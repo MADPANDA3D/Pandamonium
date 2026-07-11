@@ -62,6 +62,24 @@ async def test_doc_render_pdf_same_origin_framing():
     assert "frame-ancestors 'self'" in csp
 
 
+async def test_organic_sphere_static_allows_same_origin_framing():
+    """Assert that the Jarvis voice sphere iframe is not blocked by global frame denial."""
+    resp = await _dispatch("/static/vendor/organic-sphere/index.html")
+
+    assert resp.headers.get("X-Frame-Options") == "SAMEORIGIN"
+    csp = resp.headers.get("Content-Security-Policy", "")
+    assert "frame-ancestors 'self'" in csp
+    assert "frame-ancestors 'none'" not in csp
+
+
+async def test_organic_sphere_assets_remain_frame_blocked():
+    """Assert that only the iframe document gets the same-origin framing exception."""
+    resp = await _dispatch("/static/vendor/organic-sphere/main.css")
+
+    assert resp.headers.get("X-Frame-Options") == "DENY"
+    assert "frame-ancestors 'none'" in resp.headers.get("Content-Security-Policy", "")
+
+
 async def test_doc_render_pdf_keeps_baseline_security_headers():
     """Assert that baseline security headers are preserved on the render-pdf path."""
     resp = await _dispatch("/api/document/abc-123/render-pdf")

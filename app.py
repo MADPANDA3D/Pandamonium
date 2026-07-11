@@ -181,6 +181,11 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
     "/api/memory/audit",    # retains own 120s LLM inactivity timeout
+    "/api/tts/synthesize",  # local clone TTS can cold-load on single-GPU hosts
+    "/api/tts/stream",      # native PCM stream remains open for the full utterance
+    "/api/agent-tasks",     # replayable worker SSE streams and long-running jobs
+    "/api/knowledge/sync",  # curated corpus reconciliation can take several minutes
+    "/api/knowledge/v1/sync",  # governed corpus reconciliation uses its own bearer
 )
 
 
@@ -265,9 +270,11 @@ if AUTH_ENABLED:
         "/api/auth/integrations/presets",
         "/api/health",
         "/api/version",
+        "/api/knowledge/sync",
         "/login",
     }
-    AUTH_EXEMPT_PREFIXES = ["/static"]
+    # V1 handlers validate their own per-agent or internal bearer tokens.
+    AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/api/knowledge/v1"]
     # Dynamic paths whose own handler proves identity via a path-embedded
     # secret instead of the session/bearer auth. The route handler at
     # routes/task_routes.py validates the per-task `webhook_token` itself
@@ -494,6 +501,11 @@ class _RevalidatingStatic(StaticFiles):
 
 
 app.mount("/static", _RevalidatingStatic(directory=STATIC_DIR), name="static")
+app.mount(
+    "/assets",
+    _RevalidatingStatic(directory=os.path.join(STATIC_DIR, "vendor", "organic-sphere", "assets")),
+    name="organic_sphere_assets",
+)
 
 # ========= GENERATED IMAGES =========
 @app.get("/api/generated-image/{filename}")
@@ -737,6 +749,13 @@ stt_service = get_stt_service()
 from routes.stt_routes import setup_stt_routes
 app.include_router(setup_stt_routes(stt_service))
 logger.info("STT service initialized (provider managed via settings)")
+
+# Jarvis live voice sessions and safe action bridge
+from routes.agent_task_routes import setup_agent_task_routes
+app.include_router(setup_agent_task_routes(session_manager))
+
+from routes.voice_routes import setup_voice_routes
+app.include_router(setup_voice_routes(session_manager, tts_service))
 
 # Documents (artifacts/canvas)
 from routes.document_routes import setup_document_routes

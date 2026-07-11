@@ -1,0 +1,1258 @@
+// static/js/jarvisVoice.js
+// Jarvis call mode. Separate from voiceRecorder.js dictation.
+
+import markdownModule from './markdown.js';
+
+let sessionId = null;
+let mediaRecorder = null;
+let mediaStream = null;
+let audioChunks = [];
+let silenceTimer = null;
+let maxTurnTimer = null;
+let status = 'idle';
+let isActive = false;
+let isStopping = false;
+let organicSphereFrame = null;
+let playbackWaitResolve = null;
+let sphereAudioContext = null;
+let sphereAnalyser = null;
+let sphereSource = null;
+let sphereAudioTimer = null;
+let sphereFreqData = null;
+let chatSessionId = null;
+let sphereSmoothedVolume = 0;
+let sphereSmoothedLevels = Array(8).fill(0);
+let playbackToken = 0;
+let voiceTarget = 'jarvis';
+let speechQueue = [];
+let speechQueueRunning = false;
+let currentSpeech = null;
+let speechPaused = false;
+let discardCurrentRecording = false;
+let brainTurnInProgress = false;
+let workerStreams = new Map();
+let speechIdleResolvers = [];
+let streamingAbortController = null;
+let streamingAudioSources = new Set();
+let activeWorkerTaskId = null;
+let activeCodexThreadId = null;
+let activeWorkspace = 'home-lab';
+let pendingWorkerText = null;
+let liveAssistantMessage = null;
+let liveSpeechBuffer = '';
+let streamingScheduledUntil = 0;
+
+const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
+const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
+const ICON_STOP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+const ICON_CLOSE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+const ORGANIC_SPHERE_URL = '/static/vendor/organic-sphere/index.html?v=20260710T195450Z';
+const INSECURE_MIC_MESSAGE = 'Microphone needs localhost or HTTPS.';
+const SPHERE_AUDIO_GAIN = 0.35;
+const SPHERE_AUDIO_SMOOTHING = 0.75;
+const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'result', 'error']);
+const DURABLE_SPEECH_TYPES = new Set(['question', 'result', 'error']);
+const PROGRESS_STALE_MS = 45000;
+const LIVE_SPEECH_MIN_CHARS = 90;
+const LIVE_SPEECH_MAX_CHARS = 220;
+const STREAM_INITIAL_BUFFER_SECONDS = 2.4;
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+function showToast(message, duration = 2600) {
+  const toast = $('toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), duration);
+}
+
+function hasSecureMicContext() {
+  return Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
+}
+
+function logSphere(event, detail = {}) {
+  console.info('[Jarvis sphere]', event, detail);
+}
+
+function clamp01(value) {
+  const n = Number(value) || 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function fallbackSphereLevels(next = status) {
+  const t = Date.now() / 1000;
+  const base = {
+    listening: 0.12,
+    speaking: 0.18,
+    thinking: 0.08,
+    transcribing: 0.06,
+    background: 0.09,
+    interrupted: 0.1,
+  }[next] || 0.04;
+  const pulse = (Math.sin(t * 3.2) + 1) * 0.5;
+  return Array.from({ length: 8 }, (_, i) => clamp01(base * (0.45 + pulse * 0.45) / (i + 1)));
+}
+
+function shapeSphereLevels(volume, levels) {
+  const shapedLevels = Array.from({ length: 8 }, (_, i) => {
+    const target = clamp01((levels[i] || 0) * SPHERE_AUDIO_GAIN);
+    sphereSmoothedLevels[i] = clamp01((sphereSmoothedLevels[i] * SPHERE_AUDIO_SMOOTHING) + (target * (1 - SPHERE_AUDIO_SMOOTHING)));
+    return sphereSmoothedLevels[i];
+  });
+  const targetVolume = clamp01(volume * SPHERE_AUDIO_GAIN);
+  sphereSmoothedVolume = clamp01((sphereSmoothedVolume * SPHERE_AUDIO_SMOOTHING) + (targetVolume * (1 - SPHERE_AUDIO_SMOOTHING)));
+  return { volume: sphereSmoothedVolume, levels: shapedLevels };
+}
+
+function postSphereLevels(next = status, volume = 0, levels = fallbackSphereLevels(next)) {
+  if (!organicSphereFrame?.contentWindow) return;
+  const shaped = shapeSphereLevels(volume, levels);
+  organicSphereFrame.contentWindow.postMessage({
+    type: 'jarvis-audio-levels',
+    state: next,
+    volume: shaped.volume,
+    levels: shaped.levels,
+  }, window.location.origin);
+}
+
+function stopSphereAudio() {
+  if (sphereAudioTimer) {
+    clearInterval(sphereAudioTimer);
+    sphereAudioTimer = null;
+  }
+  try { sphereSource?.disconnect(); } catch {}
+  try { sphereAnalyser?.disconnect(); } catch {}
+  sphereSource = null;
+  sphereAnalyser = null;
+  sphereFreqData = null;
+  sphereSmoothedVolume = 0;
+  sphereSmoothedLevels = Array(8).fill(0);
+  if (sphereAudioContext) {
+    sphereAudioContext.close().catch(() => {});
+    sphereAudioContext = null;
+  }
+}
+
+function startSpherePulse(next = status) {
+  stopSphereAudio();
+  sphereAudioTimer = setInterval(() => {
+    const levels = fallbackSphereLevels(next);
+    postSphereLevels(next, Math.max(...levels), levels);
+  }, 120);
+}
+
+function startSphereAnalyser(sourceFactory, next = status) {
+  stopSphereAudio();
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) {
+    startSpherePulse(next);
+    return;
+  }
+  try {
+    sphereAudioContext = new AudioContext();
+    sphereAnalyser = sphereAudioContext.createAnalyser();
+    sphereAnalyser.fftSize = 256;
+    sphereSource = sourceFactory(sphereAudioContext);
+    sphereSource.connect(sphereAnalyser);
+    sphereFreqData = new Uint8Array(sphereAnalyser.frequencyBinCount);
+    sphereAudioContext.resume?.().catch(() => {});
+    sphereAudioTimer = setInterval(() => {
+      sphereAnalyser.getByteFrequencyData(sphereFreqData);
+      const levelCount = 8;
+      const binSize = Math.floor(sphereFreqData.length / levelCount) || 1;
+      const levels = [];
+      let max = 0;
+      for (let i = 0; i < levelCount; i += 1) {
+        let sum = 0;
+        for (let j = 0; j < binSize; j += 1) sum += sphereFreqData[(i * binSize) + j] || 0;
+        const value = clamp01(sum / binSize / 255);
+        levels.push(value);
+        if (value > max) max = value;
+      }
+      postSphereLevels(next, max, levels);
+    }, 80);
+    logSphere('audio-bridge-ready', { source: next });
+  } catch (error) {
+    console.warn('[Jarvis sphere] audio bridge fallback:', error);
+    startSpherePulse(next);
+  }
+}
+
+function startSphereStream(stream) {
+  startSphereAnalyser(ctx => ctx.createMediaStreamSource(stream), 'listening');
+}
+
+function mountOrganicSphere() {
+  const orb = $('jarvis-call-orb');
+  if (!orb || organicSphereFrame) return;
+
+  const frame = document.createElement('iframe');
+  frame.className = 'jarvis-organic-frame';
+  frame.title = 'Jarvis organic voice sphere';
+  frame.src = ORGANIC_SPHERE_URL;
+  frame.loading = 'eager';
+  frame.referrerPolicy = 'no-referrer';
+  frame.addEventListener('load', () => {
+    logSphere('iframe-load');
+    let attempts = 0;
+    const markReady = () => {
+      attempts += 1;
+      if (markOrganicSphereReady('canvas-ready')) return;
+      if (attempts < 40) window.setTimeout(markReady, 150);
+      else logSphere('canvas-timeout');
+    };
+    markReady();
+  }, { once: true });
+  organicSphereFrame = frame;
+  orb.appendChild(frame);
+}
+
+function markOrganicSphereReady(reason) {
+  const orb = $('jarvis-call-orb');
+  if (!orb || !organicSphereFrame) return false;
+  try {
+    const canvas = organicSphereFrame.contentDocument?.querySelector('canvas');
+    if (!canvas) return false;
+    const rect = canvas.getBoundingClientRect();
+    orb.classList.add('has-frame');
+    logSphere(reason, { width: Math.round(rect.width), height: Math.round(rect.height) });
+    postSphereLevels(status);
+    return true;
+  } catch (error) {
+    logSphere('canvas-check-failed', { message: error?.message || String(error) });
+    return false;
+  }
+}
+
+function handleSphereMessage(event) {
+  if (!organicSphereFrame || event.source !== organicSphereFrame.contentWindow) return;
+  if (event.data?.type === 'jarvis-sphere-ready') {
+    logSphere('bridge-ready');
+    if (!markOrganicSphereReady('bridge-ready')) {
+      window.setTimeout(() => markOrganicSphereReady('bridge-ready-late'), 120);
+    }
+    postSphereLayout($('jarvis-call-panel')?.classList.contains('has-agent-task'));
+  }
+}
+
+function unmountOrganicSphere() {
+  const orb = $('jarvis-call-orb');
+  stopSphereAudio();
+  if (organicSphereFrame) {
+    organicSphereFrame.removeAttribute('src');
+    organicSphereFrame.remove();
+    organicSphereFrame = null;
+  }
+  if (orb) orb.classList.remove('has-frame');
+}
+
+function setStatus(next, detail = '') {
+  status = next;
+  const root = $('jarvis-call-panel');
+  const pill = $('jarvis-call-status');
+  const detailEl = $('jarvis-call-detail');
+  const talkBtn = $('jarvis-call-talk');
+  const railBtn = $('rail-jarvis-call');
+  const inputBtn = $('jarvis-input-sphere');
+  const inputBar = document.querySelector('.chat-input-bar');
+  document.body?.classList.toggle('jarvis-voice-active', isActive);
+  document.documentElement?.classList.toggle('jarvis-voice-active', isActive);
+
+  if (root) {
+    root.dataset.state = next;
+    root.hidden = !isActive;
+  }
+  if (pill) pill.textContent = statusLabel(next);
+  if (detailEl) detailEl.textContent = detail || detailLabel(next);
+  if (talkBtn) {
+    talkBtn.dataset.state = next;
+    talkBtn.disabled = next === 'thinking' || next === 'transcribing';
+    talkBtn.innerHTML = next === 'listening' ? ICON_STOP : ICON_MIC;
+    talkBtn.title = talkTitle(next);
+  }
+  if (railBtn) {
+    railBtn.classList.toggle('active', isActive);
+    railBtn.dataset.state = next;
+  }
+  if (inputBtn) {
+    inputBtn.classList.toggle('active', isActive);
+    inputBtn.dataset.state = next;
+    inputBtn.title = sphereTitle(next);
+    inputBtn.setAttribute('aria-label', sphereTitle(next));
+  }
+  if (inputBar) {
+    inputBar.classList.toggle('jarvis-call-active', isActive);
+    inputBar.dataset.jarvisState = next;
+  }
+  if (isActive && next !== 'failed') {
+    mountOrganicSphere();
+    if (next === 'transcribing' || next === 'thinking' || next === 'background' || next === 'interrupted' || next === 'speaking') {
+      startSpherePulse(next);
+    } else {
+      postSphereLevels(next);
+    }
+  } else if (!isActive) {
+    unmountOrganicSphere();
+  }
+  window._updateSendBtnIcon?.();
+}
+
+function statusLabel(value) {
+  return {
+    idle: 'Ready',
+    listening: 'Listening',
+    transcribing: 'Transcribing',
+    thinking: 'Thinking',
+    speaking: 'Speaking',
+    interrupted: 'Interrupted',
+    background: 'Background task',
+    failed: 'Needs attention',
+  }[value] || 'Ready';
+}
+
+function detailLabel(value) {
+  return {
+    idle: 'Jarvis is standing by.',
+    listening: 'Listening for your turn.',
+    transcribing: 'Reading your speech.',
+    thinking: 'Jarvis is thinking.',
+    speaking: 'Jarvis is responding.',
+    interrupted: 'Redirecting.',
+    background: 'Running in the background, sir.',
+    failed: 'The call loop hit an error.',
+  }[value] || '';
+}
+
+function talkTitle(value) {
+  if (value === 'listening') return 'Stop listening';
+  if (value === 'speaking') return 'Interrupt';
+  return 'Speak to Jarvis';
+}
+
+function sphereTitle(value) {
+  if (!isActive) return 'Jarvis live call';
+  if (value === 'speaking') return 'Interrupt Jarvis';
+  if (value === 'failed') return 'End Jarvis call';
+  return 'End Jarvis call';
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = body?.detail?.message || body?.message || body?.error || res.statusText;
+    throw new Error(message);
+  }
+  return body;
+}
+
+function setVoiceTarget(worker, persist = true) {
+  voiceTarget = worker;
+  document.querySelectorAll('.jarvis-target').forEach(button => {
+    const active = button.dataset.worker === worker;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  setAgentWorkspaceActive(worker !== 'jarvis');
+  if (persist) persistVoiceTarget().catch(error => console.warn('Could not save voice target:', error));
+}
+
+function persistVoiceTarget(extra = {}) {
+  if (!sessionId) return Promise.resolve();
+  return fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/target`, {
+    method: 'POST',
+    body: JSON.stringify({
+      target: voiceTarget,
+      workspace: activeWorkspace,
+      task_id: activeWorkerTaskId || '',
+      codex_thread_id: activeCodexThreadId,
+      ...extra,
+    }),
+  });
+}
+
+function workspaceForText(text) {
+  if (/\b(business|clients?|marketing|mad\s*panda|campaign|website|crm)\b/i.test(text)) return 'business';
+  if (/\b(project\s+linux|linux\s+(desktop|workstation)|hyprland)\b/i.test(text)) return 'project-linux';
+  return 'home-lab';
+}
+
+function setAgentWorkspaceActive(active) {
+  $('jarvis-call-panel')?.classList.toggle('has-agent-task', active);
+  postSphereLayout(active);
+}
+
+function postSphereLayout(transparent) {
+  try {
+    const experience = organicSphereFrame?.contentWindow?.__jarvisSphereBridge?.experience;
+    if (experience?.renderer) {
+      experience.scene.background = null;
+      experience.renderer.instance.setClearAlpha(0);
+      experience.renderer.usePostprocess = !transparent;
+    }
+  } catch (error) {
+    logSphere('layout-bridge-fallback', { message: error?.message || String(error) });
+  }
+  organicSphereFrame?.contentWindow?.postMessage({
+    type: 'jarvis-layout',
+    transparent: Boolean(transparent),
+  }, window.location.origin);
+}
+
+function addTimelineEvent(event) {
+  const timeline = $('chat-history');
+  if (!timeline) return;
+  const row = document.createElement('article');
+  row.className = `jarvis-task-event jarvis-worker-progress is-${event.type || 'progress'}`;
+  const label = document.createElement('span');
+  label.className = 'jarvis-task-event-label';
+  label.textContent = event.worker === 'pc-codex' ? 'PC Codex' : (event.worker || 'Jarvis');
+  const text = document.createElement('p');
+  text.textContent = event.text || '';
+  row.append(label, text);
+  timeline.appendChild(row);
+  timeline.scrollTop = timeline.scrollHeight;
+}
+
+function resolveSpeechIdle() {
+  if (speechQueueRunning || speechQueue.length || currentSpeech) return;
+  speechIdleResolvers.splice(0).forEach(resolve => resolve());
+}
+
+function waitForSpeechQueueIdle() {
+  if (!speechQueueRunning && !speechQueue.length && !currentSpeech) return Promise.resolve();
+  return new Promise(resolve => speechIdleResolvers.push(resolve));
+}
+
+function enqueueSpeech(text, type = 'progress', source = 'jarvis', timings = {}) {
+  const clean = (window.aiTTSManager?.extractPlainText?.(text) || text || '').trim();
+  if (!clean) return;
+  const key = clean.toLowerCase().replace(/\s+/g, ' ');
+  if (speechQueue.some(item => item.key === key) || currentSpeech?.key === key) return;
+  if (type === 'progress') {
+    const pending = speechQueue.filter(item => item.type === 'progress');
+    while (pending.length >= 3) {
+      const stale = pending.shift();
+      const index = speechQueue.indexOf(stale);
+      if (index >= 0) speechQueue.splice(index, 1);
+    }
+  }
+  speechQueue.push({ text: clean, type, source, key, timings, createdAt: Date.now() });
+  if (!speechPaused) processSpeechQueue().catch(handleError);
+}
+
+function pauseCaptureForSpeech() {
+  if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+  discardCurrentRecording = true;
+  clearTurnTimers();
+  mediaRecorder.stop();
+  stopTracks();
+}
+
+async function processSpeechQueue() {
+  if (speechQueueRunning || speechPaused) return;
+  speechQueueRunning = true;
+  try {
+    while (isActive && !speechPaused && speechQueue.length) {
+      const item = speechQueue.shift();
+      if (item.type === 'progress' && Date.now() - item.createdAt > PROGRESS_STALE_MS) continue;
+      currentSpeech = item;
+      pauseCaptureForSpeech();
+      if (status !== 'speaking') setStatus('speaking');
+      await speak(item.text, item.timings);
+      currentSpeech = null;
+    }
+  } finally {
+    speechQueueRunning = false;
+    currentSpeech = null;
+    resolveSpeechIdle();
+    if (isActive && !speechPaused && !brainTurnInProgress && !speechQueue.length && status !== 'failed') {
+      if (sphereAudioContext && streamingScheduledUntil > sphereAudioContext.currentTime) {
+        await waitForScheduledPlayback(sphereAudioContext, streamingScheduledUntil, playbackToken);
+      }
+      stopStreamingAudio();
+      setStatus('listening');
+      startListening().catch(handleError);
+    }
+  }
+}
+
+async function handleWorkerEvent(event) {
+  if (event.type === 'tool_activity' && event.metadata?.codex_thread_id) {
+    activeCodexThreadId = event.metadata.codex_thread_id;
+    activeWorkspace = event.metadata.workspace || activeWorkspace;
+    const target = document.querySelector(`.jarvis-target[data-worker="${event.worker}"]`);
+    if (target) {
+      target.title = `${event.worker === 'pc-codex' ? 'PC Codex' : event.worker} · ${event.metadata.workspace} · ${event.metadata.codex_thread_id}`;
+      target.dataset.workspace = event.metadata.workspace || '';
+      target.dataset.threadId = event.metadata.codex_thread_id;
+    }
+    await persistVoiceTarget({ codex_thread_id: activeCodexThreadId }).catch(() => {});
+  }
+  if (['progress', 'question', 'error'].includes(event.type)) addTimelineEvent(event);
+  if (SPOKEN_WORKER_EVENTS.has(event.type)) enqueueSpeech(event.text, event.type, event.worker || 'worker');
+  if (['result', 'error', 'cancelled'].includes(event.type)) {
+    const stream = workerStreams.get(event.task_id);
+    stream?.close();
+    workerStreams.delete(event.task_id);
+    activeWorkerTaskId = null;
+    await persistVoiceTarget({ task_id: '' }).catch(() => {});
+    const queuedText = pendingWorkerText;
+    pendingWorkerText = null;
+    if (queuedText && voiceTarget === 'pc-codex') {
+      await startDirectWorkerTask(queuedText);
+    }
+    if (event.type === 'result' && chatSessionId && window.sessionModule?.selectSession) {
+      window.sessionModule.selectSession(chatSessionId, { keepSidebar: true }).catch(error => {
+        console.warn('Could not refresh worker result in chat:', error);
+      });
+    }
+  }
+}
+
+function followWorkerTask(taskId) {
+  if (!taskId || workerStreams.has(taskId)) return;
+  setAgentWorkspaceActive(true);
+  const stream = new EventSource(`/api/agent-tasks/${encodeURIComponent(taskId)}/events?after=-1`);
+  workerStreams.set(taskId, stream);
+  stream.onmessage = message => {
+    try {
+      handleWorkerEvent(JSON.parse(message.data)).catch(error => console.warn('Worker event handling failed:', error));
+    } catch (error) { console.warn('Worker event parse failed:', error); }
+  };
+  stream.onerror = () => {
+    stream.close();
+    workerStreams.delete(taskId);
+  };
+}
+
+async function startDirectWorkerTask(text) {
+  if (!sessionId) await createSession();
+  if (activeWorkerTaskId) {
+    if (!pendingWorkerText) pendingWorkerText = text;
+    else showToast('PC Codex already has one follow-up queued.');
+    return null;
+  }
+  const task = await fetchJson('/api/agent-tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      worker: voiceTarget,
+      session_id: chatSessionId,
+      workspace: workspaceForText(text),
+      prompt: text,
+      permission_mode: 'read_only',
+      approved: false,
+      persist_prompt: true,
+      codex_thread_id: activeCodexThreadId,
+    }),
+  });
+  activeWorkerTaskId = task.task_id;
+  activeWorkspace = task.workspace || workspaceForText(text);
+  await persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
+  followWorkerTask(task.task_id);
+  return task;
+}
+
+function requestsJarvisTarget(text) {
+  return /\b(back|return|switch|talk|speak)\b.*\bjarvis\b/i.test(text);
+}
+
+function renderLiveUser(text, timings, turnStarted) {
+  if (window.sessionModule?.getCurrentSessionId?.() !== chatSessionId) return;
+  window.chatModule?.addMessage?.('user', text, '', { source: 'jarvis_voice_live' });
+  timings.chat_user_render_ms = performance.now() - turnStarted;
+  window.uiModule?.scrollHistory?.();
+}
+
+function appendLiveAssistant(delta, model = '') {
+  if (!delta || window.sessionModule?.getCurrentSessionId?.() !== chatSessionId) return;
+  if (!liveAssistantMessage) {
+    liveAssistantMessage = window.chatModule?.addMessage?.('assistant', delta, model, { source: 'jarvis_voice_live' }) || null;
+    if (liveAssistantMessage) liveAssistantMessage.dataset.raw = delta;
+  } else {
+    liveAssistantMessage.dataset.raw = (liveAssistantMessage.dataset.raw || '') + delta;
+    const body = liveAssistantMessage.querySelector('.body');
+    if (body) body.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(liveAssistantMessage.dataset.raw));
+  }
+  window.uiModule?.scrollHistory?.();
+}
+
+function takeLiveSpeechChunk(force = false) {
+  const text = liveSpeechBuffer.trimStart();
+  if (!text) {
+    liveSpeechBuffer = '';
+    return '';
+  }
+  if (force) {
+    liveSpeechBuffer = '';
+    return text;
+  }
+  if (text.length < LIVE_SPEECH_MIN_CHARS) return '';
+
+  const windowText = text.slice(0, LIVE_SPEECH_MAX_CHARS + 1);
+  let cut = 0;
+  for (const match of windowText.matchAll(/[.!?]["')\]]*(?=\s|$)/g)) {
+    const end = match.index + match[0].length;
+    if (end >= LIVE_SPEECH_MIN_CHARS) {
+      cut = end;
+      break;
+    }
+  }
+  if (!cut && text.length > LIVE_SPEECH_MAX_CHARS) {
+    const breakAt = Math.max(
+      windowText.lastIndexOf(';'),
+      windowText.lastIndexOf(','),
+      windowText.lastIndexOf(' '),
+    );
+    cut = breakAt >= LIVE_SPEECH_MIN_CHARS ? breakAt + 1 : LIVE_SPEECH_MAX_CHARS;
+  }
+  if (!cut) return '';
+  const chunk = text.slice(0, cut).trim();
+  liveSpeechBuffer = text.slice(cut).trimStart();
+  return chunk;
+}
+
+function flushLiveSpeech(force, timings) {
+  let chunk = takeLiveSpeechChunk(force);
+  while (chunk) {
+    enqueueSpeech(chunk, 'assistant', 'jarvis', timings);
+    if (force) break;
+    chunk = takeLiveSpeechChunk(false);
+  }
+}
+
+async function streamTurn(text, timings, turnStarted) {
+  if (!sessionId) await createSession();
+  liveAssistantMessage = null;
+  liveSpeechBuffer = '';
+  const response = await fetch(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond/stream`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.detail?.message || body?.detail || response.statusText);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let final = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() || '';
+    for (const frame of frames) {
+      const line = frame.split('\n').find(row => row.startsWith('data: '));
+      if (!line || line === 'data: [DONE]') continue;
+      const event = JSON.parse(line.slice(6));
+      if (event.type === 'assistant_delta') {
+        const delta = event.text || '';
+        appendLiveAssistant(delta, event.model || 'Jarvis');
+        liveSpeechBuffer += delta;
+        flushLiveSpeech(false, timings);
+        if (timings.chat_assistant_first_render_ms == null) timings.chat_assistant_first_render_ms = performance.now() - turnStarted;
+      }
+      else if (event.type === 'target_changed') {
+        activeWorkspace = event.workspace || activeWorkspace;
+        setVoiceTarget(event.target || 'jarvis', false);
+      }
+      else if (event.type === 'agent_task') {
+        activeWorkerTaskId = event.task_id;
+        activeWorkspace = event.workspace || activeWorkspace;
+        setVoiceTarget(event.worker || 'pc-codex', false);
+        persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
+        followWorkerTask(event.task_id);
+      }
+      else if (event.type === 'final') final = event;
+      else if (event.type === 'error') throw new Error(event.text || 'Jarvis brain request failed');
+    }
+    if (done) break;
+  }
+  if (!final) throw new Error('Jarvis returned no final response.');
+  flushLiveSpeech(true, timings);
+  return final;
+}
+
+async function createSession() {
+  const activeChatSessionId = window.sessionModule?.getCurrentSessionId?.() || null;
+  const session = await fetchJson('/api/voice/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ mode: 'jarvis_call', chat_session_id: activeChatSessionId }),
+  });
+  sessionId = session.id;
+  chatSessionId = session.chat_session_id || null;
+  voiceTarget = session.target || 'jarvis';
+  activeWorkspace = session.workspace || 'home-lab';
+  activeWorkerTaskId = session.active_task_id || null;
+  activeCodexThreadId = session.codex_thread_id || null;
+  setVoiceTarget(voiceTarget, false);
+  return session;
+}
+
+async function transcribe(blob) {
+  const form = new FormData();
+  form.append('file', blob, `jarvis-turn-${Date.now()}.webm`);
+  const res = await fetch('/api/stt/transcribe', {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: form,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = body?.detail?.message || body?.error || 'Transcription failed';
+    throw new Error(message);
+  }
+  return (body.text || '').trim();
+}
+
+async function sendTurn(text) {
+  if (!sessionId) await createSession();
+  return fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+async function postTurnDiagnostics(timings) {
+  if (!sessionId) return;
+  await fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/diagnostics`, {
+    method: 'POST',
+    body: JSON.stringify({ label: 'client_turn', timings }),
+  }).catch(error => console.warn('Jarvis voice timing diagnostic failed:', error));
+}
+
+function prewarmVoiceStack() {
+  const jobs = [
+    fetch('/api/voice/prewarm', { method: 'POST', credentials: 'same-origin' }),
+  ];
+  if (window.aiTTSManager?.checkAvailability) {
+    jobs.push(window.aiTTSManager.checkAvailability());
+  }
+  Promise.allSettled(jobs).catch(() => {});
+}
+
+async function interrupt() {
+  if (currentSpeech && DURABLE_SPEECH_TYPES.has(currentSpeech.type)) speechQueue.unshift(currentSpeech);
+  speechQueue = speechQueue.filter(item => DURABLE_SPEECH_TYPES.has(item.type));
+  speechPaused = true;
+  playbackToken += 1;
+  resolvePlaybackWait();
+  stopStreamingAudio();
+  if (window.aiTTSManager) window.aiTTSManager.stop();
+  if (sessionId) {
+    await fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/interrupt`, { method: 'POST', body: '{}' })
+      .catch(() => {});
+  }
+  setStatus('interrupted');
+}
+
+function resolvePlaybackWait() {
+  if (playbackWaitResolve) {
+    playbackWaitResolve();
+    playbackWaitResolve = null;
+  }
+}
+
+function waitForScheduledPlayback(context, endTime, token) {
+  if (token !== playbackToken || endTime <= context.currentTime) return Promise.resolve();
+  return new Promise(resolve => {
+    let timer = null;
+    const done = () => {
+      if (timer) clearTimeout(timer);
+      if (playbackWaitResolve === done) playbackWaitResolve = null;
+      resolve();
+    };
+    playbackWaitResolve = done;
+    timer = setTimeout(done, Math.max(0, endTime - context.currentTime) * 1000 + 30);
+  });
+}
+
+function stopStreamingAudio() {
+  streamingAbortController?.abort();
+  streamingAbortController = null;
+  streamingAudioSources.forEach(source => {
+    try { source.stop(); } catch {}
+  });
+  streamingAudioSources.clear();
+  stopSphereAudio();
+}
+
+function pcm16FromBase64(value) {
+  const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const samples = new Float32Array(bytes.byteLength / 2);
+  for (let i = 0; i < samples.length; i += 1) {
+    samples[i] = view.getInt16(i * 2, true) / 32768;
+  }
+  return samples;
+}
+
+function stopTracks() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop());
+    mediaStream = null;
+  }
+  stopSphereAudio();
+}
+
+function clearTurnTimers() {
+  if (silenceTimer) {
+    clearInterval(silenceTimer);
+    silenceTimer = null;
+  }
+  if (maxTurnTimer) {
+    clearTimeout(maxTurnTimer);
+    maxTurnTimer = null;
+  }
+}
+
+function stopListening() {
+  if (isStopping) return;
+  isStopping = true;
+  clearTurnTimers();
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  } else {
+    stopTracks();
+    isStopping = false;
+    setStatus('idle');
+  }
+}
+
+function startSilenceWatch(stream) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  const ctx = new AudioContext();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.fftSize);
+  const startedAt = Date.now();
+  let lastVoiceAt = Date.now();
+
+  silenceTimer = setInterval(() => {
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 1) {
+      const normalized = (data[i] - 128) / 128;
+      sum += normalized * normalized;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    if (rms > 0.018) lastVoiceAt = Date.now();
+    const canStop = Date.now() - startedAt > 1400;
+    if (canStop && Date.now() - lastVoiceAt > 1200) {
+      stopListening();
+    }
+  }, 140);
+
+  maxTurnTimer = setTimeout(stopListening, 22000);
+}
+
+async function startListening() {
+  if (!window.isSecureContext) {
+    setStatus('failed', INSECURE_MIC_MESSAGE);
+    showToast(INSECURE_MIC_MESSAGE);
+    return;
+  }
+  if (!hasSecureMicContext()) {
+    setStatus('failed', 'Microphone is not available.');
+    return;
+  }
+
+  if (status === 'speaking') await interrupt();
+  if (mediaRecorder?.state === 'recording') return;
+
+  audioChunks = [];
+  isStopping = false;
+  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  startSphereStream(mediaStream);
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
+
+  mediaRecorder.ondataavailable = event => {
+    if (event.data?.size) audioChunks.push(event.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    clearTurnTimers();
+    stopTracks();
+    isStopping = false;
+
+    if (discardCurrentRecording) {
+      discardCurrentRecording = false;
+      return;
+    }
+
+    const blob = new Blob(audioChunks, { type: 'audio/webm' });
+    if (!blob.size || !isActive) {
+      setStatus(isActive ? 'idle' : 'idle');
+      return;
+    }
+
+    try {
+      const turnStarted = performance.now();
+      setStatus('transcribing');
+      const timings = {};
+      const sttStarted = performance.now();
+      const text = await transcribe(blob);
+      timings.stt_ms = performance.now() - sttStarted;
+      timings.transcript_chars = text.length;
+      const transcriptEl = $('jarvis-call-transcript');
+      if (transcriptEl) transcriptEl.textContent = text || '';
+      if (!text) {
+        setStatus('listening', 'No speech detected.');
+        window.setTimeout(() => { if (isActive) startListening().catch(handleError); }, 800);
+        return;
+      }
+      renderLiveUser(text, timings, turnStarted);
+
+      speechPaused = false;
+      if (voiceTarget !== 'jarvis' && !requestsJarvisTarget(text)) {
+        setStatus('background');
+        await startDirectWorkerTask(text);
+        brainTurnInProgress = false;
+        setStatus('listening');
+        startListening().catch(handleError);
+        return;
+      }
+      if (requestsJarvisTarget(text)) setVoiceTarget('jarvis');
+
+      setStatus('thinking');
+      brainTurnInProgress = true;
+      const brainStarted = performance.now();
+      const response = await streamTurn(text, timings, turnStarted);
+      timings.respond_ms = performance.now() - brainStarted;
+      const reply = response.assistant_text || '';
+      const diagnostic = response.diagnostics || {};
+      if (diagnostic.brain_ms != null) timings.brain_ms = diagnostic.brain_ms;
+      if (diagnostic.brain_first_token_ms != null) timings.brain_first_token_ms = diagnostic.brain_first_token_ms;
+      timings.assistant_chars = reply.length;
+      timings.num_predict = diagnostic.num_predict || '';
+      const panel = $('jarvis-call-panel');
+      if (panel) {
+        panel.dataset.voiceModel = diagnostic.model || '';
+        panel.dataset.turnDiagnostic = `${text.length}:${reply.length}:${diagnostic.guard_reason || 'ok'}`;
+      }
+      const replyEl = $('jarvis-call-reply');
+      if (replyEl) replyEl.textContent = reply;
+      brainTurnInProgress = false;
+      if (!speechQueueRunning && speechQueue.length) processSpeechQueue().catch(handleError);
+      await waitForSpeechQueueIdle();
+      if (sphereAudioContext && streamingScheduledUntil > sphereAudioContext.currentTime) {
+        await waitForScheduledPlayback(sphereAudioContext, streamingScheduledUntil, playbackToken);
+      }
+      stopStreamingAudio();
+      await postTurnDiagnostics(timings);
+      if (isActive && status !== 'listening') {
+        setStatus('listening');
+        startListening().catch(handleError);
+      }
+    } catch (error) {
+      brainTurnInProgress = false;
+      handleError(error);
+    }
+  };
+
+  mediaRecorder.start();
+  setStatus('listening');
+  startSilenceWatch(mediaStream);
+}
+
+async function speak(text, timings = {}) {
+  const manager = window.aiTTSManager;
+  if (!manager) {
+    setStatus('idle', text);
+    return;
+  }
+  await manager.checkAvailability?.();
+  if (!manager.available) {
+    setStatus('idle', text);
+    return;
+  }
+  if (manager.useBrowserTTS) {
+    const started = performance.now();
+    await manager.play(text);
+    timings.tts_total_ms = performance.now() - started;
+    return;
+  }
+
+  playbackToken += 1;
+  const token = playbackToken;
+  const started = performance.now();
+  timings.tts_chunks = 0;
+  if (!sphereAudioContext || sphereAudioContext.state === 'closed') manager.stop();
+
+  streamingAbortController = new AbortController();
+  const response = await fetch('/api/tts/stream', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, format: 'audio', use_cache: false }),
+    signal: streamingAbortController.signal,
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.detail?.message || body?.detail || 'Streaming speech failed');
+  }
+
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) throw new Error('Streaming audio is not supported by this browser.');
+  const freshContext = !sphereAudioContext || sphereAudioContext.state === 'closed' || !sphereAnalyser;
+  if (freshContext) {
+    stopSphereAudio();
+    sphereAudioContext = new AudioContext();
+    sphereAnalyser = sphereAudioContext.createAnalyser();
+    sphereAnalyser.fftSize = 256;
+    sphereAnalyser.connect(sphereAudioContext.destination);
+    sphereFreqData = new Uint8Array(sphereAnalyser.frequencyBinCount);
+    sphereAudioTimer = setInterval(() => {
+      sphereAnalyser.getByteFrequencyData(sphereFreqData);
+      const binSize = Math.floor(sphereFreqData.length / 8) || 1;
+      const levels = Array.from({ length: 8 }, (_, index) => {
+        let sum = 0;
+        for (let offset = 0; offset < binSize; offset += 1) sum += sphereFreqData[(index * binSize) + offset] || 0;
+        return clamp01(sum / binSize / 255);
+      });
+      postSphereLevels('speaking', Math.max(...levels), levels);
+    }, 80);
+    streamingScheduledUntil = 0;
+  }
+  const context = sphereAudioContext;
+  await context.resume();
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let sampleRate = 48000;
+  let streamDone = null;
+  const handleLine = line => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.type === 'start') {
+      sampleRate = Number(event.sample_rate) || sampleRate;
+      return;
+    }
+    if (event.type === 'error') throw new Error(event.error || 'VoxCPM streaming failed');
+    if (event.type === 'done') {
+      streamDone = event;
+      return;
+    }
+    if (event.type !== 'audio' || !event.pcm_base64 || token !== playbackToken) return;
+    const samples = pcm16FromBase64(event.pcm_base64);
+    const audioBuffer = context.createBuffer(1, samples.length, sampleRate);
+    audioBuffer.copyToChannel(samples, 0);
+    const source = context.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(sphereAnalyser);
+    source.onended = () => streamingAudioSources.delete(source);
+    streamingAudioSources.add(source);
+    const beginsAt = streamingScheduledUntil > context.currentTime
+      ? streamingScheduledUntil
+      : context.currentTime + STREAM_INITIAL_BUFFER_SECONDS;
+    source.start(beginsAt);
+    streamingScheduledUntil = beginsAt + audioBuffer.duration;
+    timings.tts_chunks += 1;
+    if (timings.tts_first_audio_ms == null) {
+      timings.tts_first_audio_ms = performance.now() - started;
+      timings.end_to_first_audio_ms = (Number(timings.stt_ms) || 0) + (Number(timings.respond_ms) || 0) + timings.tts_first_audio_ms;
+    }
+  };
+
+  try {
+    while (isActive && token === playbackToken) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      lines.forEach(handleLine);
+      if (done) break;
+    }
+    if (buffer.trim()) handleLine(buffer);
+  } catch (error) {
+    if (token === playbackToken) throw error;
+  } finally {
+    reader.cancel().catch(() => {});
+    streamingAbortController = null;
+    timings.tts_generation_ms = Number(streamDone?.generation_ms) || performance.now() - started;
+    timings.playback_duration_ms = Number(streamDone?.audio_ms) || 0;
+    timings.tts_total_ms = performance.now() - started;
+  }
+}
+
+function handleError(error) {
+  console.error('Jarvis voice error:', error);
+  clearTurnTimers();
+  stopTracks();
+  setStatus('failed', error.message || 'Voice loop failed.');
+  showToast(error.message || 'Voice loop failed.');
+}
+
+async function startCall() {
+  if (!window.isSecureContext) {
+    isActive = false;
+    sessionId = null;
+    setStatus('failed', INSECURE_MIC_MESSAGE);
+    showToast(INSECURE_MIC_MESSAGE);
+    return;
+  }
+  if (!hasSecureMicContext()) {
+    isActive = false;
+    sessionId = null;
+    setStatus('failed', 'Microphone is not available.');
+    showToast('Microphone is not available.');
+    return;
+  }
+
+  isActive = true;
+  speechPaused = false;
+  speechQueue = [];
+  brainTurnInProgress = false;
+  activeWorkerTaskId = null;
+  activeCodexThreadId = null;
+  activeWorkspace = 'home-lab';
+  pendingWorkerText = null;
+  liveAssistantMessage = null;
+  const timeline = $('jarvis-task-timeline');
+  if (timeline) timeline.replaceChildren();
+  setAgentWorkspaceActive(false);
+  mountOrganicSphere();
+  await createSession();
+  setStatus('idle');
+  prewarmVoiceStack();
+  await startListening();
+}
+
+function endCall() {
+  const linkedChatSessionId = chatSessionId;
+  isActive = false;
+  brainTurnInProgress = false;
+  speechPaused = true;
+  speechQueue = [];
+  currentSpeech = null;
+  workerStreams.forEach(stream => stream.close());
+  workerStreams.clear();
+  setAgentWorkspaceActive(false);
+  playbackToken += 1;
+  clearTurnTimers();
+  resolvePlaybackWait();
+  stopStreamingAudio();
+  if (window.aiTTSManager) window.aiTTSManager.stop();
+  stopSphereAudio();
+  stopListening();
+  stopTracks();
+  setStatus('idle');
+  unmountOrganicSphere();
+  const panel = $('jarvis-call-panel');
+  if (panel) panel.hidden = true;
+  sessionId = null;
+  chatSessionId = null;
+  voiceTarget = 'jarvis';
+  activeWorkerTaskId = null;
+  pendingWorkerText = null;
+  liveAssistantMessage = null;
+  if (linkedChatSessionId) openLinkedChatSession(linkedChatSessionId);
+}
+
+async function openLinkedChatSession(linkedChatSessionId) {
+  try {
+    if (!window.sessionModule?.selectSession) return;
+    if (window.sessionModule.loadSessions) await window.sessionModule.loadSessions();
+    await window.sessionModule.selectSession(linkedChatSessionId, { keepSidebar: true });
+  } catch (error) {
+    console.warn('Could not open Jarvis voice transcript session:', error);
+  }
+}
+
+function isCallActive() {
+  return isActive;
+}
+
+function toggleCall() {
+  if (isActive) {
+    endCall();
+    return;
+  }
+  startCall().catch(handleError);
+}
+
+async function handleInputSphereClick() {
+  if (!isActive) {
+    await startCall();
+    return;
+  }
+  if (status === 'speaking') {
+    await interrupt();
+    await startListening();
+    return;
+  }
+  endCall();
+}
+
+function bind() {
+  const railBtn = $('rail-jarvis-call');
+  const closeBtn = $('jarvis-call-close');
+  const talkBtn = $('jarvis-call-talk');
+  const inputBtn = $('jarvis-input-sphere');
+  const targetButtons = document.querySelectorAll('.jarvis-target');
+
+  if (railBtn) {
+    railBtn.innerHTML = ICON_PHONE;
+    railBtn.addEventListener('click', toggleCall);
+  }
+  if (closeBtn) {
+    closeBtn.innerHTML = ICON_CLOSE;
+    closeBtn.addEventListener('click', endCall);
+  }
+  if (talkBtn) {
+    talkBtn.innerHTML = ICON_MIC;
+    talkBtn.addEventListener('click', async () => {
+      if (!isActive) {
+        await startCall();
+        return;
+      }
+      if (status === 'listening') {
+        stopListening();
+      } else if (status === 'speaking') {
+        await interrupt();
+        await startListening();
+      } else if (status === 'idle' || status === 'interrupted' || status === 'failed') {
+        await startListening();
+      }
+    });
+  }
+  if (inputBtn) {
+    inputBtn.addEventListener('click', () => {
+      handleInputSphereClick().catch(handleError);
+    });
+  }
+  targetButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      if (!button.disabled) {
+        activeWorkspace = button.dataset.workspace || activeWorkspace;
+        setVoiceTarget(button.dataset.worker || 'jarvis');
+      }
+    });
+  });
+
+  window.addEventListener('message', handleSphereMessage);
+  setVoiceTarget('jarvis');
+  setStatus('idle');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bind);
+} else {
+  bind();
+}
+
+window.jarvisVoice = { startCall, endCall, interrupt, isActive: isCallActive };

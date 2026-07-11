@@ -213,6 +213,11 @@ export async function refreshModels(force = false) {
   }
   if (!box) return;
   try {
+    // The main model picker starts chats. Speech endpoints remain available to
+    // STT/TTS settings, but they are not selectable conversation models.
+    const chatItems = (_cachedItems || []).filter(
+      item => (item.model_type || 'llm') === 'llm'
+    );
 
     const collapseState = _loadCollapsed();
     let groupIdx = 0; // unique ID counter for drag-sort containers
@@ -221,8 +226,8 @@ export async function refreshModels(force = false) {
     const groups = { local: {}, api: {} };
     // Also track extra (non-curated) models per endpoint
     const extraGroups = { local: {}, api: {} };
-    if (_cachedItems && _cachedItems.length > 0) {
-      _cachedItems.forEach(item => {
+    if (chatItems.length > 0) {
+      chatItems.forEach(item => {
         const cat = item.category === 'local' ? 'local' : 'api';
         const epName = item.endpoint_name || 'Unknown';
         const isOffline = !!item.offline;
@@ -507,7 +512,7 @@ export async function refreshModels(force = false) {
     }
 
     // ── Search box (shown when >= 5 total models, including hidden overflow) ──
-    const totalModelCount = (_cachedItems || []).reduce((n, item) => {
+    const totalModelCount = chatItems.reduce((n, item) => {
       if (item.offline) return n;
       return n + (item.models || []).length + (item.models_extra || []).length;
     }, 0);
@@ -542,7 +547,7 @@ export async function refreshModels(force = false) {
         searchResults.innerHTML = '';
         searchResults.style.display = '';
         // Build flat results from all cached models
-        (_cachedItems || []).forEach(item => {
+        chatItems.forEach(item => {
           if (item.offline) return;
           const allModels = (item.models || []).concat(item.models_extra || []);
           const allDisplay = (item.models_display || []).concat(item.models_extra_display || item.models_extra || []);
@@ -564,7 +569,7 @@ export async function refreshModels(force = false) {
       box.insertBefore(searchBox, box.firstChild);
     }
 
-    if (!_cachedItems || _cachedItems.length === 0) {
+    if (chatItems.length === 0) {
       const noModels = document.createElement('div');
       noModels.className = 'models-empty-state';
       if (window._isAdmin) {

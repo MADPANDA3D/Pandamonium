@@ -79,13 +79,17 @@ let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 
+function _isChatEndpoint(item) {
+  return (item && (item.model_type || 'llm')) === 'llm';
+}
+
 function _modelExists(modelId, url) {
   if (!modelId || !window.modelsModule || !window.modelsModule.getCachedItems) return false;
   const items = window.modelsModule.getCachedItems() || [];
   if (!items.length) return true;
   const targetUrl = (url || '').replace(/\/+$/, '');
   return items.some(item => {
-    if (item.offline) return false;
+    if (item.offline || !_isChatEndpoint(item)) return false;
     const itemUrl = (item.url || '').replace(/\/+$/, '');
     const models = (item.models || []).concat(item.models_extra || []);
     return models.includes(modelId) && (!targetUrl || itemUrl === targetUrl);
@@ -181,6 +185,8 @@ function _initModelPickerDropdown() {
   const searchRow = menu ? menu.querySelector('.model-picker-search-row') : null;
   const refreshBtn = document.getElementById('model-picker-refresh-btn');
   if (!wrap || !btn || !menu || !search || !listEl) return;
+  if (wrap.dataset.modelPickerBound === 'true') return;
+  wrap.dataset.modelPickerBound = 'true';
 
   function _close() {
     if (menu.classList.contains('hidden')) return;
@@ -249,7 +255,7 @@ function _initModelPickerDropdown() {
     const items = (window.modelsModule && window.modelsModule.getCachedItems) ? window.modelsModule.getCachedItems() : [];
     const result = [];
     const seen = new Set();
-    items.forEach(item => {
+    items.filter(_isChatEndpoint).forEach(item => {
       // Previously: offline endpoints were skipped entirely, so a server
       // that briefly went down disappeared from the picker — confusing
       // when the user can still see it (offline-tagged) in Settings.

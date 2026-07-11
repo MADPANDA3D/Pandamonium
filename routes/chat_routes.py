@@ -20,7 +20,7 @@ from src.agent_loop import stream_agent_loop
 from src import agent_runs
 from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
-from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
+from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url, resolve_endpoint_by_id
 from src.session_search import search_session_messages
 from src.prompt_security import untrusted_context_message
 from core.exceptions import SessionNotFoundError
@@ -54,6 +54,35 @@ logger = logging.getLogger(__name__)
 # Track active streams for partial-save safety net
 _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
+_HERMES_AGENT_ENDPOINT_NAME = "Hermes API"
+_HERMES_AGENT_MODEL = "hermes-agent"
+
+
+def _resolve_hermes_agent_backend(owner: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        ep = db.query(ModelEndpoint).filter(
+            ModelEndpoint.name == _HERMES_AGENT_ENDPOINT_NAME,
+            ModelEndpoint.is_enabled == True,  # noqa: E712
+        ).first()
+        ep_id = ep.id if ep else ""
+    finally:
+        db.close()
+    return resolve_endpoint_by_id(ep_id, _HERMES_AGENT_MODEL, owner=owner) if ep_id else None
+
+
+def _hermes_agent_context_messages(sess) -> List[Dict[str, Any]]:
+    """Build Hermes passthrough from the latest user turn only.
+
+    Hermes has its own agent context and tool state. Replaying the full
+    Odysseus transcript into every Hermes API call resends tool schemas and
+    stale prompts until local models hit 100% context.
+    """
+    for msg in reversed(getattr(sess, "history", []) or []):
+        metadata = msg.metadata or {}
+        if metadata.get("source") != "slash" and msg.role == "user":
+            return [msg.to_dict()]
+    return []
 
 
 def _stream_set(session_id: str, **fields) -> None:
@@ -524,7 +553,7 @@ def setup_chat_routes(
             ctx.uprefs, memory_manager, memory_vector, webhook_manager,
             character_name=ctx.preset.character_name,
             owner=ctx.user,
-            allow_background_extraction=not tool_policy.block_all_tool_calls,
+            allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
         )
 
         return {"response": reply}
@@ -734,6 +763,14 @@ def setup_chat_routes(
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=effective_user(request))
 
+        hermes_agent_api = False
+        if chat_mode == "agent":
+            _hermes_backend = _resolve_hermes_agent_backend(owner=effective_user(request))
+            if _hermes_backend:
+                sess.endpoint_url, sess.model, sess.headers = _hermes_backend
+                hermes_agent_api = True
+                logger.info("Agent mode routed to Hermes API backend")
+
         # Check for research_pending BEFORE mode persist overwrites it
         do_research = str(use_research).lower() == "true"
         if not do_research:
@@ -775,7 +812,7 @@ def setup_chat_routes(
             # Skills index only ships when the model can actually call
             # manage_skills (agent mode). In plain chat or incognito the
             # index would be useless / unwanted noise.
-            agent_mode=(chat_mode == "agent"),
+            agent_mode=(chat_mode == "agent" and not hermes_agent_api),
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
 
@@ -1165,7 +1202,15 @@ def setup_chat_routes(
                     _active_streams.pop(session, None)
                     return
 
-            messages = _ensure_current_request_is_latest_user(ctx.messages, message)
+            if hermes_agent_api:
+                raw_history_count = len(sess.get_context_messages())
+                messages = _hermes_agent_context_messages(sess)
+                messages = _ensure_current_request_is_latest_user(messages, message)
+                logger.info(
+                    "Hermes API passthrough: stripped Odysseus context preface and local-chat assistant turns (%d ctx -> %d raw -> %d sent messages)",
+                    len(ctx.messages), raw_history_count, len(messages))
+            else:
+                messages = _ensure_current_request_is_latest_user(ctx.messages, message)
 
             # Auto-compact notification
             if ctx.was_compacted:
@@ -1234,7 +1279,7 @@ def setup_chat_routes(
                 yield "data: [DONE]\n\n"
                 _active_streams.pop(session, None)
                 return
-            elif chat_mode == "chat":
+            elif chat_mode == "chat" or hermes_agent_api:
                 _chat_start = time.time()
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
@@ -1293,9 +1338,15 @@ def setup_chat_routes(
                                         last_metrics["context_tokens_before_trim"] = ctx.context_tokens_before_trim
                                         last_metrics["context_tokens_after_trim"] = ctx.context_tokens_after_trim
                                     if ctx.context_length and last_metrics.get("input_tokens"):
-                                        pct = min(round((last_metrics["input_tokens"] / ctx.context_length) * 100, 1), 100.0)
+                                        # Hermes reports aggregate input across its internal tool loop.
+                                        # Use the Odysseus->Hermes payload for context %, not cumulative spend.
+                                        _ctx_input = estimate_tokens(messages) if hermes_agent_api else last_metrics["input_tokens"]
+                                        pct = min(round((_ctx_input / ctx.context_length) * 100, 1), 100.0)
                                         last_metrics["context_percent"] = pct
                                         last_metrics["context_length"] = ctx.context_length
+                                        if hermes_agent_api:
+                                            last_metrics["usage_source"] = "hermes_aggregate"
+                                            last_metrics["context_input_tokens"] = _ctx_input
                                     # The frontend reads `tokens_per_second`; the raw usage event
                                     # carries the backend's true gen speed as `gen_tps` (llama.cpp
                                     # timings). Map it through so this direct-chat path shows real
@@ -1355,7 +1406,7 @@ def setup_chat_routes(
                                     incognito=incognito, compare_mode=compare_mode,
                                     character_name=ctx.preset.character_name,
                                     owner=_user,
-                                    allow_background_extraction=not tool_policy.block_all_tool_calls,
+                                    allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
                                 )
                             _stream_set(session, status="done")
                             yield chunk
@@ -1517,7 +1568,7 @@ def setup_chat_routes(
                                     skills_manager=skills_manager,
                                     owner=_user,
                                     extract_skills=user_requested_agent,
-                                    allow_background_extraction=not tool_policy.block_all_tool_calls,
+                                    allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
                                 )
                             _stream_set(session, status="done")
                             yield chunk
