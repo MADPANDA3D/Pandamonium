@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -13,19 +15,15 @@ import httpx
 
 from core.constants import DATA_DIR
 from core.models import ChatMessage
+from src.agent_worker_adapters import adapters, worker_catalog
 
 TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
 KNOWLEDGE_MANIFEST_FILE = Path(DATA_DIR) / "jarvis_knowledge_manifest.json"
-PC_CODEX_URL = os.getenv("ODYSSEUS_PC_CODEX_URL", "http://192.168.1.50:8040")
 BRIDGE_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/odysseus-agent-bridge-token"))
 JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
 OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://192.168.1.247:11434")
 TERMINAL = {"completed", "failed", "cancelled", "blocked"}
-WORKERS = {
-    "pc-codex": {"enabled": True, "capabilities": ["local_files", "business", "home_lab", "code"]},
-    "hermes": {"enabled": False, "capabilities": ["remote_agent"]},
-    "vps-codex": {"enabled": False, "capabilities": ["vps_code", "vps_operations"]},
-}
+WORKERS = worker_catalog()
 
 _LOCK = threading.RLock()
 _MIRRORS: dict[str, asyncio.Task] = {}
@@ -65,15 +63,8 @@ def internal_token_valid(authorization: str | None) -> bool:
     return bool(expected and supplied and hmac.compare_digest(expected, supplied))
 
 
-def _headers() -> dict[str, str]:
-    token = _token()
-    if not token:
-        raise RuntimeError("agent_bridge_token_missing")
-    return {"Authorization": f"Bearer {token}"}
-
-
 def _tasks() -> dict:
-    return _read_json(TASKS_FILE, {"tasks": {}})
+    return _read_json(TASKS_FILE, {"tasks": {}, "bindings": {}})
 
 
 def get_task(task_id: str) -> dict | None:
@@ -86,11 +77,89 @@ def task_events(task_id: str, after: int = -1) -> list[dict]:
     return [event for event in task.get("events", []) if int(event.get("seq", -1)) > after]
 
 
+def _binding_key(session_id: str, worker: str, workspace: str) -> str:
+    return f"{session_id}:{worker}:{workspace}"
+
+
+def get_worker_binding(session_id: str, worker: str, workspace: str) -> dict:
+    with _LOCK:
+        return dict((_tasks().get("bindings") or {}).get(_binding_key(session_id, worker, workspace)) or {})
+
+
+def _save_worker_binding(task: dict, **values: Any) -> None:
+    with _LOCK:
+        state = _tasks()
+        key = _binding_key(task["session_id"], task["worker"], task["workspace"])
+        binding = state.setdefault("bindings", {}).setdefault(key, {})
+        binding.update({k: v for k, v in values.items() if v})
+        binding["updated_at"] = int(time.time())
+        _write_json(TASKS_FILE, state)
+
+
 def _save_task(task: dict) -> None:
     with _LOCK:
         state = _tasks()
         state.setdefault("tasks", {})[task["task_id"]] = task
         _write_json(TASKS_FILE, state)
+
+
+def _persist_artifact(task: dict, event: dict) -> dict:
+    metadata = dict(event.get("metadata") or {})
+    content = str(metadata.pop("content", ""))
+    if not content or len(content) > 2_000_000:
+        return event
+    source_path = str(metadata.get("source_path") or "")
+    artifact_key = str(metadata.get("artifact_key") or hashlib.sha256(
+        f"{task['worker']}|{source_path}|{content}".encode()
+    ).hexdigest())
+    existing = next((row for row in task.get("artifacts", []) if row.get("artifact_key") == artifact_key), None)
+    if existing:
+        metadata.update(existing)
+        event["metadata"] = metadata
+        return event
+
+    from core.database import Document, DocumentVersion, SessionLocal
+
+    doc_id = str(uuid.uuid4())
+    title = str(metadata.get("title") or Path(source_path).name or "Worker Artifact")[:240]
+    language = str(metadata.get("language") or "markdown")[:40]
+    db = SessionLocal()
+    try:
+        document = Document(
+            id=doc_id,
+            session_id=task.get("session_id"),
+            title=title,
+            language=language,
+            current_content=content,
+            version_count=1,
+            is_active=True,
+            owner=task.get("owner"),
+        )
+        db.add(document)
+        db.add(DocumentVersion(
+            id=str(uuid.uuid4()),
+            document_id=doc_id,
+            version_number=1,
+            content=content,
+            summary=f"Created by {task.get('worker')}",
+            source="agent_worker",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    persisted = {
+        "artifact_key": artifact_key,
+        "document_id": doc_id,
+        "title": title,
+        "language": language,
+        "source_path": source_path,
+        "href": f"#document-{doc_id}",
+    }
+    task.setdefault("artifacts", []).append(persisted)
+    metadata.update(persisted)
+    event["metadata"] = metadata
+    return event
 
 
 def _append_event(task_id: str, event: dict) -> None:
@@ -99,11 +168,17 @@ def _append_event(task_id: str, event: dict) -> None:
         if not task:
             return
         events = task.setdefault("events", [])
-        seq = int(event.get("seq", len(events)))
-        if any(int(existing.get("seq", -1)) == seq for existing in events):
+        event_id = str(event.get("event_id") or "")
+        if event_id and any(existing.get("event_id") == event_id for existing in events):
             return
+        event = dict(event)
+        event["seq"] = len(events)
+        event["task_id"] = task_id
+        event["worker"] = task.get("worker")
+        event.setdefault("event_id", str(uuid.uuid4()))
+        if event.get("type") == "artifact":
+            event = _persist_artifact(task, event)
         events.append(event)
-        events.sort(key=lambda row: int(row.get("seq", 0)))
         event_type = event.get("type")
         if event_type == "result":
             task.update(status="completed", result=event.get("text"))
@@ -113,8 +188,14 @@ def _append_event(task_id: str, event: dict) -> None:
             task["status"] = "cancelled"
         elif event_type == "question":
             task["status"] = "waiting"
-        elif event_type in {"accepted", "progress", "tool_activity"}:
+        elif event_type == "approval_required":
+            task["status"] = "waiting_approval"
+        elif event_type in {"accepted", "progress", "tool_activity", "artifact"}:
             task["status"] = "running"
+        metadata = event.get("metadata") or {}
+        if metadata.get("codex_thread_id"):
+            task["codex_thread_id"] = metadata["codex_thread_id"]
+            _save_worker_binding(task, codex_thread_id=metadata["codex_thread_id"])
         task["updated_at"] = int(time.time())
         if event_type == "result" and not task.get("result_persisted"):
             _persist_result(task, str(event.get("text") or ""))
@@ -138,20 +219,30 @@ def _persist_result(task: dict, text: str) -> None:
         return
 
 
-async def _mirror(task_id: str) -> None:
-    after = max((int(event.get("seq", -1)) for event in task_events(task_id)), default=-1)
+def _persist_task_user_message(task: dict, text: str, source: str) -> None:
+    if not _SESSION_MANAGER or not text or not task.get("session_id"):
+        return
     try:
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream(
-                "GET",
-                f"{PC_CODEX_URL}/v1/tasks/{task_id}/events",
-                params={"after": after},
-                headers=_headers(),
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        _append_event(task_id, json.loads(line[6:]))
+        _SESSION_MANAGER.add_message(
+            task["session_id"],
+            ChatMessage("user", text, metadata={
+                "source": source,
+                "worker": task.get("worker"),
+                "task_id": task.get("task_id"),
+            }),
+        )
+    except Exception:
+        return
+
+
+async def _mirror(task_id: str) -> None:
+    try:
+        task = get_task(task_id)
+        if not task:
+            return
+        adapter = adapters()[task["worker"]]
+        async for event in adapter.events(task):
+            _append_event(task_id, event)
     except Exception as exc:
         task = get_task(task_id)
         if task and task.get("status") not in TERMINAL:
@@ -178,9 +269,11 @@ async def start_task(
     owner: str = "leo",
     codex_thread_id: str | None = None,
 ) -> dict:
-    if worker not in WORKERS:
+    registry = adapters()
+    if worker not in registry:
         raise ValueError("unknown_worker")
-    if not WORKERS[worker]["enabled"]:
+    adapter = registry[worker]
+    if not adapter.enabled:
         now = int(time.time())
         task = {
             "task_id": f"blocked-{worker}-{now}",
@@ -199,40 +292,61 @@ async def start_task(
         return task
     if permission_mode != "read_only" and not approved:
         raise PermissionError("approval_required")
-    payload = {
+    binding = get_worker_binding(session_id, worker, workspace)
+    codex_thread_id = codex_thread_id or binding.get("codex_thread_id")
+    now = int(time.time())
+    task = {
+        "task_id": str(uuid.uuid4()),
+        "remote_task_id": None,
+        "worker": worker,
         "session_id": session_id,
         "workspace": workspace,
         "prompt": prompt,
         "permission_mode": permission_mode,
         "approved": approved,
         "codex_thread_id": codex_thread_id,
+        "worker_session_key": binding.get("worker_session_key"),
+        "status": "queued",
+        "result": None,
+        "error": None,
+        "owner": owner,
+        "events": [],
+        "artifacts": [],
+        "created_at": now,
+        "updated_at": now,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.post(f"{PC_CODEX_URL}/v1/tasks", json=payload, headers=_headers())
-    response.raise_for_status()
-    task = response.json()
-    task["owner"] = owner
-    task["events"] = []
+    remote = await adapter.start(task)
+    task.update(remote)
     _save_task(task)
+    _append_event(task["task_id"], {
+        "type": "accepted",
+        "text": f"{worker_catalog()[worker]['machine']} accepted the task.",
+        "metadata": {"remote_task_id": task.get("remote_task_id")},
+    })
+    if task.get("worker_session_key"):
+        _save_worker_binding(task, worker_session_key=task["worker_session_key"])
     ensure_mirror(task["task_id"])
-    return task
+    return get_task(task["task_id"]) or task
 
 
 async def refresh_task(task_id: str) -> dict:
     task = get_task(task_id)
     if not task:
         raise KeyError(task_id)
-    if task.get("worker") == "pc-codex":
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(f"{PC_CODEX_URL}/v1/tasks/{task_id}", headers=_headers())
-            response.raise_for_status()
-            remote = response.json()
-            for event in remote.get("events", []):
-                _append_event(task_id, event)
-            task = get_task(task_id) or task
-        except Exception:
-            pass
+    try:
+        adapter = adapters()[task["worker"]]
+        remote = await adapter.status(task)
+        remote_status = str(remote.get("status") or "")
+        if remote.get("codex_thread_id"):
+            task["codex_thread_id"] = remote["codex_thread_id"]
+            _save_worker_binding(task, codex_thread_id=remote["codex_thread_id"])
+        if remote_status in {"completed", "failed", "cancelled"} and task.get("status") not in TERMINAL:
+            event_type = {"completed": "result", "failed": "error", "cancelled": "cancelled"}[remote_status]
+            text = str(remote.get("output") or remote.get("result") or remote.get("error") or f"{task['worker']} {remote_status}.")
+            _append_event(task_id, {"type": event_type, "text": text, "metadata": {"reconciled": True}})
+        task = get_task(task_id) or task
+    except Exception:
+        pass
     ensure_mirror(task_id)
     return task
 
@@ -241,16 +355,36 @@ async def task_action(task_id: str, action: str, payload: dict | None = None) ->
     task = get_task(task_id)
     if not task:
         raise KeyError(task_id)
-    if task.get("worker") != "pc-codex":
-        raise RuntimeError("worker_not_connected")
-    async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.post(
-            f"{PC_CODEX_URL}/v1/tasks/{task_id}/{action}",
-            json=payload or {},
-            headers=_headers(),
-        )
-    response.raise_for_status()
+    adapter = adapters()[task["worker"]]
+    if action == "reply":
+        await adapter.reply(task, payload or {})
+        answers = (payload or {}).get("answers") or {}
+        text = " ".join(
+            " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+            for value in answers.values()
+        ).strip()
+        _persist_task_user_message(task, text, "agent_worker_reply")
+    elif action == "approval":
+        await adapter.approve(task, payload or {})
+        _persist_task_user_message(task, str((payload or {}).get("spoken_text") or "").strip(), "agent_worker_approval")
+    elif action == "cancel":
+        await adapter.cancel(task)
+    else:
+        raise ValueError("unknown_task_action")
     return await refresh_task(task_id)
+
+
+async def worker_statuses() -> dict[str, dict[str, Any]]:
+    catalog = worker_catalog()
+    registry = adapters()
+    results = await asyncio.gather(*(adapter.health() for adapter in registry.values()))
+    for (worker, adapter), health in zip(registry.items(), results):
+        catalog[worker] = {
+            **catalog[worker],
+            "connection": health,
+            "enabled": adapter.enabled and health.get("state") == "connected",
+        }
+    return catalog
 
 
 async def stream_task_events(task_id: str, after: int = -1) -> AsyncGenerator[str, None]:

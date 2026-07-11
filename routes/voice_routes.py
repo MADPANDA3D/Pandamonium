@@ -22,6 +22,7 @@ from core.constants import DATA_DIR
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_tools import TOOL_TAGS
+from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import effective_user
 from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment, take_speech_segment
 
@@ -43,7 +44,7 @@ DEFERRED_ACTIONS = {"start_local_codex_task", "start_hermes_task", "read_task_st
 SAFE_ACTIONS = DESKTOP_ACTIONS | DEFERRED_ACTIONS
 JARVIS_TOOLS = {"get_runtime_status", "start_agent_task", "read_agent_task", "search_jarvis_knowledge"}
 VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private orchestrator and conversational partner.
-The active system build is Mark 5 - Jarvis Agent Mesh And Knowledge. Unless Leo explicitly mentions scripture, Bible study, or another domain, references to Mark 1, Mark 2, Mark 3, Mark 4, or Mark 5 mean indexed Jarvis architecture builds.
+The active system build is Mark 6 - Jarvis Voice-First Agent Operating System. Unless Leo explicitly mentions scripture, Bible study, or another domain, references to a numbered Mark mean indexed Jarvis architecture builds.
 Answer naturally with enough substance for the question: usually one to four short spoken paragraphs, and more when Leo explicitly asks for a deep explanation. Never describe pacing, pauses, or speaking style.
 You coordinate work; you do not pretend to have inspected systems you have not inspected. Use get_runtime_status for runtime or model questions. Use search_jarvis_knowledge for curated background. For latest, current, or business-update requests, use background knowledge and start a read-only pc-codex task to inspect current sources.
 Model-initiated delegation is always read-only. Tell Leo briefly that work is running in the background, then let worker events deliver progress and the final result. Never invent worker results, runtime facts, paths, or endpoint details."""
@@ -53,8 +54,10 @@ WORKER_LABELS = {
     "hermes": "Hermes",
     "vps-codex": "VPS Codex",
 }
-ACTIVE_VOICE_TARGETS = {"jarvis", "pc-codex"}
-VOICE_WORKSPACES = {"business", "home-lab", "project-linux"}
+ACTIVE_VOICE_TARGETS = {"jarvis"} | {
+    worker for worker, details in worker_catalog().items() if details.get("enabled")
+}
+VOICE_WORKSPACES = {"business", "home-lab", "project-linux", "vps-ops"}
 
 
 class VoiceSessionCreate(BaseModel):
@@ -336,19 +339,10 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
 def _target_switch(text: str) -> str | None:
     if re.search(r"\b(back|return|switch|talk|speak)\b.*\bjarvis\b", text, re.IGNORECASE):
         return "jarvis"
+    if not re.search(r"\b(talk|speak|connect|switch)\b", text, re.IGNORECASE):
+        return None
     delegation = _delegation_route(text)
     return delegation[0] if delegation else None
-
-
-def _pure_target_switch(text: str) -> bool:
-    return bool(re.fullmatch(
-        r"\s*(?:hey\s+jarvis[,\s]*)?(?:i\s+(?:need|want|would\s+like)\s+to\s+)?"
-        r"(?:talk|speak|switch|connect|return|go\s+back)(?:\s+me)?(?:\s+back)?\s+(?:to\s+)?"
-        r"(?:my\s+)?(?:pc\s+codex|desktop\s+codex|computer\s+codex|codex|jarvis)"
-        r"(?:\s+please)?[.!?]*\s*",
-        text,
-        re.IGNORECASE,
-    ))
 
 
 def _validated_thread_id(value: str | None) -> str | None:
@@ -362,9 +356,34 @@ def _validated_thread_id(value: str | None) -> str | None:
 
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
     target_switch = _target_switch(text)
-    if target_switch and _pure_target_switch(text):
+    if target_switch:
         workspace = _workspace_for_text(text)
         label = WORKER_LABELS.get(target_switch, "Jarvis")
+        if target_switch != "jarvis":
+            from src.jarvis_agent import worker_statuses
+
+            target_status = (await worker_statuses()).get(target_switch) or {}
+            if not target_status.get("enabled"):
+                reply = f"{label} is not connected, so I have not switched you or claimed a task is running."
+                yield {"type": "assistant_delta", "text": reply}
+                yield {
+                    "type": "final",
+                    "assistant_text": reply,
+                    "diagnostics": {
+                        "model": JARVIS_MODEL,
+                        "transcript_chars": len(text),
+                        "assistant_chars": len(reply),
+                        "brain_ms": 0,
+                        "brain_first_token_ms": 0,
+                        "num_ctx": VOICE_CONTEXT_LENGTH,
+                        "num_predict": 0,
+                        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+                        "guard_reason": f"{target_switch}_not_connected",
+                        "task_ids": [],
+                    },
+                    "task_ids": [],
+                }
+                return
         reply = "You’re back with Jarvis." if target_switch == "jarvis" else f"You’re connected to {label}. What would you like me to handle?"
         yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
         yield {"type": "assistant_delta", "text": reply}
@@ -420,27 +439,36 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         from src.jarvis_agent import start_task
 
         worker, workspace = delegation
-        yield {"type": "target_changed", "target": worker, "workspace": workspace}
-        task = await start_task(
-            worker,
-            chat_session_id,
-            workspace,
-            f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}",
-            "read_only",
-            False,
-            owner,
-            codex_thread_id=voice_session.get("codex_thread_id") if worker == "pc-codex" else None,
-        )
         label = WORKER_LABELS[worker]
-        if task.get("status") == "blocked":
+        try:
+            task = await start_task(
+                worker,
+                chat_session_id,
+                workspace,
+                f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}",
+                "read_only",
+                False,
+                owner,
+                codex_thread_id=voice_session.get("codex_thread_id") if worker == "pc-codex" else None,
+            )
+        except Exception as exc:
+            logger.warning("Jarvis could not start %s task: %s", worker, str(exc)[:240])
+            task = {"status": "blocked"}
+        if task.get("status") == "blocked" or not task.get("task_id"):
             reply = f"{label} is registered, but its private worker connection is not enabled yet. I have not pretended to run the request."
             task_ids: list[str] = []
             guard_reason = f"{worker}_not_connected"
         else:
-            reply = f"I’m handing that to {label} in the {workspace} workspace. Its real progress and result will come back through this chat."
+            reply = f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep this conversation with me while its real progress and result come back through the chat."
             task_ids = [task["task_id"]]
             guard_reason = f"delegated_{worker}"
-            yield {"type": "agent_task", "task_id": task["task_id"], "worker": worker, "workspace": workspace}
+            yield {
+                "type": "agent_task",
+                "task_id": task["task_id"],
+                "worker": worker,
+                "workspace": workspace,
+                "foreground": False,
+            }
         yield {"type": "assistant_delta", "text": reply}
         yield {
             "type": "final",
@@ -472,13 +500,29 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "Return a useful executive summary with blockers and next actions.\n\nLeo asked:\n"
             f"{text}\n\nRetrieved background:\n" + "\n".join(citations)
         )
-        task = await start_task(
-            "pc-codex", chat_session_id, "business", prompt, "read_only", False, owner,
-            codex_thread_id=voice_session.get("codex_thread_id"),
-        )
-        reply = "I’m checking the current business files and live sources now. I’ll speak the useful milestones and the final update as they arrive."
-        yield {"type": "target_changed", "target": "pc-codex", "workspace": "business"}
-        yield {"type": "agent_task", "task_id": task["task_id"], "worker": "pc-codex", "workspace": "business"}
+        try:
+            task = await start_task(
+                "pc-codex", chat_session_id, "business", prompt, "read_only", False, owner,
+                codex_thread_id=voice_session.get("codex_thread_id"),
+            )
+        except Exception as exc:
+            logger.warning("Jarvis could not start current-business task: %s", str(exc)[:240])
+            task = {"status": "blocked"}
+        if task.get("status") == "blocked" or not task.get("task_id"):
+            reply = "PC Codex is not connected, so I could not start the live business inspection. I have not claimed that it is running."
+            task_ids = []
+            guard_reason = "pc-codex_not_connected"
+        else:
+            reply = "I’m checking the current business files and live sources now. I’ll speak the useful milestones and the final update as they arrive."
+            task_ids = [task["task_id"]]
+            guard_reason = "current_business_delegation"
+            yield {
+                "type": "agent_task",
+                "task_id": task["task_id"],
+                "worker": "pc-codex",
+                "workspace": "business",
+                "foreground": False,
+            }
         yield {"type": "assistant_delta", "text": reply}
         yield {
             "type": "final",
@@ -491,11 +535,11 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "num_ctx": VOICE_CONTEXT_LENGTH,
                 "num_predict": 0,
                 "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
-                "guard_reason": "current_business_delegation",
+                "guard_reason": guard_reason,
                 "rag_sources": [row.get("source") for row in background.get("results") or []],
-                "task_ids": [task["task_id"]],
+                "task_ids": task_ids,
             },
-            "task_ids": [task["task_id"]],
+            "task_ids": task_ids,
         }
 
 
@@ -748,6 +792,12 @@ def setup_voice_routes(session_manager=None, tts_service=None):
     async def update_voice_target(session_id: str, payload: VoiceTargetUpdate):
         if payload.target not in ACTIVE_VOICE_TARGETS:
             raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
+        if payload.target != "jarvis":
+            from src.jarvis_agent import worker_statuses
+
+            target_status = (await worker_statuses()).get(payload.target) or {}
+            if not target_status.get("enabled"):
+                raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
         if payload.workspace not in VOICE_WORKSPACES:
             raise HTTPException(status_code=400, detail={"message": "Unknown voice workspace"})
         state = _load_state()

@@ -1002,11 +1002,29 @@
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
     <section id="jarvis-call-panel" class="jarvis-call-panel" data-state="idle" hidden aria-label="Jarvis live voice">
       <div id="jarvis-agent-workspace" class="jarvis-agent-workspace" aria-label="Agent task workspace">
-        <div class="jarvis-target-control" role="tablist" aria-label="Voice target">
-          <button type="button" class="jarvis-target is-active" data-worker="jarvis" role="tab" aria-selected="true">Jarvis</button>
-          <button type="button" class="jarvis-target" data-worker="pc-codex" role="tab" aria-selected="false">PC Codex</button>
-          <button type="button" class="jarvis-target" data-worker="hermes" role="tab" aria-selected="false" disabled>Hermes</button>
-          <button type="button" class="jarvis-target" data-worker="vps-codex" role="tab" aria-selected="false" disabled>VPS Codex</button>
+        <div class="jarvis-agent-selector">
+          <button type="button" id="jarvis-agent-chip" class="jarvis-agent-chip" aria-haspopup="menu" aria-expanded="false" aria-controls="jarvis-agent-menu">
+            <span id="jarvis-agent-state" class="jarvis-agent-state is-connected" aria-hidden="true"></span>
+            <span class="jarvis-agent-chip-copy">
+              <span id="jarvis-agent-name" class="jarvis-agent-name">Jarvis</span>
+              <span id="jarvis-agent-meta" class="jarvis-agent-meta">Nimbus · home-lab · ready</span>
+            </span>
+            <svg class="jarvis-agent-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="jarvis-agent-menu" class="jarvis-agent-menu" role="menu" hidden>
+            <button type="button" class="jarvis-target is-active" data-worker="jarvis" role="menuitemradio" aria-checked="true">
+              <span>Jarvis</span><small>Nimbus · conversational brain</small>
+            </button>
+            <button type="button" class="jarvis-target" data-worker="pc-codex" role="menuitemradio" aria-checked="false">
+              <span>PC Codex</span><small>MADPANDA workstation · checking</small>
+            </button>
+            <button type="button" class="jarvis-target" data-worker="hermes" role="menuitemradio" aria-checked="false" disabled>
+              <span>Hermes</span><small>Hermes laptop · gated</small>
+            </button>
+            <button type="button" class="jarvis-target" data-worker="vps-codex" role="menuitemradio" aria-checked="false" disabled>
+              <span>VPS Codex</span><small>MADPANDA VPS · gated</small>
+            </button>
+          </div>
         </div>
         <div id="jarvis-task-timeline" class="jarvis-task-timeline" role="log" aria-live="polite"></div>
       </div>
@@ -2499,7 +2517,7 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/jarvisVoice.js?v=20260711T083954Z"></script>
+<script type="module" src="/static/js/jarvisVoice.js?v=20260711T210000Z"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260630toolmetrics"></script>

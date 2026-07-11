@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from core.models import ChatMessage
 from src.auth_helpers import effective_user, require_user
 from src.jarvis_agent import (
-    WORKERS,
     configure,
     get_task,
     internal_token_valid,
@@ -20,6 +19,7 @@ from src.jarvis_agent import (
     stream_task_events,
     sync_knowledge,
     task_action,
+    worker_statuses,
 )
 from routes.madpanda_knowledge_routes import router as madpanda_knowledge_router
 
@@ -37,6 +37,11 @@ class TaskCreate(BaseModel):
 
 class TaskReply(BaseModel):
     answers: dict[str, list[str] | str]
+
+
+class TaskApproval(BaseModel):
+    choice: str = Field(pattern="^(once|session|always|deny)$")
+    spoken_text: str | None = Field(default=None, max_length=2000)
 
 
 class KnowledgeDocument(BaseModel):
@@ -65,7 +70,7 @@ def setup_agent_task_routes(session_manager):
 
     @router.get("/api/agent-workers")
     async def workers(_owner: str = Depends(require_user)):
-        return WORKERS
+        return await worker_statuses()
 
     @router.post("/api/agent-tasks")
     async def create(payload: TaskCreate, request: Request, owner: str = Depends(require_user)):
@@ -138,6 +143,22 @@ def setup_agent_task_routes(session_manager):
             raise HTTPException(404, "Task not found")
         except HTTPException:
             raise
+        except Exception as exc:
+            raise HTTPException(502, str(exc)[:300])
+
+    @router.post("/api/agent-tasks/{task_id}/approval")
+    async def approval(task_id: str, payload: TaskApproval, owner: str = Depends(require_user)):
+        try:
+            task = get_task(task_id)
+            if task and task.get("owner") not in (None, owner):
+                raise HTTPException(403, "Task does not belong to this user")
+            return await task_action(task_id, "approval", payload.model_dump())
+        except KeyError:
+            raise HTTPException(404, "Task not found")
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         except Exception as exc:
             raise HTTPException(502, str(exc)[:300])
 

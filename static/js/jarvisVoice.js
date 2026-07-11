@@ -37,6 +37,8 @@ let streamingAudioSources = new Set();
 let activeWorkerTaskId = null;
 let activeCodexThreadId = null;
 let activeWorkspace = 'home-lab';
+let activeWorkerQuestion = null;
+let activeWorkerApproval = null;
 let pendingWorkerText = null;
 let liveAssistantMessage = null;
 let streamingScheduledUntil = 0;
@@ -53,11 +55,23 @@ const ORGANIC_SPHERE_URL = '/static/vendor/organic-sphere/index.html?v=20260710T
 const INSECURE_MIC_MESSAGE = 'Microphone needs localhost or HTTPS.';
 const SPHERE_AUDIO_GAIN = 0.35;
 const SPHERE_AUDIO_SMOOTHING = 0.75;
-const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'result', 'error']);
-const DURABLE_SPEECH_TYPES = new Set(['question', 'result', 'error']);
+const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
+const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'result', 'error']);
 const PROGRESS_STALE_MS = 45000;
 const STREAM_INITIAL_BUFFER_SECONDS = 2.2;
 const STREAM_EDGE_CROSSFADE_SECONDS = 0.008;
+const WORKER_LABELS = {
+  jarvis: 'Jarvis',
+  'pc-codex': 'PC Codex',
+  hermes: 'Hermes',
+  'vps-codex': 'VPS Codex',
+};
+let workerCatalog = {
+  jarvis: { enabled: true, machine: 'Nimbus', connection: { state: 'connected' } },
+  'pc-codex': { enabled: true, machine: 'MADPANDA workstation', connection: { state: 'checking' } },
+  hermes: { enabled: false, machine: 'Hermes laptop', connection: { state: 'gated' } },
+  'vps-codex': { enabled: false, machine: 'MADPANDA VPS', connection: { state: 'gated' } },
+};
 
 function $(id) {
   return document.getElementById(id);
@@ -365,15 +379,70 @@ async function fetchJson(url, options = {}) {
   return body;
 }
 
-function setVoiceTarget(worker, persist = true) {
-  voiceTarget = worker;
+function activeTaskCount() {
+  const taskIds = new Set(workerStreams.keys());
+  if (activeWorkerTaskId) taskIds.add(activeWorkerTaskId);
+  return taskIds.size;
+}
+
+function setAgentMenuOpen(open) {
+  const chip = $('jarvis-agent-chip');
+  const menu = $('jarvis-agent-menu');
+  if (!chip || !menu) return;
+  chip.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu.hidden = !open;
+}
+
+function refreshAgentControl() {
+  const details = workerCatalog[voiceTarget] || workerCatalog.jarvis;
+  const connection = details.connection?.state || (details.enabled ? 'connected' : 'gated');
+  const tasks = activeTaskCount();
+  const name = $('jarvis-agent-name');
+  const meta = $('jarvis-agent-meta');
+  const state = $('jarvis-agent-state');
+  if (name) name.textContent = WORKER_LABELS[voiceTarget] || voiceTarget;
+  if (meta) {
+    const taskText = tasks ? `${tasks} active task${tasks === 1 ? '' : 's'}` : (connection === 'connected' ? 'ready' : connection.replace(/_/g, ' '));
+    meta.textContent = `${details.machine || 'worker'} · ${activeWorkspace || 'workspace unbound'} · ${taskText}`;
+  }
+  state?.classList.toggle('is-connected', connection === 'connected');
   document.querySelectorAll('.jarvis-target').forEach(button => {
-    const active = button.dataset.worker === worker;
+    const worker = button.dataset.worker;
+    const item = workerCatalog[worker] || {};
+    const active = worker === voiceTarget;
     button.classList.toggle('is-active', active);
-    button.setAttribute('aria-selected', active ? 'true' : 'false');
+    button.setAttribute('aria-checked', active ? 'true' : 'false');
+    button.disabled = worker !== 'jarvis' && !item.enabled;
+    const detail = button.querySelector('small');
+    if (detail) {
+      const itemState = item.connection?.state || (item.enabled ? 'connected' : 'gated');
+      detail.textContent = `${item.machine || 'worker'} · ${itemState.replace(/_/g, ' ')}`;
+    }
   });
-  setAgentWorkspaceActive(worker !== 'jarvis');
+}
+
+async function loadWorkerCatalog() {
+  try {
+    const workers = await fetchJson('/api/agent-workers');
+    workerCatalog = { ...workerCatalog, ...workers };
+  } catch (error) {
+    console.warn('Could not load Jarvis worker status:', error);
+  }
+  refreshAgentControl();
+}
+
+function setVoiceTarget(worker, persist = true) {
+  const details = workerCatalog[worker];
+  if (worker !== 'jarvis' && details && !details.enabled) {
+    showToast(`${WORKER_LABELS[worker] || worker} is not connected yet.`);
+    return false;
+  }
+  voiceTarget = worker;
+  setAgentMenuOpen(false);
+  setAgentWorkspaceActive(worker !== 'jarvis' || activeTaskCount() > 0);
+  refreshAgentControl();
   if (persist) persistVoiceTarget().catch(error => console.warn('Could not save voice target:', error));
+  return true;
 }
 
 function persistVoiceTarget(extra = {}) {
@@ -429,8 +498,54 @@ function addTimelineEvent(event) {
   const text = document.createElement('p');
   text.textContent = event.text || '';
   row.append(label, text);
+  const deepLink = event.metadata?.codex_deep_link
+    || (event.metadata?.codex_thread_id ? `codex://threads/${event.metadata.codex_thread_id}` : '');
+  if (deepLink) {
+    const open = document.createElement('a');
+    open.className = 'jarvis-task-event-action';
+    open.href = deepLink;
+    open.textContent = 'Open in Codex';
+    open.title = 'Open this task in Codex Desktop';
+    row.appendChild(open);
+  }
   timeline.appendChild(row);
   timeline.scrollTop = timeline.scrollHeight;
+  return row;
+}
+
+async function openWorkerArtifact(event) {
+  const documentId = event.metadata?.document_id;
+  if (!documentId || !window.documentModule?.loadDocument) return;
+  setAgentWorkspaceActive(true);
+  await window.documentModule.loadDocument(documentId);
+}
+
+async function submitWorkerApproval(event, choice, row = null, spokenText = '') {
+  if (!event?.task_id) return;
+  await fetchJson(`/api/agent-tasks/${encodeURIComponent(event.task_id)}/approval`, {
+    method: 'POST',
+    body: JSON.stringify({ choice, spoken_text: spokenText || null }),
+  });
+  activeWorkerApproval = null;
+  row?.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  showToast(choice === 'deny' ? 'Worker action denied.' : 'Worker action approved.');
+}
+
+function addApprovalEvent(event) {
+  const row = addTimelineEvent(event);
+  if (!row) return;
+  const actions = document.createElement('div');
+  actions.className = 'jarvis-task-approval-actions';
+  const approve = document.createElement('button');
+  approve.type = 'button';
+  approve.textContent = 'Approve once';
+  const deny = document.createElement('button');
+  deny.type = 'button';
+  deny.textContent = 'Deny';
+  approve.addEventListener('click', () => submitWorkerApproval(event, 'once', row).catch(handleError));
+  deny.addEventListener('click', () => submitWorkerApproval(event, 'deny', row).catch(handleError));
+  actions.append(approve, deny);
+  row.appendChild(actions);
 }
 
 function resolveSpeechIdle() {
@@ -503,24 +618,27 @@ async function processSpeechQueue() {
 }
 
 async function handleWorkerEvent(event) {
-  if (event.type === 'tool_activity' && event.metadata?.codex_thread_id) {
+  if (event.metadata?.codex_thread_id) {
     activeCodexThreadId = event.metadata.codex_thread_id;
     activeWorkspace = event.metadata.workspace || activeWorkspace;
-    const target = document.querySelector(`.jarvis-target[data-worker="${event.worker}"]`);
-    if (target) {
-      target.title = `${event.worker === 'pc-codex' ? 'PC Codex' : event.worker} · ${event.metadata.workspace} · ${event.metadata.codex_thread_id}`;
-      target.dataset.workspace = event.metadata.workspace || '';
-      target.dataset.threadId = event.metadata.codex_thread_id;
-    }
     await persistVoiceTarget({ codex_thread_id: activeCodexThreadId }).catch(() => {});
   }
-  if (['progress', 'question', 'error'].includes(event.type)) addTimelineEvent(event);
+  if (event.type === 'question') activeWorkerQuestion = event;
+  if (event.type === 'approval_required') {
+    activeWorkerApproval = event;
+    addApprovalEvent(event);
+  } else if (['progress', 'question', 'artifact', 'result', 'error', 'cancelled'].includes(event.type)) {
+    addTimelineEvent(event);
+  }
+  if (event.type === 'artifact') await openWorkerArtifact(event);
   if (SPOKEN_WORKER_EVENTS.has(event.type)) enqueueSpeech(event.text, event.type, event.worker || 'worker');
   if (['result', 'error', 'cancelled'].includes(event.type)) {
     const stream = workerStreams.get(event.task_id);
     stream?.close();
     workerStreams.delete(event.task_id);
     activeWorkerTaskId = null;
+    activeWorkerQuestion = null;
+    activeWorkerApproval = null;
     await persistVoiceTarget({ task_id: '' }).catch(() => {});
     const queuedText = pendingWorkerText;
     pendingWorkerText = null;
@@ -532,7 +650,9 @@ async function handleWorkerEvent(event) {
         console.warn('Could not refresh worker result in chat:', error);
       });
     }
+    setAgentWorkspaceActive(voiceTarget !== 'jarvis' || activeTaskCount() > 0);
   }
+  refreshAgentControl();
 }
 
 function followWorkerTask(taskId) {
@@ -540,6 +660,7 @@ function followWorkerTask(taskId) {
   setAgentWorkspaceActive(true);
   const stream = new EventSource(`/api/agent-tasks/${encodeURIComponent(taskId)}/events?after=-1`);
   workerStreams.set(taskId, stream);
+  refreshAgentControl();
   stream.onmessage = message => {
     try {
       handleWorkerEvent(JSON.parse(message.data)).catch(error => console.warn('Worker event handling failed:', error));
@@ -548,11 +669,29 @@ function followWorkerTask(taskId) {
   stream.onerror = () => {
     stream.close();
     workerStreams.delete(taskId);
+    refreshAgentControl();
   };
 }
 
 async function startDirectWorkerTask(text) {
   if (!sessionId) await createSession();
+  if (activeWorkerQuestion?.task_id) {
+    const questions = activeWorkerQuestion.metadata?.questions || [];
+    const answers = {};
+    if (questions.length) {
+      questions.forEach((question, index) => {
+        answers[String(question.id || question.header || `answer_${index + 1}`)] = [text];
+      });
+    } else {
+      answers.answer = [text];
+    }
+    await fetchJson(`/api/agent-tasks/${encodeURIComponent(activeWorkerQuestion.task_id)}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
+    activeWorkerQuestion = null;
+    return null;
+  }
   if (activeWorkerTaskId) {
     if (!pendingWorkerText) pendingWorkerText = text;
     else showToast('PC Codex already has one follow-up queued.');
@@ -575,6 +714,7 @@ async function startDirectWorkerTask(text) {
   activeWorkspace = task.workspace || workspaceForText(text);
   await persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
   followWorkerTask(task.task_id);
+  refreshAgentControl();
   return task;
 }
 
@@ -687,9 +827,11 @@ async function streamTurn(text, timings, turnStarted) {
       else if (event.type === 'agent_task') {
         activeWorkerTaskId = event.task_id;
         activeWorkspace = event.workspace || activeWorkspace;
-        setVoiceTarget(event.worker || 'pc-codex', false);
+        if (event.foreground !== false) setVoiceTarget(event.worker || 'pc-codex', false);
+        else setAgentWorkspaceActive(true);
         persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
         followWorkerTask(event.task_id);
+        refreshAgentControl();
       }
       else if (event.type === 'final') final = event;
       else if (event.type === 'error') throw new Error(event.text || 'Jarvis brain request failed');
@@ -709,11 +851,12 @@ async function createSession() {
   });
   sessionId = session.id;
   chatSessionId = session.chat_session_id || null;
-  voiceTarget = session.target || 'jarvis';
+  const savedTarget = session.target || 'jarvis';
+  voiceTarget = 'jarvis';
   activeWorkspace = session.workspace || 'home-lab';
   activeWorkerTaskId = session.active_task_id || null;
   activeCodexThreadId = session.codex_thread_id || null;
-  setVoiceTarget(voiceTarget, false);
+  setVoiceTarget(savedTarget, false);
   return session;
 }
 
@@ -945,6 +1088,16 @@ async function startListening() {
       renderLiveUser(text, timings, turnStarted);
 
       speechPaused = false;
+      if (activeWorkerApproval?.task_id) {
+        const approves = /\b(approve|approved|yes|allow|go ahead|proceed)\b/i.test(text);
+        const denies = /\b(deny|denied|no|reject|do not|don't)\b/i.test(text);
+        if (approves || denies) {
+          setStatus('background');
+          await submitWorkerApproval(activeWorkerApproval, approves ? 'once' : 'deny', null, text);
+          resumeListeningIfReady();
+          return;
+        }
+      }
       if (voiceTarget !== 'jarvis' && !requestsJarvisTarget(text)) {
         setStatus('background');
         await startDirectWorkerTask(text);
@@ -1274,10 +1427,14 @@ async function handleInputSphereClick() {
 }
 
 function bind() {
+  if (document.documentElement.dataset.jarvisVoiceBound === '1') return;
+  document.documentElement.dataset.jarvisVoiceBound = '1';
   const railBtn = $('rail-jarvis-call');
   const closeBtn = $('jarvis-call-close');
   const talkBtn = $('jarvis-call-talk');
   const inputBtn = $('jarvis-input-sphere');
+  const agentChip = $('jarvis-agent-chip');
+  const agentSelector = document.querySelector('.jarvis-agent-selector');
   const targetButtons = document.querySelectorAll('.jarvis-target');
 
   if (railBtn) {
@@ -1310,6 +1467,13 @@ function bind() {
       handleInputSphereClick().catch(handleError);
     });
   }
+  if (agentChip) {
+    agentChip.addEventListener('click', async event => {
+      event.stopPropagation();
+      await loadWorkerCatalog();
+      setAgentMenuOpen(agentChip.getAttribute('aria-expanded') !== 'true');
+    });
+  }
   targetButtons.forEach(button => {
     button.addEventListener('click', () => {
       if (!button.disabled) {
@@ -1318,9 +1482,16 @@ function bind() {
       }
     });
   });
+  document.addEventListener('click', event => {
+    if (!agentSelector?.contains(event.target)) setAgentMenuOpen(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') setAgentMenuOpen(false);
+  });
 
   window.addEventListener('message', handleSphereMessage);
   setVoiceTarget('jarvis');
+  loadWorkerCatalog().catch(() => {});
   setStatus('idle');
 }
 
