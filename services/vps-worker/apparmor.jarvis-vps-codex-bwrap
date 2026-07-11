@@ -1,0 +1,11 @@
+# Permit the dedicated VPS worker's pinned Codex sandbox helper to create the
+# unprivileged namespaces required by Codex read-only/workspace-write modes.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile jarvis-vps-codex-bwrap /home/jarvis-worker/.local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/jarvis-vps-codex-bwrap>
+}
