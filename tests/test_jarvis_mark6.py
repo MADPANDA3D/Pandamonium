@@ -8,7 +8,7 @@ from pydantic import ValidationError
 import src.jarvis_agent as jarvis_agent
 from routes.agent_task_routes import TaskApproval
 from routes.voice_routes import _delegation_route, _target_switch
-from src.agent_worker_adapters import HermesRunsAdapter, _hermes_run_features
+from src.agent_worker_adapters import HermesRunsAdapter, _hermes_instructions, _hermes_run_features
 
 
 def test_voice_intent_separates_foreground_switch_from_background_delegation():
@@ -51,6 +51,17 @@ def test_hermes_capability_names_match_current_runs_contract():
         "run_stop": True,
         "run_approval": True,
     })["approvals"] is True
+
+
+def test_hermes_instructions_preserve_broker_and_native_approval_boundaries():
+    read_only = _hermes_instructions({"approved": False})
+    approved = _hermes_instructions({"approved": True})
+
+    assert "This run is read-only" in read_only
+    assert "Do not attempt file changes" in read_only
+    assert "approved this task at the broker level" in approved
+    assert "only the specifically requested mutation" in approved
+    assert "Do not bypass or suppress Hermes' native tool approval gate" in approved
 
 
 @pytest.mark.asyncio

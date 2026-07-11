@@ -33,6 +33,22 @@ def _hermes_run_features(features: dict[str, Any]) -> dict[str, bool]:
     }
 
 
+def _hermes_instructions(task: dict[str, Any]) -> str:
+    base = (
+        "You are Hermes working for Leo through Jarvis. Give factual milestone updates and a clear final result. "
+        "Never claim an action completed without tool evidence. "
+    )
+    if task.get("approved"):
+        return base + (
+            "Odysseus approved this task at the broker level. You may attempt only the specifically requested "
+            "mutation using normal Hermes tools. Do not bypass or suppress Hermes' native tool approval gate; "
+            "no other side effects are authorized."
+        )
+    return base + (
+        "This run is read-only. Do not attempt file changes, installs, deletes, service operations, or other side effects."
+    )
+
+
 class WorkerAdapter(Protocol):
     worker: str
     enabled: bool
@@ -162,14 +178,10 @@ class HermesRunsAdapter:
     async def start(self, task: dict[str, Any]) -> dict[str, Any]:
         session_key = task.get("worker_session_key") or f"odysseus:{task['session_id']}:{task['workspace']}"
         task["worker_session_key"] = session_key[:256]
-        instructions = (
-            "You are Hermes working for Leo through Jarvis. Give factual milestone updates and a clear final result. "
-            "This run is read-only unless Odysseus explicitly grants an approval. Never claim an action completed without tool evidence."
-        )
         payload = {
             "input": task["prompt"],
             "session_id": session_key,
-            "instructions": instructions,
+            "instructions": _hermes_instructions(task),
         }
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(f"{self.url}/v1/runs", json=payload, headers=self._headers(task))
