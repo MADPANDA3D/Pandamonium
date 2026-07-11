@@ -23,6 +23,17 @@ def _task(tmp_path: Path):
     })
 
 
+def test_bridge_hosts_require_explicit_interfaces():
+    assert bridge._configured_hosts("127.0.0.1,100.64.0.1,127.0.0.1") == ("127.0.0.1", "100.64.0.1")
+    for wildcard in ("0.0.0.0", "::"):
+        try:
+            bridge._configured_hosts(wildcard)
+        except RuntimeError as exc:
+            assert str(exc) == "bridge_hosts_must_be_explicit"
+        else:
+            raise AssertionError(f"wildcard host {wildcard} was accepted")
+
+
 def test_artifact_marker_emits_validated_document_event(tmp_path):
     document = tmp_path / "Mark 5.md"
     document.write_text("# Mark 5\n\nSuccess, slow.", encoding="utf-8")

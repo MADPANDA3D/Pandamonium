@@ -47,6 +47,14 @@ ARTIFACT_SUFFIXES = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".tom
 ARTIFACT_MAX_BYTES = 2_000_000
 
 
+def _configured_hosts(value: str | None = None) -> tuple[str, ...]:
+    configured = value if value is not None else os.getenv("JARVIS_CODEX_BRIDGE_HOSTS", HOST)
+    hosts = tuple(dict.fromkeys(part.strip() for part in configured.split(",") if part.strip()))
+    if not hosts or any(host in {"0.0.0.0", "::"} for host in hosts):
+        raise RuntimeError("bridge_hosts_must_be_explicit")
+    return hosts
+
+
 class Task:
     def __init__(self, data: dict):
         self.data = data
@@ -528,9 +536,13 @@ def self_check() -> None:
     assert _safe_tool_text({"type": "webSearch", "query": "test"}) == "Web search completed: test"
     assert MAX_TASK_RUNTIME >= 60
     assert ARTIFACT_PATTERN.search('[[ODYSSEUS_ARTIFACT path="notes/Mark 5.md" title="Mark 5"]]')
+    assert _configured_hosts("127.0.0.1,100.64.0.1,127.0.0.1") == ("127.0.0.1", "100.64.0.1")
 
 
 if __name__ == "__main__":
     self_check()
     _load_tasks()
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    servers = [ThreadingHTTPServer((host, PORT), Handler) for host in _configured_hosts()]
+    for server in servers[1:]:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    servers[0].serve_forever()
