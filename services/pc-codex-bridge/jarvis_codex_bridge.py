@@ -21,6 +21,7 @@ STATE_DIR = Path(os.getenv("JARVIS_CODEX_BRIDGE_STATE_DIR", str(Path.home() / ".
 CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
+WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
 TERMINAL = {"completed", "failed", "cancelled"}
 DEFAULT_WORKSPACES = {"workspace": str(Path.home())}
 if WORKER_ID == "vps-codex":
@@ -358,7 +359,7 @@ def _watch_task(task: Task) -> None:
             })
     except Exception:
         pass
-    task.event("error", f"PC Codex exceeded the {MAX_TASK_RUNTIME // 60}-minute task limit. The task was stopped without making changes.")
+    task.event("error", f"{WORKER_LABEL} exceeded the {MAX_TASK_RUNTIME // 60}-minute task limit. The task was stopped without making changes.")
 
 
 def create_task(payload: dict) -> Task:
@@ -401,7 +402,7 @@ def create_task(payload: dict) -> Task:
     with TASKS_LOCK:
         TASKS[task.task_id] = task
     task.save()
-    task.event("accepted", "PC Codex accepted the task.")
+    task.event("accepted", f"{WORKER_LABEL} accepted the task.")
     threading.Thread(target=_run_task, args=(task,), daemon=True).start()
     threading.Thread(target=_watch_task, args=(task,), daemon=True).start()
     return task

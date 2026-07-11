@@ -34,6 +34,7 @@ def test_vps_worker_units_preserve_privilege_boundary():
     assert "User=jarvis-worker" in bridge
     assert "NoNewPrivileges=true" in bridge
     assert "SupplementaryGroups=jarvis-observer" in bridge
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" in bridge
     assert "User=root" in observer_unit
     assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in observer_unit
     assert "100." not in bridge
