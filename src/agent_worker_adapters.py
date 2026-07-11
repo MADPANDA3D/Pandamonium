@@ -24,6 +24,15 @@ def _token(path: Path) -> str:
         return ""
 
 
+def _hermes_run_features(features: dict[str, Any]) -> dict[str, bool]:
+    """Normalize Hermes capability names across compatible API revisions."""
+    return {
+        "runs": bool(features.get("run_submission") and features.get("run_events_sse")),
+        "stop": bool(features.get("run_stop")),
+        "approvals": bool(features.get("run_approval_response") or features.get("run_approval")),
+    }
+
+
 class WorkerAdapter(Protocol):
     worker: str
     enabled: bool
@@ -256,8 +265,7 @@ class HermesRunsAdapter:
                 "state": "connected",
                 "machine": self.machine,
                 "version": public.json().get("version"),
-                "runs": bool(features.get("runs")),
-                "approvals": bool(features.get("run_approval_response")),
+                **_hermes_run_features(features),
             }
         except Exception as exc:
             state = "auth_required" if "token_missing" in str(exc) or "401" in str(exc) else "unreachable"

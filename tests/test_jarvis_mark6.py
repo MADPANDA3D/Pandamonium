@@ -8,7 +8,7 @@ from pydantic import ValidationError
 import src.jarvis_agent as jarvis_agent
 from routes.agent_task_routes import TaskApproval
 from routes.voice_routes import _delegation_route, _target_switch
-from src.agent_worker_adapters import HermesRunsAdapter
+from src.agent_worker_adapters import HermesRunsAdapter, _hermes_run_features
 
 
 def test_voice_intent_separates_foreground_switch_from_background_delegation():
@@ -36,6 +36,21 @@ def test_hermes_native_events_are_normalized_without_speaking_tools(tmp_path):
         "metadata": {"event": "approval.request", "description": "Restart service?"},
     }
     assert result["type"] == "result"
+
+
+def test_hermes_capability_names_match_current_runs_contract():
+    assert _hermes_run_features({
+        "run_submission": True,
+        "run_events_sse": True,
+        "run_stop": True,
+        "run_approval_response": True,
+    }) == {"runs": True, "stop": True, "approvals": True}
+    assert _hermes_run_features({
+        "run_submission": True,
+        "run_events_sse": True,
+        "run_stop": True,
+        "run_approval": True,
+    })["approvals"] is True
 
 
 @pytest.mark.asyncio
@@ -90,4 +105,3 @@ async def test_codex_thread_binding_is_scoped_to_session_and_workspace(tmp_path,
     await asyncio.sleep(0)
     await jarvis_agent.start_task("pc-codex", "session-a", "home-lab", "second")
     assert adapter.started_with == [None, "019f5022-a520-7de0-9208-018cd2d4d222"]
-
