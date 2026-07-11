@@ -94,6 +94,12 @@ def test_disabled_tools_does_not_bash_when_allow_bash_is_none():
     )
 
 
+def test_hermes_agent_api_bypasses_odysseus_context_preface():
+    """Hermes owns the agent context; Odysseus should send only chat history."""
+    source = _CHAT_ROUTES.read_text(encoding="utf-8")
+    assert "messages = sess.get_context_messages() if hermes_agent_api else ctx.messages" in source
+
+
 # ── Functional tests of the disabled-tools logic ───────────────
 
 

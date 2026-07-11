@@ -886,6 +886,54 @@ async def _execute_tool_block_impl(
     elif tool == "vault_unlock":
         desc = "vault_unlock"
         result = await do_vault_unlock(content, owner=owner)
+    elif tool == "get_runtime_status":
+        from src.jarvis_agent import runtime_status
+
+        desc = "get_runtime_status"
+        runtime = await runtime_status()
+        result = {**runtime, "output": json.dumps(runtime, ensure_ascii=False), "exit_code": 0}
+    elif tool == "start_agent_task":
+        from src.jarvis_agent import start_task
+
+        desc = "start_agent_task"
+        try:
+            args = json.loads(content or "{}")
+            task = await start_task(
+                worker=str(args.get("worker") or "pc-codex"),
+                session_id=str(session_id or ""),
+                workspace=str(args.get("workspace") or "home-lab"),
+                prompt=str(args.get("prompt") or ""),
+                permission_mode="read_only",
+                approved=False,
+                owner=owner or "leo",
+            )
+            result = {**task, "output": json.dumps(task, ensure_ascii=False), "exit_code": 0}
+        except Exception as exc:
+            result = {"error": str(exc), "exit_code": 1}
+    elif tool == "read_agent_task":
+        from src.jarvis_agent import refresh_task
+
+        desc = "read_agent_task"
+        try:
+            args = json.loads(content or "{}")
+            task = await refresh_task(str(args.get("task_id") or ""))
+            result = {**task, "output": json.dumps(task, ensure_ascii=False), "exit_code": 0}
+        except Exception as exc:
+            result = {"error": str(exc), "exit_code": 1}
+    elif tool == "search_jarvis_knowledge":
+        from src.jarvis_agent import search_knowledge
+
+        desc = "search_jarvis_knowledge"
+        try:
+            args = json.loads(content or "{}")
+            result = search_knowledge(
+                str(args.get("query") or ""),
+                owner=owner or "leo",
+                client=args.get("client"),
+                limit=int(args.get("limit") or 6),
+            )
+        except Exception as exc:
+            result = {"error": str(exc), "exit_code": 1}
     elif tool.startswith("mcp__"):
         # MCP tool dispatch
         mcp = get_mcp_manager()

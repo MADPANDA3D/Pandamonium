@@ -5,6 +5,7 @@ import io
 import wave
 import logging
 import hashlib
+import os
 import httpx
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -12,6 +13,20 @@ from typing import Optional, Dict, Any
 from src.constants import TTS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
+
+KOKORO_VOICES = [
+    {"id": "af_sarah", "label": "Sarah", "locale": "American English", "gender": "female"},
+    {"id": "af_heart", "label": "Heart", "locale": "American English", "gender": "female"},
+    {"id": "af_bella", "label": "Bella", "locale": "American English", "gender": "female"},
+    {"id": "af_nicole", "label": "Nicole", "locale": "American English", "gender": "female"},
+    {"id": "af_sky", "label": "Sky", "locale": "American English", "gender": "female"},
+    {"id": "am_adam", "label": "Adam", "locale": "American English", "gender": "male"},
+    {"id": "am_michael", "label": "Michael", "locale": "American English", "gender": "male"},
+    {"id": "bf_emma", "label": "Emma", "locale": "British English", "gender": "female"},
+    {"id": "bf_isabella", "label": "Isabella", "locale": "British English", "gender": "female"},
+    {"id": "bm_george", "label": "George", "locale": "British English", "gender": "male"},
+    {"id": "bm_lewis", "label": "Lewis", "locale": "British English", "gender": "male"},
+]
 
 
 def _safe_speed(value, default: float = 1.0) -> float:
@@ -133,7 +148,8 @@ class TTSService:
         }
 
         try:
-            r = httpx.post(url, json=payload, headers=headers, timeout=60)
+            timeout = float(os.getenv("ODYSSEUS_TTS_ENDPOINT_TIMEOUT", "180"))
+            r = httpx.post(url, json=payload, headers=headers, timeout=timeout)
             r.raise_for_status()
             logger.info(f"API TTS: {len(r.content)} bytes from {base_url}")
             return r.content
@@ -143,14 +159,21 @@ class TTSService:
 
     # ── Public interface ──
 
-    def synthesize(self, text: str, use_cache: bool = True) -> Optional[bytes]:
+    def synthesize(
+        self,
+        text: str,
+        use_cache: bool = True,
+        model: str | None = None,
+        voice: str | None = None,
+        speed: float | str | None = None,
+    ) -> Optional[bytes]:
         settings = self._load_settings()
         if settings.get("tts_enabled") is False:
             return None
         provider = settings["tts_provider"]
-        model = settings["tts_model"]
-        voice = settings["tts_voice"]
-        speed = _safe_speed(settings.get("tts_speed", "1"))
+        model = model or settings["tts_model"]
+        voice = voice or settings["tts_voice"]
+        speed = _safe_speed(speed if speed is not None else settings.get("tts_speed", "1"))
 
         if provider in ("disabled", "browser"):
             return None
@@ -187,12 +210,22 @@ class TTSService:
 
         return audio_data
 
-    def synthesize_to_base64(self, text: str) -> Optional[str]:
+    def synthesize_to_base64(
+        self,
+        text: str,
+        model: str | None = None,
+        voice: str | None = None,
+        speed: float | str | None = None,
+        use_cache: bool = True,
+    ) -> Optional[str]:
         import base64
-        audio = self.synthesize(text)
+        audio = self.synthesize(text, use_cache=use_cache, model=model, voice=voice, speed=speed)
         if audio:
             return base64.b64encode(audio).decode("utf-8")
         return None
+
+    def list_voices(self) -> list[dict[str, str]]:
+        return list(KOKORO_VOICES)
 
     def set_voice(self, voice: str):
         """Legacy no-op — voice is now managed via admin settings."""

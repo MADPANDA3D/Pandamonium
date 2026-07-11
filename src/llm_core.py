@@ -1756,6 +1756,11 @@ async def llm_call_async(
         # Suppress thinking for qwen3/gemma4 on Ollama /v1 — same as stream_llm.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+            # Ollama's OpenAI-compatible route ignores `think: false` for
+            # Qwen 3.5 but honors the OpenAI reasoning control. Keep this
+            # scoped to the low-latency Jarvis voice alias.
+            if model.lower().startswith("qwen3.5-jarvis-v5"):
+                payload["reasoning_effort"] = "none"
         if provider == "mistral" and _supports_thinking(model):
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
         _apply_local_cache_affinity(payload, url, session_id)
@@ -1887,6 +1892,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+            if model.lower().startswith("qwen3.5-jarvis-v5"):
+                payload["reasoning_effort"] = "none"
         _apply_local_cache_affinity(payload, url, session_id)
         h = _provider_headers(provider, headers)
         if provider == "copilot":

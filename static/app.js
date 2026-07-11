@@ -6,7 +6,7 @@ import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import fileHandlerModule from './js/fileHandler.js';
-import modelsModule from './js/models.js';
+import modelsModule from './js/models.js?v=20260711-model-cleanup2';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
@@ -17,7 +17,7 @@ import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
-import sessionModule from './js/sessions.js';
+import sessionModule from './js/sessions.js?v=20260711-model-cleanup2';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
@@ -3559,6 +3559,10 @@ function startOdysseusApp() {
     return voiceRecorderModule._sttProvider && voiceRecorderModule._sttProvider !== 'disabled';
   }
 
+  function _isJarvisCallActive() {
+    return Boolean(window.jarvisVoice?.isActive?.());
+  }
+
   function _hasAttachments() {
     return fileHandlerModule.getPendingCount && fileHandlerModule.getPendingCount() > 0;
   }
@@ -3570,13 +3574,19 @@ function startOdysseusApp() {
     const prevMode = sendBtn.dataset.mode || '';
     const hasText = messageInput && messageInput.value.trim().length > 0;
     const hasFiles = _hasAttachments();
+    const jarvisCallActive = _isJarvisCallActive();
     let newMode;
+    sendBtn.disabled = false;
+    sendBtn.classList.remove('dictation-paused');
     if (!hasText && !hasFiles && _isSttEnabled()) {
       clearTimeout(sendBtn._collapseTimer);
       sendBtn.innerHTML = _micIcon;
-      sendBtn.title = 'Record voice';
+      sendBtn.title = jarvisCallActive ? 'Dictation paused during Jarvis live call' : 'Dictation';
+      sendBtn.setAttribute('aria-label', sendBtn.title);
+      sendBtn.disabled = jarvisCallActive;
       newMode = 'mic';
       sendBtn.classList.add('mic-mode');
+      sendBtn.classList.toggle('dictation-paused', jarvisCallActive);
       sendBtn.classList.remove('newchat-mode', 'newchat-expanded');
     } else if (!hasText && !hasFiles && !_isSttEnabled()) {
       clearTimeout(sendBtn._collapseTimer);
@@ -3584,6 +3594,7 @@ function startOdysseusApp() {
       if (groupModule && groupModule.isActive()) {
         sendBtn.innerHTML = _sendIcon;
         sendBtn.title = 'Send to group';
+        sendBtn.setAttribute('aria-label', 'Send to group');
         newMode = 'idle';
         sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded');
       } else {
@@ -3593,6 +3604,7 @@ function startOdysseusApp() {
         // Already on new chat — show arrow in muted style (ready to type)
         sendBtn.innerHTML = _sendIcon;
         sendBtn.title = 'Send message';
+        sendBtn.setAttribute('aria-label', 'Send message');
         newMode = 'idle';
         sendBtn.classList.add('newchat-mode'); // muted gray style
         sendBtn.classList.remove('mic-mode', 'newchat-expanded');
@@ -3600,6 +3612,7 @@ function startOdysseusApp() {
       } else {
         sendBtn.innerHTML = _newChatIcon + '<span class="send-btn-label">+ New</span>';
         sendBtn.title = 'New chat';
+        sendBtn.setAttribute('aria-label', 'New chat');
         newMode = 'newchat';
         sendBtn.classList.add('newchat-mode');
         sendBtn.classList.remove('mic-mode');
@@ -3623,6 +3636,7 @@ function startOdysseusApp() {
           if (sendBtn.dataset.mode !== 'send') return;
           sendBtn.innerHTML = _sendIcon;
           sendBtn.title = 'Send message';
+          sendBtn.setAttribute('aria-label', 'Send message');
           sendBtn.classList.remove('mic-mode', 'newchat-mode', 'anim-spin-swap');
           sendBtn.classList.add('anim-spin');
           sendBtn.addEventListener('animationend', () => sendBtn.classList.remove('anim-spin'), { once: true });
@@ -3630,6 +3644,7 @@ function startOdysseusApp() {
       } else {
         sendBtn.innerHTML = _sendIcon;
         sendBtn.title = 'Send message';
+        sendBtn.setAttribute('aria-label', 'Send message');
         sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded', 'anim-spin', 'anim-launch', 'anim-land');
       }
     }
@@ -3681,8 +3696,13 @@ function startOdysseusApp() {
 
       // If input is empty and STT is enabled, start recording
       if (!hasText && !hasFiles && _isSttEnabled()) {
+        if (_isJarvisCallActive()) {
+          uiModule.showToast?.('Dictation is paused during Jarvis live call.');
+          return;
+        }
         sendBtn.innerHTML = _stopIcon;
         sendBtn.title = 'Stop recording';
+        sendBtn.setAttribute('aria-label', 'Stop dictation');
         sendBtn.dataset.mode = 'recording';
         sendBtn.classList.add('recording');
         voiceRecorderModule.startRecording(

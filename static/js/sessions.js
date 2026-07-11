@@ -16,6 +16,7 @@ let sessions = [];
 let currentSessionId = null;
 let _sessionNavToken = 0;
 let _skipAutoSelect = false;
+let _initialLoadComplete = false;
 
 const SIDEBAR_MAX_VISIBLE = 10;
 const FOLDER_MAX_VISIBLE = 5;
@@ -1385,6 +1386,10 @@ export async function loadSessions() {
       }
     }
     const hasPendingChat = !!_pendingChat;
+    const initialPageLoad = !_initialLoadComplete;
+    _initialLoadComplete = true;
+    const startFreshOnLoad = initialPageLoad && !hashId && !hasPendingChat;
+    if (startFreshOnLoad) Storage.remove('lastSessionId');
     let targetId = null;
     if (hasPendingChat) {
       // A model was picked and the UI is showing a fresh New Chat, but the
@@ -1392,20 +1397,20 @@ export async function loadSessions() {
       // completions call loadSessions() later; without this guard that reload
       // sees no current session and auto-selects the previous chat.
       targetId = null;
-    } else if (hashId && activeSessions.some(s => s.id === hashId)) {
+    } else if (hashId) {
       targetId = hashId;
     } else if (currentSessionId && activeSessions.some(s => s.id === currentSessionId)) {
       targetId = currentSessionId;
     } else if (currentSessionId) {
       // Session was just created but may not be in the list yet — keep it
       targetId = currentSessionId;
-    } else if (savedId && activeSessions.some(s => s.id === savedId)) {
+    } else if (!startFreshOnLoad && savedId && activeSessions.some(s => s.id === savedId)) {
       targetId = savedId;
-    } else if (!_skipAutoSelect && _realSessions.length > 0) {
+    } else if (!startFreshOnLoad && !_skipAutoSelect && _realSessions.length > 0) {
       // Most-recent NON-transient session — skip Assistant / Tasks so the
       // auto-firing assistant doesn't become the apparent default chat.
       targetId = _realSessions[0].id;
-    } else if (!_skipAutoSelect && activeSessions.length > 0) {
+    } else if (!startFreshOnLoad && !_skipAutoSelect && activeSessions.length > 0) {
       // Only transient sessions exist (brand-new account) — fall through to
       // the original behaviour so we don't leave the user with nothing.
       targetId = activeSessions[0].id;
@@ -1421,7 +1426,7 @@ export async function loadSessions() {
     // picker would still show the old model's name from cached state). See
     // the targetId resolution above (hash → currentSession → lastSessionId →
     // most-recent).
-    const _isFirstLoad = !sessionStorage.getItem('ody-session-active');
+    const _isFirstLoad = initialPageLoad;
     if (_isFirstLoad) {
       sessionStorage.setItem('ody-session-active', '1');
       if (!targetId) {
@@ -1433,7 +1438,7 @@ export async function loadSessions() {
             const emptyDefault = activeSessions.find(s =>
               s.model === dc.model && s.message_count === 0
             );
-            if (emptyDefault) {
+            if (emptyDefault && !startFreshOnLoad) {
               targetId = emptyDefault.id;
             } else {
               await createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
@@ -1523,7 +1528,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       const presetsModule = window.presetsModule || (await import('./presets.js')).default;
       if (presetsModule && presetsModule.onSessionSwitch) presetsModule.onSessionSwitch(id);
     } catch (e) {}
-    const meta = sessions.find(s => s.id === id);
+    let meta = sessions.find(s => s.id === id);
 
     // Detach any in-flight stream to background instead of aborting
     try {
@@ -1595,6 +1600,23 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       if (navToken !== _sessionNavToken || currentSessionId !== id) return;
       msgHistory = data.history || [];
       modelName = data.model || null;
+      if (!meta && data.name) {
+        meta = {
+          id,
+          name: data.name,
+          model: data.model,
+          endpoint_url: data.endpoint_url,
+          archived: false,
+          message_count: msgHistory.length,
+        };
+        sessions = _normalizeSessionsList([meta, ...sessions]);
+        renderSessionList();
+        document.querySelectorAll('.list-item.active-session').forEach(el => el.classList.remove('active-session'));
+        const hydratedActiveEl = document.querySelector(`.list-item[data-session-id="${id}"]`);
+        if (hydratedActiveEl) hydratedActiveEl.classList.add('active-session');
+        if (currentMetaEl) currentMetaEl.textContent = meta.name;
+        updateModelPicker();
+      }
       // The model returned by /api/history is the authoritative one the
       // backend will use for this session. Write it back into the cached
       // session meta and refresh the picker so the displayed model can
@@ -2008,8 +2030,7 @@ window.addEventListener('hashchange', () => {
   const hashId = window.location.hash.replace('#', '');
   if (/^(document|note|image|email|event|task|skill|research)-/.test(hashId)) return;
   if (hashId && hashId !== currentSessionId) {
-    const target = sessions.find(s => s.id === hashId && !s.archived);
-    if (target) selectSession(hashId);
+    selectSession(hashId);
   }
 });
 

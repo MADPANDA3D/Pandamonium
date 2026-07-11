@@ -895,10 +895,25 @@ async function initTtsSettings() {
   var ttsMsg = el('set-ttsSettingsMsg');
   var ttsEnabledToggle = el('set-ttsEnabledToggle');
   var ttsConfigWrap = provSel ? provSel.closest('div[style*="flex-direction"]') : null;
+  var ttsVoiceCatalog = [];
+  var endpointLabels = {};
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
+  function ensureOption(select, value, label) {
+    if (!select || !value) return;
+    var existing = Array.from(select.options).find(function(opt) { return opt.value === value; });
+    if (existing) { existing.textContent = label || existing.textContent || value; return; }
+    var opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label || value;
+    select.appendChild(opt);
+  }
+  function voiceInSelect(value) {
+    return Array.from(voiceSelect.options).some(function(opt) { return opt.value === value; });
+  }
+  function isCustomVoice() { return isEndpoint() && voiceSelect.value === '__custom__'; }
   function getModel() { return isEndpoint() ? modelSelect.value : modelInput.value; }
-  function getVoice() { return isEndpoint() ? voiceSelect.value : voiceInput.value; }
+  function getVoice() { return isCustomVoice() ? voiceInput.value : (isEndpoint() ? voiceSelect.value : voiceInput.value); }
 
   function updateVisibility() {
     var prov = provSel.value;
@@ -907,19 +922,20 @@ async function initTtsSettings() {
     speedRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     if (isEndpoint()) {
       modelSelect.style.display = ''; modelInput.style.display = 'none';
-      voiceSelect.style.display = ''; voiceInput.style.display = 'none';
+      voiceSelect.style.display = ''; voiceInput.style.display = isCustomVoice() ? '' : 'none';
     } else {
       modelSelect.style.display = 'none'; modelInput.style.display = '';
       voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
     }
   }
 
-  var ttsKeywords = ['tts', 'audio'];
+  var ttsKeywords = ['tts', 'audio', 'kokoro'];
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
     endpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
+      endpointLabels['endpoint:' + ep.id] = ep.name || ep.id;
       var hasTTS = (ep.models || []).some(m => ttsKeywords.some(kw => m.toLowerCase().includes(kw)));
       if (!hasTTS) return;
       var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
@@ -927,11 +943,43 @@ async function initTtsSettings() {
   } catch (e) { console.warn('Failed to load endpoints for TTS', e); }
 
   try {
+    var voiceRes = await fetch('/api/tts/voices', { credentials: 'same-origin' });
+    var voicePayload = await voiceRes.json();
+    ttsVoiceCatalog = Array.isArray(voicePayload.voices) ? voicePayload.voices : [];
+    if (ttsVoiceCatalog.length) {
+      voiceSelect.innerHTML = '';
+      ttsVoiceCatalog.forEach(function(voice) {
+        ensureOption(voiceSelect, voice.id, voice.id + ' — ' + (voice.label || voice.id));
+      });
+      ensureOption(voiceSelect, '__custom__', 'Custom voice code...');
+    }
+    if (voicePayload.settings?.tts_model) ensureOption(modelSelect, voicePayload.settings.tts_model, voicePayload.settings.tts_model);
+  } catch (e) { console.warn('Failed to load TTS voices', e); }
+
+  try {
     var settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     var settings = await settingsRes.json();
-    if (settings.tts_provider) provSel.value = settings.tts_provider;
-    if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
-    if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
+    if (settings.tts_provider) {
+      if (settings.tts_provider.startsWith('endpoint:')) {
+        var endpointLabel = endpointLabels[settings.tts_provider] || settings.tts_provider.replace(/^endpoint:/, '');
+        ensureOption(provSel, settings.tts_provider, endpointLabel + ' (API)');
+      }
+      provSel.value = settings.tts_provider;
+    }
+    if (settings.tts_model) {
+      ensureOption(modelSelect, settings.tts_model, settings.tts_model);
+      modelSelect.value = settings.tts_model;
+      modelInput.value = settings.tts_model;
+    }
+    if (settings.tts_voice) {
+      if (voiceInSelect(settings.tts_voice)) {
+        voiceSelect.value = settings.tts_voice;
+      } else {
+        ensureOption(voiceSelect, '__custom__', 'Custom voice code...');
+        voiceSelect.value = '__custom__';
+      }
+      voiceInput.value = settings.tts_voice;
+    }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (ttsEnabledToggle) ttsEnabledToggle.checked = settings.tts_enabled !== false;
   } catch (e) { console.warn('Failed to load TTS settings', e); }
@@ -962,14 +1010,18 @@ async function initTtsSettings() {
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
     if (prov === 'local') voiceInput.value = 'af_heart';
-    else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
+    else if (isEndpoint()) {
+      ensureOption(modelSelect, 'kokoro-onnx', 'kokoro-onnx');
+      modelSelect.value = modelSelect.value || 'kokoro-onnx';
+      if (ttsVoiceCatalog.length && voiceSelect.value !== '__custom__') voiceSelect.value = ttsVoiceCatalog[0].id;
+    }
     else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
     updateVisibility();
     saveTTS();
   });
   modelSelect.addEventListener('change', saveAndClearCache);
   modelInput.addEventListener('change', saveTTS);
-  voiceSelect.addEventListener('change', saveAndClearCache);
+  voiceSelect.addEventListener('change', function() { updateVisibility(); saveAndClearCache(); });
   voiceInput.addEventListener('change', saveTTS);
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
@@ -992,7 +1044,7 @@ async function initTtsSettings() {
         ttsMsg.textContent = 'Select a provider first'; ttsMsg.style.color = 'var(--red, #e55)';
         setTimeout(function() { ttsMsg.textContent = ''; }, 2000); return;
       }
-      var testText = 'Hello, this is a test of text to speech.';
+      var testText = 'Sir, Jarvis voice sample online.';
       previewPlaying = true; previewBtn.textContent = 'Loading...';
       try {
         if (prov === 'browser') {
@@ -1017,7 +1069,7 @@ async function initTtsSettings() {
           var res = await fetch('/api/tts/synthesize', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: testText, format: 'audio' })
+            body: JSON.stringify({ text: testText, format: 'audio', model: getModel(), voice: getVoice(), speed: speedSelect.value || '1', use_cache: false })
           });
           if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.detail?.message || 'Synthesis failed'); }
           var blob = await res.blob();

@@ -1203,6 +1203,61 @@ FUNCTION_TOOL_SCHEMAS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_runtime_status",
+            "description": "Return server-verified Jarvis runtime facts including the actual brain model, architecture, quantization, context allocation, TTS provider, and worker availability. Use this whenever Leo asks what model or runtime is active.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_agent_task",
+            "description": "Delegate deeper read-only work to an allowlisted worker and workspace. The task continues in the background and emits progress events. Never claim the task is complete until read_agent_task returns a final result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "worker": {"type": "string", "enum": ["pc-codex", "hermes", "vps-codex"]},
+                    "workspace": {"type": "string", "enum": ["business", "home-lab", "project-linux"]},
+                    "prompt": {"type": "string", "description": "A self-contained task request with the desired output."},
+                },
+                "required": ["worker", "workspace", "prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_agent_task",
+            "description": "Read the current status and final result of a delegated agent task.",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_jarvis_knowledge",
+            "description": "Search the curated Jarvis business knowledge corpus. Use this for background context; requests for current or latest status should also delegate a read-only PC Codex inspection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "client": {"type": "string", "description": "Optional exact client filter."},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 12, "default": 6},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 

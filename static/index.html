@@ -678,6 +678,7 @@
     <div class="rail-resize-handle" id="rail-resize-handle"></div>
     <!-- Static: core actions -->
     <button class="icon-rail-btn" id="rail-search-btn" title="Search conversations (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
+    <button class="icon-rail-btn" id="rail-jarvis-call" title="Jarvis call" aria-label="Jarvis call"></button>
     <button class="icon-rail-btn rail-new-chat" id="rail-new-session" title="New chat"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     <button class="icon-rail-btn" id="rail-delete-session" title="Delete session">&#x2715;</button>
     <div class="rail-separator"></div>
@@ -999,6 +1000,35 @@
     })();
     </script>
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
+    <section id="jarvis-call-panel" class="jarvis-call-panel" data-state="idle" hidden aria-label="Jarvis live voice">
+      <div id="jarvis-agent-workspace" class="jarvis-agent-workspace" aria-label="Agent task workspace">
+        <div class="jarvis-target-control" role="tablist" aria-label="Voice target">
+          <button type="button" class="jarvis-target is-active" data-worker="jarvis" role="tab" aria-selected="true">Jarvis</button>
+          <button type="button" class="jarvis-target" data-worker="pc-codex" role="tab" aria-selected="false">PC Codex</button>
+          <button type="button" class="jarvis-target" data-worker="hermes" role="tab" aria-selected="false" disabled>Hermes</button>
+          <button type="button" class="jarvis-target" data-worker="vps-codex" role="tab" aria-selected="false" disabled>VPS Codex</button>
+        </div>
+        <div id="jarvis-task-timeline" class="jarvis-task-timeline" role="log" aria-live="polite"></div>
+      </div>
+      <div id="jarvis-call-orb" class="jarvis-call-orb" aria-hidden="true">
+        <div class="jarvis-call-orb-preview"></div>
+      </div>
+      <div class="jarvis-call-copy">
+        <div class="jarvis-call-topline">
+          <span class="jarvis-call-name">Jarvis</span>
+          <span id="jarvis-call-status" class="jarvis-call-status">Ready</span>
+        </div>
+        <div id="jarvis-call-detail" class="jarvis-call-detail">Jarvis is standing by.</div>
+        <div class="jarvis-call-turns">
+          <span id="jarvis-call-transcript" class="jarvis-call-turn"></span>
+          <span id="jarvis-call-reply" class="jarvis-call-turn"></span>
+        </div>
+      </div>
+      <div class="jarvis-call-actions">
+        <button type="button" id="jarvis-call-talk" class="jarvis-call-talk" title="Speak to Jarvis" aria-label="Speak to Jarvis"></button>
+        <button type="button" id="jarvis-call-close" class="jarvis-call-close" title="End call" aria-label="End call"></button>
+      </div>
+    </section>
 
     <!-- Attachments strip -->
     <div id="attach-strip" class="attach-strip"></div>
@@ -1148,6 +1178,9 @@
           </div>
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
+          </button>
+          <button type="button" class="jarvis-input-sphere" id="jarvis-input-sphere" title="Jarvis live call" aria-label="Jarvis live call">
+            <span class="jarvis-sphere-core" aria-hidden="true"></span>
           </button>
         </div>
       </div>
@@ -1530,12 +1563,9 @@
               <div id="set-imgSettingsMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
             </div>
           </div>
-          <!-- TTS panel hidden — user opted out of read-aloud entirely. Kept
-               in DOM so the JS that wires set-ttsProviderSelect etc. doesn't
-               throw on missing nodes; not visible to anyone. -->
-          <div class="admin-card" hidden style="display:none">
-            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>Text to Speech<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-ttsEnabledToggle" checked><span class="admin-slider"></span></label></h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Configure TTS provider for assistant message read-aloud.</div>
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>Jarvis Voice<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-ttsEnabledToggle" checked><span class="admin-slider"></span></label></h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Configure the TTS voice used by Jarvis live call mode.</div>
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
               <div style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Provider</label>
@@ -2473,6 +2503,7 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
+<script type="module" src="/static/js/jarvisVoice.js?v=20260711T083954Z"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js"></script>
