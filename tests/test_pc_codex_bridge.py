@@ -45,3 +45,13 @@ def test_artifact_marker_rejects_paths_outside_workspace(tmp_path):
     bridge._extract_artifacts(task, f'[[ODYSSEUS_ARTIFACT path="{outside}"]]')
     assert task.data["events"][0]["type"] == "error"
     assert all(event["type"] != "artifact" for event in task.data["events"])
+
+
+def test_artifact_marker_rejects_symlink_escape(tmp_path):
+    outside = tmp_path.parent / "outside-through-link.md"
+    outside.write_text("private", encoding="utf-8")
+    (tmp_path / "linked.md").symlink_to(outside)
+    task = _task(tmp_path)
+    bridge._extract_artifacts(task, '[[ODYSSEUS_ARTIFACT path="linked.md"]]')
+    assert task.data["events"][0]["type"] == "error"
+    assert all(event["type"] != "artifact" for event in task.data["events"])
