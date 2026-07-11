@@ -39,8 +39,11 @@ let activeCodexThreadId = null;
 let activeWorkspace = 'home-lab';
 let pendingWorkerText = null;
 let liveAssistantMessage = null;
-let liveSpeechBuffer = '';
 let streamingScheduledUntil = 0;
+let streamingLastGain = null;
+let activeTurnAudioPromise = null;
+let activeAudioTurnId = null;
+let captureAudioContext = null;
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -53,9 +56,8 @@ const SPHERE_AUDIO_SMOOTHING = 0.75;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'result', 'error']);
 const PROGRESS_STALE_MS = 45000;
-const LIVE_SPEECH_MIN_CHARS = 90;
-const LIVE_SPEECH_MAX_CHARS = 220;
-const STREAM_INITIAL_BUFFER_SECONDS = 2.4;
+const STREAM_INITIAL_BUFFER_SECONDS = 0.18;
+const STREAM_EDGE_CROSSFADE_SECONDS = 0.008;
 
 function $(id) {
   return document.getElementById(id);
@@ -130,6 +132,8 @@ function stopSphereAudio() {
   sphereFreqData = null;
   sphereSmoothedVolume = 0;
   sphereSmoothedLevels = Array(8).fill(0);
+  streamingScheduledUntil = 0;
+  streamingLastGain = null;
   if (sphereAudioContext) {
     sphereAudioContext.close().catch(() => {});
     sphereAudioContext = null;
@@ -289,7 +293,9 @@ function setStatus(next, detail = '') {
   }
   if (isActive && next !== 'failed') {
     mountOrganicSphere();
-    if (next === 'transcribing' || next === 'thinking' || next === 'background' || next === 'interrupted' || next === 'speaking') {
+    if (next === 'speaking' && streamingAudioSources.size) {
+      postSphereLevels(next);
+    } else if (next === 'transcribing' || next === 'thinking' || next === 'worker' || next === 'background' || next === 'buffering' || next === 'interrupted' || next === 'speaking') {
       startSpherePulse(next);
     } else {
       postSphereLevels(next);
@@ -306,9 +312,12 @@ function statusLabel(value) {
     listening: 'Listening',
     transcribing: 'Transcribing',
     thinking: 'Thinking',
+    worker: 'Worker active',
+    buffering: 'Preparing voice',
     speaking: 'Speaking',
     interrupted: 'Interrupted',
     background: 'Background task',
+    ready: 'Ready',
     failed: 'Needs attention',
   }[value] || 'Ready';
 }
@@ -319,22 +328,25 @@ function detailLabel(value) {
     listening: 'Listening for your turn.',
     transcribing: 'Reading your speech.',
     thinking: 'Jarvis is thinking.',
+    worker: 'A connected worker is active.',
+    buffering: 'Preparing Jarvis voice.',
     speaking: 'Jarvis is responding.',
     interrupted: 'Redirecting.',
     background: 'Running in the background, sir.',
+    ready: 'Jarvis is standing by.',
     failed: 'The call loop hit an error.',
   }[value] || '';
 }
 
 function talkTitle(value) {
   if (value === 'listening') return 'Stop listening';
-  if (value === 'speaking') return 'Interrupt';
+  if (value === 'speaking' || value === 'buffering') return 'Interrupt';
   return 'Speak to Jarvis';
 }
 
 function sphereTitle(value) {
   if (!isActive) return 'Jarvis live call';
-  if (value === 'speaking') return 'Interrupt Jarvis';
+  if (value === 'speaking' || value === 'buffering') return 'Interrupt Jarvis';
   if (value === 'failed') return 'End Jarvis call';
   return 'End Jarvis call';
 }
@@ -431,6 +443,13 @@ function waitForSpeechQueueIdle() {
   return new Promise(resolve => speechIdleResolvers.push(resolve));
 }
 
+function resumeListeningIfReady() {
+  if (!isActive || brainTurnInProgress || activeTurnAudioPromise || speechQueueRunning || speechQueue.length || currentSpeech) return;
+  if (status === 'failed' || mediaRecorder?.state === 'recording') return;
+  setStatus('listening');
+  startListening().catch(handleError);
+}
+
 function enqueueSpeech(text, type = 'progress', source = 'jarvis', timings = {}) {
   const clean = (window.aiTTSManager?.extractPlainText?.(text) || text || '').trim();
   if (!clean) return;
@@ -457,7 +476,7 @@ function pauseCaptureForSpeech() {
 }
 
 async function processSpeechQueue() {
-  if (speechQueueRunning || speechPaused) return;
+  if (speechQueueRunning || speechPaused || activeTurnAudioPromise) return;
   speechQueueRunning = true;
   try {
     while (isActive && !speechPaused && speechQueue.length) {
@@ -473,13 +492,12 @@ async function processSpeechQueue() {
     speechQueueRunning = false;
     currentSpeech = null;
     resolveSpeechIdle();
-    if (isActive && !speechPaused && !brainTurnInProgress && !speechQueue.length && status !== 'failed') {
+    if (isActive && !speechPaused && !brainTurnInProgress && !activeTurnAudioPromise && !speechQueue.length && status !== 'failed') {
       if (sphereAudioContext && streamingScheduledUntil > sphereAudioContext.currentTime) {
         await waitForScheduledPlayback(sphereAudioContext, streamingScheduledUntil, playbackToken);
       }
       stopStreamingAudio();
-      setStatus('listening');
-      startListening().catch(handleError);
+      resumeListeningIfReady();
     }
   }
 }
@@ -584,54 +602,39 @@ function appendLiveAssistant(delta, model = '') {
   window.uiModule?.scrollHistory?.();
 }
 
-function takeLiveSpeechChunk(force = false) {
-  const text = liveSpeechBuffer.trimStart();
-  if (!text) {
-    liveSpeechBuffer = '';
-    return '';
-  }
-  if (force) {
-    liveSpeechBuffer = '';
-    return text;
-  }
-  if (text.length < LIVE_SPEECH_MIN_CHARS) return '';
-
-  const windowText = text.slice(0, LIVE_SPEECH_MAX_CHARS + 1);
-  let cut = 0;
-  for (const match of windowText.matchAll(/[.!?]["')\]]*(?=\s|$)/g)) {
-    const end = match.index + match[0].length;
-    if (end >= LIVE_SPEECH_MIN_CHARS) {
-      cut = end;
-      break;
-    }
-  }
-  if (!cut && text.length > LIVE_SPEECH_MAX_CHARS) {
-    const breakAt = Math.max(
-      windowText.lastIndexOf(';'),
-      windowText.lastIndexOf(','),
-      windowText.lastIndexOf(' '),
-    );
-    cut = breakAt >= LIVE_SPEECH_MIN_CHARS ? breakAt + 1 : LIVE_SPEECH_MAX_CHARS;
-  }
-  if (!cut) return '';
-  const chunk = text.slice(0, cut).trim();
-  liveSpeechBuffer = text.slice(cut).trimStart();
-  return chunk;
+async function postPlaybackState(turnId, state, timings = {}) {
+  if (!sessionId || !turnId) return;
+  await fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/playback`, {
+    method: 'POST',
+    body: JSON.stringify({ state, timings }),
+  }).catch(error => console.warn('Could not update Jarvis playback state:', error));
 }
 
-function flushLiveSpeech(force, timings) {
-  let chunk = takeLiveSpeechChunk(force);
-  while (chunk) {
-    enqueueSpeech(chunk, 'assistant', 'jarvis', timings);
-    if (force) break;
-    chunk = takeLiveSpeechChunk(false);
+async function playVoiceTurnAudio(turnId, timings) {
+  const controller = new AbortController();
+  streamingAbortController = controller;
+  const response = await fetch(
+    `/api/voice/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/audio`,
+    { credentials: 'same-origin', signal: controller.signal },
+  );
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.detail?.message || body?.detail || 'Jarvis audio stream failed');
+  }
+  const token = ++playbackToken;
+  try {
+    return await consumePcmResponse(response, timings, token, turnId);
+  } catch (error) {
+    if (token === playbackToken) await postPlaybackState(turnId, 'failed', timings);
+    throw error;
+  } finally {
+    if (streamingAbortController === controller) streamingAbortController = null;
   }
 }
 
 async function streamTurn(text, timings, turnStarted) {
   if (!sessionId) await createSession();
   liveAssistantMessage = null;
-  liveSpeechBuffer = '';
   const response = await fetch(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond/stream`, {
     method: 'POST',
     credentials: 'same-origin',
@@ -646,6 +649,7 @@ async function streamTurn(text, timings, turnStarted) {
   const decoder = new TextDecoder();
   let buffer = '';
   let final = null;
+  let turnAudioPromise = null;
   while (true) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -658,10 +662,24 @@ async function streamTurn(text, timings, turnStarted) {
       if (event.type === 'assistant_delta') {
         const delta = event.text || '';
         appendLiveAssistant(delta, event.model || 'Jarvis');
-        liveSpeechBuffer += delta;
-        flushLiveSpeech(false, timings);
         if (timings.chat_assistant_first_render_ms == null) timings.chat_assistant_first_render_ms = performance.now() - turnStarted;
       }
+      else if (event.type === 'audio_ready') {
+        activeAudioTurnId = event.turn_id;
+        setStatus('buffering');
+        const promise = playVoiceTurnAudio(event.turn_id, timings);
+        activeTurnAudioPromise = promise;
+        turnAudioPromise = promise;
+        promise.then(() => {
+          if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
+          if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
+          if (speechQueue.length) processSpeechQueue().catch(handleError);
+        }, () => {
+          if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
+          if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
+        });
+      }
+      else if (event.type === 'state' && event.state !== 'listening') setStatus(event.state);
       else if (event.type === 'target_changed') {
         activeWorkspace = event.workspace || activeWorkspace;
         setVoiceTarget(event.target || 'jarvis', false);
@@ -679,8 +697,8 @@ async function streamTurn(text, timings, turnStarted) {
     if (done) break;
   }
   if (!final) throw new Error('Jarvis returned no final response.');
-  flushLiveSpeech(true, timings);
-  return final;
+  if (!turnAudioPromise) throw new Error('Jarvis returned no audio stream.');
+  return { ...final, audioPromise: turnAudioPromise };
 }
 
 async function createSession() {
@@ -745,11 +763,15 @@ async function interrupt() {
   if (currentSpeech && DURABLE_SPEECH_TYPES.has(currentSpeech.type)) speechQueue.unshift(currentSpeech);
   speechQueue = speechQueue.filter(item => DURABLE_SPEECH_TYPES.has(item.type));
   speechPaused = true;
+  const interruptedTurnId = activeAudioTurnId;
+  activeAudioTurnId = null;
+  activeTurnAudioPromise = null;
   playbackToken += 1;
   resolvePlaybackWait();
   stopStreamingAudio();
   if (window.aiTTSManager) window.aiTTSManager.stop();
   if (sessionId) {
+    if (interruptedTurnId) await postPlaybackState(interruptedTurnId, 'interrupted');
     await fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/interrupt`, { method: 'POST', body: '{}' })
       .catch(() => {});
   }
@@ -814,6 +836,10 @@ function clearTurnTimers() {
     clearTimeout(maxTurnTimer);
     maxTurnTimer = null;
   }
+  if (captureAudioContext) {
+    captureAudioContext.close().catch(() => {});
+    captureAudioContext = null;
+  }
 }
 
 function stopListening() {
@@ -833,13 +859,14 @@ function startSilenceWatch(stream) {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
   const ctx = new AudioContext();
+  captureAudioContext = ctx;
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;
   source.connect(analyser);
   const data = new Uint8Array(analyser.fftSize);
-  const startedAt = Date.now();
-  let lastVoiceAt = Date.now();
+  let heardVoice = false;
+  let lastVoiceAt = 0;
 
   silenceTimer = setInterval(() => {
     analyser.getByteTimeDomainData(data);
@@ -849,14 +876,16 @@ function startSilenceWatch(stream) {
       sum += normalized * normalized;
     }
     const rms = Math.sqrt(sum / data.length);
-    if (rms > 0.018) lastVoiceAt = Date.now();
-    const canStop = Date.now() - startedAt > 1400;
-    if (canStop && Date.now() - lastVoiceAt > 1200) {
+    if (rms > 0.018) {
+      heardVoice = true;
+      lastVoiceAt = Date.now();
+    }
+    if (heardVoice && Date.now() - lastVoiceAt > 1200) {
       stopListening();
     }
   }, 140);
 
-  maxTurnTimer = setTimeout(stopListening, 22000);
+  maxTurnTimer = setTimeout(stopListening, 30000);
 }
 
 async function startListening() {
@@ -869,8 +898,7 @@ async function startListening() {
     setStatus('failed', 'Microphone is not available.');
     return;
   }
-
-  if (status === 'speaking') await interrupt();
+  if (!isActive || brainTurnInProgress || activeTurnAudioPromise || speechQueueRunning || currentSpeech) return;
   if (mediaRecorder?.state === 'recording') return;
 
   audioChunks = [];
@@ -902,7 +930,7 @@ async function startListening() {
     try {
       const turnStarted = performance.now();
       setStatus('transcribing');
-      const timings = {};
+      const timings = { turn_started_at: turnStarted };
       const sttStarted = performance.now();
       const text = await transcribe(blob);
       timings.stt_ms = performance.now() - sttStarted;
@@ -921,8 +949,7 @@ async function startListening() {
         setStatus('background');
         await startDirectWorkerTask(text);
         brainTurnInProgress = false;
-        setStatus('listening');
-        startListening().catch(handleError);
+        resumeListeningIfReady();
         return;
       }
       if (requestsJarvisTarget(text)) setVoiceTarget('jarvis');
@@ -946,17 +973,15 @@ async function startListening() {
       const replyEl = $('jarvis-call-reply');
       if (replyEl) replyEl.textContent = reply;
       brainTurnInProgress = false;
+      await response.audioPromise;
+      if (activeTurnAudioPromise === response.audioPromise) activeTurnAudioPromise = null;
+      activeAudioTurnId = null;
       if (!speechQueueRunning && speechQueue.length) processSpeechQueue().catch(handleError);
       await waitForSpeechQueueIdle();
-      if (sphereAudioContext && streamingScheduledUntil > sphereAudioContext.currentTime) {
-        await waitForScheduledPlayback(sphereAudioContext, streamingScheduledUntil, playbackToken);
-      }
       stopStreamingAudio();
+      delete timings.turn_started_at;
       await postTurnDiagnostics(timings);
-      if (isActive && status !== 'listening') {
-        setStatus('listening');
-        startListening().catch(handleError);
-      }
+      resumeListeningIfReady();
     } catch (error) {
       brainTurnInProgress = false;
       handleError(error);
@@ -968,43 +993,7 @@ async function startListening() {
   startSilenceWatch(mediaStream);
 }
 
-async function speak(text, timings = {}) {
-  const manager = window.aiTTSManager;
-  if (!manager) {
-    setStatus('idle', text);
-    return;
-  }
-  await manager.checkAvailability?.();
-  if (!manager.available) {
-    setStatus('idle', text);
-    return;
-  }
-  if (manager.useBrowserTTS) {
-    const started = performance.now();
-    await manager.play(text);
-    timings.tts_total_ms = performance.now() - started;
-    return;
-  }
-
-  playbackToken += 1;
-  const token = playbackToken;
-  const started = performance.now();
-  timings.tts_chunks = 0;
-  if (!sphereAudioContext || sphereAudioContext.state === 'closed') manager.stop();
-
-  streamingAbortController = new AbortController();
-  const response = await fetch('/api/tts/stream', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, format: 'audio', use_cache: false }),
-    signal: streamingAbortController.signal,
-  });
-  if (!response.ok || !response.body) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body?.detail?.message || body?.detail || 'Streaming speech failed');
-  }
-
+async function ensurePlaybackContext() {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) throw new Error('Streaming audio is not supported by this browser.');
   const freshContext = !sphereAudioContext || sphereAudioContext.state === 'closed' || !sphereAnalyser;
@@ -1026,15 +1015,26 @@ async function speak(text, timings = {}) {
       postSphereLevels('speaking', Math.max(...levels), levels);
     }, 80);
     streamingScheduledUntil = 0;
+    streamingLastGain = null;
   }
   const context = sphereAudioContext;
   await context.resume();
+  return context;
+}
+
+async function consumePcmResponse(response, timings, token, turnId = null) {
+  const started = performance.now();
+  const context = await ensurePlaybackContext();
+  timings.tts_chunks = 0;
+  timings.scheduler_underruns = 0;
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let sampleRate = 48000;
   let streamDone = null;
+  let playbackStarted = false;
+  let nextAudioStartsBlock = false;
   const handleLine = line => {
     if (!line.trim()) return;
     const event = JSON.parse(line);
@@ -1047,24 +1047,55 @@ async function speak(text, timings = {}) {
       streamDone = event;
       return;
     }
+    if (event.type === 'block') {
+      timings.tts_blocks = Number(event.index) + 1;
+      nextAudioStartsBlock = true;
+      return;
+    }
     if (event.type !== 'audio' || !event.pcm_base64 || token !== playbackToken) return;
     const samples = pcm16FromBase64(event.pcm_base64);
     const audioBuffer = context.createBuffer(1, samples.length, sampleRate);
     audioBuffer.copyToChannel(samples, 0);
     const source = context.createBufferSource();
+    const gain = context.createGain();
     source.buffer = audioBuffer;
-    source.connect(sphereAnalyser);
-    source.onended = () => streamingAudioSources.delete(source);
+    source.connect(gain);
+    gain.connect(sphereAnalyser);
+    source.onended = () => {
+      streamingAudioSources.delete(source);
+      try { gain.disconnect(); } catch {}
+    };
     streamingAudioSources.add(source);
-    const beginsAt = streamingScheduledUntil > context.currentTime
-      ? streamingScheduledUntil
+    const previousEnd = streamingScheduledUntil;
+    const hasQueuedAudio = Boolean(streamingLastGain && previousEnd > context.currentTime + 0.005);
+    if (streamingLastGain && !hasQueuedAudio) timings.scheduler_underruns += 1;
+    const crossfadeBoundary = hasQueuedAudio && nextAudioStartsBlock;
+    const beginsAt = hasQueuedAudio
+      ? Math.max(context.currentTime + 0.005, previousEnd - (crossfadeBoundary ? STREAM_EDGE_CROSSFADE_SECONDS : 0))
       : context.currentTime + STREAM_INITIAL_BUFFER_SECONDS;
+    if (crossfadeBoundary) {
+      const fadeEndsAt = beginsAt + STREAM_EDGE_CROSSFADE_SECONDS;
+      streamingLastGain.gain.cancelScheduledValues(beginsAt);
+      streamingLastGain.gain.setValueAtTime(1, beginsAt);
+      streamingLastGain.gain.linearRampToValueAtTime(0, fadeEndsAt);
+      gain.gain.setValueAtTime(0, beginsAt);
+      gain.gain.linearRampToValueAtTime(1, fadeEndsAt);
+    } else {
+      gain.gain.setValueAtTime(1, beginsAt);
+    }
+    nextAudioStartsBlock = false;
     source.start(beginsAt);
     streamingScheduledUntil = beginsAt + audioBuffer.duration;
+    streamingLastGain = gain;
     timings.tts_chunks += 1;
     if (timings.tts_first_audio_ms == null) {
       timings.tts_first_audio_ms = performance.now() - started;
-      timings.end_to_first_audio_ms = (Number(timings.stt_ms) || 0) + (Number(timings.respond_ms) || 0) + timings.tts_first_audio_ms;
+      if (timings.turn_started_at != null) timings.end_to_first_audio_ms = performance.now() - timings.turn_started_at;
+    }
+    if (!playbackStarted) {
+      playbackStarted = true;
+      setStatus('speaking');
+      if (turnId) postPlaybackState(turnId, 'started', timings);
     }
   };
 
@@ -1078,19 +1109,59 @@ async function speak(text, timings = {}) {
       if (done) break;
     }
     if (buffer.trim()) handleLine(buffer);
+    if (token === playbackToken && streamingScheduledUntil > context.currentTime) {
+      await waitForScheduledPlayback(context, streamingScheduledUntil, token);
+    }
   } catch (error) {
-    if (token === playbackToken) throw error;
+    if (token === playbackToken && error?.name !== 'AbortError') throw error;
   } finally {
     reader.cancel().catch(() => {});
-    streamingAbortController = null;
     timings.tts_generation_ms = Number(streamDone?.generation_ms) || performance.now() - started;
     timings.playback_duration_ms = Number(streamDone?.audio_ms) || 0;
     timings.tts_total_ms = performance.now() - started;
+  }
+  if (turnId && token === playbackToken) await postPlaybackState(turnId, 'completed', timings);
+  return streamDone;
+}
+
+async function speak(text, timings = {}) {
+  const manager = window.aiTTSManager;
+  if (!manager) return;
+  await manager.checkAvailability?.();
+  if (!manager.available) return;
+  if (manager.useBrowserTTS) {
+    const started = performance.now();
+    await manager.play(text);
+    timings.tts_total_ms = performance.now() - started;
+    return;
+  }
+
+  const token = ++playbackToken;
+  const controller = new AbortController();
+  streamingAbortController = controller;
+  const response = await fetch('/api/tts/stream', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, format: 'audio', use_cache: false }),
+    signal: controller.signal,
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.detail?.message || body?.detail || 'Streaming speech failed');
+  }
+  try {
+    await consumePcmResponse(response, timings, token);
+  } finally {
+    if (streamingAbortController === controller) streamingAbortController = null;
   }
 }
 
 function handleError(error) {
   console.error('Jarvis voice error:', error);
+  activeTurnAudioPromise = null;
+  activeAudioTurnId = null;
+  brainTurnInProgress = false;
   clearTurnTimers();
   stopTracks();
   setStatus('failed', error.message || 'Voice loop failed.');
@@ -1122,6 +1193,8 @@ async function startCall() {
   activeWorkspace = 'home-lab';
   pendingWorkerText = null;
   liveAssistantMessage = null;
+  activeTurnAudioPromise = null;
+  activeAudioTurnId = null;
   const timeline = $('jarvis-task-timeline');
   if (timeline) timeline.replaceChildren();
   setAgentWorkspaceActive(false);
@@ -1136,6 +1209,8 @@ function endCall() {
   const linkedChatSessionId = chatSessionId;
   isActive = false;
   brainTurnInProgress = false;
+  activeTurnAudioPromise = null;
+  activeAudioTurnId = null;
   speechPaused = true;
   speechQueue = [];
   currentSpeech = null;
@@ -1190,7 +1265,7 @@ async function handleInputSphereClick() {
     await startCall();
     return;
   }
-  if (status === 'speaking') {
+  if (status === 'speaking' || status === 'buffering') {
     await interrupt();
     await startListening();
     return;
@@ -1222,7 +1297,7 @@ function bind() {
       }
       if (status === 'listening') {
         stopListening();
-      } else if (status === 'speaking') {
+      } else if (status === 'speaking' || status === 'buffering') {
         await interrupt();
         await startListening();
       } else if (status === 'idle' || status === 'interrupted' || status === 'failed') {

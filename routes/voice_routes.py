@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_tools import TOOL_TAGS
 from src.auth_helpers import effective_user
+from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, take_speech_segment, wav_to_pcm16
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = "http://192.168.1.50:8010/actions"
@@ -35,6 +37,7 @@ VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
 VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
 logger = logging.getLogger(__name__)
 _SESSION_MANAGER = None
+_SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
 
 DESKTOP_ACTIONS = {"open_grafana_big_screen", "open_odysseus"}
 DEFERRED_ACTIONS = {"start_local_codex_task", "start_hermes_task", "read_task_status"}
@@ -90,6 +93,76 @@ class VoiceDiagnosticCreate(BaseModel):
     timings: dict[str, Any] = Field(default_factory=dict)
 
 
+class VoicePlaybackUpdate(BaseModel):
+    state: Literal["started", "completed", "interrupted", "failed"]
+    timings: dict[str, Any] = Field(default_factory=dict)
+
+
+class _SpeechTurn:
+    """A growing assistant response consumed by one server-owned TTS stream."""
+
+    def __init__(self, session_id: str, turn_id: str):
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self.buffer = ""
+        self.finished = False
+        self.cancelled = False
+        self.error: str | None = None
+        self.first = True
+        self.target_chars = 280
+        self.created_at = time.monotonic()
+        self.condition = asyncio.Condition()
+
+    async def append(self, text: str) -> None:
+        if not text:
+            return
+        async with self.condition:
+            self.buffer += text
+            self.condition.notify_all()
+
+    async def finish(self, error: str | None = None) -> None:
+        async with self.condition:
+            self.finished = True
+            self.error = error
+            self.condition.notify_all()
+
+    async def cancel(self) -> None:
+        async with self.condition:
+            self.cancelled = True
+            self.finished = True
+            self.condition.notify_all()
+
+    async def next_segment(self) -> str | None:
+        async with self.condition:
+            while True:
+                if self.cancelled:
+                    return None
+                if self.error:
+                    raise RuntimeError(self.error)
+                segment, remainder = take_speech_segment(
+                    self.buffer,
+                    first=self.first,
+                    target_chars=self.target_chars,
+                    done=self.finished,
+                )
+                if segment:
+                    self.buffer = remainder
+                    self.first = False
+                    return segment
+                if self.finished:
+                    return None
+                await self.condition.wait()
+
+    def record_block(self, generation_ms: int, audio_ms: int) -> None:
+        if audio_ms <= 0:
+            return
+        ratio = generation_ms / audio_ms
+        if ratio > 0.70:
+            self.target_chars = min(360, self.target_chars + 40)
+        elif ratio < 0.45:
+            self.target_chars = max(220, self.target_chars - 20)
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -107,6 +180,27 @@ def _save_state(state: dict) -> None:
     tmp = VOICE_STATE_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
     tmp.replace(VOICE_STATE_FILE)
+
+
+def _set_voice_status(session_id: str, status: str, **fields: Any) -> dict:
+    state = _load_state()
+    session = _session(state, session_id)
+    session["status"] = status
+    session["updated_at"] = _now()
+    session.update(fields)
+    _save_state(state)
+    return session
+
+
+def _register_speech_turn(session_id: str) -> _SpeechTurn:
+    now = time.monotonic()
+    for key, stale in list(_SPEECH_TURNS.items()):
+        if stale.finished and now - stale.created_at > 600:
+            _SPEECH_TURNS.pop(key, None)
+    turn_id = str(uuid.uuid4())
+    turn = _SpeechTurn(session_id, turn_id)
+    _SPEECH_TURNS[(session_id, turn_id)] = turn
+    return turn
 
 
 def _session(state: dict, session_id: str) -> dict:
@@ -773,13 +867,19 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         session = _session(state, session_id)
         user_turn = _append_turn(session, "user", text, "thinking")
         _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
+        speech_turn = _register_speech_turn(session_id)
+        session["active_audio_turn_id"] = speech_turn.turn_id
         _save_state(state)
         chat_session_id = str(session.get("chat_session_id") or "")
 
         async def generate():
             try:
                 final: dict[str, Any] | None = None
+                yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
+                yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
                 async for event in _jarvis_events(chat_session_id, text, owner, session):
+                    if event.get("type") == "assistant_delta":
+                        await speech_turn.append(str(event.get("text") or ""))
                     if event.get("type") in {"target_changed", "agent_task"}:
                         event_state = _load_state()
                         event_session = _session(event_state, session_id)
@@ -795,6 +895,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     yield f"data: {json.dumps(event)}\n\n"
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
+                await speech_turn.finish()
                 current_state = _load_state()
                 current = _session(current_state, session_id)
                 task_ids = final.get("task_ids") or []
@@ -824,6 +925,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 _append_diagnostic(current, final["diagnostics"])
                 _save_state(current_state)
             except Exception as exc:
+                await speech_turn.finish(str(exc)[:240])
                 current_state = _load_state()
                 current = _session(current_state, session_id)
                 current["status"] = "failed"
@@ -837,9 +939,105 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 _save_state(current_state)
                 yield f"data: {json.dumps({'type': 'error', 'text': str(exc)[:240]})}\n\n"
             finally:
+                if not speech_turn.finished:
+                    await speech_turn.finish()
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
+
+    @router.get("/sessions/{session_id}/turns/{turn_id}/audio")
+    async def stream_voice_turn_audio(session_id: str, turn_id: str):
+        _session(_load_state(), session_id)
+        speech_turn = _SPEECH_TURNS.get((session_id, turn_id))
+        if not speech_turn:
+            raise HTTPException(status_code=404, detail={"message": "Voice audio turn not found"})
+        if not tts_service or not tts_service.available:
+            raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
+
+        async def generate_audio():
+            sample_rate: int | None = None
+            generation_ms = 0
+            audio_ms = 0
+            blocks = 0
+            _set_voice_status(session_id, "buffering", active_audio_turn_id=turn_id)
+            try:
+                while True:
+                    segment = await speech_turn.next_segment()
+                    if segment is None:
+                        break
+                    started = time.perf_counter()
+                    async with TTS_INFERENCE_LOCK:
+                        audio = await asyncio.to_thread(tts_service.synthesize, segment, False)
+                    block_generation_ms = int((time.perf_counter() - started) * 1000)
+                    if not audio:
+                        raise RuntimeError("TTS synthesis returned no audio")
+                    block_rate, pcm = wav_to_pcm16(audio)
+                    if sample_rate is None:
+                        sample_rate = block_rate
+                        yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
+                    elif block_rate != sample_rate:
+                        raise RuntimeError("TTS sample rate changed during a voice turn")
+
+                    block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
+                    speech_turn.record_block(block_generation_ms, block_audio_ms)
+                    generation_ms += block_generation_ms
+                    audio_ms += block_audio_ms
+                    _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
+                    yield json.dumps({
+                        "type": "block",
+                        "index": blocks,
+                        "text_chars": len(segment),
+                        "generation_ms": block_generation_ms,
+                        "audio_ms": block_audio_ms,
+                        "next_target_chars": speech_turn.target_chars,
+                    }) + "\n"
+                    for frame in pcm_frames(pcm):
+                        yield json.dumps({
+                            "type": "audio",
+                            "pcm_base64": base64.b64encode(frame).decode("ascii"),
+                        }) + "\n"
+                    blocks += 1
+                yield json.dumps({
+                    "type": "done",
+                    "blocks": blocks,
+                    "generation_ms": generation_ms,
+                    "audio_ms": audio_ms,
+                    "interrupted": speech_turn.cancelled,
+                }) + "\n"
+            except Exception as exc:
+                logger.exception("Jarvis speech turn %s failed", turn_id)
+                _set_voice_status(session_id, "failed", active_audio_turn_id=None)
+                yield json.dumps({"type": "error", "error": str(exc)[:240]}) + "\n"
+            finally:
+                _SPEECH_TURNS.pop((session_id, turn_id), None)
+
+        return StreamingResponse(generate_audio(), media_type="application/x-ndjson")
+
+    @router.post("/sessions/{session_id}/turns/{turn_id}/playback")
+    async def update_voice_playback(session_id: str, turn_id: str, payload: VoicePlaybackUpdate):
+        status_for_state = {
+            "started": "speaking",
+            "completed": "ready",
+            "interrupted": "interrupted",
+            "failed": "failed",
+        }
+        session = _set_voice_status(
+            session_id,
+            status_for_state[payload.state],
+            active_audio_turn_id=None if payload.state != "started" else turn_id,
+        )
+        if payload.timings:
+            _append_diagnostic(session, {
+                "label": "playback",
+                "turn_id": turn_id,
+                "playback_state": payload.state,
+                "client": True,
+                **_clean_client_timings(payload.timings),
+            })
+            state = _load_state()
+            state["sessions"][session_id] = session
+            _save_state(state)
+        return {"session_id": session_id, "turn_id": turn_id, "status": session["status"]}
 
     @router.post("/sessions/{session_id}/diagnostics")
     async def add_voice_diagnostic(session_id: str, payload: VoiceDiagnosticCreate):
@@ -856,6 +1054,9 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
     @router.post("/sessions/{session_id}/interrupt")
     async def interrupt_voice_session(session_id: str):
+        for (voice_session_id, _turn_id), speech_turn in list(_SPEECH_TURNS.items()):
+            if voice_session_id == session_id:
+                await speech_turn.cancel()
         state = _load_state()
         session = _session(state, session_id)
         session["status"] = "interrupted"

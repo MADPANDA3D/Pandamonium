@@ -1,14 +1,17 @@
 # routes/tts_routes.py
-"""
-TTS API routes — multi-provider (local Kokoro, API endpoint, browser).
-"""
+"""TTS API routes."""
+
+import asyncio
+import base64
+import json
+import logging
+import time
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
-import httpx
-import logging
-import os
+
+from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, take_speech_segment, wav_to_pcm16
 
 logger = logging.getLogger(__name__)
 
@@ -108,52 +111,73 @@ def setup_tts_routes(tts_service):
 
     @router.post("/stream")
     async def stream_speech(request: TTSRequest):
-        """Relay the configured endpoint's native PCM stream without buffering it."""
-        from src.database import ModelEndpoint, SessionLocal
+        """Synthesize bounded text blocks and expose one clean PCM stream."""
+        text = request.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail={"message": "Speech text is required"})
+        if not tts_service.available:
+            raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
 
-        settings = tts_service._load_settings()
-        provider = settings.get("tts_provider", "")
-        if not provider.startswith("endpoint:"):
-            raise HTTPException(status_code=503, detail={"message": "Streaming TTS requires an endpoint provider"})
-        endpoint_id = provider.split(":", 1)[1]
-        db = SessionLocal()
-        try:
-            endpoint = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
-            if not endpoint:
-                raise HTTPException(status_code=503, detail={"message": "TTS endpoint not found"})
-            base_url = endpoint.base_url.rstrip("/")
-            api_key = endpoint.api_key
-        finally:
-            db.close()
-
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        payload = {
-            "model": request.model or settings.get("tts_model"),
-            "input": request.text,
-            "voice": request.voice or settings.get("tts_voice"),
-            "speed": request.speed if request.speed is not None else settings.get("tts_speed", 1),
-            "response_format": "pcm_s16le",
-        }
-        client = httpx.AsyncClient(timeout=float(os.getenv("ODYSSEUS_TTS_ENDPOINT_TIMEOUT", "180")))
-        stream = client.stream("POST", f"{base_url}/audio/speech/stream", json=payload, headers=headers)
-        response = await stream.__aenter__()
-        if response.status_code >= 400:
-            detail = (await response.aread()).decode(errors="replace")[:500]
-            await stream.__aexit__(None, None, None)
-            await client.aclose()
-            raise HTTPException(status_code=502, detail={"message": detail or "Streaming synthesis failed"})
-
-        async def relay():
+        async def generate():
+            remaining = text
+            first = True
+            sample_rate = None
+            blocks = 0
+            generation_ms = 0
+            audio_ms = 0
             try:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-            finally:
-                await stream.__aexit__(None, None, None)
-                await client.aclose()
+                while remaining:
+                    segment, remaining = take_speech_segment(remaining, first=first, done=True)
+                    if not segment:
+                        break
+                    started = time.perf_counter()
+                    async with TTS_INFERENCE_LOCK:
+                        audio = await asyncio.to_thread(
+                            tts_service.synthesize,
+                            segment,
+                            False,
+                            request.model,
+                            request.voice,
+                            request.speed,
+                        )
+                    block_generation_ms = int((time.perf_counter() - started) * 1000)
+                    if not audio:
+                        raise RuntimeError("TTS synthesis returned no audio")
+                    block_rate, pcm = wav_to_pcm16(audio)
+                    if sample_rate is None:
+                        sample_rate = block_rate
+                        yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
+                    elif block_rate != sample_rate:
+                        raise RuntimeError("TTS sample rate changed during a speech turn")
 
-        return StreamingResponse(relay(), media_type="application/x-ndjson")
+                    block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
+                    blocks += 1
+                    generation_ms += block_generation_ms
+                    audio_ms += block_audio_ms
+                    yield json.dumps({
+                        "type": "block",
+                        "index": blocks - 1,
+                        "text_chars": len(segment),
+                        "generation_ms": block_generation_ms,
+                        "audio_ms": block_audio_ms,
+                    }) + "\n"
+                    for frame in pcm_frames(pcm):
+                        yield json.dumps({
+                            "type": "audio",
+                            "pcm_base64": base64.b64encode(frame).decode("ascii"),
+                        }) + "\n"
+                    first = False
+                yield json.dumps({
+                    "type": "done",
+                    "blocks": blocks,
+                    "generation_ms": generation_ms,
+                    "audio_ms": audio_ms,
+                }) + "\n"
+            except Exception as exc:
+                logger.exception("Segmented TTS stream failed")
+                yield json.dumps({"type": "error", "error": str(exc)[:240]}) + "\n"
+
+        return StreamingResponse(generate(), media_type="application/x-ndjson")
 
     @router.post("/clear-cache")
     async def clear_tts_cache():

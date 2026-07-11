@@ -25,13 +25,13 @@ class FakeSessionManager:
 
 
 def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch, tmp_path):
-    async def fake_jarvis_reply(session, text):
+    async def fake_jarvis_reply(session, text, owner):
         return "At once, sir.", {
             "model": "jarvis-voice:latest",
             "transcript_chars": len(text),
             "assistant_chars": 13,
             "guard_reason": None,
-        }
+        }, []
 
     manager = FakeSessionManager()
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
