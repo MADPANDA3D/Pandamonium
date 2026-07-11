@@ -1,0 +1,41 @@
+[Unit]
+Description=Jarvis private VPS Codex worker bridge
+After=network-online.target tailscaled.service jarvis-vps-observer.service
+Wants=network-online.target
+Requires=jarvis-vps-observer.service
+
+[Service]
+Type=simple
+User=jarvis-worker
+Group=jarvis-worker
+SupplementaryGroups=jarvis-observer
+WorkingDirectory=/home/jarvis-worker/workspaces/vps-ops
+Environment=JARVIS_CODEX_WORKER_ID=vps-codex
+EnvironmentFile=-/etc/jarvis-vps-worker.env
+Environment=JARVIS_CODEX_BRIDGE_PORT=8650
+Environment=JARVIS_CODEX_BRIDGE_TOKEN_FILE=/home/jarvis-worker/.config/jarvis/agent-bridge-token
+Environment=JARVIS_CODEX_BRIDGE_STATE_DIR=/home/jarvis-worker/.local/share/jarvis/vps-codex-bridge/tasks
+Environment=JARVIS_CODEX_BIN=/usr/bin/codex
+Environment=JARVIS_CODEX_MAX_TASK_SECONDS=600
+Environment="JARVIS_CODEX_DEVELOPER_INSTRUCTIONS=You are VPS Codex working for Leo through Jarvis. Work only in the vps-ops workspace. Use jarvis-vps-observe for live server facts. Start read-only, never invent system state, and never attempt privilege escalation. Give concise milestone commentary and a factual final result."
+ExecStart=/usr/bin/python3 /opt/jarvis-vps-worker/jarvis_codex_bridge.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/jarvis-worker/.codex
+ReadWritePaths=/home/jarvis-worker/.config/jarvis
+ReadWritePaths=/home/jarvis-worker/.local/share/jarvis
+ReadWritePaths=/home/jarvis-worker/workspaces/vps-ops
+ReadWritePaths=/home/jarvis-worker/.cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

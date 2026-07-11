@@ -68,9 +68,9 @@ const WORKER_LABELS = {
 };
 let workerCatalog = {
   jarvis: { enabled: true, machine: 'Nimbus', connection: { state: 'connected' } },
-  'pc-codex': { enabled: true, machine: 'MADPANDA workstation', connection: { state: 'checking' } },
+  'pc-codex': { enabled: true, machine: 'Local workstation', connection: { state: 'checking' } },
   hermes: { enabled: false, machine: 'Hermes laptop', connection: { state: 'gated' } },
-  'vps-codex': { enabled: false, machine: 'MADPANDA VPS', connection: { state: 'gated' } },
+  'vps-codex': { enabled: false, machine: 'Remote server', connection: { state: 'gated' } },
 };
 
 function $(id) {

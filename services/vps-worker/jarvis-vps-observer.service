@@ -1,0 +1,27 @@
+[Unit]
+Description=Jarvis root-owned read-only VPS observer
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=jarvis-vps-observer
+RuntimeDirectoryMode=0755
+EnvironmentFile=-/etc/jarvis-vps-worker.env
+ExecStart=/usr/bin/python3 /opt/jarvis-vps-worker/jarvis_vps_observer.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

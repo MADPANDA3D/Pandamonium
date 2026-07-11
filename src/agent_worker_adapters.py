@@ -260,7 +260,8 @@ class HermesRunsAdapter:
                 "approvals": bool(features.get("run_approval_response")),
             }
         except Exception as exc:
-            return {"state": "auth_required" if "401" in str(exc) else "unreachable", "machine": self.machine, "error": str(exc)[:160]}
+            state = "auth_required" if "token_missing" in str(exc) or "401" in str(exc) else "unreachable"
+            return {"state": state, "machine": self.machine, "error": str(exc)[:160]}
 
 
 PC_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/odysseus-agent-bridge-token"))
@@ -272,22 +273,22 @@ def adapters() -> dict[str, WorkerAdapter]:
     return {
         "pc-codex": CodexBridgeAdapter(
             "pc-codex",
-            os.getenv("ODYSSEUS_PC_CODEX_URL", "http://192.168.1.50:8040"),
+            os.getenv("ODYSSEUS_PC_CODEX_URL", "http://127.0.0.1:8040"),
             PC_TOKEN_FILE,
             enabled=_enabled("ODYSSEUS_PC_CODEX_ENABLED", True),
-            machine="MADPANDA workstation",
+            machine="Local workstation",
         ),
         "hermes": HermesRunsAdapter(
-            os.getenv("ODYSSEUS_HERMES_URL", "http://100.119.195.80:8642"),
+            os.getenv("ODYSSEUS_HERMES_URL", "http://127.0.0.1:8642"),
             HERMES_TOKEN_FILE,
             enabled=_enabled("ODYSSEUS_HERMES_ENABLED", False),
         ),
         "vps-codex": CodexBridgeAdapter(
             "vps-codex",
-            os.getenv("ODYSSEUS_VPS_CODEX_URL", "http://100.106.175.62:8650"),
+            os.getenv("ODYSSEUS_VPS_CODEX_URL", "http://127.0.0.1:8650"),
             VPS_TOKEN_FILE,
             enabled=_enabled("ODYSSEUS_VPS_CODEX_ENABLED", False),
-            machine="MADPANDA VPS",
+            machine="Remote server",
         ),
     }
 
@@ -297,7 +298,7 @@ def worker_catalog() -> dict[str, dict[str, Any]]:
     return {
         "pc-codex": {
             "enabled": registry["pc-codex"].enabled,
-            "machine": "MADPANDA workstation",
+            "machine": "Local workstation",
             "capabilities": ["local_files", "business", "home_lab", "code", "artifacts"],
             "workspaces": ["business", "home-lab", "project-linux"],
         },
@@ -309,7 +310,7 @@ def worker_catalog() -> dict[str, dict[str, Any]]:
         },
         "vps-codex": {
             "enabled": registry["vps-codex"].enabled,
-            "machine": "MADPANDA VPS",
+            "machine": "Remote server",
             "capabilities": ["vps_code", "vps_observer", "vps_operations"],
             "workspaces": ["vps-ops"],
         },

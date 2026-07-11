@@ -20,13 +20,19 @@ TOKEN_FILE = Path(os.getenv("JARVIS_CODEX_BRIDGE_TOKEN_FILE", str(Path.home() / 
 STATE_DIR = Path(os.getenv("JARVIS_CODEX_BRIDGE_STATE_DIR", str(Path.home() / ".local/share/jarvis/pc-codex-bridge/tasks")))
 CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
+WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
 TERMINAL = {"completed", "failed", "cancelled"}
-WORKSPACES = {
-    "business": "/home/leo/the-lab/MADPANDA3D/MADPANDA/12 Business",
-    "home-lab": "/home/leo/the-lab/MADPANDA3D/MADPANDA/03 Projects/14 Home Lab",
-    "project-linux": "/home/leo/the-lab/MADPANDA3D/MADPANDA/03 Projects/16 Project Linux",
-}
-DEVELOPER_INSTRUCTIONS = """You are PC Codex working for Jarvis and Leo.
+DEFAULT_WORKSPACES = {"workspace": str(Path.home())}
+if WORKER_ID == "vps-codex":
+    DEFAULT_WORKSPACES = {"vps-ops": "/home/jarvis-worker/workspaces/vps-ops"}
+try:
+    WORKSPACES = json.loads(os.getenv("JARVIS_CODEX_WORKSPACES_JSON", "{}")) or DEFAULT_WORKSPACES
+except json.JSONDecodeError as exc:
+    raise RuntimeError("invalid_workspace_configuration") from exc
+if not isinstance(WORKSPACES, dict) or not WORKSPACES:
+    raise RuntimeError("workspace_configuration_required")
+
+DEVELOPER_INSTRUCTIONS = os.getenv("JARVIS_CODEX_DEVELOPER_INSTRUCTIONS", "") or """You are PC Codex working for Jarvis and Leo.
 Give short, useful commentary updates at meaningful milestones while you work.
 Do not narrate raw commands or internal reasoning. End with a standalone result.
 Respect the selected sandbox. Ask a focused question only when genuinely blocked.
@@ -70,7 +76,7 @@ class Task:
                 "seq": len(events),
                 "event_id": str(uuid.uuid4()),
                 "task_id": self.task_id,
-                "worker": "pc-codex",
+                "worker": WORKER_ID,
                 "type": event_type,
                 "text": text[:12000],
                 "created_at": int(time.time()),
@@ -369,7 +375,7 @@ def create_task(payload: dict) -> Task:
     now = int(time.time())
     data = {
         "task_id": str(uuid.uuid4()),
-        "worker": "pc-codex",
+        "worker": WORKER_ID,
         "session_id": str(payload.get("session_id") or ""),
         "workspace": workspace,
         "cwd": cwd,
@@ -403,7 +409,7 @@ def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "JarvisCodexBridge/1.0"
+    server_version = "JarvisCodexBridge/1.1"
 
     def log_message(self, _fmt: str, *_args) -> None:
         return
@@ -427,7 +433,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            _json(self, 200, {"ok": True, "worker": "pc-codex", "app_server": True, "workspaces": sorted(WORKSPACES)})
+            _json(self, 200, {"ok": True, "worker": WORKER_ID, "app_server": True, "workspaces": sorted(WORKSPACES)})
             return
         if not self._check_auth():
             return
@@ -517,7 +523,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def self_check() -> None:
-    assert set(WORKSPACES) == {"business", "home-lab", "project-linux"}
+    assert WORKER_ID in {"pc-codex", "vps-codex"}
+    assert all(Path(path).is_absolute() for path in WORKSPACES.values())
     assert _safe_tool_text({"type": "webSearch", "query": "test"}) == "Web search completed: test"
     assert MAX_TASK_RUNTIME >= 60
     assert ARTIFACT_PATTERN.search('[[ODYSSEUS_ARTIFACT path="notes/Mark 5.md" title="Mark 5"]]')
