@@ -2,16 +2,14 @@
 """TTS API routes."""
 
 import asyncio
-import base64
 import json
 import logging
-import time
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, take_speech_segment, wav_to_pcm16
+from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment, take_speech_segment
 
 logger = logging.getLogger(__name__)
 
@@ -130,42 +128,39 @@ def setup_tts_routes(tts_service):
                     segment, remaining = take_speech_segment(remaining, first=first, done=True)
                     if not segment:
                         break
-                    started = time.perf_counter()
+                    block_generation_ms = 0
+                    block_audio_ms = 0
                     async with TTS_INFERENCE_LOCK:
-                        audio = await asyncio.to_thread(
-                            tts_service.synthesize,
+                        async for event in stream_tts_pcm_segment(
+                            tts_service,
                             segment,
-                            False,
-                            request.model,
-                            request.voice,
-                            request.speed,
-                        )
-                    block_generation_ms = int((time.perf_counter() - started) * 1000)
-                    if not audio:
-                        raise RuntimeError("TTS synthesis returned no audio")
-                    block_rate, pcm = wav_to_pcm16(audio)
-                    if sample_rate is None:
-                        sample_rate = block_rate
-                        yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
-                    elif block_rate != sample_rate:
-                        raise RuntimeError("TTS sample rate changed during a speech turn")
-
-                    block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
+                            model=request.model,
+                            voice=request.voice,
+                            speed=request.speed,
+                        ):
+                            event_type = event.get("type")
+                            if event_type == "start":
+                                block_rate = int(event.get("sample_rate") or 0)
+                                if not block_rate:
+                                    raise RuntimeError("TTS returned an invalid sample rate")
+                                if sample_rate is None:
+                                    sample_rate = block_rate
+                                    yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
+                                elif block_rate != sample_rate:
+                                    raise RuntimeError("TTS sample rate changed during a speech turn")
+                                yield json.dumps({
+                                    "type": "block",
+                                    "index": blocks,
+                                    "text_chars": len(segment),
+                                }) + "\n"
+                            elif event_type == "audio":
+                                yield json.dumps(event, separators=(",", ":")) + "\n"
+                            elif event_type == "done":
+                                block_generation_ms = int(event.get("generation_ms") or 0)
+                                block_audio_ms = int(event.get("audio_ms") or 0)
                     blocks += 1
                     generation_ms += block_generation_ms
                     audio_ms += block_audio_ms
-                    yield json.dumps({
-                        "type": "block",
-                        "index": blocks - 1,
-                        "text_chars": len(segment),
-                        "generation_ms": block_generation_ms,
-                        "audio_ms": block_audio_ms,
-                    }) + "\n"
-                    for frame in pcm_frames(pcm):
-                        yield json.dumps({
-                            "type": "audio",
-                            "pcm_base64": base64.b64encode(frame).decode("ascii"),
-                        }) + "\n"
                     first = False
                 yield json.dumps({
                     "type": "done",

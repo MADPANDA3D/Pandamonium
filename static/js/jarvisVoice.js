@@ -56,7 +56,7 @@ const SPHERE_AUDIO_SMOOTHING = 0.75;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'result', 'error']);
 const PROGRESS_STALE_MS = 45000;
-const STREAM_INITIAL_BUFFER_SECONDS = 0.18;
+const STREAM_INITIAL_BUFFER_SECONDS = 2.2;
 const STREAM_EDGE_CROSSFADE_SECONDS = 0.008;
 
 function $(id) {

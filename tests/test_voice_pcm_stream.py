@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import wave
@@ -48,20 +49,17 @@ def test_voice_turn_audio_is_one_ordered_pcm_stream(monkeypatch, tmp_path):
     class FakeTTS:
         available = True
 
-        def __init__(self):
-            self.calls = []
-
-        def synthesize(self, text, use_cache=True, *_args):
-            self.calls.append((text, use_cache))
-            payload = io.BytesIO()
-            with wave.open(payload, "wb") as target:
-                target.setnchannels(1)
-                target.setsampwidth(2)
-                target.setframerate(24_000)
-                target.writeframes(b"\x01\x00" * max(2_400, len(text) * 120))
-            return payload.getvalue()
-
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    calls = []
+
+    async def fake_stream(_tts, text, **_kwargs):
+        calls.append(text)
+        pcm = b"\x01\x00" * max(2_400, len(text) * 120)
+        yield {"type": "start", "sample_rate": 24_000}
+        yield {"type": "audio", "pcm_base64": base64.b64encode(pcm).decode("ascii"), "samples": len(pcm) // 2}
+        yield {"type": "done", "generation_ms": 100, "audio_ms": int(len(pcm) / 48)}
+
+    monkeypatch.setattr(voice_routes, "stream_tts_pcm_segment", fake_stream)
     voice_routes._SPEECH_TURNS.clear()
     tts = FakeTTS()
     app = FastAPI()
@@ -81,9 +79,8 @@ def test_voice_turn_audio_is_one_ordered_pcm_stream(monkeypatch, tmp_path):
     events = [json.loads(line) for line in response.text.splitlines() if line]
     assert events[0] == {"type": "start", "sample_rate": 24_000}
     assert events[-1]["type"] == "done"
-    assert events[-1]["blocks"] == len(tts.calls)
-    assert len(tts.calls) >= 2
-    assert all(use_cache is False for _text, use_cache in tts.calls)
+    assert events[-1]["blocks"] == len(calls)
+    assert len(calls) >= 2
     assert all(event["type"] in {"start", "block", "audio", "done"} for event in events)
 
     completed = client.post(
