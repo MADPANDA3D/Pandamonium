@@ -22,6 +22,10 @@ from src.rag_vector import VectorRAG
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "madpanda_knowledge_v1_fastembed"
+KNOWLEDGE_EMBEDDING_MODEL = os.getenv(
+    "ODYSSEUS_KNOWLEDGE_EMBEDDING_MODEL",
+    "BAAI/bge-small-en-v1.5",
+)
 DATA_DIR = Path(os.getenv("ODYSSEUS_DATA_DIR", "/srv/odysseus/data"))
 MANIFEST_FILE = DATA_DIR / "madpanda_knowledge_v1_manifest.json"
 SYNC_DIR = DATA_DIR / "madpanda_knowledge_sync"
@@ -101,7 +105,7 @@ class KnowledgeStore:
             metadata={
                 "hnsw:space": "cosine",
                 "embedding_lane": "fastembed",
-                "embedding_model": "BAAI/bge-small-en-v1.5",
+                "embedding_model": KNOWLEDGE_EMBEDDING_MODEL,
                 "embedding_dimension": 384,
             },
         )
@@ -109,17 +113,7 @@ class KnowledgeStore:
     def _ensure_embedder(self) -> Any:
         if self.embedder is not None:
             return self.embedder
-        try:
-            from src.rag_singleton import get_rag_manager
-
-            legacy = get_rag_manager()
-            self.embedder = next(
-                lane.client for lane in legacy._lanes if lane.name == "fastembed"
-            ) if legacy else None
-        except Exception:
-            self.embedder = None
-        if self.embedder is None:
-            self.embedder = FastEmbedClient()
+        self.embedder = FastEmbedClient(model=KNOWLEDGE_EMBEDDING_MODEL)
         return self.embedder
 
     def _split(self, text: str) -> list[str]:

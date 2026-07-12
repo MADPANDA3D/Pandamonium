@@ -54,3 +54,19 @@ def test_large_source_embeddings_are_batched():
     }, "v1")
     assert count == 205
     assert store.embedder.calls == [25, 25, 25, 25, 25, 25, 25, 25, 5]
+
+
+def test_knowledge_embedder_is_isolated_from_generic_rag(monkeypatch):
+    created = []
+    expected = object()
+    monkeypatch.setattr(
+        knowledge,
+        "FastEmbedClient",
+        lambda model: created.append(model) or expected,
+    )
+    store = knowledge.KnowledgeStore.__new__(knowledge.KnowledgeStore)
+    store.embedder = None
+
+    assert store._ensure_embedder() is expected
+    assert created == [knowledge.KNOWLEDGE_EMBEDDING_MODEL]
+    assert knowledge.KNOWLEDGE_EMBEDDING_MODEL == "BAAI/bge-small-en-v1.5"
