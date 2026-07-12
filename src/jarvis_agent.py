@@ -21,7 +21,7 @@ TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
 KNOWLEDGE_MANIFEST_FILE = Path(DATA_DIR) / "jarvis_knowledge_manifest.json"
 BRIDGE_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/odysseus-agent-bridge-token"))
 JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
-OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://192.168.1.247:11434")
+OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 TERMINAL = {"completed", "failed", "cancelled", "blocked"}
 WORKERS = worker_catalog()
 
@@ -477,7 +477,7 @@ def sync_knowledge(documents: list[dict], owner: str = "leo") -> dict:
                 "owner": owner,
                 "source": source,
                 "filename": Path(source).name,
-                "client": str(doc.get("client") or "MADPANDA3D"),
+                "client": str(doc.get("client") or "unscoped"),
                 "mtime": int(doc.get("mtime") or 0),
                 "content_hash": content_hash,
                 "document_type": str(doc.get("document_type") or "text"),

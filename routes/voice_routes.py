@@ -27,9 +27,10 @@ from src.auth_helpers import effective_user
 from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment, take_speech_segment
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
-ACTION_BRIDGE_URL = "http://192.168.1.50:8010/actions"
-JARVIS_GENERATE_URL = "http://192.168.1.247:11434/api/generate"
-JARVIS_CHAT_URL = "http://192.168.1.247:11434/v1/chat/completions"
+ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
+JARVIS_OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+JARVIS_GENERATE_URL = f"{JARVIS_OLLAMA_URL}/api/generate"
+JARVIS_CHAT_URL = f"{JARVIS_OLLAMA_URL}/v1/chat/completions"
 JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
 VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
 VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))

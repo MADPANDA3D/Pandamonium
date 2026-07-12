@@ -54,9 +54,13 @@ def test_vps_worker_units_preserve_privilege_boundary():
 
 def test_worker_sources_do_not_embed_private_network_addresses():
     adapter_source = (ROOT / "src" / "agent_worker_adapters.py").read_text()
+    agent_source = (ROOT / "src" / "jarvis_agent.py").read_text()
+    voice_source = (ROOT / "routes" / "voice_routes.py").read_text()
     bridge_source = (ROOT / "services" / "pc-codex-bridge" / "jarvis_codex_bridge.py").read_text()
-    assert "192.168." not in adapter_source
-    assert "100.119." not in adapter_source
+    reusable_source = "\n".join((adapter_source, agent_source, voice_source))
+    assert "192.168." not in reusable_source
+    assert "100.119." not in reusable_source
+    assert "MADPANDA3D" not in reusable_source
     assert "/home/leo/" not in bridge_source
 
 
