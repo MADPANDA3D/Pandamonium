@@ -76,6 +76,100 @@ async def test_spoken_result_falls_back_when_qwen_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_spoken_milestone_is_one_bounded_sentence(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "response": "The focused verification now passes cleanly. A second sentence must not be spoken. "
+                + ("Extra detail " * 40)
+            }
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json):
+            captured.update(url=url, payload=json)
+            return Response()
+
+    monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
+    spoken = await jarvis_agent._spoken_milestone(_task(), "Tests completed.")
+
+    assert spoken == "The focused verification now passes cleanly."
+    assert len(spoken) <= 240
+    assert captured["payload"]["options"]["num_predict"] == 80
+
+
+@pytest.mark.asyncio
+async def test_spoken_milestone_failure_uses_non_raw_fallback(monkeypatch):
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, json):
+            raise RuntimeError("offline")
+
+    monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
+    spoken = await jarvis_agent._spoken_milestone(_task(), "SECRET RAW TABLE CONTENT")
+
+    assert spoken == "PC Codex completed a milestone; details are in the activity history."
+    assert "SECRET RAW TABLE CONTENT" not in spoken
+    assert len(spoken) <= 240
+
+
+@pytest.mark.asyncio
+async def test_progress_speech_is_broker_owned_and_milestone_only(tmp_path, monkeypatch):
+    class Adapter:
+        async def events(self, _task):
+            yield {
+                "type": "progress",
+                "text": "Ordinary progress remains visual.",
+                "spoken_text": "Worker tried to narrate ordinary progress.",
+                "metadata": {},
+            }
+            yield {
+                "type": "progress",
+                "text": "The verification subtask passed.",
+                "spoken_text": "Worker supplied raw milestone narration.",
+                "metadata": {"milestone": True},
+            }
+
+    async def milestone(_task, _text):
+        return "Jarvis confirms the verification subtask passed."
+
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
+    monkeypatch.setattr(jarvis_agent, "_MIRRORS", {})
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": Adapter()})
+    monkeypatch.setattr(jarvis_agent, "_spoken_milestone", milestone)
+    jarvis_agent._save_task(_task())
+
+    await jarvis_agent._mirror("task-1")
+
+    events = jarvis_agent.get_task("task-1")["events"]
+    assert "spoken_text" not in events[0]
+    assert events[1]["spoken_text"] == "Jarvis confirms the verification subtask passed."
+    assert events[1]["metadata"]["milestone"] is True
+
+
+@pytest.mark.asyncio
 async def test_live_result_keeps_raw_chat_text_and_adds_spoken_summary(tmp_path, monkeypatch):
     raw = "| Item | Status |\n| --- | --- |\n| Mark 6 | complete |"
 

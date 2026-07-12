@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Jarvis activity acceptance harness</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    body { max-width: 920px; margin: 0 auto; padding: 28px; background: var(--bg); color: var(--fg); }
+    #chat-history { height: auto; min-height: 520px; overflow: visible; }
+  </style>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+  <div id="chat-history" class="chat-history">
+    <div class="msg msg-ai" data-source="jarvis_voice" data-task-id="task-complete"><div class="role">Jarvis</div><div class="body">PC Codex is working on that now.</div></div>
+    <div class="msg msg-ai" data-source="agent_worker" data-task-id="task-complete"><div class="role">PC Codex</div><div class="body"><table><tr><th>Check</th><th>Status</th></tr><tr><td>Mark 6</td><td>Passed</td></tr></table></div></div>
+    <div class="msg msg-ai" data-source="jarvis_voice" data-task-id="task-live"><div class="role">Jarvis</div><div class="body">Hermes is working on that now.</div></div>
+  </div>
+  <script>
+    window.__spoken = [];
+    window.__streams = [];
+    window.sessionModule = { getCurrentSessionId: () => 'session-1' };
+    window.uiModule = { scrollHistory() {} };
+    window.chatModule = {
+      addMessage(role, content, _model, metadata = {}) {
+        const wrap = document.createElement('div');
+        wrap.className = `msg ${role === 'user' ? 'msg-user' : 'msg-ai'}`;
+        if (metadata.source) wrap.dataset.source = metadata.source;
+        if (metadata.task_id) wrap.dataset.taskId = metadata.task_id;
+        if (metadata.worker) wrap.dataset.worker = metadata.worker;
+        wrap.innerHTML = `<div class="role">${metadata.character_name || 'Jarvis'}</div><div class="body"></div>`;
+        wrap.querySelector('.body').textContent = content;
+        document.getElementById('chat-history').appendChild(wrap);
+        return wrap;
+      },
+    };
+    window.aiTTSManager = {
+      available: true,
+      useBrowserTTS: true,
+      extractPlainText: value => value,
+      checkAvailability: async () => true,
+      play: async value => { window.__spoken.push(value); },
+      stop() {},
+    };
+
+    const tasks = {
+      'task-complete': {
+        task_id: 'task-complete', session_id: 'session-1', worker: 'pc-codex', status: 'completed',
+        created_at: 100, updated_at: 170,
+        events: [
+          { seq: 0, event_id: 'c-0', task_id: 'task-complete', worker: 'pc-codex', type: 'accepted', text: 'Accepted.', metadata: {} },
+          { seq: 1, event_id: 'c-1', task_id: 'task-complete', worker: 'pc-codex', type: 'progress', text: 'Loaded the project context.', metadata: {} },
+          { seq: 2, event_id: 'c-2', task_id: 'task-complete', worker: 'pc-codex', type: 'tool_activity', text: 'Command completed: rg Mark 6 .', metadata: { item_type: 'commandExecution' } },
+          { seq: 3, event_id: 'c-3', task_id: 'task-complete', worker: 'pc-codex', type: 'tool_activity', text: 'Command completed: pytest -q', metadata: { item_type: 'commandExecution' } },
+          { seq: 4, event_id: 'c-4', task_id: 'task-complete', worker: 'pc-codex', type: 'progress', text: 'The focused checks passed.', spoken_text: 'PC Codex confirms the focused checks passed.', metadata: { milestone: true } },
+          { seq: 5, event_id: 'c-5', task_id: 'task-complete', worker: 'pc-codex', type: 'result', text: '| Check | Status |', spoken_text: 'PC Codex finished.', metadata: {} },
+        ],
+      },
+      'task-live': {
+        task_id: 'task-live', session_id: 'session-1', worker: 'hermes', status: 'running',
+        created_at: Math.floor(Date.now() / 1000) - 5, updated_at: Math.floor(Date.now() / 1000),
+        events: [
+          { seq: 0, event_id: 'l-0', task_id: 'task-live', worker: 'hermes', type: 'accepted', text: 'Accepted.', metadata: {} },
+        ],
+      },
+    };
+
+    window.fetch = async url => {
+      const value = String(url);
+      if (value === '/api/agent-workers') {
+        return { ok: true, json: async () => ({ hermes: { enabled: true, machine: 'Hermes laptop', connection: { state: 'connected' } } }) };
+      }
+      const match = value.match(/^\/api\/agent-tasks\/([^/]+)$/);
+      if (match && tasks[decodeURIComponent(match[1])]) {
+        return { ok: true, json: async () => structuredClone(tasks[decodeURIComponent(match[1])]) };
+      }
+      return { ok: true, json: async () => ({}) };
+    };
+
+    window.EventSource = class MockEventSource {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        window.__streams.push(this);
+      }
+      close() { this.closed = true; }
+      emit(event) {
+        this.onmessage?.({ data: JSON.stringify(event), lastEventId: String(event.seq ?? '') });
+      }
+    };
+  </script>
+  <script type="module" src="/static/js/jarvisVoice.js"></script>
+</body>
+</html>

@@ -36,11 +36,15 @@ if not isinstance(WORKSPACES, dict) or not WORKSPACES:
 DEVELOPER_INSTRUCTIONS = os.getenv("JARVIS_CODEX_DEVELOPER_INSTRUCTIONS", "") or """You are PC Codex working for Jarvis and Leo.
 Give short, useful commentary updates at meaningful milestones while you work.
 Do not narrate raw commands or internal reasoning. End with a standalone result.
+Only after a subtask is complete and verified by tool evidence, you may emit one commentary update as:
+[[ODYSSEUS_MILESTONE]] <one completed-subtask update>
+Do not use that marker for plans, activity, commands, estimates, or the final result.
 Respect the selected sandbox. Ask a focused question only when genuinely blocked.
 When Leo asks to open, show, or put a text document in Odysseus, finish with exactly one marker on its own line:
 [[ODYSSEUS_ARTIFACT path="path inside the active workspace" title="Human title"]]
 Only emit that marker for a file you verified exists inside the active workspace.
 """
+MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
 ARTIFACT_PATTERN = re.compile(
     r'\[\[ODYSSEUS_ARTIFACT\s+path="([^"]+)"(?:\s+title="([^"]+)")?\s*\]\]'
 )
@@ -81,8 +85,6 @@ class Task:
     def event(self, event_type: str, text: str, metadata: dict | None = None) -> dict:
         with self.changed:
             events = self.data.setdefault("events", [])
-            if event_type == "progress" and events and events[-1].get("type") == "progress" and events[-1].get("text") == text:
-                return events[-1]
             event = {
                 "seq": len(events),
                 "event_id": str(uuid.uuid4()),
@@ -190,6 +192,17 @@ def _safe_tool_text(item: dict) -> str:
     return f"{kind or 'tool'} completed"
 
 
+def _milestone_commentary(text: str) -> tuple[str, bool]:
+    value = text.strip()
+    if not value.startswith(MILESTONE_MARKER):
+        return value, False
+    remainder = value[len(MILESTONE_MARKER):]
+    if remainder and not remainder[0].isspace():
+        return value, False
+    value = remainder.strip()
+    return value, bool(value)
+
+
 def _artifact_language(path: Path) -> str:
     return {
         ".md": "markdown",
@@ -265,11 +278,18 @@ def _handle_server_message(task: Task, message: dict) -> None:
         if not text:
             return
         phase = item.get("phase")
-        if phase != "commentary":
+        metadata = {"phase": phase}
+        if phase == "commentary":
+            text, milestone = _milestone_commentary(text)
+            if not text:
+                return
+            if milestone:
+                metadata["milestone"] = True
+        else:
             text = _extract_artifacts(task, text)
             if not text:
                 text = "The requested document is open in Odysseus."
-        task.event("progress" if phase == "commentary" else "result", text, {"phase": phase})
+        task.event("progress" if phase == "commentary" else "result", text, metadata)
     elif kind in {"commandExecution", "fileChange", "mcpToolCall", "webSearch"}:
         task.event("tool_activity", _safe_tool_text(item), {"item_type": kind})
 

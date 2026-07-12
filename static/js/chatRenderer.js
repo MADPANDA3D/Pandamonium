@@ -2245,6 +2245,13 @@ export function renderAskUserCard(payload, options) {
 /**
  * Add a message to the chat history.
  */
+function applyTaskMessageMetadata(wrap, metadata) {
+  if (!wrap || !metadata) return;
+  if (metadata.source) wrap.dataset.source = String(metadata.source);
+  if (metadata.task_id) wrap.dataset.taskId = String(metadata.task_id);
+  if (metadata.worker) wrap.dataset.worker = String(metadata.worker);
+}
+
 export function addMessage(role, content, modelName, metadata) {
   try {
     hideWelcomeScreen();
@@ -2284,6 +2291,7 @@ export function addMessage(role, content, modelName, metadata) {
         if (txt) {
           const wrap = document.createElement('div');
           wrap.className = 'msg msg-ai' + (r > 0 ? ' msg-continuation' : '');
+          applyTaskMessageMetadata(wrap, metadata);
           const roleEl = document.createElement('div');
           roleEl.className = 'role';
           const pair = replyModelPair(modelName, metadata);
@@ -2438,6 +2446,7 @@ export function addMessage(role, content, modelName, metadata) {
     // --- Standard single-bubble message ---
     const wrap = document.createElement('div');
     wrap.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-ai');
+    applyTaskMessageMetadata(wrap, metadata);
 
     const r = document.createElement('div');
     r.className = 'role';

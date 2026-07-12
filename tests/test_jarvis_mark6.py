@@ -227,9 +227,24 @@ def test_worker_approval_choices_are_narrow():
 def test_hermes_native_events_are_normalized_without_speaking_tools(tmp_path):
     adapter = HermesRunsAdapter("http://hermes", tmp_path / "token", enabled=False)
     tool = adapter._normalize({"event": "tool.started", "tool": "terminal"})
+    progress = adapter._normalize({"event": "reasoning.available", "text": "Checking the service."})
+    milestone = adapter._normalize({
+        "event": "reasoning.available",
+        "text": "[[ODYSSEUS_MILESTONE]] The service health check passed.",
+    })
     approval = adapter._normalize({"event": "approval.request", "description": "Restart service?"})
     result = adapter._normalize({"event": "run.completed", "output": "Done."})
     assert tool["type"] == "tool_activity"
+    assert progress == {
+        "type": "progress",
+        "text": "Checking the service.",
+        "metadata": {"source_event": "reasoning.available"},
+    }
+    assert milestone == {
+        "type": "progress",
+        "text": "The service health check passed.",
+        "metadata": {"source_event": "reasoning.available", "milestone": True},
+    }
     assert approval == {
         "type": "approval_required",
         "text": "Restart service?",
@@ -262,6 +277,7 @@ def test_hermes_instructions_preserve_broker_and_native_approval_boundaries():
     assert "approved this task at the broker level" in approved
     assert "only the specifically requested mutation" in approved
     assert "Do not bypass or suppress Hermes' native tool approval gate" in approved
+    assert "[[ODYSSEUS_MILESTONE]] <one completed-subtask update>" in read_only
 
 
 @pytest.mark.asyncio

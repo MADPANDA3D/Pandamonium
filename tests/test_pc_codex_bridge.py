@@ -99,6 +99,75 @@ def test_artifact_marker_rejects_symlink_escape(tmp_path):
     assert all(event["type"] != "artifact" for event in task.data["events"])
 
 
+def test_commentary_milestone_marker_is_stripped_and_tagged(tmp_path):
+    task = _task(tmp_path)
+
+    bridge._handle_server_message(task, {
+        "method": "item/completed",
+        "params": {"item": {
+            "type": "agentMessage",
+            "phase": "commentary",
+            "text": "[[ODYSSEUS_MILESTONE]] The focused tests now pass.",
+        }},
+    })
+
+    assert task.data["events"][0]["type"] == "progress"
+    assert task.data["events"][0]["text"] == "The focused tests now pass."
+    assert task.data["events"][0]["metadata"] == {"phase": "commentary", "milestone": True}
+
+
+def test_unmarked_commentary_cannot_set_milestone(tmp_path):
+    task = _task(tmp_path)
+
+    bridge._handle_server_message(task, {
+        "method": "item/completed",
+        "params": {"item": {
+            "type": "agentMessage",
+            "phase": "commentary",
+            "text": "I will mention [[ODYSSEUS_MILESTONE]] later.",
+        }},
+    })
+
+    assert task.data["events"][0]["text"] == "I will mention [[ODYSSEUS_MILESTONE]] later."
+    assert "milestone" not in task.data["events"][0]["metadata"]
+
+    glued = _task(tmp_path / "glued")
+    bridge._handle_server_message(glued, {
+        "method": "item/completed",
+        "params": {"item": {
+            "type": "agentMessage",
+            "phase": "commentary",
+            "text": "[[ODYSSEUS_MILESTONE]]not-the-contract",
+        }},
+    })
+    assert "milestone" not in glued.data["events"][0]["metadata"]
+
+
+def test_matching_commentary_and_milestone_are_both_preserved(tmp_path):
+    task = _task(tmp_path)
+
+    for text in (
+        "The focused tests now pass.",
+        "[[ODYSSEUS_MILESTONE]] The focused tests now pass.",
+    ):
+        bridge._handle_server_message(task, {
+            "method": "item/completed",
+            "params": {"item": {
+                "type": "agentMessage",
+                "phase": "commentary",
+                "text": text,
+            }},
+        })
+
+    assert [event["text"] for event in task.data["events"]] == [
+        "The focused tests now pass.",
+        "The focused tests now pass.",
+    ]
+    assert "milestone" not in task.data["events"][0]["metadata"]
+    assert task.data["events"][1]["metadata"]["milestone"] is True
+    assert task.data["events"][0]["event_id"] != task.data["events"][1]["event_id"]
+
+
 def test_steer_uses_active_turn_and_existing_stdout_dispatch(tmp_path):
     task, stdin = _active_task(tmp_path)
     before = json.dumps(task.data, sort_keys=True)

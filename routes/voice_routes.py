@@ -1182,7 +1182,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         if task:
             state.setdefault("actions", {})[task["task_id"]] = task
             session.setdefault("tasks", []).append(task)
-        assistant_turn = _append_turn(session, "assistant", reply, "speaking", task["task_id"] if task else None)
+        linked_task_id = task["task_id"] if task else (agent_task_ids[0] if not action and agent_task_ids else None)
+        assistant_turn = _append_turn(session, "assistant", reply, "speaking", linked_task_id)
         _append_chat_message(
             session_manager,
             session,
@@ -1190,7 +1191,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             reply,
             voice_turn_id=assistant_turn["id"],
             voice_status="speaking",
-            task_id=task["task_id"] if task else None,
+            task_id=linked_task_id,
             diagnostics=diagnostics,
         )
         _append_diagnostic(session, diagnostics)

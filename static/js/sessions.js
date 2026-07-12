@@ -73,6 +73,10 @@ function _nextPaint() {
   return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
+function _notifySessionRendered(sessionId) {
+  window.dispatchEvent(new CustomEvent('odysseus:session-rendered', { detail: { sessionId } }));
+}
+
 function _displayHistoryContent(content) {
   const text = String(content || '');
   if (text.length <= HISTORY_DISPLAY_CHAR_LIMIT) return text;
@@ -221,6 +225,7 @@ function _installHistoryPager(id, pageInfo, modelName) {
       }
       const heightDelta = box.scrollHeight - beforeHeight;
       box.scrollTop += heightDelta;
+      _notifySessionRendered(_historyPager.sessionId);
     } catch (e) {
       console.warn('Failed to load older chat history:', e);
     } finally {
@@ -2002,6 +2007,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     if (!isOC && msgHistory.length) {
       _installHistoryPager(id, pageInfo, modelName);
     }
+    _notifySessionRendered(id);
 
     // Fade in and re-enable message animations
     if (chatHistory) {
@@ -2753,6 +2759,7 @@ async function _arcPeekOpen(sid) {
         }
       }
     }
+    _notifySessionRendered(sid);
     if (window.uiModule) window.uiModule.scrollHistory();
   } catch (e) {
     console.error('Peek open failed:', e);

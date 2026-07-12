@@ -9,6 +9,8 @@ from typing import Any, Protocol
 
 import httpx
 
+MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
+
 
 def _enabled(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -37,6 +39,9 @@ def _hermes_instructions(task: dict[str, Any]) -> str:
     base = (
         "You are Hermes working for Leo through Jarvis. Give factual milestone updates and a clear final result. "
         "Never claim an action completed without tool evidence. "
+        "Only after a subtask is complete and verified by tool evidence, you may emit one reasoning update as "
+        f"{MILESTONE_MARKER} <one completed-subtask update>. Do not use that marker for plans, activity, "
+        "commands, estimates, or the final result. "
     )
     if task.get("approved"):
         return base + (
@@ -231,7 +236,17 @@ class HermesRunsAdapter:
         if kind == "tool.completed":
             return {"type": "tool_activity", "text": f"Hermes completed {raw.get('tool') or 'a tool'}.", "metadata": raw}
         if kind == "reasoning.available" and raw.get("text"):
-            return {"type": "progress", "text": str(raw["text"]), "metadata": {"source_event": kind}}
+            text = str(raw["text"]).strip()
+            remainder = text[len(MILESTONE_MARKER):] if text.startswith(MILESTONE_MARKER) else None
+            milestone = remainder is not None and (not remainder or remainder[0].isspace())
+            if milestone:
+                text = remainder.strip()
+            if not text:
+                return None
+            metadata = {"source_event": kind}
+            if milestone:
+                metadata["milestone"] = True
+            return {"type": "progress", "text": text, "metadata": metadata}
         if kind == "approval.request":
             text = str(raw.get("description") or "Hermes needs approval before continuing.")
             return {"type": "approval_required", "text": text, "metadata": raw}

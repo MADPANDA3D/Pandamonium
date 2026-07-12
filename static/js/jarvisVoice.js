@@ -6,7 +6,6 @@ import markdownModule from './markdown.js';
 let sessionId = null;
 let mediaRecorder = null;
 let mediaStream = null;
-let audioChunks = [];
 let silenceTimer = null;
 let maxTurnTimer = null;
 let status = 'idle';
@@ -28,10 +27,14 @@ let speechQueue = [];
 let speechQueueRunning = false;
 let currentSpeech = null;
 let speechPaused = false;
-let discardCurrentRecording = false;
+let discardRecordingGeneration = null;
 let brainTurnInProgress = false;
 let workerStreams = new Map();
+let workerEventChains = new Map();
 let handledWorkerEventIds = new Set();
+let taskSnapshots = new Map();
+let activityTicker = null;
+let activityRestoreRevision = 0;
 let speechIdleResolvers = [];
 let playbackAbortController = null;
 let playbackAudioSources = new Set();
@@ -43,6 +46,7 @@ let activeTurnAudioPromise = null;
 let activeAudioTurnId = null;
 let captureAudioContext = null;
 let captureVoicedMs = 0;
+let voiceCallGeneration = 0;
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -56,9 +60,10 @@ const SPHERE_AUDIO_SMOOTHING = 0.75;
 const VOICE_RMS_THRESHOLD = 0.018;
 const VOICE_SAMPLE_INTERVAL_MS = 140;
 const MIN_VOICED_MS = 280;
-const SPOKEN_WORKER_EVENTS = new Set(['question', 'approval_required', 'result', 'error']);
+const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
+const TERMINAL_TASK_STATES = new Set(['completed', 'failed', 'cancelled', 'blocked']);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
   'pc-codex': 'PC Codex',
@@ -74,6 +79,10 @@ let workerCatalog = {
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function isCurrentVoiceCall(callGeneration) {
+  return isActive && callGeneration === voiceCallGeneration;
 }
 
 function showToast(message, duration = 2600) {
@@ -493,27 +502,178 @@ function postSphereLayout(transparent) {
   }, window.location.origin);
 }
 
-function addTimelineEvent(event) {
-  const timeline = $('jarvis-task-timeline');
-  if (!timeline) return;
-  const taskId = String(event.task_id || activeWorkerTaskId || 'unbound');
-  let row = event.type === 'progress'
-    ? Array.from(timeline.children).find(item => item.dataset.taskId === taskId && item.dataset.eventType === 'progress')
-    : null;
-  if (!row) {
-    row = document.createElement('article');
-    row.dataset.taskId = taskId;
-    row.dataset.eventType = event.type || 'progress';
-    row.append(document.createElement('span'), document.createElement('p'));
-    timeline.appendChild(row);
+function currentChatSessionId() {
+  return window.sessionModule?.getCurrentSessionId?.() || null;
+}
+
+function taskActivityElement(taskId) {
+  return Array.from(document.querySelectorAll('#chat-history .jarvis-task-activity'))
+    .find(item => item.dataset.taskId === String(taskId)) || null;
+}
+
+function taskMessageElements(taskId) {
+  return Array.from(document.querySelectorAll('#chat-history .msg[data-task-id]'))
+    .filter(item => item.dataset.taskId === String(taskId));
+}
+
+function rememberTask(task) {
+  const taskId = String(task?.task_id || '');
+  if (!taskId) return null;
+  const prior = taskSnapshots.get(taskId) || {};
+  const merged = { ...prior, ...task, task_id: taskId };
+  if (!Array.isArray(task.events) && Array.isArray(prior.events)) merged.events = prior.events;
+  taskSnapshots.set(taskId, merged);
+  return merged;
+}
+
+function taskVisible(task) {
+  return Boolean(task?.session_id && task.session_id === currentChatSessionId());
+}
+
+function elapsedTaskTime(task, now = Date.now() / 1000) {
+  const started = Number(task?.created_at || now);
+  const ended = TERMINAL_TASK_STATES.has(String(task?.status || ''))
+    ? Number(task?.updated_at || now)
+    : now;
+  const seconds = Math.max(0, Math.floor(ended - started));
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+function activityTitle(task) {
+  const elapsed = elapsedTaskTime(task);
+  if (task?.status === 'completed') return `Worked for ${elapsed}`;
+  if (task?.status === 'failed' || task?.status === 'blocked') return `Failed after ${elapsed}`;
+  if (task?.status === 'cancelled') return `Cancelled after ${elapsed}`;
+  return `Working for ${elapsed}`;
+}
+
+function updateActivitySummary(group, task) {
+  if (!group || !task) return;
+  const duration = group.querySelector('.jarvis-task-duration');
+  const worker = group.querySelector('.jarvis-task-worker');
+  if (duration) duration.textContent = activityTitle(task);
+  if (worker) worker.textContent = WORKER_LABELS[task.worker] || task.worker || 'Worker';
+}
+
+function ensureActivityTicker() {
+  if (activityTicker) return;
+  activityTicker = window.setInterval(() => {
+    const activeGroups = Array.from(document.querySelectorAll('#chat-history .jarvis-task-activity'))
+      .filter(group => !TERMINAL_TASK_STATES.has(group.dataset.status || ''));
+    activeGroups.forEach(group => {
+      const task = taskSnapshots.get(group.dataset.taskId);
+      if (task) updateActivitySummary(group, task);
+    });
+    if (!activeGroups.length) {
+      window.clearInterval(activityTicker);
+      activityTicker = null;
+    }
+  }, 1000);
+}
+
+function positionActivityGroup(group) {
+  if (!group) return;
+  const box = $('chat-history');
+  if (!box) return;
+  const messages = taskMessageElements(group.dataset.taskId);
+  const acknowledgement = messages.find(item => (
+    item.classList.contains('msg-ai')
+    && ['jarvis_voice', 'jarvis_voice_live'].includes(item.dataset.source || '')
+  ));
+  const result = messages.find(item => item.dataset.source === 'agent_worker');
+  if (acknowledgement) acknowledgement.after(group);
+  else if (result) result.before(group);
+  else if (group.parentElement !== box) box.appendChild(group);
+}
+
+function positionWorkerResult(result, taskId) {
+  const group = taskActivityElement(taskId);
+  if (group && result) group.after(result);
+}
+
+function setActivityStatus(group, task, status) {
+  if (!group || !task) return;
+  const previous = group.dataset.status || '';
+  task.status = status || task.status || 'running';
+  group.dataset.status = task.status;
+  group.className = `jarvis-task-activity is-${task.status}`;
+  const cancel = group.querySelector('.jarvis-task-cancel');
+  if (cancel) cancel.hidden = TERMINAL_TASK_STATES.has(task.status);
+  if (TERMINAL_TASK_STATES.has(task.status)) {
+    group.querySelectorAll('.jarvis-task-approval-actions button').forEach(button => { button.disabled = true; });
   }
-  row.className = `jarvis-task-event jarvis-worker-progress is-${event.type || 'progress'}`;
-  const label = row.querySelector('span');
-  label.className = 'jarvis-task-event-label';
-  label.textContent = WORKER_LABELS[event.worker] || event.worker || 'Jarvis';
-  const text = row.querySelector('p');
-  text.textContent = event.text || '';
-  row.querySelector('.jarvis-task-event-action')?.remove();
+  if (task.status === 'completed') group.open = false;
+  else if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'blocked') group.open = true;
+  else if (!previous) group.open = true;
+  updateActivitySummary(group, task);
+  if (!TERMINAL_TASK_STATES.has(task.status)) ensureActivityTicker();
+}
+
+async function cancelWorkerTask(taskId) {
+  if (!taskId || !window.confirm('Cancel the active task?')) return;
+  await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+  showToast('Cancellation requested. Voice remains open.');
+}
+
+function ensureActivityGroup(task) {
+  task = rememberTask(task);
+  if (!task || !taskVisible(task)) return null;
+  let group = taskActivityElement(task.task_id);
+  if (!group) {
+    group = document.createElement('details');
+    group.className = 'jarvis-task-activity';
+    group.dataset.taskId = task.task_id;
+    group.dataset.sessionId = task.session_id;
+
+    const summary = document.createElement('summary');
+    const indicator = document.createElement('span');
+    indicator.className = 'jarvis-task-indicator';
+    indicator.setAttribute('aria-hidden', 'true');
+    const duration = document.createElement('span');
+    duration.className = 'jarvis-task-duration';
+    const worker = document.createElement('span');
+    worker.className = 'jarvis-task-worker';
+    summary.append(indicator, duration, worker);
+
+    const history = document.createElement('div');
+    history.className = 'jarvis-task-activity-history';
+
+    const controls = document.createElement('div');
+    controls.className = 'jarvis-task-activity-controls';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'jarvis-task-cancel';
+    cancel.textContent = 'Cancel Task';
+    cancel.addEventListener('click', event => {
+      event.preventDefault();
+      cancelWorkerTask(task.task_id).catch(error => showToast(error.message || 'Could not cancel the task.'));
+    });
+    controls.appendChild(cancel);
+    group.append(summary, history, controls);
+    $('chat-history')?.appendChild(group);
+  }
+  setActivityStatus(group, task, task.status || 'running');
+  positionActivityGroup(group);
+  return group;
+}
+
+function activityEventKey(event) {
+  return String(event.event_id || `${event.task_id || 'task'}:${event.seq ?? 'event'}`);
+}
+
+function toolActivityLabel(event) {
+  const kind = String(event.metadata?.item_type || event.metadata?.source_event || '');
+  const text = String(event.text || '').toLowerCase();
+  if (kind === 'fileChange') return 'Edited files';
+  if (kind === 'webSearch') return 'Searched the web';
+  if (kind === 'mcpToolCall' || /\btool\b/.test(text)) return 'Used tools';
+  if (/command completed:\s*(?:rg|grep|sed|cat|head|tail|less|ls|find|git (?:status|diff|show|log))\b/.test(text)) return 'Read files';
+  if (kind === 'commandExecution' || /\bcommand\b/.test(text)) return 'Ran commands';
+  if (event.metadata?.codex_thread_id) return 'Opened task';
+  return 'Used tools';
+}
+
+function appendActivityAction(row, event) {
   const deepLink = event.metadata?.codex_deep_link
     || (event.metadata?.codex_thread_id ? `codex://threads/${event.metadata.codex_thread_id}` : '');
   if (deepLink) {
@@ -524,30 +684,29 @@ function addTimelineEvent(event) {
     open.title = 'Open this task in Codex Desktop';
     row.appendChild(open);
   }
-  timeline.scrollTop = timeline.scrollHeight;
-  return row;
+  if (event.type === 'artifact' && event.metadata?.document_id) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'jarvis-task-event-action';
+    open.textContent = 'Open artifact';
+    open.addEventListener('click', () => openWorkerArtifact(event).catch(handleError));
+    row.appendChild(open);
+  }
 }
 
-async function openWorkerArtifact(event) {
-  const documentId = event.metadata?.document_id;
-  if (!documentId || !window.documentModule?.loadDocument) return;
-  setAgentWorkspaceActive(true);
-  await window.documentModule.loadDocument(documentId, { side: 'left' });
+function ensureTaskDeepLink(group, event) {
+  const deepLink = event.metadata?.codex_deep_link
+    || (event.metadata?.codex_thread_id ? `codex://threads/${event.metadata.codex_thread_id}` : '');
+  const controls = group?.querySelector('.jarvis-task-activity-controls');
+  if (!deepLink || !controls || controls.querySelector('.jarvis-task-open-codex')) return;
+  const open = document.createElement('a');
+  open.className = 'jarvis-task-open-codex';
+  open.href = deepLink;
+  open.textContent = 'Open in Codex';
+  controls.prepend(open);
 }
 
-async function submitWorkerApproval(event, choice, row = null, spokenText = '') {
-  if (!event?.task_id) return;
-  await fetchJson(`/api/agent-tasks/${encodeURIComponent(event.task_id)}/approval`, {
-    method: 'POST',
-    body: JSON.stringify({ choice, spoken_text: spokenText || null }),
-  });
-  row?.querySelectorAll('button').forEach(button => { button.disabled = true; });
-  showToast(choice === 'deny' ? 'Worker action denied.' : 'Worker action approved.');
-}
-
-function addApprovalEvent(event) {
-  const row = addTimelineEvent(event);
-  if (!row) return;
+function appendApprovalControls(row, event) {
   const actions = document.createElement('div');
   actions.className = 'jarvis-task-approval-actions';
   const approve = document.createElement('button');
@@ -560,6 +719,88 @@ function addApprovalEvent(event) {
   deny.addEventListener('click', () => submitWorkerApproval(event, 'deny', row).catch(handleError));
   actions.append(approve, deny);
   row.appendChild(actions);
+}
+
+function renderActivityEvent(event) {
+  const task = rememberTask({
+    ...(taskSnapshots.get(String(event.task_id)) || {}),
+    task_id: String(event.task_id || ''),
+    worker: event.worker,
+  });
+  if (!task || !taskVisible(task)) return null;
+  const group = ensureActivityGroup(task);
+  if (!group) return null;
+  if (event.type === 'accepted') return group;
+  if (event.type === 'result') {
+    setActivityStatus(group, task, 'completed');
+    return group;
+  }
+
+  const history = group.querySelector('.jarvis-task-activity-history');
+  const eventKey = activityEventKey(event);
+  if (!history || Array.from(history.children).some(row => (
+    row.dataset.eventKey === eventKey
+    || String(row.dataset.eventKeys || '').split(/\s+/).includes(eventKey)
+  ))) {
+    return group;
+  }
+
+  if (event.type === 'tool_activity') {
+    ensureTaskDeepLink(group, event);
+    const last = history.lastElementChild;
+    const row = last?.dataset.eventType === 'tool_activity' ? last : document.createElement('div');
+    if (row !== last) {
+      row.className = 'jarvis-task-tool-row';
+      row.dataset.eventType = 'tool_activity';
+      row.dataset.eventKey = eventKey;
+      row._labels = [];
+      row._rawEvents = [];
+      history.appendChild(row);
+    }
+    const label = toolActivityLabel(event);
+    if (!row._labels.includes(label)) row._labels.push(label);
+    row._rawEvents.push(String(event.text || label));
+    row.textContent = row._labels.map((value, index) => index ? value.toLowerCase() : value).join(', ');
+    row.title = row._rawEvents.join('\n');
+    row.dataset.eventKeys = `${row.dataset.eventKeys || ''} ${eventKey}`.trim();
+    return group;
+  }
+
+  const row = document.createElement('article');
+  row.className = `jarvis-task-activity-event is-${event.type || 'progress'}`;
+  row.dataset.eventType = event.type || 'progress';
+  row.dataset.eventKey = eventKey;
+  if (event.metadata?.milestone === true) row.classList.add('is-milestone');
+  const text = document.createElement('p');
+  text.textContent = event.text || '';
+  row.appendChild(text);
+  appendActivityAction(row, event);
+  if (event.type === 'approval_required') appendApprovalControls(row, event);
+  history.appendChild(row);
+
+  if (event.type === 'error') setActivityStatus(group, task, 'failed');
+  else if (event.type === 'cancelled') setActivityStatus(group, task, 'cancelled');
+  else if (event.type === 'question') setActivityStatus(group, task, 'waiting');
+  else if (event.type === 'approval_required') setActivityStatus(group, task, 'waiting_approval');
+  else setActivityStatus(group, task, 'running');
+  return group;
+}
+
+async function openWorkerArtifact(event) {
+  const documentId = event.metadata?.document_id;
+  if (!documentId || !window.documentModule?.loadDocument) return;
+  if (isActive) setAgentWorkspaceActive(true);
+  await window.documentModule.loadDocument(documentId, { side: 'left' });
+}
+
+async function submitWorkerApproval(event, choice, row = null, spokenText = '') {
+  if (!event?.task_id) return;
+  await fetchJson(`/api/agent-tasks/${encodeURIComponent(event.task_id)}/approval`, {
+    method: 'POST',
+    body: JSON.stringify({ choice, spoken_text: spokenText || null }),
+  });
+  row?.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  showToast(choice === 'deny' ? 'Worker action denied.' : 'Worker action approved.');
 }
 
 function resolveSpeechIdle() {
@@ -592,7 +833,9 @@ function workerSpeech(event) {
   const label = WORKER_LABELS[event.worker] || event.worker || 'Worker';
   const source = event.type === 'result'
     ? (event.spoken_text || `${label} finished. The full result is in chat.`)
-    : (event.text || '');
+    : event.type === 'progress'
+      ? (event.spoken_text || '')
+      : (event.text || '');
   const clean = (window.aiTTSManager?.extractPlainText?.(source) || source).trim();
   if (clean.length <= WORKER_SPEECH_MAX_CHARS) return clean;
   const clipped = clean.slice(0, WORKER_SPEECH_MAX_CHARS - 1);
@@ -602,7 +845,7 @@ function workerSpeech(event) {
 
 function pauseCaptureForSpeech() {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-  discardCurrentRecording = true;
+  discardRecordingGeneration = voiceCallGeneration;
   clearTurnTimers();
   mediaRecorder.stop();
   stopTracks();
@@ -635,47 +878,82 @@ async function handleWorkerEvent(event) {
   const eventId = String(event.event_id || '').trim();
   if (eventId && handledWorkerEventIds.has(eventId)) return;
   if (eventId) handledWorkerEventIds.add(eventId);
-  if (event.metadata?.codex_thread_id) {
+  const taskId = String(event.task_id || '');
+  const prior = taskSnapshots.get(taskId) || {};
+  const events = Array.isArray(prior.events) ? [...prior.events] : [];
+  if (!events.some(item => activityEventKey(item) === activityEventKey(event))) events.push(event);
+  const task = rememberTask({
+    ...prior,
+    task_id: taskId,
+    worker: event.worker || prior.worker,
+    events,
+    updated_at: event.created_at || Date.now() / 1000,
+  });
+  const eventBelongsToActiveVoiceTask = isActive
+    && taskId === activeWorkerTaskId
+    && task?.session_id === chatSessionId;
+  if (event.metadata?.codex_thread_id && eventBelongsToActiveVoiceTask) {
     activeCodexThreadId = event.metadata.codex_thread_id;
     activeWorkspace = event.metadata.workspace || activeWorkspace;
     await persistVoiceTarget({ codex_thread_id: activeCodexThreadId }).catch(() => {});
   }
-  if (event.type === 'approval_required') {
-    addApprovalEvent(event);
-  } else if (['progress', 'question', 'artifact', 'result', 'error', 'cancelled'].includes(event.type)) {
-    addTimelineEvent(event.type === 'result'
-      ? { ...event, text: `${WORKER_LABELS[event.worker] || event.worker || 'Worker'} completed. Full result is in chat.` }
-      : event);
-  }
-  if (event.type === 'artifact') await openWorkerArtifact(event);
+  if (taskVisible(task)) renderActivityEvent(event);
+  if (event.type === 'artifact' && isActive) await openWorkerArtifact(event);
   if (event.type === 'result'
       && event.text
-      && window.sessionModule?.getCurrentSessionId?.() === chatSessionId) {
-    window.chatModule?.addMessage?.('assistant', event.text, '', {
-      source: 'agent_worker',
-      worker: event.worker,
-      task_id: event.task_id,
-      character_name: WORKER_LABELS[event.worker] || event.worker || 'Worker',
-    });
+      && taskVisible(task)) {
+    let result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
+    if (!result) {
+      result = window.chatModule?.addMessage?.('assistant', event.text, '', {
+        source: 'agent_worker',
+        worker: event.worker,
+        task_id: taskId,
+        character_name: WORKER_LABELS[event.worker] || event.worker || 'Worker',
+      });
+    }
+    positionWorkerResult(result, taskId);
     window.uiModule?.scrollHistory?.();
   }
-  if (isActive && SPOKEN_WORKER_EVENTS.has(event.type)) {
+  if (isActive
+      && SPOKEN_WORKER_EVENTS.has(event.type)
+      && (event.type !== 'progress' || Boolean(event.spoken_text))) {
     enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
   }
   if (['result', 'error', 'cancelled'].includes(event.type)) {
-    const stream = workerStreams.get(event.task_id);
+    if (task) {
+      task.status = event.type === 'result' ? 'completed' : (event.type === 'error' ? 'failed' : 'cancelled');
+      task.updated_at = event.created_at || Date.now() / 1000;
+      const group = taskActivityElement(taskId);
+      if (group) setActivityStatus(group, task, task.status);
+    }
+    const stream = workerStreams.get(taskId);
     stream?.close();
-    workerStreams.delete(event.task_id);
-    activeWorkerTaskId = null;
-    await persistVoiceTarget({ task_id: '' }).catch(() => {});
-    setAgentWorkspaceActive(voiceTarget !== 'jarvis' || activeTaskCount() > 0);
+    workerStreams.delete(taskId);
+    if (activeWorkerTaskId === taskId) {
+      activeWorkerTaskId = null;
+      await persistVoiceTarget({ task_id: '' }).catch(() => {});
+    }
+    if (isActive) setAgentWorkspaceActive(voiceTarget !== 'jarvis' || activeTaskCount() > 0);
   }
   refreshAgentControl();
 }
 
-function followWorkerTask(taskId) {
+function queueWorkerEvent(event) {
+  const taskId = String(event.task_id || 'unbound');
+  const previous = workerEventChains.get(taskId) || Promise.resolve();
+  const queued = previous
+    .catch(() => {})
+    .then(() => handleWorkerEvent(event))
+    .catch(error => console.warn('Worker event handling failed:', error));
+  workerEventChains.set(taskId, queued);
+  queued.then(() => {
+    if (workerEventChains.get(taskId) === queued) workerEventChains.delete(taskId);
+  });
+}
+
+function followWorkerTask(taskId, affectVoiceLayout = true) {
   if (!taskId || workerStreams.has(taskId)) return;
-  setAgentWorkspaceActive(true);
+  if (isActive && affectVoiceLayout) setAgentWorkspaceActive(true);
   const stream = new EventSource(`/api/agent-tasks/${encodeURIComponent(taskId)}/events`);
   workerStreams.set(taskId, stream);
   refreshAgentControl();
@@ -683,18 +961,56 @@ function followWorkerTask(taskId) {
     try {
       const event = JSON.parse(message.data);
       if (!event.event_id && message.lastEventId) event.event_id = `${taskId}:${message.lastEventId}`;
-      handleWorkerEvent(event).catch(error => console.warn('Worker event handling failed:', error));
+      queueWorkerEvent(event);
     } catch (error) { console.warn('Worker event parse failed:', error); }
   };
   stream.onerror = refreshAgentControl;
 }
 
+async function restoreSessionTasks(targetSessionId) {
+  const sessionIdToRestore = String(targetSessionId || '');
+  if (!sessionIdToRestore || currentChatSessionId() !== sessionIdToRestore) return;
+  const revision = ++activityRestoreRevision;
+  const taskIds = new Set(
+    Array.from(document.querySelectorAll('#chat-history .msg[data-task-id]'))
+      .map(item => item.dataset.taskId)
+      .filter(Boolean),
+  );
+  if (!taskIds.size) return;
+
+  const snapshots = await Promise.all(Array.from(taskIds, async taskId => {
+    try { return await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}`); }
+    catch (error) {
+      console.warn(`Could not restore worker task ${taskId}:`, error);
+      return null;
+    }
+  }));
+  if (revision !== activityRestoreRevision || currentChatSessionId() !== sessionIdToRestore) return;
+
+  for (const snapshot of snapshots.filter(Boolean)) {
+    if (snapshot.session_id !== sessionIdToRestore) continue;
+    const task = rememberTask(snapshot);
+    const group = ensureActivityGroup(task);
+    const events = [...(snapshot.events || [])].sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
+    events.forEach(event => {
+      if (event.event_id) handledWorkerEventIds.add(String(event.event_id));
+      renderActivityEvent(event);
+    });
+    if (group) {
+      setActivityStatus(group, task, task.status || 'running');
+      positionActivityGroup(group);
+      const result = taskMessageElements(task.task_id).find(item => item.dataset.source === 'agent_worker');
+      if (result) positionWorkerResult(result, task.task_id);
+    }
+    if (!TERMINAL_TASK_STATES.has(task.status || '')) followWorkerTask(task.task_id);
+  }
+}
+
 async function cancelActiveWorkerTask() {
   const taskId = activeWorkerTaskId;
-  if (!taskId || !window.confirm('Cancel the active task?')) return;
+  if (!taskId) return;
   setAgentMenuOpen(false);
-  await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
-  showToast('Cancellation requested. Voice remains open.');
+  await cancelWorkerTask(taskId);
 }
 
 function renderLiveUser(text, timings, turnStarted) {
@@ -704,39 +1020,57 @@ function renderLiveUser(text, timings, turnStarted) {
   window.uiModule?.scrollHistory?.();
 }
 
-function appendLiveAssistant(delta, model = '') {
+function applyLiveTaskMetadata(message, task) {
+  if (!message || !task?.task_id) return;
+  message.dataset.source = 'jarvis_voice_live';
+  message.dataset.taskId = String(task.task_id);
+  if (task.worker) message.dataset.worker = String(task.worker);
+  const group = taskActivityElement(task.task_id);
+  if (group) positionActivityGroup(group);
+}
+
+function appendLiveAssistant(delta, model = '', task = null) {
   if (!delta || window.sessionModule?.getCurrentSessionId?.() !== chatSessionId) return;
   if (!liveAssistantMessage) {
-    liveAssistantMessage = window.chatModule?.addMessage?.('assistant', delta, model, { source: 'jarvis_voice_live' }) || null;
+    liveAssistantMessage = window.chatModule?.addMessage?.('assistant', delta, model, {
+      source: 'jarvis_voice_live',
+      task_id: task?.task_id,
+      worker: task?.worker,
+    }) || null;
     if (liveAssistantMessage) liveAssistantMessage.dataset.raw = delta;
   } else {
     liveAssistantMessage.dataset.raw = (liveAssistantMessage.dataset.raw || '') + delta;
     const body = liveAssistantMessage.querySelector('.body');
     if (body) body.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(liveAssistantMessage.dataset.raw));
   }
+  applyLiveTaskMetadata(liveAssistantMessage, task);
   window.uiModule?.scrollHistory?.();
 }
 
-async function postPlaybackState(turnId, state, timings = {}) {
-  if (!sessionId || !turnId) return;
-  await fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/playback`, {
+async function postPlaybackState(turnId, state, timings = {}, voiceSessionId = sessionId) {
+  if (!voiceSessionId || !turnId) return;
+  await fetchJson(`/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/turns/${encodeURIComponent(turnId)}/playback`, {
     method: 'POST',
     body: JSON.stringify({ state, timings }),
   }).catch(error => console.warn('Could not update Jarvis playback state:', error));
 }
 
-async function playVoiceTurnAudio(turnId, timings) {
+async function playVoiceTurnAudio(turnId, timings, voiceSessionId) {
   const token = ++playbackToken;
   return playBufferedAudio(
-    `/api/voice/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/audio`,
-    {}, timings, token, turnId,
+    `/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/turns/${encodeURIComponent(turnId)}/audio`,
+    {}, timings, token, turnId, voiceSessionId,
   );
 }
 
-async function streamTurn(text, timings, turnStarted) {
-  if (!sessionId) await createSession();
+async function streamTurn(text, timings, turnStarted, callGeneration) {
+  if (!sessionId) await createSession(callGeneration);
+  if (!isCurrentVoiceCall(callGeneration) || !sessionId) throw new Error('Voice call ended.');
+  const turnSessionId = sessionId;
+  const turnChatSessionId = chatSessionId;
   liveAssistantMessage = null;
-  const response = await fetch(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond/stream`, {
+  const turnTasks = [];
+  const response = await fetch(`/api/voice/sessions/${encodeURIComponent(turnSessionId)}/respond/stream`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...browserTimezoneHeaders() },
@@ -761,56 +1095,89 @@ async function streamTurn(text, timings, turnStarted) {
       if (!line || line === 'data: [DONE]') continue;
       const event = JSON.parse(line.slice(6));
       if (event.type === 'assistant_delta') {
-        const delta = event.text || '';
-        appendLiveAssistant(delta, event.model || 'Jarvis');
-        if (timings.chat_assistant_first_render_ms == null) timings.chat_assistant_first_render_ms = performance.now() - turnStarted;
+        if (isCurrentVoiceCall(callGeneration)) {
+          const delta = event.text || '';
+          appendLiveAssistant(delta, event.model || 'Jarvis', turnTasks[0] || null);
+          if (timings.chat_assistant_first_render_ms == null) timings.chat_assistant_first_render_ms = performance.now() - turnStarted;
+        }
       }
       else if (event.type === 'audio_ready') {
-        activeAudioTurnId = event.turn_id;
-        setStatus('buffering');
-        const promise = playVoiceTurnAudio(event.turn_id, timings);
-        activeTurnAudioPromise = promise;
-        turnAudioPromise = promise;
-        promise.then(() => {
-          if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
-          if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
-          if (speechQueue.length) processSpeechQueue().catch(handleError);
-        }, () => {
-          if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
-          if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
-        });
+        if (!isCurrentVoiceCall(callGeneration)) {
+          turnAudioPromise = Promise.resolve();
+        } else {
+          activeAudioTurnId = event.turn_id;
+          setStatus('buffering');
+          const promise = playVoiceTurnAudio(event.turn_id, timings, turnSessionId);
+          activeTurnAudioPromise = promise;
+          turnAudioPromise = promise;
+          promise.then(() => {
+            if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
+            if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
+            if (speechQueue.length) processSpeechQueue().catch(handleError);
+          }, () => {
+            if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
+            if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
+          });
+        }
       }
-      else if (event.type === 'state' && event.state !== 'listening') setStatus(event.state);
+      else if (event.type === 'state' && event.state !== 'listening' && isCurrentVoiceCall(callGeneration)) setStatus(event.state);
       else if (event.type === 'target_changed') {
-        activeWorkspace = event.workspace || activeWorkspace;
-        setVoiceTarget(event.target || 'jarvis', false);
+        if (isCurrentVoiceCall(callGeneration)) {
+          activeWorkspace = event.workspace || activeWorkspace;
+          setVoiceTarget(event.target || 'jarvis', false);
+        }
       }
       else if (event.type === 'agent_task') {
-        activeWorkerTaskId = event.task_id;
-        activeWorkspace = event.workspace || activeWorkspace;
-        if (event.foreground !== false) setVoiceTarget(event.worker || 'pc-codex', false);
-        else setAgentWorkspaceActive(true);
-        persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
-        followWorkerTask(event.task_id);
-        refreshAgentControl();
+        const currentCall = isCurrentVoiceCall(callGeneration);
+        const taskWorkspace = event.workspace || (currentCall ? activeWorkspace : 'home-lab');
+        const existingTask = taskSnapshots.get(String(event.task_id || ''));
+        const task = rememberTask({
+          ...(existingTask || {}),
+          task_id: event.task_id,
+          session_id: turnChatSessionId,
+          worker: event.worker || 'pc-codex',
+          workspace: taskWorkspace,
+          status: 'running',
+          created_at: existingTask?.created_at || Date.now() / 1000,
+          updated_at: Date.now() / 1000,
+          events: existingTask?.events || [],
+        });
+        if (task && !turnTasks.some(item => item.task_id === task.task_id)) turnTasks.push(task);
+        ensureActivityGroup(task);
+        if (currentCall) {
+          activeWorkerTaskId = event.task_id;
+          activeWorkspace = taskWorkspace;
+          if (event.foreground !== false) setVoiceTarget(event.worker || 'pc-codex', false);
+          else setAgentWorkspaceActive(true);
+          persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
+          refreshAgentControl();
+        }
+        followWorkerTask(event.task_id, currentCall);
       }
-      else if (event.type === 'final') final = event;
+      else if (event.type === 'final') {
+        final = event;
+        const finalTaskId = (event.task_ids || [])[0];
+        const task = turnTasks.find(item => item.task_id === finalTaskId) || taskSnapshots.get(finalTaskId) || turnTasks[0];
+        if (isCurrentVoiceCall(callGeneration)) applyLiveTaskMetadata(liveAssistantMessage, task);
+      }
       else if (event.type === 'error') throw new Error(event.text || 'Jarvis brain request failed');
     }
     if (done) break;
   }
   if (!final) throw new Error('Jarvis returned no final response.');
+  if (!turnAudioPromise && !isCurrentVoiceCall(callGeneration)) turnAudioPromise = Promise.resolve();
   if (!turnAudioPromise) throw new Error('Jarvis returned no audio stream.');
-  return { ...final, audioPromise: turnAudioPromise };
+  return { ...final, audioPromise: turnAudioPromise, voiceSessionId: turnSessionId };
 }
 
-async function createSession() {
+async function createSession(callGeneration = voiceCallGeneration) {
   const activeChatSessionId = window.sessionModule?.getCurrentSessionId?.() || null;
   const session = await fetchJson('/api/voice/sessions', {
     method: 'POST',
     headers: browserTimezoneHeaders(),
     body: JSON.stringify({ mode: 'jarvis_call', chat_session_id: activeChatSessionId }),
   });
+  if (!isCurrentVoiceCall(callGeneration)) return null;
   sessionId = session.id;
   chatSessionId = session.chat_session_id || null;
   const savedTarget = session.target || 'jarvis';
@@ -818,7 +1185,8 @@ async function createSession() {
   activeWorkspace = session.workspace || 'home-lab';
   activeWorkerTaskId = session.active_task_id || null;
   activeCodexThreadId = session.codex_thread_id || null;
-  if (chatSessionId) await openLinkedChatSession(chatSessionId);
+  if (chatSessionId) await openLinkedChatSession(chatSessionId, callGeneration);
+  if (!isCurrentVoiceCall(callGeneration)) return null;
   setVoiceTarget(savedTarget, false);
   return session;
 }
@@ -848,9 +1216,9 @@ async function sendTurn(text) {
   });
 }
 
-async function postTurnDiagnostics(timings) {
-  if (!sessionId) return;
-  await fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/diagnostics`, {
+async function postTurnDiagnostics(timings, voiceSessionId = sessionId) {
+  if (!voiceSessionId) return;
+  await fetchJson(`/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/diagnostics`, {
     method: 'POST',
     body: JSON.stringify({ label: 'client_turn', timings }),
   }).catch(error => console.warn('Jarvis voice timing diagnostic failed:', error));
@@ -939,7 +1307,7 @@ function stopListening() {
   }
 }
 
-function startSilenceWatch(stream) {
+function startSilenceWatch(stream, callGeneration) {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
   const ctx = new AudioContext();
@@ -966,12 +1334,14 @@ function startSilenceWatch(stream) {
       lastVoiceAt = Date.now();
       captureVoicedMs += VOICE_SAMPLE_INTERVAL_MS;
     }
-    if (heardVoice && Date.now() - lastVoiceAt > 1200) {
+    if (heardVoice && Date.now() - lastVoiceAt > 1200 && isCurrentVoiceCall(callGeneration)) {
       stopListening();
     }
   }, VOICE_SAMPLE_INTERVAL_MS);
 
-  maxTurnTimer = setTimeout(stopListening, 30000);
+  maxTurnTimer = setTimeout(() => {
+    if (isCurrentVoiceCall(callGeneration)) stopListening();
+  }, 30000);
 }
 
 async function startListening() {
@@ -986,44 +1356,62 @@ async function startListening() {
   }
   if (!isActive || brainTurnInProgress || activeTurnAudioPromise || speechQueueRunning || currentSpeech) return;
   if (mediaRecorder?.state === 'recording') return;
+  const callGeneration = voiceCallGeneration;
 
-  audioChunks = [];
+  const recordingChunks = [];
   isStopping = false;
-  mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      channelCount: 1,
-    },
-  });
+  let requestedStream;
+  try {
+    requestedStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+    });
+  } catch (error) {
+    if (!isCurrentVoiceCall(callGeneration)) return;
+    throw error;
+  }
+  if (!isCurrentVoiceCall(callGeneration)) {
+    requestedStream.getTracks().forEach(track => track.stop());
+    return;
+  }
+  mediaStream = requestedStream;
   startSphereStream(mediaStream);
   mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
 
   mediaRecorder.ondataavailable = event => {
-    if (event.data?.size) audioChunks.push(event.data);
+    if (event.data?.size) recordingChunks.push(event.data);
   };
 
   mediaRecorder.onstop = async () => {
+    if (!isCurrentVoiceCall(callGeneration)) {
+      requestedStream.getTracks().forEach(track => track.stop());
+      return;
+    }
     clearTurnTimers();
     stopTracks();
     isStopping = false;
 
-    if (discardCurrentRecording) {
-      discardCurrentRecording = false;
+    if (discardRecordingGeneration === callGeneration) {
+      discardRecordingGeneration = null;
       captureVoicedMs = 0;
       return;
     }
 
-    const blob = new Blob(audioChunks, { type: 'audio/webm' });
-    if (!blob.size || !isActive) {
-      setStatus(isActive ? 'idle' : 'idle');
+    const blob = new Blob(recordingChunks, { type: 'audio/webm' });
+    if (!blob.size) {
+      setStatus('idle');
       return;
     }
     if (captureVoicedMs < MIN_VOICED_MS) {
       captureVoicedMs = 0;
       setStatus('listening', 'No speech detected.');
-      window.setTimeout(() => { if (isActive) startListening().catch(handleError); }, 400);
+      window.setTimeout(() => {
+        if (isCurrentVoiceCall(callGeneration)) startListening().catch(handleError);
+      }, 400);
       return;
     }
     captureVoicedMs = 0;
@@ -1036,11 +1424,14 @@ async function startListening() {
       const text = await transcribe(blob);
       timings.stt_ms = performance.now() - sttStarted;
       timings.transcript_chars = text.length;
+      if (!isCurrentVoiceCall(callGeneration)) return;
       const transcriptEl = $('jarvis-call-transcript');
       if (transcriptEl) transcriptEl.textContent = text || '';
       if (!text) {
         setStatus('listening', 'No speech detected.');
-        window.setTimeout(() => { if (isActive) startListening().catch(handleError); }, 800);
+        window.setTimeout(() => {
+          if (isCurrentVoiceCall(callGeneration)) startListening().catch(handleError);
+        }, 800);
         return;
       }
       renderLiveUser(text, timings, turnStarted);
@@ -1049,7 +1440,8 @@ async function startListening() {
       setStatus('thinking');
       brainTurnInProgress = true;
       const brainStarted = performance.now();
-      const response = await streamTurn(text, timings, turnStarted);
+      const response = await streamTurn(text, timings, turnStarted, callGeneration);
+      if (!isCurrentVoiceCall(callGeneration)) return;
       timings.respond_ms = performance.now() - brainStarted;
       const reply = response.assistant_text || '';
       const diagnostic = response.diagnostics || {};
@@ -1066,15 +1458,19 @@ async function startListening() {
       if (replyEl) replyEl.textContent = reply;
       brainTurnInProgress = false;
       await response.audioPromise;
+      if (!isCurrentVoiceCall(callGeneration)) return;
       if (activeTurnAudioPromise === response.audioPromise) activeTurnAudioPromise = null;
       activeAudioTurnId = null;
       if (!speechQueueRunning && speechQueue.length) processSpeechQueue().catch(handleError);
       await waitForSpeechQueueIdle();
+      if (!isCurrentVoiceCall(callGeneration)) return;
       stopPlaybackAudio();
       delete timings.turn_started_at;
-      await postTurnDiagnostics(timings);
+      await postTurnDiagnostics(timings, response.voiceSessionId);
+      if (!isCurrentVoiceCall(callGeneration)) return;
       resumeListeningIfReady();
     } catch (error) {
+      if (!isCurrentVoiceCall(callGeneration)) return;
       brainTurnInProgress = false;
       handleError(error);
     }
@@ -1082,7 +1478,7 @@ async function startListening() {
 
   mediaRecorder.start();
   setStatus('listening');
-  startSilenceWatch(mediaStream);
+  startSilenceWatch(mediaStream, callGeneration);
 }
 
 async function ensurePlaybackContext() {
@@ -1112,7 +1508,7 @@ async function ensurePlaybackContext() {
   return context;
 }
 
-async function playBufferedAudio(url, options, timings, token, turnId = null) {
+async function playBufferedAudio(url, options, timings, token, turnId = null, voiceSessionId = sessionId) {
   const started = performance.now();
   const controller = new AbortController();
   playbackAbortController = controller;
@@ -1147,7 +1543,7 @@ async function playBufferedAudio(url, options, timings, token, turnId = null) {
     source.connect(sphereAnalyser);
     playbackAudioSources.add(source);
     setStatus('speaking');
-    if (turnId) postPlaybackState(turnId, 'started', timings);
+    if (turnId) postPlaybackState(turnId, 'started', timings, voiceSessionId);
 
     await new Promise((resolve, reject) => {
       let settled = false;
@@ -1165,11 +1561,11 @@ async function playBufferedAudio(url, options, timings, token, turnId = null) {
     });
 
     timings.tts_total_ms = performance.now() - started;
-    if (turnId && token === playbackToken) await postPlaybackState(turnId, 'completed', timings);
+    if (turnId && token === playbackToken) await postPlaybackState(turnId, 'completed', timings, voiceSessionId);
     return { audio_ms: timings.playback_duration_ms, blocks: 1 };
   } catch (error) {
     if (token !== playbackToken || error?.name === 'AbortError') return null;
-    if (turnId) await postPlaybackState(turnId, 'failed', timings);
+    if (turnId) await postPlaybackState(turnId, 'failed', timings, voiceSessionId);
     speechQueue = [];
     currentSpeech = null;
     stopPlaybackAudio();
@@ -1230,10 +1626,10 @@ async function startCall() {
     return;
   }
 
+  const callGeneration = ++voiceCallGeneration;
   isActive = true;
   speechPaused = false;
   speechQueue = [];
-  handledWorkerEventIds = new Set();
   brainTurnInProgress = false;
   activeWorkerTaskId = null;
   activeCodexThreadId = null;
@@ -1241,18 +1637,22 @@ async function startCall() {
   liveAssistantMessage = null;
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
-  const timeline = $('jarvis-task-timeline');
-  if (timeline) timeline.replaceChildren();
   setAgentWorkspaceActive(false);
   mountOrganicSphere();
-  await createSession();
-  setStatus('idle');
-  prewarmVoiceStack();
-  await startListening();
+  try {
+    await createSession(callGeneration);
+    if (!isCurrentVoiceCall(callGeneration)) return;
+    setStatus('idle');
+    prewarmVoiceStack();
+    await startListening();
+  } catch (error) {
+    if (isCurrentVoiceCall(callGeneration)) handleError(error);
+  }
 }
 
 function endCall() {
   const continuedTasks = activeTaskCount();
+  voiceCallGeneration += 1;
   isActive = false;
   brainTurnInProgress = false;
   activeTurnAudioPromise = null;
@@ -1260,8 +1660,6 @@ function endCall() {
   speechPaused = true;
   speechQueue = [];
   currentSpeech = null;
-  workerStreams.forEach(stream => stream.close());
-  workerStreams.clear();
   setAgentWorkspaceActive(false);
   playbackToken += 1;
   clearTurnTimers();
@@ -1276,18 +1674,19 @@ function endCall() {
   const panel = $('jarvis-call-panel');
   if (panel) panel.hidden = true;
   sessionId = null;
-  chatSessionId = null;
+  if (!continuedTasks) chatSessionId = null;
   voiceTarget = 'jarvis';
-  activeWorkerTaskId = null;
-  handledWorkerEventIds = new Set();
+  if (!continuedTasks) activeWorkerTaskId = null;
   liveAssistantMessage = null;
   if (continuedTasks) showToast(`Voice ended. ${continuedTasks === 1 ? 'The active task continues' : `${continuedTasks} active tasks continue`}.`);
 }
 
-async function openLinkedChatSession(linkedChatSessionId) {
+async function openLinkedChatSession(linkedChatSessionId, callGeneration = voiceCallGeneration) {
   try {
     if (!window.sessionModule?.selectSession) return;
+    if (!isCurrentVoiceCall(callGeneration)) return;
     if (window.sessionModule.loadSessions) await window.sessionModule.loadSessions();
+    if (!isCurrentVoiceCall(callGeneration)) return;
     await window.sessionModule.selectSession(linkedChatSessionId, { keepSidebar: true });
   } catch (error) {
     console.warn('Could not open Jarvis voice transcript session:', error);
@@ -1387,11 +1786,18 @@ function bind() {
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') setAgentMenuOpen(false);
   });
+  window.addEventListener('odysseus:session-rendered', event => {
+    restoreSessionTasks(event.detail?.sessionId).catch(error => {
+      console.warn('Could not restore Jarvis task activity:', error);
+    });
+  });
 
   window.addEventListener('message', handleSphereMessage);
   setVoiceTarget('jarvis');
   loadWorkerCatalog().catch(() => {});
   setStatus('idle');
+  const currentSession = currentChatSessionId();
+  if (currentSession) restoreSessionTasks(currentSession).catch(() => {});
 }
 
 if (document.readyState === 'loading') {
@@ -1400,4 +1806,4 @@ if (document.readyState === 'loading') {
   bind();
 }
 
-window.jarvisVoice = { startCall, endCall, interrupt, isActive: isCallActive };
+window.jarvisVoice = { startCall, endCall, interrupt, isActive: isCallActive, restoreSessionTasks };

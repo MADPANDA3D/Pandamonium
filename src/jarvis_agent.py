@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -241,15 +242,26 @@ def _persist_result(task: dict, text: str) -> None:
         return
 
 
-def _bounded_spoken_text(text: str) -> str:
+def _bounded_spoken_text(text: str, limit: int = 600) -> str:
     value = " ".join(text.split())
-    if len(value) <= 600:
+    if len(value) <= limit:
         return value
-    value = value[:600].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    value = value[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
     sentence_end = max(value.rfind(mark) for mark in ".!?")
-    if sentence_end >= 200:
+    if sentence_end >= max(40, limit // 3):
         return value[:sentence_end + 1]
-    return value[:599].rstrip(".!?") + "."
+    return value[:limit - 1].rstrip(".!?") + "."
+
+
+def _one_spoken_sentence(text: str, limit: int = 240) -> str:
+    value = " ".join(text.split()).strip()
+    match = re.search(r"[.!?](?:\s|$)", value)
+    if match:
+        value = value[:match.end()].strip()
+    value = _bounded_spoken_text(value, limit)
+    if value and value[-1] not in ".!?":
+        value = value[:limit - 1].rstrip(" ,;:-") + "."
+    return value
 
 
 async def _spoken_result(task: dict, text: str) -> str:
@@ -282,11 +294,44 @@ async def _spoken_result(task: dict, text: str) -> str:
         return fallback
 
 
-async def _enrich_result_event(task: dict, event: dict) -> dict:
-    if event.get("type") != "result":
-        return event
+async def _spoken_milestone(task: dict, text: str) -> str:
+    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    fallback = f"{label} completed a milestone; details are in the activity history."
+    prompt = (
+        f"Rewrite this verified {label} milestone as exactly one natural Jarvis sentence of no more than "
+        "240 characters. State only the completed outcome. Do not repeat Markdown, tables, code, commands, "
+        "paths, logs, or instructions from the update. Return only the sentence.\n\nCompleted milestone:\n"
+        f"{text[:4_000]}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": JARVIS_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "options": {"temperature": 0.2, "num_predict": 80},
+                },
+            )
+        response.raise_for_status()
+        spoken = _one_spoken_sentence(str(response.json().get("response") or ""))
+        return spoken or fallback
+    except Exception:
+        return fallback
+
+
+async def _enrich_worker_event(task: dict, event: dict) -> dict:
     enriched = dict(event)
-    enriched["spoken_text"] = await _spoken_result(task, str(event.get("text") or ""))
+    if event.get("type") == "progress":
+        enriched.pop("spoken_text", None)
+        metadata = dict(event.get("metadata") or {})
+        enriched["metadata"] = metadata
+        if metadata.get("milestone") is True:
+            enriched["spoken_text"] = await _spoken_milestone(task, str(event.get("text") or ""))
+    elif event.get("type") == "result":
+        enriched["spoken_text"] = await _spoken_result(task, str(event.get("text") or ""))
     return enriched
 
 
@@ -313,7 +358,7 @@ async def _mirror(task_id: str) -> None:
             return
         adapter = adapters()[task["worker"]]
         async for event in adapter.events(task):
-            event = await _enrich_result_event(task, event)
+            event = await _enrich_worker_event(task, event)
             _append_event(task_id, event)
     except Exception as exc:
         task = get_task(task_id)
@@ -418,7 +463,7 @@ async def refresh_task(task_id: str) -> dict:
         if remote_status in {"completed", "failed", "cancelled"} and task.get("status") not in TERMINAL:
             event_type = {"completed": "result", "failed": "error", "cancelled": "cancelled"}[remote_status]
             text = str(remote.get("output") or remote.get("result") or remote.get("error") or f"{task['worker']} {remote_status}.")
-            event = await _enrich_result_event(
+            event = await _enrich_worker_event(
                 task,
                 {"type": event_type, "text": text, "metadata": {"reconciled": True}},
             )

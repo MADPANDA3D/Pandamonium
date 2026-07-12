@@ -34,7 +34,7 @@ def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch,
             "transcript_chars": len(text),
             "assistant_chars": 13,
             "guard_reason": None,
-        }, []
+        }, ["task-1"]
 
     manager = FakeSessionManager()
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
@@ -59,6 +59,7 @@ def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch,
     assert manager.messages[chat_session_id][0].content == "open the voice transcript"
     assert manager.messages[chat_session_id][1].content == "At once, sir."
     assert manager.messages[chat_session_id][0].metadata["source"] == "jarvis_voice"
+    assert manager.messages[chat_session_id][1].metadata["task_id"] == "task-1"
 
     state = json.loads((tmp_path / "voice_sessions.json").read_text())
     voice_session = state["sessions"][session_payload["id"]]
