@@ -295,7 +295,7 @@ def adapters() -> dict[str, WorkerAdapter]:
             "pc-codex",
             os.getenv("ODYSSEUS_PC_CODEX_URL", "http://127.0.0.1:8040"),
             PC_TOKEN_FILE,
-            enabled=_enabled("ODYSSEUS_PC_CODEX_ENABLED", True),
+            enabled=_enabled("ODYSSEUS_PC_CODEX_ENABLED", False),
             machine="Local workstation",
         ),
         "hermes": HermesRunsAdapter(

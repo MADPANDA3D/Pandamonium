@@ -35,7 +35,7 @@ def test_mark5_voice_budgets_and_runtime_parser():
 def test_agent_tools_and_worker_defaults_are_narrow():
     names = {schema["function"]["name"] for schema in FUNCTION_TOOL_SCHEMAS}
     assert {"get_runtime_status", "start_agent_task", "read_agent_task", "search_jarvis_knowledge"} <= names
-    assert WORKERS["pc-codex"]["enabled"] is True
+    assert WORKERS["pc-codex"]["enabled"] is False
     assert WORKERS["hermes"]["enabled"] is False
     assert WORKERS["vps-codex"]["enabled"] is False
     payload = TaskCreate(worker="pc-codex", session_id="s", workspace="home-lab", prompt="inspect")
