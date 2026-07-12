@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment, take_speech_segment
+from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +59,15 @@ def setup_tts_routes(tts_service):
                 )
             
             if request.format == "base64":
-                audio_b64 = tts_service.synthesize_to_base64(
-                    request.text,
-                    model=request.model,
-                    voice=request.voice,
-                    speed=request.speed,
-                    use_cache=request.use_cache,
-                )
+                async with TTS_INFERENCE_LOCK:
+                    audio_b64 = await asyncio.to_thread(
+                        tts_service.synthesize_to_base64,
+                        request.text,
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                        use_cache=request.use_cache,
+                    )
                 if not audio_b64:
                     raise HTTPException(
                         status_code=500,
@@ -74,13 +76,15 @@ def setup_tts_routes(tts_service):
                 return {"audio": audio_b64}
             
             else:  # audio format
-                audio_data = tts_service.synthesize(
-                    request.text,
-                    model=request.model,
-                    voice=request.voice,
-                    speed=request.speed,
-                    use_cache=request.use_cache,
-                )
+                async with TTS_INFERENCE_LOCK:
+                    audio_data = await asyncio.to_thread(
+                        tts_service.synthesize,
+                        request.text,
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                        use_cache=request.use_cache,
+                    )
                 if not audio_data:
                     raise HTTPException(
                         status_code=500,
@@ -109,7 +113,7 @@ def setup_tts_routes(tts_service):
 
     @router.post("/stream")
     async def stream_speech(request: TTSRequest):
-        """Synthesize bounded text blocks and expose one clean PCM stream."""
+        """Relay one native PCM inference for the complete utterance."""
         text = request.text.strip()
         if not text:
             raise HTTPException(status_code=400, detail={"message": "Speech text is required"})
@@ -117,59 +121,18 @@ def setup_tts_routes(tts_service):
             raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
 
         async def generate():
-            remaining = text
-            first = True
-            sample_rate = None
-            blocks = 0
-            generation_ms = 0
-            audio_ms = 0
             try:
-                while remaining:
-                    segment, remaining = take_speech_segment(remaining, first=first, done=True)
-                    if not segment:
-                        break
-                    block_generation_ms = 0
-                    block_audio_ms = 0
-                    async with TTS_INFERENCE_LOCK:
-                        async for event in stream_tts_pcm_segment(
-                            tts_service,
-                            segment,
-                            model=request.model,
-                            voice=request.voice,
-                            speed=request.speed,
-                        ):
-                            event_type = event.get("type")
-                            if event_type == "start":
-                                block_rate = int(event.get("sample_rate") or 0)
-                                if not block_rate:
-                                    raise RuntimeError("TTS returned an invalid sample rate")
-                                if sample_rate is None:
-                                    sample_rate = block_rate
-                                    yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
-                                elif block_rate != sample_rate:
-                                    raise RuntimeError("TTS sample rate changed during a speech turn")
-                                yield json.dumps({
-                                    "type": "block",
-                                    "index": blocks,
-                                    "text_chars": len(segment),
-                                }) + "\n"
-                            elif event_type == "audio":
-                                yield json.dumps(event, separators=(",", ":")) + "\n"
-                            elif event_type == "done":
-                                block_generation_ms = int(event.get("generation_ms") or 0)
-                                block_audio_ms = int(event.get("audio_ms") or 0)
-                    blocks += 1
-                    generation_ms += block_generation_ms
-                    audio_ms += block_audio_ms
-                    first = False
-                yield json.dumps({
-                    "type": "done",
-                    "blocks": blocks,
-                    "generation_ms": generation_ms,
-                    "audio_ms": audio_ms,
-                }) + "\n"
+                async with TTS_INFERENCE_LOCK:
+                    async for event in stream_tts_pcm_segment(
+                        tts_service,
+                        text,
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                    ):
+                        yield json.dumps(event, separators=(",", ":")) + "\n"
             except Exception as exc:
-                logger.exception("Segmented TTS stream failed")
+                logger.exception("TTS stream failed")
                 yield json.dumps({"type": "error", "error": str(exc)[:240]}) + "\n"
 
         return StreamingResponse(generate(), media_type="application/x-ndjson")

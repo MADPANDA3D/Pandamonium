@@ -1,4 +1,4 @@
-import base64
+import asyncio
 import io
 import json
 import wave
@@ -6,28 +6,8 @@ import wave
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from routes import voice_routes
-from src.voice_pcm import pcm_frames, take_speech_segment, wav_to_pcm16
-
-
-def test_speech_segments_preserve_text_and_stay_bounded():
-    source = (
-        "Good morning, Leo. All systems are stable and the background workers are still checking their assigned sources. "
-        "PC Codex has opened the Home Lab workspace, while Hermes is reviewing its operations notes. "
-        "I will alert you at the next natural boundary if either worker needs a decision."
-    )
-    remaining = source
-    chunks = []
-    first = True
-    while remaining:
-        chunk, remaining = take_speech_segment(remaining, first=first, done=True)
-        assert chunk
-        chunks.append(chunk)
-        first = False
-
-    assert "".join(chunks).replace(" ", "") == source.replace(" ", "")
-    assert len(chunks[0]) <= 220
-    assert all(len(chunk) <= 360 for chunk in chunks[1:])
+from routes import tts_routes, voice_routes
+from src.voice_pcm import pcm_frames, wav_to_pcm16
 
 
 def test_wav_pcm_validation_and_frame_alignment():
@@ -45,21 +25,18 @@ def test_wav_pcm_validation_and_frame_alignment():
     assert all(len(frame) % 2 == 0 for frame in frames)
 
 
-def test_voice_turn_audio_is_one_ordered_pcm_stream(monkeypatch, tmp_path):
+def test_voice_turn_audio_uses_one_complete_inference(monkeypatch, tmp_path):
     class FakeTTS:
         available = True
 
+        def __init__(self):
+            self.calls = []
+
+        def synthesize(self, text, use_cache=True):
+            self.calls.append((text, use_cache))
+            return b"ID3complete-audio"
+
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
-    calls = []
-
-    async def fake_stream(_tts, text, **_kwargs):
-        calls.append(text)
-        pcm = b"\x01\x00" * max(2_400, len(text) * 120)
-        yield {"type": "start", "sample_rate": 24_000}
-        yield {"type": "audio", "pcm_base64": base64.b64encode(pcm).decode("ascii"), "samples": len(pcm) // 2}
-        yield {"type": "done", "generation_ms": 100, "audio_ms": int(len(pcm) / 48)}
-
-    monkeypatch.setattr(voice_routes, "stream_tts_pcm_segment", fake_stream)
     voice_routes._SPEECH_TURNS.clear()
     tts = FakeTTS()
     app = FastAPI()
@@ -67,21 +44,17 @@ def test_voice_turn_audio_is_one_ordered_pcm_stream(monkeypatch, tmp_path):
     client = TestClient(app)
     session = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
     speech_turn = voice_routes._register_speech_turn(session["id"])
-    speech_turn.buffer = (
+    spoken = (
         "Good morning, Leo. The first response block is ready and should begin promptly. "
-        "The coordinator is preparing the next block while this one is playing, which keeps the voice continuous. "
-        "The complete response remains one ordered stream and is persisted only once."
+        "The complete response remains one inference and is persisted only once."
     )
-    speech_turn.finished = True
+    asyncio.run(speech_turn.complete(spoken))
 
     response = client.get(f"/api/voice/sessions/{session['id']}/turns/{speech_turn.turn_id}/audio")
     assert response.status_code == 200
-    events = [json.loads(line) for line in response.text.splitlines() if line]
-    assert events[0] == {"type": "start", "sample_rate": 24_000}
-    assert events[-1]["type"] == "done"
-    assert events[-1]["blocks"] == len(calls)
-    assert len(calls) >= 2
-    assert all(event["type"] in {"start", "block", "audio", "done"} for event in events)
+    assert response.headers["content-type"].startswith("audio/mpeg")
+    assert response.content == b"ID3complete-audio"
+    assert tts.calls == [(spoken, False)]
 
     completed = client.post(
         f"/api/voice/sessions/{session['id']}/turns/{speech_turn.turn_id}/playback",
@@ -89,3 +62,51 @@ def test_voice_turn_audio_is_one_ordered_pcm_stream(monkeypatch, tmp_path):
     )
     assert completed.status_code == 200
     assert completed.json()["status"] == "ready"
+
+
+def test_compatibility_tts_stream_uses_one_upstream_inference(monkeypatch):
+    class FakeTTS:
+        available = True
+
+    calls = []
+
+    async def fake_stream(_tts, text, **_kwargs):
+        calls.append(text)
+        yield {"type": "start", "sample_rate": 24_000}
+        yield {"type": "done", "generation_ms": 1, "audio_ms": 1}
+
+    monkeypatch.setattr(tts_routes, "stream_tts_pcm_segment", fake_stream)
+    app = FastAPI()
+    app.include_router(tts_routes.setup_tts_routes(FakeTTS()))
+    text = "One complete utterance. " * 40
+
+    response = TestClient(app).post("/api/tts/stream", json={"text": text})
+
+    assert response.status_code == 200
+    assert [json.loads(line)["type"] for line in response.text.splitlines()] == ["start", "done"]
+    assert calls == [text.strip()]
+
+
+def test_tts_synthesize_uses_shared_lock_for_audio_and_base64():
+    class FakeTTS:
+        available = True
+
+        def __init__(self):
+            self.calls = []
+
+        def synthesize(self, text, **_kwargs):
+            self.calls.append(("audio", text, tts_routes.TTS_INFERENCE_LOCK.locked()))
+            return b"ID3audio"
+
+        def synthesize_to_base64(self, text, **_kwargs):
+            self.calls.append(("base64", text, tts_routes.TTS_INFERENCE_LOCK.locked()))
+            return "YXVkaW8="
+
+    tts = FakeTTS()
+    app = FastAPI()
+    app.include_router(tts_routes.setup_tts_routes(tts))
+    client = TestClient(app)
+
+    assert client.post("/api/tts/synthesize", json={"text": "audio"}).status_code == 200
+    assert client.post("/api/tts/synthesize", json={"text": "base64", "format": "base64"}).json() == {"audio": "YXVkaW8="}
+    assert tts.calls == [("audio", "audio", True), ("base64", "base64", True)]

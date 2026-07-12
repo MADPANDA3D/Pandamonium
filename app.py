@@ -141,6 +141,7 @@ app.add_middleware(
         "X-Odysseus-Internal-Token",
         "X-Odysseus-Owner",
         "X-Requested-With",
+        "X-TZ-Name",
         "X-TZ-Offset",
     ],
 )
@@ -189,10 +190,24 @@ _TIMEOUT_EXEMPT_PREFIXES = (
 )
 
 
+def _is_timeout_exempt(path: str) -> bool:
+    if any(path.startswith(prefix) for prefix in _TIMEOUT_EXEMPT_PREFIXES):
+        return True
+    parts = path.strip("/").split("/")
+    return (
+        len(parts) == 7
+        and parts[:3] == ["api", "voice", "sessions"]
+        and parts[4] == "turns"
+        and parts[6] == "audio"
+        and bool(parts[3])
+        and bool(parts[5])
+    )
+
+
 class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path or ""
-        if any(path.startswith(p) for p in _TIMEOUT_EXEMPT_PREFIXES):
+        if _is_timeout_exempt(path):
             return await call_next(request)
         try:
             return await _asyncio.wait_for(call_next(request), timeout=REQUEST_HARD_TIMEOUT)

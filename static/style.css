@@ -40861,6 +40861,29 @@ body.jarvis-voice-active {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.jarvis-call-panel[data-state="failed"] .jarvis-call-copy {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(92px, 14vh, 150px);
+  z-index: 4;
+  width: min(520px, calc(100vw - 32px));
+  height: auto;
+  margin: 0;
+  padding: 12px 16px;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  border: 1px solid rgba(255, 107, 122, 0.42);
+  border-radius: 6px;
+  background: rgba(10, 5, 9, 0.9);
+  text-align: center;
+  white-space: normal;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+.jarvis-call-panel[data-state="failed"] .jarvis-call-detail {
+  white-space: normal;
+}
 .jarvis-call-turns {
   display: flex;
   gap: 10px;

@@ -32,8 +32,8 @@ let discardCurrentRecording = false;
 let brainTurnInProgress = false;
 let workerStreams = new Map();
 let speechIdleResolvers = [];
-let streamingAbortController = null;
-let streamingAudioSources = new Set();
+let playbackAbortController = null;
+let playbackAudioSources = new Set();
 let activeWorkerTaskId = null;
 let activeCodexThreadId = null;
 let activeWorkspace = 'home-lab';
@@ -41,8 +41,6 @@ let activeWorkerQuestion = null;
 let activeWorkerApproval = null;
 let pendingWorkerText = null;
 let liveAssistantMessage = null;
-let streamingScheduledUntil = 0;
-let streamingLastGain = null;
 let activeTurnAudioPromise = null;
 let activeAudioTurnId = null;
 let captureAudioContext = null;
@@ -55,11 +53,9 @@ const ORGANIC_SPHERE_URL = '/static/vendor/organic-sphere/index.html?v=20260710T
 const INSECURE_MIC_MESSAGE = 'Microphone needs localhost or HTTPS.';
 const SPHERE_AUDIO_GAIN = 0.35;
 const SPHERE_AUDIO_SMOOTHING = 0.75;
-const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
-const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'result', 'error']);
-const PROGRESS_STALE_MS = 45000;
-const STREAM_INITIAL_BUFFER_SECONDS = 2.2;
-const STREAM_EDGE_CROSSFADE_SECONDS = 0.008;
+const SPOKEN_WORKER_EVENTS = new Set(['question', 'approval_required', 'result', 'error']);
+const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
+const WORKER_SPEECH_MAX_CHARS = 700;
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
   'pc-codex': 'PC Codex',
@@ -146,8 +142,6 @@ function stopSphereAudio() {
   sphereFreqData = null;
   sphereSmoothedVolume = 0;
   sphereSmoothedLevels = Array(8).fill(0);
-  streamingScheduledUntil = 0;
-  streamingLastGain = null;
   if (sphereAudioContext) {
     sphereAudioContext.close().catch(() => {});
     sphereAudioContext = null;
@@ -307,7 +301,7 @@ function setStatus(next, detail = '') {
   }
   if (isActive && next !== 'failed') {
     mountOrganicSphere();
-    if (next === 'speaking' && streamingAudioSources.size) {
+    if (next === 'speaking' && playbackAudioSources.size) {
       postSphereLevels(next);
     } else if (next === 'transcribing' || next === 'thinking' || next === 'worker' || next === 'background' || next === 'buffering' || next === 'interrupted' || next === 'speaking') {
       startSpherePulse(next);
@@ -365,11 +359,21 @@ function sphereTitle(value) {
   return 'End Jarvis call';
 }
 
+function browserTimezoneHeaders() {
+  let name = '';
+  try { name = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch {}
+  return {
+    'X-Tz-Offset': String(-new Date().getTimezoneOffset()),
+    'X-Tz-Name': name,
+  };
+}
+
 async function fetchJson(url, options = {}) {
+  const { headers = {}, ...requestOptions } = options;
   const res = await fetch(url, {
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
+    ...requestOptions,
+    headers: { 'Content-Type': 'application/json', ...headers },
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -565,21 +569,25 @@ function resumeListeningIfReady() {
   startListening().catch(handleError);
 }
 
-function enqueueSpeech(text, type = 'progress', source = 'jarvis', timings = {}) {
+function enqueueSpeech(text, type = 'speech', source = 'jarvis', timings = {}) {
   const clean = (window.aiTTSManager?.extractPlainText?.(text) || text || '').trim();
   if (!clean) return;
   const key = clean.toLowerCase().replace(/\s+/g, ' ');
   if (speechQueue.some(item => item.key === key) || currentSpeech?.key === key) return;
-  if (type === 'progress') {
-    const pending = speechQueue.filter(item => item.type === 'progress');
-    while (pending.length >= 3) {
-      const stale = pending.shift();
-      const index = speechQueue.indexOf(stale);
-      if (index >= 0) speechQueue.splice(index, 1);
-    }
-  }
-  speechQueue.push({ text: clean, type, source, key, timings, createdAt: Date.now() });
+  speechQueue.push({ text: clean, type, source, key, timings });
   if (!speechPaused) processSpeechQueue().catch(handleError);
+}
+
+function workerSpeech(event) {
+  const label = WORKER_LABELS[event.worker] || event.worker || 'Worker';
+  const source = event.type === 'result'
+    ? (event.spoken_text || `${label} finished. The full result is in chat.`)
+    : (event.text || '');
+  const clean = (window.aiTTSManager?.extractPlainText?.(source) || source).trim();
+  if (clean.length <= WORKER_SPEECH_MAX_CHARS) return clean;
+  const clipped = clean.slice(0, WORKER_SPEECH_MAX_CHARS - 1);
+  const boundary = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf(' '));
+  return `${clipped.slice(0, boundary > 400 ? boundary + 1 : clipped.length).trim()}…`;
 }
 
 function pauseCaptureForSpeech() {
@@ -596,7 +604,6 @@ async function processSpeechQueue() {
   try {
     while (isActive && !speechPaused && speechQueue.length) {
       const item = speechQueue.shift();
-      if (item.type === 'progress' && Date.now() - item.createdAt > PROGRESS_STALE_MS) continue;
       currentSpeech = item;
       pauseCaptureForSpeech();
       if (status !== 'speaking') setStatus('speaking');
@@ -608,10 +615,7 @@ async function processSpeechQueue() {
     currentSpeech = null;
     resolveSpeechIdle();
     if (isActive && !speechPaused && !brainTurnInProgress && !activeTurnAudioPromise && !speechQueue.length && status !== 'failed') {
-      if (sphereAudioContext && streamingScheduledUntil > sphereAudioContext.currentTime) {
-        await waitForScheduledPlayback(sphereAudioContext, streamingScheduledUntil, playbackToken);
-      }
-      stopStreamingAudio();
+      stopPlaybackAudio();
       resumeListeningIfReady();
     }
   }
@@ -631,7 +635,7 @@ async function handleWorkerEvent(event) {
     addTimelineEvent(event);
   }
   if (event.type === 'artifact') await openWorkerArtifact(event);
-  if (SPOKEN_WORKER_EVENTS.has(event.type)) enqueueSpeech(event.text, event.type, event.worker || 'worker');
+  if (SPOKEN_WORKER_EVENTS.has(event.type)) enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
   if (['result', 'error', 'cancelled'].includes(event.type)) {
     const stream = workerStreams.get(event.task_id);
     stream?.close();
@@ -714,6 +718,8 @@ async function startDirectWorkerTask(text) {
   activeWorkspace = task.workspace || workspaceForText(text);
   await persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
   followWorkerTask(task.task_id);
+  const worker = task.worker || voiceTarget;
+  enqueueSpeech(`${WORKER_LABELS[worker] || worker} has the task. I’ll keep progress in chat and brief you when it finishes.`, 'start', worker);
   refreshAgentControl();
   return task;
 }
@@ -751,25 +757,11 @@ async function postPlaybackState(turnId, state, timings = {}) {
 }
 
 async function playVoiceTurnAudio(turnId, timings) {
-  const controller = new AbortController();
-  streamingAbortController = controller;
-  const response = await fetch(
-    `/api/voice/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/audio`,
-    { credentials: 'same-origin', signal: controller.signal },
-  );
-  if (!response.ok || !response.body) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body?.detail?.message || body?.detail || 'Jarvis audio stream failed');
-  }
   const token = ++playbackToken;
-  try {
-    return await consumePcmResponse(response, timings, token, turnId);
-  } catch (error) {
-    if (token === playbackToken) await postPlaybackState(turnId, 'failed', timings);
-    throw error;
-  } finally {
-    if (streamingAbortController === controller) streamingAbortController = null;
-  }
+  return playBufferedAudio(
+    `/api/voice/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/audio`,
+    {}, timings, token, turnId,
+  );
 }
 
 async function streamTurn(text, timings, turnStarted) {
@@ -778,7 +770,7 @@ async function streamTurn(text, timings, turnStarted) {
   const response = await fetch(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond/stream`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...browserTimezoneHeaders() },
     body: JSON.stringify({ text }),
   });
   if (!response.ok || !response.body) {
@@ -847,6 +839,7 @@ async function createSession() {
   const activeChatSessionId = window.sessionModule?.getCurrentSessionId?.() || null;
   const session = await fetchJson('/api/voice/sessions', {
     method: 'POST',
+    headers: browserTimezoneHeaders(),
     body: JSON.stringify({ mode: 'jarvis_call', chat_session_id: activeChatSessionId }),
   });
   sessionId = session.id;
@@ -880,6 +873,7 @@ async function sendTurn(text) {
   if (!sessionId) await createSession();
   return fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond`, {
     method: 'POST',
+    headers: browserTimezoneHeaders(),
     body: JSON.stringify({ text }),
   });
 }
@@ -911,7 +905,7 @@ async function interrupt() {
   activeTurnAudioPromise = null;
   playbackToken += 1;
   resolvePlaybackWait();
-  stopStreamingAudio();
+  stopPlaybackAudio();
   if (window.aiTTSManager) window.aiTTSManager.stop();
   if (sessionId) {
     if (interruptedTurnId) await postPlaybackState(interruptedTurnId, 'interrupted');
@@ -928,38 +922,15 @@ function resolvePlaybackWait() {
   }
 }
 
-function waitForScheduledPlayback(context, endTime, token) {
-  if (token !== playbackToken || endTime <= context.currentTime) return Promise.resolve();
-  return new Promise(resolve => {
-    let timer = null;
-    const done = () => {
-      if (timer) clearTimeout(timer);
-      if (playbackWaitResolve === done) playbackWaitResolve = null;
-      resolve();
-    };
-    playbackWaitResolve = done;
-    timer = setTimeout(done, Math.max(0, endTime - context.currentTime) * 1000 + 30);
-  });
-}
-
-function stopStreamingAudio() {
-  streamingAbortController?.abort();
-  streamingAbortController = null;
-  streamingAudioSources.forEach(source => {
+function stopPlaybackAudio() {
+  playbackAbortController?.abort();
+  playbackAbortController = null;
+  resolvePlaybackWait();
+  playbackAudioSources.forEach(source => {
     try { source.stop(); } catch {}
   });
-  streamingAudioSources.clear();
+  playbackAudioSources.clear();
   stopSphereAudio();
-}
-
-function pcm16FromBase64(value) {
-  const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0));
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const samples = new Float32Array(bytes.byteLength / 2);
-  for (let i = 0; i < samples.length; i += 1) {
-    samples[i] = view.getInt16(i * 2, true) / 32768;
-  }
-  return samples;
 }
 
 function stopTracks() {
@@ -1131,7 +1102,7 @@ async function startListening() {
       activeAudioTurnId = null;
       if (!speechQueueRunning && speechQueue.length) processSpeechQueue().catch(handleError);
       await waitForSpeechQueueIdle();
-      stopStreamingAudio();
+      stopPlaybackAudio();
       delete timings.turn_started_at;
       await postTurnDiagnostics(timings);
       resumeListeningIfReady();
@@ -1148,7 +1119,7 @@ async function startListening() {
 
 async function ensurePlaybackContext() {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) throw new Error('Streaming audio is not supported by this browser.');
+  if (!AudioContext) throw new Error('Audio playback is not supported by this browser.');
   const freshContext = !sphereAudioContext || sphereAudioContext.state === 'closed' || !sphereAnalyser;
   if (freshContext) {
     stopSphereAudio();
@@ -1167,114 +1138,78 @@ async function ensurePlaybackContext() {
       });
       postSphereLevels('speaking', Math.max(...levels), levels);
     }, 80);
-    streamingScheduledUntil = 0;
-    streamingLastGain = null;
   }
   const context = sphereAudioContext;
   await context.resume();
   return context;
 }
 
-async function consumePcmResponse(response, timings, token, turnId = null) {
+async function playBufferedAudio(url, options, timings, token, turnId = null) {
   const started = performance.now();
-  const context = await ensurePlaybackContext();
-  timings.tts_chunks = 0;
-  timings.scheduler_underruns = 0;
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let sampleRate = 48000;
-  let streamDone = null;
-  let playbackStarted = false;
-  let nextAudioStartsBlock = false;
-  const handleLine = line => {
-    if (!line.trim()) return;
-    const event = JSON.parse(line);
-    if (event.type === 'start') {
-      sampleRate = Number(event.sample_rate) || sampleRate;
-      return;
-    }
-    if (event.type === 'error') throw new Error(event.error || 'VoxCPM streaming failed');
-    if (event.type === 'done') {
-      streamDone = event;
-      return;
-    }
-    if (event.type === 'block') {
-      timings.tts_blocks = Number(event.index) + 1;
-      nextAudioStartsBlock = true;
-      return;
-    }
-    if (event.type !== 'audio' || !event.pcm_base64 || token !== playbackToken) return;
-    const samples = pcm16FromBase64(event.pcm_base64);
-    const audioBuffer = context.createBuffer(1, samples.length, sampleRate);
-    audioBuffer.copyToChannel(samples, 0);
-    const source = context.createBufferSource();
-    const gain = context.createGain();
-    source.buffer = audioBuffer;
-    source.connect(gain);
-    gain.connect(sphereAnalyser);
-    source.onended = () => {
-      streamingAudioSources.delete(source);
-      try { gain.disconnect(); } catch {}
-    };
-    streamingAudioSources.add(source);
-    const previousEnd = streamingScheduledUntil;
-    const hasQueuedAudio = Boolean(streamingLastGain && previousEnd > context.currentTime + 0.005);
-    if (streamingLastGain && !hasQueuedAudio) timings.scheduler_underruns += 1;
-    const crossfadeBoundary = hasQueuedAudio && nextAudioStartsBlock;
-    const beginsAt = hasQueuedAudio
-      ? Math.max(context.currentTime + 0.005, previousEnd - (crossfadeBoundary ? STREAM_EDGE_CROSSFADE_SECONDS : 0))
-      : context.currentTime + STREAM_INITIAL_BUFFER_SECONDS;
-    if (crossfadeBoundary) {
-      const fadeEndsAt = beginsAt + STREAM_EDGE_CROSSFADE_SECONDS;
-      streamingLastGain.gain.cancelScheduledValues(beginsAt);
-      streamingLastGain.gain.setValueAtTime(1, beginsAt);
-      streamingLastGain.gain.linearRampToValueAtTime(0, fadeEndsAt);
-      gain.gain.setValueAtTime(0, beginsAt);
-      gain.gain.linearRampToValueAtTime(1, fadeEndsAt);
-    } else {
-      gain.gain.setValueAtTime(1, beginsAt);
-    }
-    nextAudioStartsBlock = false;
-    source.start(beginsAt);
-    streamingScheduledUntil = beginsAt + audioBuffer.duration;
-    streamingLastGain = gain;
-    timings.tts_chunks += 1;
-    if (timings.tts_first_audio_ms == null) {
-      timings.tts_first_audio_ms = performance.now() - started;
-      if (timings.turn_started_at != null) timings.end_to_first_audio_ms = performance.now() - timings.turn_started_at;
-    }
-    if (!playbackStarted) {
-      playbackStarted = true;
-      setStatus('speaking');
-      if (turnId) postPlaybackState(turnId, 'started', timings);
-    }
-  };
-
+  const controller = new AbortController();
+  playbackAbortController = controller;
   try {
-    while (isActive && token === playbackToken) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      lines.forEach(handleLine);
-      if (done) break;
+    const response = await fetch(url, {
+      credentials: 'same-origin',
+      ...options,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.detail?.message || body?.detail || body?.message || 'Audio synthesis failed');
     }
-    if (buffer.trim()) handleLine(buffer);
-    if (token === playbackToken && streamingScheduledUntil > context.currentTime) {
-      await waitForScheduledPlayback(context, streamingScheduledUntil, token);
-    }
-  } catch (error) {
-    if (token === playbackToken && error?.name !== 'AbortError') throw error;
-  } finally {
-    reader.cancel().catch(() => {});
-    timings.tts_generation_ms = Number(streamDone?.generation_ms) || performance.now() - started;
-    timings.playback_duration_ms = Number(streamDone?.audio_ms) || 0;
+    const encodedAudio = await response.arrayBuffer();
+    if (!encodedAudio.byteLength) throw new Error('Audio synthesis returned no audio.');
+    if (token !== playbackToken) return null;
+
+    const context = await ensurePlaybackContext();
+    const audioBuffer = await context.decodeAudioData(encodedAudio.slice(0));
+    if (token !== playbackToken) return null;
+
+    timings.tts_chunks = 1;
+    timings.tts_blocks = 1;
+    timings.scheduler_underruns = 0;
+    timings.tts_generation_ms = performance.now() - started;
+    timings.playback_duration_ms = audioBuffer.duration * 1000;
+    timings.tts_first_audio_ms = performance.now() - started;
+    if (timings.turn_started_at != null) timings.end_to_first_audio_ms = performance.now() - timings.turn_started_at;
+
+    const source = context.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(sphereAnalyser);
+    playbackAudioSources.add(source);
+    setStatus('speaking');
+    if (turnId) postPlaybackState(turnId, 'started', timings);
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        playbackAudioSources.delete(source);
+        if (playbackWaitResolve === finish) playbackWaitResolve = null;
+        try { source.disconnect(); } catch {}
+        resolve();
+      };
+      playbackWaitResolve = finish;
+      source.onended = finish;
+      try { source.start(); } catch (error) { reject(error); }
+    });
+
     timings.tts_total_ms = performance.now() - started;
+    if (turnId && token === playbackToken) await postPlaybackState(turnId, 'completed', timings);
+    return { audio_ms: timings.playback_duration_ms, blocks: 1 };
+  } catch (error) {
+    if (token !== playbackToken || error?.name === 'AbortError') return null;
+    if (turnId) await postPlaybackState(turnId, 'failed', timings);
+    speechQueue = [];
+    currentSpeech = null;
+    stopPlaybackAudio();
+    setStatus('failed', error.message || 'Audio playback failed.');
+    throw error;
+  } finally {
+    if (playbackAbortController === controller) playbackAbortController = null;
   }
-  if (turnId && token === playbackToken) await postPlaybackState(turnId, 'completed', timings);
-  return streamDone;
 }
 
 async function speak(text, timings = {}) {
@@ -1290,24 +1225,11 @@ async function speak(text, timings = {}) {
   }
 
   const token = ++playbackToken;
-  const controller = new AbortController();
-  streamingAbortController = controller;
-  const response = await fetch('/api/tts/stream', {
+  await playBufferedAudio('/api/tts/synthesize', {
     method: 'POST',
-    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, format: 'audio', use_cache: false }),
-    signal: controller.signal,
-  });
-  if (!response.ok || !response.body) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body?.detail?.message || body?.detail || 'Streaming speech failed');
-  }
-  try {
-    await consumePcmResponse(response, timings, token);
-  } finally {
-    if (streamingAbortController === controller) streamingAbortController = null;
-  }
+  }, timings, token);
 }
 
 function handleError(error) {
@@ -1315,7 +1237,10 @@ function handleError(error) {
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
   brainTurnInProgress = false;
+  speechQueue = [];
+  currentSpeech = null;
   clearTurnTimers();
+  stopPlaybackAudio();
   stopTracks();
   setStatus('failed', error.message || 'Voice loop failed.');
   showToast(error.message || 'Voice loop failed.');
@@ -1373,7 +1298,7 @@ function endCall() {
   playbackToken += 1;
   clearTurnTimers();
   resolvePlaybackWait();
-  stopStreamingAudio();
+  stopPlaybackAudio();
   if (window.aiTTSManager) window.aiTTSManager.stop();
   stopSphereAudio();
   stopListening();

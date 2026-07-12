@@ -24,6 +24,7 @@ JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
 OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 TERMINAL = {"completed", "failed", "cancelled", "blocked"}
 WORKERS = worker_catalog()
+WORKER_LABELS = {"pc-codex": "PC Codex", "hermes": "Hermes", "vps-codex": "VPS Codex"}
 
 _LOCK = threading.RLock()
 _MIRRORS: dict[str, asyncio.Task] = {}
@@ -213,10 +214,60 @@ def _persist_result(task: dict, text: str) -> None:
                 "source": "agent_worker",
                 "worker": task.get("worker"),
                 "task_id": task.get("task_id"),
+                "character_name": WORKER_LABELS.get(str(task.get("worker")), "Worker"),
             }),
         )
     except Exception:
         return
+
+
+def _bounded_spoken_text(text: str) -> str:
+    value = " ".join(text.split())
+    if len(value) <= 600:
+        return value
+    value = value[:600].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    sentence_end = max(value.rfind(mark) for mark in ".!?")
+    if sentence_end >= 200:
+        return value[:sentence_end + 1]
+    return value[:599].rstrip(".!?") + "."
+
+
+async def _spoken_result(task: dict, text: str) -> str:
+    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    fallback = f"{label} finished. The full result is in the chat."
+    if not text.strip():
+        return fallback
+    prompt = (
+        f"Summarize this {label} result for spoken playback. Use two to four natural sentences covering "
+        "the outcome, any blocker, and the next action. Speak plainly; do not read tables, Markdown, paths, "
+        "or logs aloud. Return only the spoken summary.\n\nWorker result:\n"
+        f"{text[:16_000]}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": JARVIS_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "options": {"temperature": 0.2, "num_predict": 180},
+                },
+            )
+        response.raise_for_status()
+        spoken = _bounded_spoken_text(str(response.json().get("response") or ""))
+        return spoken or fallback
+    except Exception:
+        return fallback
+
+
+async def _enrich_result_event(task: dict, event: dict) -> dict:
+    if event.get("type") != "result":
+        return event
+    enriched = dict(event)
+    enriched["spoken_text"] = await _spoken_result(task, str(event.get("text") or ""))
+    return enriched
 
 
 def _persist_task_user_message(task: dict, text: str, source: str) -> None:
@@ -242,12 +293,16 @@ async def _mirror(task_id: str) -> None:
             return
         adapter = adapters()[task["worker"]]
         async for event in adapter.events(task):
+            event = await _enrich_result_event(task, event)
             _append_event(task_id, event)
     except Exception as exc:
         task = get_task(task_id)
         if task and task.get("status") not in TERMINAL:
-            task.update(status="failed", error=f"worker_stream_failed: {str(exc)[:300]}")
-            _save_task(task)
+            _append_event(task_id, {
+                "type": "error",
+                "text": f"worker_stream_failed: {str(exc)[:300]}",
+                "metadata": {"source": "worker_stream"},
+            })
     finally:
         _MIRRORS.pop(task_id, None)
 
@@ -343,7 +398,11 @@ async def refresh_task(task_id: str) -> dict:
         if remote_status in {"completed", "failed", "cancelled"} and task.get("status") not in TERMINAL:
             event_type = {"completed": "result", "failed": "error", "cancelled": "cancelled"}[remote_status]
             text = str(remote.get("output") or remote.get("result") or remote.get("error") or f"{task['worker']} {remote_status}.")
-            _append_event(task_id, {"type": event_type, "text": text, "metadata": {"reconciled": True}})
+            event = await _enrich_result_event(
+                task,
+                {"type": event_type, "text": text, "metadata": {"reconciled": True}},
+            )
+            _append_event(task_id, event)
         task = get_task(task_id) or task
     except Exception:
         pass
