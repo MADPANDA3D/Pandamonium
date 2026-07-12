@@ -73,6 +73,26 @@ def get_task(task_id: str) -> dict | None:
         return _tasks().get("tasks", {}).get(task_id)
 
 
+def find_active_task(
+    session_id: str,
+    worker: str,
+    workspace: str | None = None,
+    owner: str | None = None,
+) -> dict | None:
+    """Return the newest nonterminal task for this chat and worker."""
+    with _LOCK:
+        matches = [
+            task
+            for task in (_tasks().get("tasks") or {}).values()
+            if task.get("session_id") == session_id
+            and task.get("worker") == worker
+            and (workspace is None or task.get("workspace") == workspace)
+            and task.get("status") not in TERMINAL
+            and (owner is None or task.get("owner") in (None, owner))
+        ]
+    return max(matches, key=lambda task: (task.get("updated_at", 0), task.get("created_at", 0)), default=None)
+
+
 def task_events(task_id: str, after: int = -1) -> list[dict]:
     task = get_task(task_id) or {}
     return [event for event in task.get("events", []) if int(event.get("seq", -1)) > after]
@@ -410,22 +430,34 @@ async def refresh_task(task_id: str) -> dict:
     return task
 
 
-async def task_action(task_id: str, action: str, payload: dict | None = None) -> dict:
+async def task_action(
+    task_id: str,
+    action: str,
+    payload: dict | None = None,
+    *,
+    persist_user_message: bool = True,
+) -> dict:
     task = get_task(task_id)
     if not task:
         raise KeyError(task_id)
     adapter = adapters()[task["worker"]]
-    if action == "reply":
+    if action == "steer":
+        await adapter.steer(task, payload or {})
+        if persist_user_message:
+            _persist_task_user_message(task, str((payload or {}).get("prompt") or "").strip(), "agent_worker_steer")
+    elif action == "reply":
         await adapter.reply(task, payload or {})
         answers = (payload or {}).get("answers") or {}
         text = " ".join(
             " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
             for value in answers.values()
         ).strip()
-        _persist_task_user_message(task, text, "agent_worker_reply")
+        if persist_user_message:
+            _persist_task_user_message(task, text, "agent_worker_reply")
     elif action == "approval":
         await adapter.approve(task, payload or {})
-        _persist_task_user_message(task, str((payload or {}).get("spoken_text") or "").strip(), "agent_worker_approval")
+        if persist_user_message:
+            _persist_task_user_message(task, str((payload or {}).get("spoken_text") or "").strip(), "agent_worker_approval")
     elif action == "cancel":
         await adapter.cancel(task)
     else:

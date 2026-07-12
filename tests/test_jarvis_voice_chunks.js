@@ -22,8 +22,17 @@ assert.match(source, /DURABLE_SPEECH_TYPES = new Set\(\['question', 'approval_re
 assert.match(source, /event\.spoken_text \|\| `\$\{label\} finished\. The full result is in chat\.`/);
 assert.doesNotMatch(source, /enqueueSpeech\(event\.text/);
 assert.match(source, /WORKER_SPEECH_MAX_CHARS = 700/);
-assert.match(source, /has the task\. I’ll keep progress in chat and brief you when it finishes\./);
-assert.equal((source.match(/has the task\. I’ll keep progress in chat/g) || []).length, 1);
+assert.match(source, /VOICE_RMS_THRESHOLD = 0\.018/);
+assert.match(source, /VOICE_SAMPLE_INTERVAL_MS = 140/);
+assert.match(source, /MIN_VOICED_MS = 280/);
+assert.match(source, /captureVoicedMs \+= VOICE_SAMPLE_INTERVAL_MS/);
+assert.match(source, /captureVoicedMs < MIN_VOICED_MS/);
+assert.match(source, /echoCancellation: true/);
+assert.match(source, /noiseSuppression: true/);
+assert.match(source, /autoGainControl: true/);
+assert.match(source, /channelCount: 1/);
+assert.doesNotMatch(source, /startDirectWorkerTask|pendingWorkerText|requestsJarvisTarget/);
+assert.match(source, /isActive && SPOKEN_WORKER_EVENTS\.has\(event\.type\)/);
 assert.match(source, /'X-Tz-Offset': String\(-new Date\(\)\.getTimezoneOffset\(\)\)/);
 assert.match(source, /'X-Tz-Name': name/);
 assert.equal((source.match(/browserTimezoneHeaders\(\)/g) || []).length, 4);
@@ -56,5 +65,5 @@ assert.match(style, /body\.jarvis-agent-workspace-active \.msg table \{\s*max-wi
 assert.match(style, /\.jarvis-call-panel\.has-agent-task \.jarvis-task-timeline \{[\s\S]*display: flex/);
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
-assert.match(index, /jarvisVoice\.js\?v=20260712T041500Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v349'/);
+assert.match(index, /jarvisVoice\.js\?v=20260712T014500Z/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v350'/);

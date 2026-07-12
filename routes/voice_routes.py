@@ -358,12 +358,20 @@ def _workspace_for_text(text: str) -> str:
     return "home-lab"
 
 
+def _selected_workspace(text: str, current: str) -> str:
+    if re.search(r"\b(business|clients?|marketing|mad\s*panda|campaign|website|crm)\b", text, re.IGNORECASE):
+        return "business"
+    if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
+        return "project-linux"
+    return current
+
+
 def _delegation_route(text: str) -> tuple[str, str] | None:
     """Map Leo's stable names to fixed workers and server-controlled workspaces."""
     if re.search(r"\b(vps|online server|public server|hosting server|mad\s*panda hosting)\b", text, re.IGNORECASE):
-        return "vps-codex", _workspace_for_text(text)
+        return "vps-codex", "vps-ops"
     if re.search(r"\bhermes\b", text, re.IGNORECASE):
-        return "hermes", _workspace_for_text(text)
+        return "hermes", "home-lab"
     if re.search(r"\b(pc codex|my codex|desktop codex|computer codex)\b|\b(?:ask|talk to|speak to|check with)\s+my computer\b", text, re.IGNORECASE):
         return "pc-codex", _workspace_for_text(text)
     if re.search(r"\b(project\s+nimbus|nimbus|home cloud|my cloud|the cloud)\b", text, re.IGNORECASE):
@@ -372,12 +380,87 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
 
 
 def _target_switch(text: str) -> str | None:
-    if re.search(r"\b(back|return|switch|talk|speak)\b.*\bjarvis\b", text, re.IGNORECASE):
+    switch_phrase = r"\b(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+"
+    if re.search(switch_phrase + r"jarvis\b", text, re.IGNORECASE) or re.search(
+        r"\b(?:return|go|come)\s+(?:back\s+)?to\s+jarvis\b",
+        text,
+        re.IGNORECASE,
+    ):
         return "jarvis"
-    if not re.search(r"\b(talk|speak|connect|switch)\b", text, re.IGNORECASE):
+    if not re.search(switch_phrase, text, re.IGNORECASE):
         return None
     delegation = _delegation_route(text)
     return delegation[0] if delegation else None
+
+
+def _background_delegation(text: str) -> tuple[str, str] | None:
+    route = _delegation_route(text)
+    if route and re.search(r"\b(?:ask|have|get|tell|send|check)\b", text, re.IGNORECASE):
+        return route
+    return None
+
+
+def _is_casual_greeting(text: str) -> bool:
+    value = re.sub(r"\bjarvis\b", " ", text.lower())
+    value = " ".join(re.sub(r"[^a-z' ]", " ", value).split())
+    return bool(re.fullmatch(
+        r"(?:hi|hello|hey|good (?:morning|afternoon|evening))(?: there)?"
+        r"(?: how (?:are )?you(?: doing)?| how(?:'s| is) it going)?|"
+        r"how (?:are )?you(?: doing)?|how(?:'s| is) it going|what(?:'s| is) up",
+        value,
+    ))
+
+
+def _casual_greeting_reply(voice_session: dict) -> str:
+    replies = (
+        "I’m doing well, Leo. What are we working on?",
+        "Good to hear from you, Leo. What would you like to tackle?",
+    )
+    recent = {str(turn.get("text") or "") for turn in voice_session.get("turns", [])[-6:]}
+    return next((reply for reply in replies if reply not in recent), replies[0])
+
+
+def _approval_choice(text: str) -> str | None:
+    value = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
+    deny = bool(re.search(r"\b(?:deny|decline|reject|don't|do not|no)\b", value))
+    approve = bool(re.search(r"\b(?:approve|approved|yes|okay|ok|go ahead|do it|proceed)\b", value))
+    if deny == approve:
+        return None
+    if deny:
+        return "deny"
+    if approve:
+        return "once"
+    return None
+
+
+def _explicit_reply_target(text: str) -> str | None:
+    if not re.search(r"\b(?:answer|reply|respond)\b", text, re.IGNORECASE):
+        return None
+    route = _delegation_route(text)
+    return route[0] if route else None
+
+
+def _pending_task_accepts_turn(task: dict | None, text: str, selected_target: str) -> bool:
+    if not task or task.get("status") not in {"waiting", "waiting_approval"}:
+        return False
+    worker = str(task.get("worker") or "")
+    if selected_target == worker:
+        return True
+    if selected_target != "jarvis":
+        return False
+    if task.get("status") == "waiting_approval":
+        return _approval_choice(text) is not None
+    return _explicit_reply_target(text) == worker
+
+
+def _question_answers(task: dict, text: str) -> dict[str, str]:
+    question_event = next(
+        (event for event in reversed(task.get("events", [])) if event.get("type") == "question"),
+        {},
+    )
+    questions = (question_event.get("metadata") or {}).get("questions") or []
+    ids = [str(question.get("id") or "") for question in questions if question.get("id")]
+    return {question_id: text for question_id in ids} or {"voice": text}
 
 
 def _validated_thread_id(value: str | None) -> str | None:
@@ -389,10 +472,72 @@ def _validated_thread_id(value: str | None) -> str | None:
         raise HTTPException(status_code=400, detail={"message": "Invalid Codex thread ID"}) from exc
 
 
+def _server_final_event(text: str, reply: str, guard_reason: str, task_ids: list[str] | None = None, **extra) -> dict:
+    task_ids = task_ids or []
+    return {
+        "type": "final",
+        "assistant_text": reply,
+        "diagnostics": {
+            "model": JARVIS_MODEL,
+            "transcript_chars": len(text),
+            "assistant_chars": len(reply),
+            "brain_ms": 0,
+            "brain_first_token_ms": 0,
+            "num_ctx": VOICE_CONTEXT_LENGTH,
+            "num_predict": 0,
+            "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+            "guard_reason": guard_reason,
+            "task_ids": task_ids,
+            **extra,
+        },
+        "task_ids": task_ids,
+    }
+
+
+async def _dispatch_worker_request(
+    chat_session_id: str,
+    worker: str,
+    workspace: str,
+    prompt: str,
+    owner: str,
+    _voice_session: dict,
+) -> tuple[dict, str]:
+    from src.jarvis_agent import find_active_task, start_task, task_action
+
+    active = find_active_task(chat_session_id, worker, workspace, owner)
+    if active:
+        if worker in {"pc-codex", "vps-codex"} and active.get("status") not in {"waiting", "waiting_approval"}:
+            try:
+                await task_action(
+                    active["task_id"],
+                    "steer",
+                    {"prompt": prompt},
+                    persist_user_message=False,
+                )
+                return active, "steered"
+            except Exception as exc:
+                logger.info("%s active task rejected steering: %s", worker, str(exc)[:160])
+        return active, "busy"
+
+    task = await start_task(
+        worker,
+        chat_session_id,
+        workspace,
+        prompt,
+        "read_only",
+        False,
+        owner,
+    )
+    return task, "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
+
+
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
     target_switch = _target_switch(text)
     if target_switch:
-        workspace = _workspace_for_text(text)
+        workspace = {
+            "vps-codex": "vps-ops",
+            "hermes": "home-lab",
+        }.get(target_switch, _workspace_for_text(text))
         label = WORKER_LABELS.get(target_switch, "Jarvis")
         if target_switch != "jarvis":
             from src.jarvis_agent import worker_statuses
@@ -422,24 +567,108 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         reply = "You’re back with Jarvis." if target_switch == "jarvis" else f"You’re connected to {label}. What would you like me to handle?"
         yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
         yield {"type": "assistant_delta", "text": reply}
-        yield {
-            "type": "final",
-            "assistant_text": reply,
-            "diagnostics": {
-                "model": JARVIS_MODEL,
-                "transcript_chars": len(text),
-                "assistant_chars": len(reply),
-                "brain_ms": 0,
-                "brain_first_token_ms": 0,
-                "num_ctx": VOICE_CONTEXT_LENGTH,
-                "num_predict": 0,
-                "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
-                "guard_reason": f"target_switch_{target_switch}",
-                "task_ids": [],
-            },
-            "task_ids": [],
-        }
+        yield _server_final_event(text, reply, f"target_switch_{target_switch}")
         return
+
+    if _is_casual_greeting(text):
+        reply = _casual_greeting_reply(voice_session)
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "casual_greeting")
+        return
+
+    delegation = _background_delegation(text)
+    if delegation:
+        worker, workspace = delegation
+        label = WORKER_LABELS[worker]
+        prompt = f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}"
+        try:
+            task, action = await _dispatch_worker_request(
+                chat_session_id, worker, workspace, prompt, owner, voice_session,
+            )
+        except Exception as exc:
+            logger.warning("Jarvis could not dispatch %s task: %s", worker, str(exc)[:240])
+            task, action = {}, "blocked"
+        if action == "started":
+            reply = f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
+        elif action == "steered":
+            reply = f"I’ve passed that follow-up to the active {label} task."
+        elif action == "busy":
+            reply = f"{label} is still working and could not accept another instruction yet. You can wait, cancel it, or switch agents."
+        else:
+            reply = f"{label} is not connected, so I could not start the request."
+        task_ids = [task["task_id"]] if task.get("task_id") and action != "blocked" else []
+        if action in {"started", "steered"}:
+            yield {
+                "type": "agent_task",
+                "task_id": task["task_id"],
+                "worker": worker,
+                "workspace": workspace,
+                "foreground": False,
+            }
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, f"delegation_{action}_{worker}", task_ids)
+        return
+
+    from src.jarvis_agent import find_active_task, get_task, task_action
+
+    selected_target = str(voice_session.get("target") or "jarvis")
+    selected_workspace = _selected_workspace(text, str(voice_session.get("workspace") or "home-lab"))
+    active = (
+        find_active_task(chat_session_id, selected_target, selected_workspace, owner)
+        if selected_target != "jarvis"
+        else None
+    )
+    pending = get_task(str(voice_session.get("active_task_id") or ""))
+    if (
+        not pending
+        or pending.get("session_id") != chat_session_id
+        or pending.get("owner") not in (None, owner)
+        or not _pending_task_accepts_turn(pending, text, selected_target)
+    ):
+        pending = active
+
+    if pending and pending.get("status") == "waiting_approval":
+        choice = _approval_choice(text)
+        if choice:
+            try:
+                await task_action(
+                    pending["task_id"],
+                    "approval",
+                    {"choice": choice, "spoken_text": text},
+                    persist_user_message=False,
+                )
+                verb = "denied" if choice == "deny" else "approved once"
+                reply = f"I {verb} that request for {WORKER_LABELS.get(pending['worker'], 'the worker')}."
+                guard = f"worker_approval_{choice}"
+            except Exception as exc:
+                logger.warning("Voice worker approval failed: %s", str(exc)[:200])
+                reply = "I could not submit that approval. The task remains paused."
+                guard = "worker_approval_failed"
+        else:
+            reply = "That task is waiting for approval. Please say approve once or deny."
+            guard = "worker_approval_unclear"
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard, [pending["task_id"]])
+        return
+
+    if pending and pending.get("status") == "waiting":
+        try:
+            await task_action(
+                pending["task_id"],
+                "reply",
+                {"answers": _question_answers(pending, text)},
+                persist_user_message=False,
+            )
+            reply = f"I passed your answer to {WORKER_LABELS.get(pending['worker'], 'the worker')}."
+            guard = "worker_question_reply"
+        except Exception as exc:
+            logger.warning("Voice worker reply failed: %s", str(exc)[:200])
+            reply = "I could not submit that answer. The task is still waiting for input."
+            guard = "worker_question_reply_failed"
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard, [pending["task_id"]])
+        return
+
     if _asks_runtime_status(text):
         from src.jarvis_agent import runtime_status
 
@@ -469,61 +698,41 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "task_ids": [],
         }
         return
-    delegation = _delegation_route(text)
-    if delegation:
-        from src.jarvis_agent import start_task
 
-        worker, workspace = delegation
-        label = WORKER_LABELS[worker]
+    if selected_target != "jarvis":
+        worker = selected_target
+        workspace = "vps-ops" if worker == "vps-codex" else ("home-lab" if worker == "hermes" else selected_workspace)
+        label = WORKER_LABELS.get(worker, "Worker")
         try:
-            task = await start_task(
-                worker,
-                chat_session_id,
-                workspace,
-                f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}",
-                "read_only",
-                False,
-                owner,
-                codex_thread_id=voice_session.get("codex_thread_id") if worker == "pc-codex" else None,
+            task, action = await _dispatch_worker_request(
+                chat_session_id, worker, workspace, text, owner, voice_session,
             )
         except Exception as exc:
-            logger.warning("Jarvis could not start %s task: %s", worker, str(exc)[:240])
-            task = {"status": "blocked"}
-        if task.get("status") == "blocked" or not task.get("task_id"):
-            reply = f"{label} is registered, but its private worker connection is not enabled yet. I have not pretended to run the request."
-            task_ids: list[str] = []
-            guard_reason = f"{worker}_not_connected"
+            logger.warning("Jarvis could not dispatch selected %s task: %s", worker, str(exc)[:240])
+            task, action = {}, "blocked"
+        if action == "started":
+            reply = f"{label} is working on that now."
+        elif action == "steered":
+            reply = f"I passed that follow-up to {label}'s active task."
+        elif action == "busy":
+            reply = f"{label} is still working and cannot accept another instruction yet. You can wait, cancel it, or switch agents."
         else:
-            reply = f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep this conversation with me while its real progress and result come back through the chat."
-            task_ids = [task["task_id"]]
-            guard_reason = f"delegated_{worker}"
+            reply = f"{label} is not connected, so I could not start the request."
+        task_ids = [task["task_id"]] if task.get("task_id") and action != "blocked" else []
+        if action in {"started", "steered"}:
             yield {
                 "type": "agent_task",
                 "task_id": task["task_id"],
                 "worker": worker,
                 "workspace": workspace,
-                "foreground": False,
+                "foreground": True,
             }
         yield {"type": "assistant_delta", "text": reply}
-        yield {
-            "type": "final",
-            "assistant_text": reply,
-            "diagnostics": {
-                "model": JARVIS_MODEL,
-                "transcript_chars": len(text),
-                "assistant_chars": len(reply),
-                "brain_ms": 0,
-                "num_ctx": VOICE_CONTEXT_LENGTH,
-                "num_predict": 0,
-                "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
-                "guard_reason": guard_reason,
-                "task_ids": task_ids,
-            },
-            "task_ids": task_ids,
-        }
+        yield _server_final_event(text, reply, f"selected_{action}_{worker}", task_ids)
         return
+
     if _asks_current_business(text):
-        from src.jarvis_agent import search_knowledge, start_task
+        from src.jarvis_agent import search_knowledge
 
         background = search_knowledge(text, owner=owner, limit=6)
         citations = []
@@ -536,21 +745,24 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             f"{text}\n\nRetrieved background:\n" + "\n".join(citations)
         )
         try:
-            task = await start_task(
-                "pc-codex", chat_session_id, "business", prompt, "read_only", False, owner,
-                codex_thread_id=voice_session.get("codex_thread_id"),
+            task, action = await _dispatch_worker_request(
+                chat_session_id, "pc-codex", "business", prompt, owner, voice_session,
             )
         except Exception as exc:
             logger.warning("Jarvis could not start current-business task: %s", str(exc)[:240])
-            task = {"status": "blocked"}
-        if task.get("status") == "blocked" or not task.get("task_id"):
+            task, action = {}, "blocked"
+        if action == "blocked":
             reply = "PC Codex is not connected, so I could not start the live business inspection. I have not claimed that it is running."
             task_ids = []
             guard_reason = "pc-codex_not_connected"
-        else:
-            reply = "I’m checking the current business files and live sources now. I’ll speak the useful milestones and the final update as they arrive."
+        elif action == "busy":
+            reply = "PC Codex is still working and could not accept another instruction yet. You can wait or cancel that task."
             task_ids = [task["task_id"]]
-            guard_reason = "current_business_delegation"
+            guard_reason = "current_business_busy"
+        else:
+            reply = "I’m checking the current business files and live sources now." if action == "started" else "I passed that update request to the active PC Codex task."
+            task_ids = [task["task_id"]]
+            guard_reason = f"current_business_{action}"
             yield {
                 "type": "agent_task",
                 "task_id": task["task_id"],
@@ -559,23 +771,14 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "foreground": False,
             }
         yield {"type": "assistant_delta", "text": reply}
-        yield {
-            "type": "final",
-            "assistant_text": reply,
-            "diagnostics": {
-                "model": JARVIS_MODEL,
-                "transcript_chars": len(text),
-                "assistant_chars": len(reply),
-                "brain_ms": 0,
-                "num_ctx": VOICE_CONTEXT_LENGTH,
-                "num_predict": 0,
-                "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
-                "guard_reason": guard_reason,
-                "rag_sources": [row.get("source") for row in background.get("results") or []],
-                "task_ids": task_ids,
-            },
-            "task_ids": task_ids,
-        }
+        yield _server_final_event(
+            text,
+            reply,
+            guard_reason,
+            task_ids,
+            rag_sources=[row.get("source") for row in background.get("results") or []],
+        )
+        return
 
 
 async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
@@ -584,7 +787,30 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
-    if _asks_runtime_status(text) or _asks_current_business(text) or _delegation_route(text) or _target_switch(text):
+    pending_voice_task = False
+    if voice_session.get("active_task_id"):
+        from src.jarvis_agent import get_task
+
+        pending = get_task(str(voice_session["active_task_id"]))
+        if (
+            pending
+            and pending.get("session_id") == chat_session_id
+            and pending.get("owner") in (None, owner)
+        ):
+            pending_voice_task = _pending_task_accepts_turn(
+                pending,
+                text,
+                str(voice_session.get("target") or "jarvis"),
+            )
+    if (
+        _target_switch(text)
+        or _is_casual_greeting(text)
+        or _background_delegation(text)
+        or _asks_runtime_status(text)
+        or _asks_current_business(text)
+        or str(voice_session.get("target") or "jarvis") != "jarvis"
+        or pending_voice_task
+    ):
         async for event in _server_routed_events(chat_session_id, text, owner, voice_session):
             yield event
         return
@@ -654,9 +880,14 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     yield {"type": "final", "assistant_text": reply, "diagnostics": diagnostics, "task_ids": task_ids}
 
 
-async def _jarvis_reply(chat_session_id: str, text: str, owner: str) -> tuple[str, dict[str, Any], list[str]]:
+async def _jarvis_reply(
+    chat_session_id: str,
+    text: str,
+    owner: str,
+    voice_session: dict | None = None,
+) -> tuple[str, dict[str, Any], list[str]]:
     final: dict[str, Any] | None = None
-    async for event in _jarvis_events(chat_session_id, text, owner, {}):
+    async for event in _jarvis_events(chat_session_id, text, owner, voice_session or {}):
         if event.get("type") == "final":
             final = event
     if not final:
@@ -924,6 +1155,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     str(session.get("chat_session_id") or ""),
                     text,
                     effective_user(request),
+                    session,
                 )
             except Exception as exc:
                 session["status"] = "failed"

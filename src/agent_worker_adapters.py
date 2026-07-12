@@ -56,6 +56,7 @@ class WorkerAdapter(Protocol):
     async def start(self, task: dict[str, Any]) -> dict[str, Any]: ...
     async def status(self, task: dict[str, Any]) -> dict[str, Any]: ...
     async def events(self, task: dict[str, Any]) -> AsyncIterator[dict[str, Any]]: ...
+    async def steer(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]: ...
     async def reply(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]: ...
     async def approve(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]: ...
     async def cancel(self, task: dict[str, Any]) -> dict[str, Any]: ...
@@ -138,6 +139,9 @@ class CodexBridgeAdapter:
 
     async def reply(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         return await self._action(task, "reply", payload)
+
+    async def steer(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._action(task, "steer", payload)
 
     async def approve(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         return await self._action(task, "approval", payload)
@@ -241,6 +245,9 @@ class HermesRunsAdapter:
 
     async def reply(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("hermes_run_reply_not_supported")
+
+    async def steer(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("hermes_run_steer_not_supported")
 
     async def approve(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         choice = str(payload.get("choice") or "deny")

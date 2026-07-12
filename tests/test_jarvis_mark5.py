@@ -21,7 +21,7 @@ def test_voice_runtime_and_business_intents_are_server_routed():
 def test_leos_worker_names_route_without_confusing_nimbus_and_vps():
     assert _delegation_route("Ask my Codex to inspect the client files") == ("pc-codex", "business")
     assert _delegation_route("I need to talk to Hermes") == ("hermes", "home-lab")
-    assert _delegation_route("Check my online server") == ("vps-codex", "home-lab")
+    assert _delegation_route("Check my online server") == ("vps-codex", "vps-ops")
     assert _delegation_route("Check Project Nimbus") == ("pc-codex", "home-lab")
     assert _workspace_for_text("Inspect Project Linux and Hyprland") == "project-linux"
 

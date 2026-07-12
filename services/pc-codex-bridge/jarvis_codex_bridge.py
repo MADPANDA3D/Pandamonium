@@ -64,6 +64,8 @@ class Task:
         self.proc: subprocess.Popen[str] | None = None
         self.stdin_lock = threading.Lock()
         self.pending_request_id: int | str | None = None
+        self.pending_responses: dict[int, dict | None] = {}
+        self.next_request_id = 1000
 
     @property
     def task_id(self) -> str:
@@ -111,6 +113,36 @@ class Task:
         with self.stdin_lock:
             self.proc.stdin.write(json.dumps(message) + "\n")
             self.proc.stdin.flush()
+
+    def request(self, method: str, params: dict, timeout: float = 10) -> dict:
+        with self.changed:
+            request_id = self.next_request_id
+            self.next_request_id += 1
+            self.pending_responses[request_id] = None
+        try:
+            self.send({"id": request_id, "method": method, "params": params})
+            deadline = time.monotonic() + timeout
+            with self.changed:
+                while self.pending_responses[request_id] is None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(f"codex_response_timeout_{request_id}")
+                    self.changed.wait(remaining)
+                return self.pending_responses[request_id] or {}
+        finally:
+            with self.changed:
+                self.pending_responses.pop(request_id, None)
+
+    def resolve_response(self, message: dict) -> bool:
+        if message.get("method"):
+            return False
+        request_id = message.get("id")
+        with self.changed:
+            if request_id not in self.pending_responses:
+                return False
+            self.pending_responses[request_id] = message
+            self.changed.notify_all()
+            return True
 
 
 TASKS: dict[str, Task] = {}
@@ -214,6 +246,8 @@ def _extract_artifacts(task: Task, text: str) -> str:
 
 
 def _handle_server_message(task: Task, message: dict) -> None:
+    if task.resolve_response(message):
+        return
     method = message.get("method")
     params = message.get("params") or {}
     if "id" in message and method == "item/tool/requestUserInput":
@@ -408,6 +442,39 @@ def create_task(payload: dict) -> Task:
     return task
 
 
+def steer_task(task: Task, prompt: str, timeout: float = 10) -> dict:
+    prompt = prompt.strip()
+    if not prompt:
+        raise ValueError("prompt_required")
+    with task.lock:
+        if task.data.get("status") != "running":
+            raise RuntimeError("task_not_active")
+        thread_id = task.data.get("codex_thread_id")
+        turn_id = task.data.get("codex_turn_id")
+        if not thread_id or not turn_id or not task.proc or task.proc.poll() is not None:
+            raise RuntimeError("codex_turn_not_active")
+    response = task.request(
+        "turn/steer",
+        {
+            "threadId": thread_id,
+            "expectedTurnId": turn_id,
+            "input": [{"type": "text", "text": prompt[:50000]}],
+        },
+        timeout,
+    )
+    if response.get("error"):
+        raise RuntimeError("task_not_steerable")
+    result = response.get("result") or {}
+    if result.get("turnId") != turn_id:
+        raise RuntimeError("invalid_steer_response")
+    return {
+        "ok": True,
+        "task_id": task.task_id,
+        "codex_thread_id": thread_id,
+        "codex_turn_id": turn_id,
+    }
+
+
 def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
     body = json.dumps(payload).encode()
     handler.send_response(status)
@@ -503,6 +570,17 @@ class Handler(BaseHTTPRequestHandler):
                 _json(self, 404, {"error": "task_not_found"})
                 return
             action = parts[3]
+            if action == "steer":
+                try:
+                    result = steer_task(task, str(payload.get("prompt") or ""))
+                except TimeoutError:
+                    _json(self, 409, {"error": "steer_timeout"})
+                    return
+                except RuntimeError as exc:
+                    _json(self, 409, {"error": str(exc)})
+                    return
+                _json(self, 200, result)
+                return
             if action == "cancel":
                 if task.data.get("status") not in TERMINAL:
                     if task.data.get("codex_thread_id") and task.data.get("codex_turn_id"):

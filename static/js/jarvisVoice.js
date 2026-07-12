@@ -38,13 +38,11 @@ let playbackAudioSources = new Set();
 let activeWorkerTaskId = null;
 let activeCodexThreadId = null;
 let activeWorkspace = 'home-lab';
-let activeWorkerQuestion = null;
-let activeWorkerApproval = null;
-let pendingWorkerText = null;
 let liveAssistantMessage = null;
 let activeTurnAudioPromise = null;
 let activeAudioTurnId = null;
 let captureAudioContext = null;
+let captureVoicedMs = 0;
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -55,6 +53,9 @@ const ORGANIC_SPHERE_URL = '/static/vendor/organic-sphere/index.html?v=20260710T
 const INSECURE_MIC_MESSAGE = 'Microphone needs localhost or HTTPS.';
 const SPHERE_AUDIO_GAIN = 0.35;
 const SPHERE_AUDIO_SMOOTHING = 0.75;
+const VOICE_RMS_THRESHOLD = 0.018;
+const VOICE_SAMPLE_INTERVAL_MS = 140;
+const MIN_VOICED_MS = 280;
 const SPOKEN_WORKER_EVENTS = new Set(['question', 'approval_required', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
@@ -469,12 +470,6 @@ function persistVoiceTarget(extra = {}) {
   });
 }
 
-function workspaceForText(text) {
-  if (/\b(business|clients?|marketing|mad\s*panda|campaign|website|crm)\b/i.test(text)) return 'business';
-  if (/\b(project\s+linux|linux\s+(desktop|workstation)|hyprland)\b/i.test(text)) return 'project-linux';
-  return 'home-lab';
-}
-
 function setAgentWorkspaceActive(active) {
   $('jarvis-call-panel')?.classList.toggle('has-agent-task', active);
   document.body?.classList.toggle('jarvis-agent-workspace-active', active);
@@ -546,7 +541,6 @@ async function submitWorkerApproval(event, choice, row = null, spokenText = '') 
     method: 'POST',
     body: JSON.stringify({ choice, spoken_text: spokenText || null }),
   });
-  activeWorkerApproval = null;
   row?.querySelectorAll('button').forEach(button => { button.disabled = true; });
   showToast(choice === 'deny' ? 'Worker action denied.' : 'Worker action approved.');
 }
@@ -646,9 +640,7 @@ async function handleWorkerEvent(event) {
     activeWorkspace = event.metadata.workspace || activeWorkspace;
     await persistVoiceTarget({ codex_thread_id: activeCodexThreadId }).catch(() => {});
   }
-  if (event.type === 'question') activeWorkerQuestion = event;
   if (event.type === 'approval_required') {
-    activeWorkerApproval = event;
     addApprovalEvent(event);
   } else if (['progress', 'question', 'artifact', 'result', 'error', 'cancelled'].includes(event.type)) {
     addTimelineEvent(event.type === 'result'
@@ -667,20 +659,15 @@ async function handleWorkerEvent(event) {
     });
     window.uiModule?.scrollHistory?.();
   }
-  if (SPOKEN_WORKER_EVENTS.has(event.type)) enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
+  if (isActive && SPOKEN_WORKER_EVENTS.has(event.type)) {
+    enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
+  }
   if (['result', 'error', 'cancelled'].includes(event.type)) {
     const stream = workerStreams.get(event.task_id);
     stream?.close();
     workerStreams.delete(event.task_id);
     activeWorkerTaskId = null;
-    activeWorkerQuestion = null;
-    activeWorkerApproval = null;
     await persistVoiceTarget({ task_id: '' }).catch(() => {});
-    const queuedText = pendingWorkerText;
-    pendingWorkerText = null;
-    if (queuedText && voiceTarget === 'pc-codex') {
-      await startDirectWorkerTask(queuedText);
-    }
     setAgentWorkspaceActive(voiceTarget !== 'jarvis' || activeTaskCount() > 0);
   }
   refreshAgentControl();
@@ -702,63 +689,12 @@ function followWorkerTask(taskId) {
   stream.onerror = refreshAgentControl;
 }
 
-async function startDirectWorkerTask(text) {
-  if (!sessionId) await createSession();
-  if (activeWorkerQuestion?.task_id) {
-    const questions = activeWorkerQuestion.metadata?.questions || [];
-    const answers = {};
-    if (questions.length) {
-      questions.forEach((question, index) => {
-        answers[String(question.id || question.header || `answer_${index + 1}`)] = [text];
-      });
-    } else {
-      answers.answer = [text];
-    }
-    await fetchJson(`/api/agent-tasks/${encodeURIComponent(activeWorkerQuestion.task_id)}/reply`, {
-      method: 'POST',
-      body: JSON.stringify({ answers }),
-    });
-    activeWorkerQuestion = null;
-    return null;
-  }
-  if (activeWorkerTaskId) {
-    if (!pendingWorkerText) pendingWorkerText = text;
-    else showToast('PC Codex already has one follow-up queued.');
-    return null;
-  }
-  const task = await fetchJson('/api/agent-tasks', {
-    method: 'POST',
-    body: JSON.stringify({
-      worker: voiceTarget,
-      session_id: chatSessionId,
-      workspace: workspaceForText(text),
-      prompt: text,
-      permission_mode: 'read_only',
-      approved: false,
-      persist_prompt: true,
-      codex_thread_id: activeCodexThreadId,
-    }),
-  });
-  activeWorkerTaskId = task.task_id;
-  activeWorkspace = task.workspace || workspaceForText(text);
-  await persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
-  followWorkerTask(task.task_id);
-  const worker = task.worker || voiceTarget;
-  enqueueSpeech(`${WORKER_LABELS[worker] || worker} has the task. I’ll keep progress in chat and brief you when it finishes.`, 'start', worker);
-  refreshAgentControl();
-  return task;
-}
-
 async function cancelActiveWorkerTask() {
   const taskId = activeWorkerTaskId;
   if (!taskId || !window.confirm('Cancel the active task?')) return;
   setAgentMenuOpen(false);
   await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
   showToast('Cancellation requested. Voice remains open.');
-}
-
-function requestsJarvisTarget(text) {
-  return /\b(back|return|switch|talk|speak)\b.*\bjarvis\b/i.test(text);
 }
 
 function renderLiveUser(text, timings, turnStarted) {
@@ -1015,6 +951,7 @@ function startSilenceWatch(stream) {
   const data = new Uint8Array(analyser.fftSize);
   let heardVoice = false;
   let lastVoiceAt = 0;
+  captureVoicedMs = 0;
 
   silenceTimer = setInterval(() => {
     analyser.getByteTimeDomainData(data);
@@ -1024,14 +961,15 @@ function startSilenceWatch(stream) {
       sum += normalized * normalized;
     }
     const rms = Math.sqrt(sum / data.length);
-    if (rms > 0.018) {
+    if (rms > VOICE_RMS_THRESHOLD) {
       heardVoice = true;
       lastVoiceAt = Date.now();
+      captureVoicedMs += VOICE_SAMPLE_INTERVAL_MS;
     }
     if (heardVoice && Date.now() - lastVoiceAt > 1200) {
       stopListening();
     }
-  }, 140);
+  }, VOICE_SAMPLE_INTERVAL_MS);
 
   maxTurnTimer = setTimeout(stopListening, 30000);
 }
@@ -1051,7 +989,14 @@ async function startListening() {
 
   audioChunks = [];
   isStopping = false;
-  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+    },
+  });
   startSphereStream(mediaStream);
   mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
 
@@ -1066,6 +1011,7 @@ async function startListening() {
 
     if (discardCurrentRecording) {
       discardCurrentRecording = false;
+      captureVoicedMs = 0;
       return;
     }
 
@@ -1074,6 +1020,13 @@ async function startListening() {
       setStatus(isActive ? 'idle' : 'idle');
       return;
     }
+    if (captureVoicedMs < MIN_VOICED_MS) {
+      captureVoicedMs = 0;
+      setStatus('listening', 'No speech detected.');
+      window.setTimeout(() => { if (isActive) startListening().catch(handleError); }, 400);
+      return;
+    }
+    captureVoicedMs = 0;
 
     try {
       const turnStarted = performance.now();
@@ -1093,25 +1046,6 @@ async function startListening() {
       renderLiveUser(text, timings, turnStarted);
 
       speechPaused = false;
-      if (activeWorkerApproval?.task_id) {
-        const approves = /\b(approve|approved|yes|allow|go ahead|proceed)\b/i.test(text);
-        const denies = /\b(deny|denied|no|reject|do not|don't)\b/i.test(text);
-        if (approves || denies) {
-          setStatus('background');
-          await submitWorkerApproval(activeWorkerApproval, approves ? 'once' : 'deny', null, text);
-          resumeListeningIfReady();
-          return;
-        }
-      }
-      if (voiceTarget !== 'jarvis' && !requestsJarvisTarget(text)) {
-        setStatus('background');
-        await startDirectWorkerTask(text);
-        brainTurnInProgress = false;
-        resumeListeningIfReady();
-        return;
-      }
-      if (requestsJarvisTarget(text)) setVoiceTarget('jarvis');
-
       setStatus('thinking');
       brainTurnInProgress = true;
       const brainStarted = performance.now();
@@ -1304,7 +1238,6 @@ async function startCall() {
   activeWorkerTaskId = null;
   activeCodexThreadId = null;
   activeWorkspace = 'home-lab';
-  pendingWorkerText = null;
   liveAssistantMessage = null;
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
@@ -1347,7 +1280,6 @@ function endCall() {
   voiceTarget = 'jarvis';
   activeWorkerTaskId = null;
   handledWorkerEventIds = new Set();
-  pendingWorkerText = null;
   liveAssistantMessage = null;
   if (continuedTasks) showToast(`Voice ended. ${continuedTasks === 1 ? 'The active task continues' : `${continuedTasks} active tasks continue`}.`);
 }

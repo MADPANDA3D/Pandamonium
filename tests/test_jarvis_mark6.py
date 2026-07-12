@@ -6,16 +6,216 @@ import pytest
 from pydantic import ValidationError
 
 import src.jarvis_agent as jarvis_agent
+from routes import voice_routes
 from routes.agent_task_routes import TaskApproval
-from routes.voice_routes import _delegation_route, _target_switch
+from routes.voice_routes import (
+    _approval_choice,
+    _delegation_route,
+    _explicit_reply_target,
+    _is_casual_greeting,
+    _pending_task_accepts_turn,
+    _selected_workspace,
+    _server_routed_events,
+    _target_switch,
+)
 from src.agent_worker_adapters import HermesRunsAdapter, _hermes_instructions, _hermes_run_features
 
 
 def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("Talk to PC Codex") == "pc-codex"
     assert _target_switch("Please switch me back to Jarvis") == "jarvis"
+    assert _target_switch("Connect me to Jarvis") == "jarvis"
+    assert _target_switch("Talk about the result Hermes found") is None
     assert _target_switch("Ask PC Codex to inspect Mark 5") is None
     assert _delegation_route("Ask PC Codex to inspect Mark 5") == ("pc-codex", "home-lab")
+
+
+def test_casual_greeting_and_approval_guards_are_deterministic():
+    assert _is_casual_greeting("Hey Jarvis, how you doing?")
+    reply = voice_routes._casual_greeting_reply({"turns": []})
+    assert "time" not in reply.lower()
+    assert "london" not in reply.lower()
+    assert _approval_choice("Yes, approve it once") == "once"
+    assert _approval_choice("No, deny it") == "deny"
+    assert _approval_choice("Yes, no, wait") is None
+
+
+def test_background_question_requires_foreground_or_explicit_reply_association():
+    waiting = {"worker": "pc-codex", "status": "waiting"}
+    assert _pending_task_accepts_turn(waiting, "Use the Acme account", "pc-codex")
+    assert not _pending_task_accepts_turn(waiting, "Tell me a joke", "jarvis")
+    assert _explicit_reply_target("Reply to PC Codex: use the Acme account") == "pc-codex"
+    assert _pending_task_accepts_turn(waiting, "Reply to PC Codex: use Acme", "jarvis")
+
+
+def test_background_approval_requires_a_clear_choice_when_jarvis_is_foreground():
+    waiting = {"worker": "hermes", "status": "waiting_approval"}
+    assert _pending_task_accepts_turn(waiting, "Approve it once", "jarvis")
+    assert not _pending_task_accepts_turn(waiting, "Tell me what this approval means", "jarvis")
+
+
+def test_selected_workspace_changes_only_when_the_turn_names_one():
+    assert _selected_workspace("Keep checking that", "business") == "business"
+    assert _selected_workspace("Inspect Project Linux and Hyprland", "home-lab") == "project-linux"
+    assert _selected_workspace("Review the client CRM", "home-lab") == "business"
+
+
+@pytest.mark.asyncio
+async def test_target_switch_precedes_active_worker_dispatch(monkeypatch):
+    async def statuses():
+        return {"hermes": {"enabled": True}}
+
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("target switch must not dispatch or steer a task")
+
+    monkeypatch.setattr(jarvis_agent, "worker_statuses", statuses)
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+
+    events = [
+        event
+        async for event in _server_routed_events(
+            "chat-1",
+            "Talk to Hermes",
+            "leo",
+            {"target": "pc-codex", "workspace": "home-lab", "active_task_id": "pc-task"},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
+    assert events[0]["target"] == "hermes"
+    assert events[-1]["task_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_old_worker_question_does_not_capture_new_target_turn(monkeypatch):
+    monkeypatch.setattr(jarvis_agent, "get_task", lambda _task_id: {
+        "task_id": "pc-question",
+        "worker": "pc-codex",
+        "session_id": "chat-1",
+        "status": "waiting",
+        "owner": "leo",
+    })
+    monkeypatch.setattr(jarvis_agent, "find_active_task", lambda *_args: None)
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        assert (worker, workspace, prompt) == ("hermes", "home-lab", "Handle this with Hermes.")
+        return {"task_id": "hermes-task", "worker": worker}, "started"
+
+    async def must_not_reply(*_args, **_kwargs):
+        raise AssertionError("the old PC question captured a Hermes turn")
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(jarvis_agent, "task_action", must_not_reply)
+
+    events = [
+        event
+        async for event in _server_routed_events(
+            "chat-1",
+            "Handle this with Hermes.",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab", "active_task_id": "pc-question"},
+        )
+    ]
+
+    assert next(event for event in events if event["type"] == "agent_task")["worker"] == "hermes"
+
+
+@pytest.mark.asyncio
+async def test_selected_codex_followup_steers_without_duplicate_persistence(monkeypatch):
+    active = {
+        "task_id": "task-1",
+        "worker": "pc-codex",
+        "session_id": "chat-1",
+        "workspace": "business",
+        "status": "running",
+        "owner": "leo",
+    }
+    calls = []
+
+    def find_active(session_id, worker, workspace=None, owner=None):
+        calls.append(("find", session_id, worker, workspace, owner))
+        return active
+
+    async def action(task_id, name, payload, *, persist_user_message=True):
+        calls.append(("action", task_id, name, payload, persist_user_message))
+        return active
+
+    monkeypatch.setattr(jarvis_agent, "find_active_task", find_active)
+    monkeypatch.setattr(jarvis_agent, "task_action", action)
+
+    task, result = await voice_routes._dispatch_worker_request(
+        "chat-1",
+        "pc-codex",
+        "business",
+        "Add the CRM check.",
+        "leo",
+        {},
+    )
+
+    assert task == active
+    assert result == "steered"
+    assert calls == [
+        ("find", "chat-1", "pc-codex", "business", "leo"),
+        ("action", "task-1", "steer", {"prompt": "Add the CRM check."}, False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(jarvis_agent, "find_active_task", lambda *_args: None)
+
+    async def start_task(worker, session_id, workspace, prompt, permission_mode, approved, owner, codex_thread_id=None):
+        captured.update(
+            worker=worker,
+            session_id=session_id,
+            workspace=workspace,
+            prompt=prompt,
+            permission_mode=permission_mode,
+            approved=approved,
+            owner=owner,
+            codex_thread_id=codex_thread_id,
+        )
+        return {"task_id": "business-task", "status": "queued"}
+
+    monkeypatch.setattr(jarvis_agent, "start_task", start_task)
+
+    task, result = await voice_routes._dispatch_worker_request(
+        "chat-1",
+        "pc-codex",
+        "business",
+        "Inspect the CRM.",
+        "leo",
+        {"codex_thread_id": "019f5022-a520-7de0-9208-018cd2d4d222"},
+    )
+
+    assert task["task_id"] == "business-task"
+    assert result == "started"
+    assert captured["workspace"] == "business"
+    assert captured["codex_thread_id"] is None
+
+
+def test_active_task_lookup_is_workspace_scoped(tmp_path, monkeypatch):
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    for task_id, workspace, updated in (
+        ("home", "home-lab", 10),
+        ("business", "business", 5),
+        ("done", "business", 20),
+    ):
+        jarvis_agent._save_task({
+            "task_id": task_id,
+            "worker": "pc-codex",
+            "session_id": "chat-1",
+            "workspace": workspace,
+            "status": "completed" if task_id == "done" else "running",
+            "owner": "leo",
+            "created_at": updated,
+            "updated_at": updated,
+        })
+
+    assert jarvis_agent.find_active_task("chat-1", "pc-codex", "business", "leo")["task_id"] == "business"
+    assert jarvis_agent.find_active_task("chat-1", "pc-codex", "project-linux", "leo") is None
 
 
 def test_worker_approval_choices_are_narrow():
