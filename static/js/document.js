@@ -4738,9 +4738,31 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       });
   }
 
-  export function openPanel() {
+  function _placePanel(side, remember = false) {
+    const pane = document.getElementById('doc-editor-pane');
+    const divider = document.getElementById('doc-divider');
+    const container = document.getElementById('chat-container');
+    if (!pane || !divider || !container || !['left', 'right'].includes(side)) return;
+    if (remember) pane.dataset.preferredSide = side;
+    if (pane.classList.contains('doc-left') === (side === 'left')) return;
+    if (side === 'left') {
+      pane.classList.add('doc-left');
+      container.parentNode.insertBefore(pane, container);
+      container.parentNode.insertBefore(divider, container);
+    } else {
+      pane.classList.remove('doc-left');
+      container.after(divider);
+      divider.after(pane);
+    }
+    initDividerDrag(divider, pane, side === 'left');
+  }
+
+  export function openPanel(options = {}) {
     _closeNotesForDocumentOpen();
-    if (isOpen) return;
+    if (isOpen) {
+      if (options.side) _placePanel(options.side, true);
+      return;
+    }
     // Clear any pane/divider still sliding out from a just-fired close so we
     // don't end up with two #doc-editor-pane nodes (and a stale close stripping
     // doc-view). Paired with the isOpen guard in _finishClose above.
@@ -5052,7 +5074,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     // If sidebar is on the right, insert before chat-container instead
     const sidebar = document.getElementById('sidebar');
     const isRight = sidebar && sidebar.classList.contains('right-side');
-    if (isRight) {
+    const openLeft = options.side === 'left' || (options.side !== 'right' && isRight);
+    if (options.side) pane.dataset.preferredSide = options.side;
+    if (openLeft) {
       pane.classList.add('doc-left');
       container.parentNode.insertBefore(pane, container);
       container.parentNode.insertBefore(divider, container);
@@ -5078,7 +5102,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     });
 
     // Wire up divider drag to resize
-    initDividerDrag(divider, pane, isRight);
+    initDividerDrag(divider, pane, openLeft);
     // Divider chevron — single button with three modes (the glyph is the
      // same `›` in markup; CSS rotates 180° for the left-pointing variant).
      //   • cursor INSIDE the doc pane  →  collapse  (›, slide back, closes panel)
@@ -6756,6 +6780,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   /** Divider drag to resize the editor pane */
   function initDividerDrag(divider, pane, isRight) {
+    divider.dataset.docLeft = isRight ? '1' : '0';
+    if (divider.dataset.dragBound === '1') return;
+    divider.dataset.dragBound = '1';
     let dragging = false;
     divider.addEventListener('mousedown', (e) => {
       dragging = true;
@@ -6765,7 +6792,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     });
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
-      const width = isRight
+      const width = divider.dataset.docLeft === '1'
         ? e.clientX
         : window.innerWidth - e.clientX;
       pane.style.width = Math.max(250, Math.min(width, window.innerWidth * 0.7)) + 'px';
@@ -6907,27 +6934,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   export function swapSide() {
     if (!isOpen) return;
     const pane = document.getElementById('doc-editor-pane');
-    const divider = document.getElementById('doc-divider');
-    const container = document.getElementById('chat-container');
-    if (!pane || !divider || !container) return;
+    if (!pane) return;
 
     const sidebar = document.getElementById('sidebar');
     const isRight = sidebar && sidebar.classList.contains('right-side');
-
-    if (isRight) {
-      // Sidebar moved right → doc goes left (before chat)
-      pane.classList.add('doc-left');
-      container.parentNode.insertBefore(pane, container);
-      container.parentNode.insertBefore(divider, container);
-    } else {
-      // Sidebar moved left → doc goes right (after chat)
-      pane.classList.remove('doc-left');
-      container.after(divider);
-      divider.after(pane);
-    }
-
-    // Re-init divider drag for the new side
-    initDividerDrag(divider, pane, isRight);
+    _placePanel(pane.dataset.preferredSide || (isRight ? 'left' : 'right'));
   }
 
   // ---- Document CRUD ----
@@ -7057,18 +7068,18 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   // pane was torn down by another full-screen view (e.g. opening a doc from the
   // email modal): in that case openPanel() early-returns and nothing mounts, so
   // the doc silently never appears. Reset the stale flag and re-open for real.
-  function _ensureDocPaneMounted() {
+  function _ensureDocPaneMounted(options = {}) {
     if (!isOpen || !document.getElementById('doc-editor-pane')) {
       isOpen = false;
-      openPanel();
-    }
+      openPanel(options);
+    } else if (options.side) _placePanel(options.side, true);
   }
 
-  export async function loadDocument(docId) {
+  export async function loadDocument(docId, options = {}) {
     _closeNotesForDocumentOpen();
     // If already in tabs, just switch
     if (docs.has(docId)) {
-      _ensureDocPaneMounted();
+      _ensureDocPaneMounted(options);
       switchToDoc(docId);
       return;
     }
@@ -7077,7 +7088,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (!res.ok) throw new Error(res.status === 404 ? 'Not found' : `HTTP ${res.status}`);
       const doc = await res.json();
       addDocToTabs(doc, doc.session_id);
-      _ensureDocPaneMounted();
+      _ensureDocPaneMounted(options);
       switchToDoc(doc.id);
     } catch (e) {
       console.error('Failed to load document:', e);

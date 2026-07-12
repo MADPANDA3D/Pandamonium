@@ -110,12 +110,22 @@ def setup_agent_task_routes(session_manager):
             raise HTTPException(404, "Task not found")
 
     @router.get("/api/agent-tasks/{task_id}/events")
-    async def events(task_id: str, after: int = Query(-1), owner: str = Depends(require_user)):
+    async def events(
+        task_id: str,
+        request: Request,
+        after: int | None = Query(None),
+        owner: str = Depends(require_user),
+    ):
         task = get_task(task_id)
         if not task:
             raise HTTPException(404, "Task not found")
         if task.get("owner") not in (None, owner):
             raise HTTPException(403, "Task does not belong to this user")
+        if after is None:
+            try:
+                after = int(request.headers.get("last-event-id", "-1"))
+            except ValueError:
+                after = -1
         return StreamingResponse(stream_task_events(task_id, after), media_type="text/event-stream")
 
     @router.post("/api/agent-tasks/{task_id}/reply")

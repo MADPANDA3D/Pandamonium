@@ -31,6 +31,7 @@ let speechPaused = false;
 let discardCurrentRecording = false;
 let brainTurnInProgress = false;
 let workerStreams = new Map();
+let handledWorkerEventIds = new Set();
 let speechIdleResolvers = [];
 let playbackAbortController = null;
 let playbackAudioSources = new Set();
@@ -49,6 +50,7 @@ const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
 const ICON_STOP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 const ICON_CLOSE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+const END_VOICE_LABEL = 'End voice — task continues';
 const ORGANIC_SPHERE_URL = '/static/vendor/organic-sphere/index.html?v=20260710T195450Z';
 const INSECURE_MIC_MESSAGE = 'Microphone needs localhost or HTTPS.';
 const SPHERE_AUDIO_GAIN = 0.35;
@@ -355,8 +357,7 @@ function talkTitle(value) {
 function sphereTitle(value) {
   if (!isActive) return 'Jarvis live call';
   if (value === 'speaking' || value === 'buffering') return 'Interrupt Jarvis';
-  if (value === 'failed') return 'End Jarvis call';
-  return 'End Jarvis call';
+  return END_VOICE_LABEL;
 }
 
 function browserTimezoneHeaders() {
@@ -404,12 +405,17 @@ function refreshAgentControl() {
   const name = $('jarvis-agent-name');
   const meta = $('jarvis-agent-meta');
   const state = $('jarvis-agent-state');
+  const cancel = $('jarvis-agent-cancel');
   if (name) name.textContent = WORKER_LABELS[voiceTarget] || voiceTarget;
   if (meta) {
     const taskText = tasks ? `${tasks} active task${tasks === 1 ? '' : 's'}` : (connection === 'connected' ? 'ready' : connection.replace(/_/g, ' '));
     meta.textContent = `${details.machine || 'worker'} · ${activeWorkspace || 'workspace unbound'} · ${taskText}`;
   }
   state?.classList.toggle('is-connected', connection === 'connected');
+  if (cancel) {
+    cancel.hidden = !activeWorkerTaskId;
+    cancel.disabled = !activeWorkerTaskId;
+  }
   document.querySelectorAll('.jarvis-target').forEach(button => {
     const worker = button.dataset.worker;
     const item = workerCatalog[worker] || {};
@@ -471,6 +477,7 @@ function workspaceForText(text) {
 
 function setAgentWorkspaceActive(active) {
   $('jarvis-call-panel')?.classList.toggle('has-agent-task', active);
+  document.body?.classList.toggle('jarvis-agent-workspace-active', active);
   postSphereLayout(active);
 }
 
@@ -492,16 +499,26 @@ function postSphereLayout(transparent) {
 }
 
 function addTimelineEvent(event) {
-  const timeline = $('chat-history');
+  const timeline = $('jarvis-task-timeline');
   if (!timeline) return;
-  const row = document.createElement('article');
+  const taskId = String(event.task_id || activeWorkerTaskId || 'unbound');
+  let row = event.type === 'progress'
+    ? Array.from(timeline.children).find(item => item.dataset.taskId === taskId && item.dataset.eventType === 'progress')
+    : null;
+  if (!row) {
+    row = document.createElement('article');
+    row.dataset.taskId = taskId;
+    row.dataset.eventType = event.type || 'progress';
+    row.append(document.createElement('span'), document.createElement('p'));
+    timeline.appendChild(row);
+  }
   row.className = `jarvis-task-event jarvis-worker-progress is-${event.type || 'progress'}`;
-  const label = document.createElement('span');
+  const label = row.querySelector('span');
   label.className = 'jarvis-task-event-label';
-  label.textContent = event.worker === 'pc-codex' ? 'PC Codex' : (event.worker || 'Jarvis');
-  const text = document.createElement('p');
+  label.textContent = WORKER_LABELS[event.worker] || event.worker || 'Jarvis';
+  const text = row.querySelector('p');
   text.textContent = event.text || '';
-  row.append(label, text);
+  row.querySelector('.jarvis-task-event-action')?.remove();
   const deepLink = event.metadata?.codex_deep_link
     || (event.metadata?.codex_thread_id ? `codex://threads/${event.metadata.codex_thread_id}` : '');
   if (deepLink) {
@@ -512,7 +529,6 @@ function addTimelineEvent(event) {
     open.title = 'Open this task in Codex Desktop';
     row.appendChild(open);
   }
-  timeline.appendChild(row);
   timeline.scrollTop = timeline.scrollHeight;
   return row;
 }
@@ -521,7 +537,7 @@ async function openWorkerArtifact(event) {
   const documentId = event.metadata?.document_id;
   if (!documentId || !window.documentModule?.loadDocument) return;
   setAgentWorkspaceActive(true);
-  await window.documentModule.loadDocument(documentId);
+  await window.documentModule.loadDocument(documentId, { side: 'left' });
 }
 
 async function submitWorkerApproval(event, choice, row = null, spokenText = '') {
@@ -622,6 +638,9 @@ async function processSpeechQueue() {
 }
 
 async function handleWorkerEvent(event) {
+  const eventId = String(event.event_id || '').trim();
+  if (eventId && handledWorkerEventIds.has(eventId)) return;
+  if (eventId) handledWorkerEventIds.add(eventId);
   if (event.metadata?.codex_thread_id) {
     activeCodexThreadId = event.metadata.codex_thread_id;
     activeWorkspace = event.metadata.workspace || activeWorkspace;
@@ -632,9 +651,22 @@ async function handleWorkerEvent(event) {
     activeWorkerApproval = event;
     addApprovalEvent(event);
   } else if (['progress', 'question', 'artifact', 'result', 'error', 'cancelled'].includes(event.type)) {
-    addTimelineEvent(event);
+    addTimelineEvent(event.type === 'result'
+      ? { ...event, text: `${WORKER_LABELS[event.worker] || event.worker || 'Worker'} completed. Full result is in chat.` }
+      : event);
   }
   if (event.type === 'artifact') await openWorkerArtifact(event);
+  if (event.type === 'result'
+      && event.text
+      && window.sessionModule?.getCurrentSessionId?.() === chatSessionId) {
+    window.chatModule?.addMessage?.('assistant', event.text, '', {
+      source: 'agent_worker',
+      worker: event.worker,
+      task_id: event.task_id,
+      character_name: WORKER_LABELS[event.worker] || event.worker || 'Worker',
+    });
+    window.uiModule?.scrollHistory?.();
+  }
   if (SPOKEN_WORKER_EVENTS.has(event.type)) enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
   if (['result', 'error', 'cancelled'].includes(event.type)) {
     const stream = workerStreams.get(event.task_id);
@@ -649,11 +681,6 @@ async function handleWorkerEvent(event) {
     if (queuedText && voiceTarget === 'pc-codex') {
       await startDirectWorkerTask(queuedText);
     }
-    if (event.type === 'result' && chatSessionId && window.sessionModule?.selectSession) {
-      window.sessionModule.selectSession(chatSessionId, { keepSidebar: true }).catch(error => {
-        console.warn('Could not refresh worker result in chat:', error);
-      });
-    }
     setAgentWorkspaceActive(voiceTarget !== 'jarvis' || activeTaskCount() > 0);
   }
   refreshAgentControl();
@@ -662,19 +689,17 @@ async function handleWorkerEvent(event) {
 function followWorkerTask(taskId) {
   if (!taskId || workerStreams.has(taskId)) return;
   setAgentWorkspaceActive(true);
-  const stream = new EventSource(`/api/agent-tasks/${encodeURIComponent(taskId)}/events?after=-1`);
+  const stream = new EventSource(`/api/agent-tasks/${encodeURIComponent(taskId)}/events`);
   workerStreams.set(taskId, stream);
   refreshAgentControl();
   stream.onmessage = message => {
     try {
-      handleWorkerEvent(JSON.parse(message.data)).catch(error => console.warn('Worker event handling failed:', error));
+      const event = JSON.parse(message.data);
+      if (!event.event_id && message.lastEventId) event.event_id = `${taskId}:${message.lastEventId}`;
+      handleWorkerEvent(event).catch(error => console.warn('Worker event handling failed:', error));
     } catch (error) { console.warn('Worker event parse failed:', error); }
   };
-  stream.onerror = () => {
-    stream.close();
-    workerStreams.delete(taskId);
-    refreshAgentControl();
-  };
+  stream.onerror = refreshAgentControl;
 }
 
 async function startDirectWorkerTask(text) {
@@ -722,6 +747,14 @@ async function startDirectWorkerTask(text) {
   enqueueSpeech(`${WORKER_LABELS[worker] || worker} has the task. I’ll keep progress in chat and brief you when it finishes.`, 'start', worker);
   refreshAgentControl();
   return task;
+}
+
+async function cancelActiveWorkerTask() {
+  const taskId = activeWorkerTaskId;
+  if (!taskId || !window.confirm('Cancel the active task?')) return;
+  setAgentMenuOpen(false);
+  await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+  showToast('Cancellation requested. Voice remains open.');
 }
 
 function requestsJarvisTarget(text) {
@@ -849,6 +882,7 @@ async function createSession() {
   activeWorkspace = session.workspace || 'home-lab';
   activeWorkerTaskId = session.active_task_id || null;
   activeCodexThreadId = session.codex_thread_id || null;
+  if (chatSessionId) await openLinkedChatSession(chatSessionId);
   setVoiceTarget(savedTarget, false);
   return session;
 }
@@ -1265,6 +1299,7 @@ async function startCall() {
   isActive = true;
   speechPaused = false;
   speechQueue = [];
+  handledWorkerEventIds = new Set();
   brainTurnInProgress = false;
   activeWorkerTaskId = null;
   activeCodexThreadId = null;
@@ -1284,7 +1319,7 @@ async function startCall() {
 }
 
 function endCall() {
-  const linkedChatSessionId = chatSessionId;
+  const continuedTasks = activeTaskCount();
   isActive = false;
   brainTurnInProgress = false;
   activeTurnAudioPromise = null;
@@ -1311,9 +1346,10 @@ function endCall() {
   chatSessionId = null;
   voiceTarget = 'jarvis';
   activeWorkerTaskId = null;
+  handledWorkerEventIds = new Set();
   pendingWorkerText = null;
   liveAssistantMessage = null;
-  if (linkedChatSessionId) openLinkedChatSession(linkedChatSessionId);
+  if (continuedTasks) showToast(`Voice ended. ${continuedTasks === 1 ? 'The active task continues' : `${continuedTasks} active tasks continue`}.`);
 }
 
 async function openLinkedChatSession(linkedChatSessionId) {
@@ -1359,6 +1395,7 @@ function bind() {
   const talkBtn = $('jarvis-call-talk');
   const inputBtn = $('jarvis-input-sphere');
   const agentChip = $('jarvis-agent-chip');
+  const cancelTaskBtn = $('jarvis-agent-cancel');
   const agentSelector = document.querySelector('.jarvis-agent-selector');
   const targetButtons = document.querySelectorAll('.jarvis-target');
 
@@ -1368,6 +1405,8 @@ function bind() {
   }
   if (closeBtn) {
     closeBtn.innerHTML = ICON_CLOSE;
+    closeBtn.title = END_VOICE_LABEL;
+    closeBtn.setAttribute('aria-label', END_VOICE_LABEL);
     closeBtn.addEventListener('click', endCall);
   }
   if (talkBtn) {
@@ -1399,6 +1438,9 @@ function bind() {
       setAgentMenuOpen(agentChip.getAttribute('aria-expanded') !== 'true');
     });
   }
+  cancelTaskBtn?.addEventListener('click', () => {
+    cancelActiveWorkerTask().catch(error => showToast(error.message || 'Could not cancel the task.'));
+  });
   targetButtons.forEach(button => {
     button.addEventListener('click', () => {
       if (!button.disabled) {

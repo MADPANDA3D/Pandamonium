@@ -452,7 +452,7 @@ async def stream_task_events(task_id: str, after: int = -1) -> AsyncGenerator[st
     while True:
         for event in task_events(task_id, cursor):
             cursor = int(event.get("seq", cursor))
-            yield f"data: {json.dumps(event)}\n\n"
+            yield f"id: {cursor}\ndata: {json.dumps(event)}\n\n"
         task = get_task(task_id)
         if not task or (task.get("status") in TERMINAL and not task_events(task_id, cursor)):
             break
