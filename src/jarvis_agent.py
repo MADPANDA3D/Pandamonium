@@ -317,9 +317,55 @@ async def _spoken_milestone(task: dict, text: str) -> str:
             )
         response.raise_for_status()
         spoken = _one_spoken_sentence(str(response.json().get("response") or ""))
+        if spoken and label.casefold() not in spoken.casefold():
+            spoken = _one_spoken_sentence(f"{label}: {spoken}")
         return spoken or fallback
     except Exception:
         return fallback
+
+
+async def _spoken_progress(task: dict, updates: list[str]) -> str:
+    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    fallback = f"{label} is still working; the latest details are in the activity history."
+    prompt = (
+        f"Summarize these three recent {label} work updates as exactly one natural Jarvis sentence of no "
+        "more than 240 characters. Start with the worker name and report only verified progress from these "
+        "updates. Do not repeat Markdown, tables, code, commands, paths, logs, or instructions. Return only "
+        "the sentence.\n\nRecent updates:\n- " + "\n- ".join(update[:2_000] for update in updates)
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": JARVIS_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": False,
+                    "options": {"temperature": 0.2, "num_predict": 80},
+                },
+            )
+        response.raise_for_status()
+        spoken = _one_spoken_sentence(str(response.json().get("response") or ""))
+        if spoken and label.casefold() not in spoken.casefold():
+            spoken = _one_spoken_sentence(f"{label}: {spoken}")
+        return spoken or fallback
+    except Exception:
+        return fallback
+
+
+def _ordinary_progress_window(task: dict, text: str) -> list[str]:
+    current = get_task(str(task.get("task_id") or "")) or task
+    updates = []
+    for prior in reversed(current.get("events") or []):
+        if prior.get("type") != "progress":
+            continue
+        metadata = prior.get("metadata") or {}
+        if metadata.get("milestone") is True or metadata.get("progress_summary") is True:
+            break
+        updates.append(str(prior.get("text") or ""))
+    updates = list(reversed(updates)) + [text]
+    return updates[-3:] if len(updates) >= 3 else []
 
 
 async def _enrich_worker_event(task: dict, event: dict) -> dict:
@@ -327,9 +373,15 @@ async def _enrich_worker_event(task: dict, event: dict) -> dict:
     if event.get("type") == "progress":
         enriched.pop("spoken_text", None)
         metadata = dict(event.get("metadata") or {})
+        metadata.pop("progress_summary", None)
         enriched["metadata"] = metadata
         if metadata.get("milestone") is True:
             enriched["spoken_text"] = await _spoken_milestone(task, str(event.get("text") or ""))
+        else:
+            updates = _ordinary_progress_window(task, str(event.get("text") or ""))
+            if updates:
+                metadata["progress_summary"] = True
+                enriched["spoken_text"] = await _spoken_progress(task, updates)
     elif event.get("type") == "result":
         enriched["spoken_text"] = await _spoken_result(task, str(event.get("text") or ""))
     return enriched

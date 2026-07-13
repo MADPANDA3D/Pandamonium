@@ -347,7 +347,10 @@ def _asks_runtime_status(text: str) -> bool:
 
 
 def _asks_current_business(text: str) -> bool:
-    return bool(re.search(r"\b(current|latest|today|recent|updates?|status)\b.*\b(business|clients?|mad panda)\b|\b(business|clients?|mad panda)\b.*\b(current|latest|today|recent|updates?|status)\b", text, re.IGNORECASE))
+    normalized = text.replace("’", "'")
+    if re.search(r"\bwhat(?:'s|s|\s+is)\s+up\s+with\s+the\s+business\b", normalized, re.IGNORECASE):
+        return True
+    return bool(re.search(r"\b(current|latest|today|recent|updates?|status)\b.*\b(business|clients?|mad panda)\b|\b(business|clients?|mad panda)\b.*\b(current|latest|today|recent|updates?|status)\b", normalized, re.IGNORECASE))
 
 
 def _workspace_for_text(text: str) -> str:
@@ -760,7 +763,11 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             task_ids = [task["task_id"]]
             guard_reason = "current_business_busy"
         else:
-            reply = "I’m checking the current business files and live sources now." if action == "started" else "I passed that update request to the active PC Codex task."
+            reply = (
+                "I’m not current enough to answer that reliably, so I’m asking PC Codex to check the live Business sources now."
+                if action == "started"
+                else "I’m not current enough to answer that reliably, so I passed the request to the active PC Codex task."
+            )
             task_ids = [task["task_id"]]
             guard_reason = f"current_business_{action}"
             yield {

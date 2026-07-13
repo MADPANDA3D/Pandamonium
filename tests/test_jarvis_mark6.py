@@ -10,6 +10,7 @@ from routes import voice_routes
 from routes.agent_task_routes import TaskApproval
 from routes.voice_routes import (
     _approval_choice,
+    _asks_current_business,
     _delegation_route,
     _explicit_reply_target,
     _is_casual_greeting,
@@ -58,6 +59,51 @@ def test_selected_workspace_changes_only_when_the_turn_names_one():
     assert _selected_workspace("Keep checking that", "business") == "business"
     assert _selected_workspace("Inspect Project Linux and Hyprland", "home-lab") == "project-linux"
     assert _selected_workspace("Review the client CRM", "home-lab") == "business"
+
+
+@pytest.mark.parametrize("text", [
+    "What's up with the business?",
+    "Whats up with the business",
+    "What is up with the business?",
+    "What’s up with the business?",
+])
+def test_business_update_phrase_is_deterministic(text):
+    assert _asks_current_business(text)
+
+
+@pytest.mark.asyncio
+async def test_business_then_hermes_runs_as_distinct_background_tasks_with_jarvis_foreground(monkeypatch):
+    async def dispatch(_session, worker, workspace, _prompt, _owner, _voice):
+        return {"task_id": f"{worker}-task", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(jarvis_agent, "search_knowledge", lambda *_args, **_kwargs: {"results": []})
+    voice_session = {"target": "jarvis", "workspace": "home-lab", "active_task_id": None}
+
+    business = [
+        event async for event in _server_routed_events(
+            "chat-1", "What's up with the business?", "leo", voice_session,
+        )
+    ]
+    hermes = [
+        event async for event in _server_routed_events(
+            "chat-1", "While he works, ask Hermes to check the architecture.", "leo", voice_session,
+        )
+    ]
+
+    business_task = next(event for event in business if event["type"] == "agent_task")
+    hermes_task = next(event for event in hermes if event["type"] == "agent_task")
+    assert business_task == {
+        "type": "agent_task", "task_id": "pc-codex-task", "worker": "pc-codex",
+        "workspace": "business", "foreground": False,
+    }
+    assert hermes_task == {
+        "type": "agent_task", "task_id": "hermes-task", "worker": "hermes",
+        "workspace": "home-lab", "foreground": False,
+    }
+    assert "not current enough" in business[-1]["assistant_text"]
+    assert all(event["type"] != "target_changed" for event in business + hermes)
+    assert voice_session["target"] == "jarvis"
 
 
 @pytest.mark.asyncio

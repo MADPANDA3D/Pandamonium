@@ -106,7 +106,7 @@ async def test_spoken_milestone_is_one_bounded_sentence(monkeypatch):
     monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
     spoken = await jarvis_agent._spoken_milestone(_task(), "Tests completed.")
 
-    assert spoken == "The focused verification now passes cleanly."
+    assert spoken == "PC Codex: The focused verification now passes cleanly."
     assert len(spoken) <= 240
     assert captured["payload"]["options"]["num_predict"] == 80
 
@@ -142,7 +142,7 @@ async def test_progress_speech_is_broker_owned_and_milestone_only(tmp_path, monk
                 "type": "progress",
                 "text": "Ordinary progress remains visual.",
                 "spoken_text": "Worker tried to narrate ordinary progress.",
-                "metadata": {},
+                "metadata": {"progress_summary": True},
             }
             yield {
                 "type": "progress",
@@ -165,8 +165,55 @@ async def test_progress_speech_is_broker_owned_and_milestone_only(tmp_path, monk
 
     events = jarvis_agent.get_task("task-1")["events"]
     assert "spoken_text" not in events[0]
+    assert "progress_summary" not in events[0]["metadata"]
     assert events[1]["spoken_text"] == "Jarvis confirms the verification subtask passed."
     assert events[1]["metadata"]["milestone"] is True
+
+
+@pytest.mark.asyncio
+async def test_every_third_progress_summary_is_per_task_and_milestone_resets_window(tmp_path, monkeypatch):
+    updates = {
+        "task-a": ["A one", "A two", "A three", "A four", "A milestone", "A five", "A six", "A seven"],
+        "task-b": ["B one", "B two"],
+    }
+
+    class Adapter:
+        async def events(self, task):
+            for index, text in enumerate(updates[task["task_id"]]):
+                metadata = {"milestone": True} if text == "A milestone" else {}
+                yield {"type": "progress", "text": text, "metadata": metadata}
+
+    calls = []
+
+    async def progress(task, texts):
+        calls.append((task["task_id"], list(texts)))
+        return f"{task['worker']} summarized {texts[-1]}."
+
+    async def milestone(_task, _text):
+        return "PC Codex completed the milestone."
+
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
+    monkeypatch.setattr(jarvis_agent, "_MIRRORS", {})
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": Adapter(), "hermes": Adapter()})
+    monkeypatch.setattr(jarvis_agent, "_spoken_progress", progress)
+    monkeypatch.setattr(jarvis_agent, "_spoken_milestone", milestone)
+    jarvis_agent._save_task(_task(task_id="task-a"))
+    jarvis_agent._save_task(_task(task_id="task-b", worker="hermes"))
+
+    await jarvis_agent._mirror("task-a")
+    await jarvis_agent._mirror("task-b")
+
+    assert calls == [
+        ("task-a", ["A one", "A two", "A three"]),
+        ("task-a", ["A five", "A six", "A seven"]),
+    ]
+    task_a = jarvis_agent.get_task("task-a")["events"]
+    task_b = jarvis_agent.get_task("task-b")["events"]
+    assert task_a[2]["metadata"]["progress_summary"] is True
+    assert task_a[4]["spoken_text"] == "PC Codex completed the milestone."
+    assert task_a[7]["metadata"]["progress_summary"] is True
+    assert all("spoken_text" not in event for event in task_b)
 
 
 @pytest.mark.asyncio
