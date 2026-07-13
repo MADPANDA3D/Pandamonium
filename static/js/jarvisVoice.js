@@ -18,6 +18,7 @@ let sphereAnalyser = null;
 let sphereSource = null;
 let sphereAudioTimer = null;
 let sphereFreqData = null;
+let cueAudioContext = null;
 let chatSessionId = null;
 let sphereSmoothedVolume = 0;
 let sphereSmoothedLevels = Array(8).fill(0);
@@ -160,6 +161,47 @@ function stopSphereAudio() {
   }
 }
 
+function playVoiceCue(name, delay = 0) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return Promise.resolve();
+  try {
+    if (!cueAudioContext || cueAudioContext.state === 'closed') cueAudioContext = new AudioContext();
+    cueAudioContext.resume?.().catch(() => {});
+    const tones = {
+      call: [[392, 0, 0.09], [523, 0.1, 0.14]],
+      heard: [[784, 0, 0.07]],
+      thinking: [[440, 0, 0.055], [554, 0.075, 0.075]],
+    }[name] || [];
+    const base = cueAudioContext.currentTime + Math.max(0, delay) + 0.005;
+    tones.forEach(([frequency, offset, duration]) => {
+      const oscillator = cueAudioContext.createOscillator();
+      const gain = cueAudioContext.createGain();
+      const start = base + offset;
+      const end = start + duration;
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.linearRampToValueAtTime(0.055, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      oscillator.connect(gain);
+      gain.connect(cueAudioContext.destination);
+      oscillator.start(start);
+      oscillator.stop(end + 0.01);
+    });
+    const cueSeconds = tones.reduce((longest, [, offset, duration]) => Math.max(longest, offset + duration), 0);
+    return new Promise(resolve => window.setTimeout(resolve, (Math.max(0, delay) + cueSeconds) * 1000));
+  } catch (error) {
+    console.warn('Jarvis voice cue unavailable:', error);
+    return Promise.resolve();
+  }
+}
+
+function closeVoiceCueAudio() {
+  if (!cueAudioContext) return;
+  cueAudioContext.close().catch(() => {});
+  cueAudioContext = null;
+}
+
 function startSpherePulse(next = status) {
   stopSphereAudio();
   sphereAudioTimer = setInterval(() => {
@@ -258,7 +300,7 @@ function handleSphereMessage(event) {
     if (!markOrganicSphereReady('bridge-ready')) {
       window.setTimeout(() => markOrganicSphereReady('bridge-ready-late'), 120);
     }
-    postSphereLayout($('jarvis-call-panel')?.classList.contains('has-agent-task'));
+    postSphereLayout(true);
   }
 }
 
@@ -482,7 +524,7 @@ function persistVoiceTarget(extra = {}) {
 function setAgentWorkspaceActive(active) {
   $('jarvis-call-panel')?.classList.toggle('has-agent-task', active);
   document.body?.classList.toggle('jarvis-agent-workspace-active', active);
-  postSphereLayout(active);
+  postSphereLayout(true);
 }
 
 function postSphereLayout(transparent) {
@@ -507,7 +549,7 @@ function currentChatSessionId() {
 }
 
 function taskActivityElement(taskId) {
-  return Array.from(document.querySelectorAll('#chat-history .jarvis-task-activity'))
+  return Array.from(document.querySelectorAll('.jarvis-task-activity[data-task-id]'))
     .find(item => item.dataset.taskId === String(taskId)) || null;
 }
 
@@ -558,7 +600,7 @@ function updateActivitySummary(group, task) {
 function ensureActivityTicker() {
   if (activityTicker) return;
   activityTicker = window.setInterval(() => {
-    const activeGroups = Array.from(document.querySelectorAll('#chat-history .jarvis-task-activity'))
+    const activeGroups = Array.from(document.querySelectorAll('.jarvis-task-activity[data-task-id]'))
       .filter(group => !TERMINAL_TASK_STATES.has(group.dataset.status || ''));
     activeGroups.forEach(group => {
       const task = taskSnapshots.get(group.dataset.taskId);
@@ -575,6 +617,11 @@ function positionActivityGroup(group) {
   if (!group) return;
   const box = $('chat-history');
   if (!box) return;
+  const rail = $('jarvis-activity-rail');
+  if (isActive && rail && !TERMINAL_TASK_STATES.has(group.dataset.status || '')) {
+    if (group.parentElement !== rail) rail.appendChild(group);
+    return;
+  }
   const messages = taskMessageElements(group.dataset.taskId);
   const acknowledgement = messages.find(item => (
     item.classList.contains('msg-ai')
@@ -584,6 +631,14 @@ function positionActivityGroup(group) {
   if (acknowledgement) acknowledgement.after(group);
   else if (result) result.before(group);
   else if (group.parentElement !== box) box.appendChild(group);
+}
+
+function positionVisibleActivityGroups() {
+  document.querySelectorAll('.jarvis-task-activity[data-task-id]').forEach(positionActivityGroup);
+}
+
+function restoreActivityGroupsToChat() {
+  $('jarvis-activity-rail')?.querySelectorAll('.jarvis-task-activity[data-task-id]').forEach(positionActivityGroup);
 }
 
 function positionWorkerResult(result, taskId) {
@@ -606,6 +661,7 @@ function setActivityStatus(group, task, status) {
   else if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'blocked') group.open = true;
   else if (!previous) group.open = true;
   updateActivitySummary(group, task);
+  if (TERMINAL_TASK_STATES.has(task.status)) positionActivityGroup(group);
   if (!TERMINAL_TASK_STATES.has(task.status)) ensureActivityTicker();
 }
 
@@ -1435,8 +1491,10 @@ async function startListening() {
         return;
       }
       renderLiveUser(text, timings, turnStarted);
+      playVoiceCue('heard');
 
       speechPaused = false;
+      playVoiceCue('thinking', 0.1);
       setStatus('thinking');
       brainTurnInProgress = true;
       const brainStarted = performance.now();
@@ -1637,10 +1695,14 @@ async function startCall() {
   liveAssistantMessage = null;
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
-  setAgentWorkspaceActive(false);
-  mountOrganicSphere();
+  setAgentWorkspaceActive(activeTaskCount() > 0);
+  positionVisibleActivityGroups();
+  setStatus('idle', 'Connecting…');
+  const callCue = playVoiceCue('call');
   try {
     await createSession(callGeneration);
+    if (!isCurrentVoiceCall(callGeneration)) return;
+    await callCue;
     if (!isCurrentVoiceCall(callGeneration)) return;
     setStatus('idle');
     prewarmVoiceStack();
@@ -1654,6 +1716,7 @@ function endCall() {
   const continuedTasks = activeTaskCount();
   voiceCallGeneration += 1;
   isActive = false;
+  restoreActivityGroupsToChat();
   brainTurnInProgress = false;
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
@@ -1666,6 +1729,7 @@ function endCall() {
   resolvePlaybackWait();
   stopPlaybackAudio();
   if (window.aiTTSManager) window.aiTTSManager.stop();
+  closeVoiceCueAudio();
   stopSphereAudio();
   stopListening();
   stopTracks();
