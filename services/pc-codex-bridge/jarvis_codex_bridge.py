@@ -22,6 +22,18 @@ CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
 WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
+INTERACTION_WORKSPACE = Path(os.getenv(
+    "JARVIS_CODEX_INTERACTION_WORKSPACE",
+    str(Path.home() / ".local/share/jarvis/pc-codex-workspace"),
+)).expanduser()
+CODEX_MODEL = os.getenv(
+    "JARVIS_CODEX_MODEL",
+    "gpt-5.6-terra" if WORKER_ID == "pc-codex" else "",
+).strip()
+CODEX_REASONING_EFFORT = os.getenv(
+    "JARVIS_CODEX_REASONING_EFFORT",
+    "high" if WORKER_ID == "pc-codex" else "",
+).strip()
 TERMINAL = {"completed", "failed", "cancelled"}
 DEFAULT_WORKSPACES = {"workspace": str(Path.home())}
 if WORKER_ID == "vps-codex":
@@ -50,6 +62,42 @@ ARTIFACT_PATTERN = re.compile(
 )
 ARTIFACT_SUFFIXES = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml", ".csv", ".log"}
 ARTIFACT_MAX_BYTES = 2_000_000
+
+
+def _codex_command() -> list[str]:
+    command = [CODEX_BIN]
+    if CODEX_MODEL:
+        command += ["-c", f'model="{CODEX_MODEL}"']
+    if CODEX_REASONING_EFFORT:
+        command += ["-c", f'model_reasoning_effort="{CODEX_REASONING_EFFORT}"']
+    return command + ["app-server", "--stdio"]
+
+
+def _task_developer_instructions(task: "Task") -> str:
+    source_root = task.data.get("source_root")
+    if not source_root or source_root == task.data["cwd"]:
+        return DEVELOPER_INSTRUCTIONS
+    permission = task.data.get("permission_mode")
+    source_rule = (
+        "You may modify it only within this explicitly approved workspace-write task."
+        if permission == "workspace_write"
+        else "Treat it as read-only."
+    )
+    return (
+        f"{DEVELOPER_INSTRUCTIONS.rstrip()}\n\n"
+        f"The selected source workspace is {source_root}. Read it using absolute paths. "
+        f"{source_rule}\n"
+        f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
+        "Keep generated reports and Odysseus artifacts there so Jarvis tasks do not clutter the source project.\n"
+    )
+
+
+def _runtime_workspace_roots(task: "Task") -> list[str]:
+    roots = [task.data["cwd"]]
+    source_root = task.data.get("source_root")
+    if task.data.get("permission_mode") == "workspace_write" and source_root not in roots:
+        roots.append(source_root)
+    return roots
 
 
 def _configured_hosts(value: str | None = None) -> tuple[str, ...]:
@@ -319,7 +367,7 @@ def _drain_stderr(proc: subprocess.Popen[str]) -> None:
 def _run_task(task: Task) -> None:
     try:
         task.proc = subprocess.Popen(
-            [CODEX_BIN, "app-server", "--stdio"],
+            _codex_command(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -331,6 +379,7 @@ def _run_task(task: Task) -> None:
         _read_until(task, 1)
         task.send({"method": "initialized", "params": {}})
         sandbox = "workspace-write" if task.data["permission_mode"] == "workspace_write" else "read-only"
+        developer_instructions = _task_developer_instructions(task)
         resume_thread_id = task.data.get("codex_thread_id")
         if resume_thread_id:
             task.send({
@@ -341,7 +390,7 @@ def _run_task(task: Task) -> None:
                     "cwd": task.data["cwd"],
                     "sandbox": sandbox,
                     "approvalPolicy": "never",
-                    "developerInstructions": DEVELOPER_INSTRUCTIONS,
+                    "developerInstructions": developer_instructions,
                 },
             })
         else:
@@ -350,11 +399,11 @@ def _run_task(task: Task) -> None:
                 "method": "thread/start",
                 "params": {
                 "cwd": task.data["cwd"],
-                "runtimeWorkspaceRoots": [task.data["cwd"]],
+                "runtimeWorkspaceRoots": _runtime_workspace_roots(task),
                 "sandbox": sandbox,
                 "approvalPolicy": "never",
                 "ephemeral": False,
-                "developerInstructions": DEVELOPER_INSTRUCTIONS,
+                "developerInstructions": developer_instructions,
                 },
             })
         started = _read_until(task, 2)
@@ -418,9 +467,15 @@ def _watch_task(task: Task) -> None:
 
 def create_task(payload: dict) -> Task:
     workspace = str(payload.get("workspace") or "").strip()
-    cwd = WORKSPACES.get(workspace)
-    if not cwd:
+    source_root = WORKSPACES.get(workspace)
+    if not source_root:
         raise ValueError("unknown_workspace")
+    source_root = str(Path(source_root).expanduser().resolve())
+    if WORKER_ID == "pc-codex":
+        INTERACTION_WORKSPACE.mkdir(parents=True, exist_ok=True)
+        cwd = str(INTERACTION_WORKSPACE.resolve())
+    else:
+        cwd = source_root
     prompt = str(payload.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("prompt_required")
@@ -442,6 +497,7 @@ def create_task(payload: dict) -> Task:
         "session_id": str(payload.get("session_id") or ""),
         "workspace": workspace,
         "cwd": cwd,
+        "source_root": source_root,
         "permission_mode": permission,
         "prompt": prompt[:50000],
         "codex_thread_id": codex_thread_id,
@@ -632,6 +688,8 @@ class Handler(BaseHTTPRequestHandler):
 def self_check() -> None:
     assert WORKER_ID in {"pc-codex", "vps-codex"}
     assert all(Path(path).is_absolute() for path in WORKSPACES.values())
+    assert INTERACTION_WORKSPACE.is_absolute()
+    assert _codex_command()[-2:] == ["app-server", "--stdio"]
     assert _safe_tool_text({"type": "webSearch", "query": "test"}) == "Web search completed: test"
     assert MAX_TASK_RUNTIME >= 60
     assert ARTIFACT_PATTERN.search('[[ODYSSEUS_ARTIFACT path="notes/Mark 5.md" title="Mark 5"]]')

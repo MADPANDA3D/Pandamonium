@@ -65,6 +65,72 @@ def test_bridge_hosts_require_explicit_interfaces():
             raise AssertionError(f"wildcard host {wildcard} was accepted")
 
 
+def test_pc_bridge_uses_dedicated_interaction_workspace(tmp_path, monkeypatch):
+    class IdleThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    source = tmp_path / "Home Lab"
+    source.mkdir()
+    interaction = tmp_path / "Jarvis Codex Workspace"
+    monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
+    monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", interaction)
+    monkeypatch.setattr(bridge.threading, "Thread", IdleThread)
+
+    task = bridge.create_task({
+        "session_id": "session-1",
+        "workspace": "home-lab",
+        "prompt": "Inspect the current handoff.",
+        "codex_thread_id": "019f5022-a520-7de0-9208-018cd2d4d222",
+    })
+
+    try:
+        assert task.data["cwd"] == str(interaction.resolve())
+        assert task.data["source_root"] == str(source.resolve())
+        assert task.data["workspace"] == "home-lab"
+        assert task.data["codex_thread_id"] == "019f5022-a520-7de0-9208-018cd2d4d222"
+        assert interaction.is_dir()
+        assert bridge._runtime_workspace_roots(task) == [str(interaction.resolve())]
+        instructions = bridge._task_developer_instructions(task)
+        assert f"selected source workspace is {source.resolve()}" in instructions
+        assert "Treat it as read-only." in instructions
+    finally:
+        bridge.TASKS.pop(task.task_id, None)
+
+
+def test_approved_write_keeps_source_as_explicit_write_root(tmp_path):
+    interaction = tmp_path / "interactions"
+    source = tmp_path / "source"
+    task = _task(interaction)
+    task.data.update(
+        permission_mode="workspace_write",
+        source_root=str(source),
+    )
+
+    assert bridge._runtime_workspace_roots(task) == [str(interaction), str(source)]
+    assert "explicitly approved workspace-write task" in bridge._task_developer_instructions(task)
+
+
+def test_codex_command_applies_explicit_model_defaults(monkeypatch):
+    monkeypatch.setattr(bridge, "CODEX_BIN", "/usr/bin/codex")
+    monkeypatch.setattr(bridge, "CODEX_MODEL", "gpt-5.6-terra")
+    monkeypatch.setattr(bridge, "CODEX_REASONING_EFFORT", "high")
+
+    assert bridge._codex_command() == [
+        "/usr/bin/codex",
+        "-c",
+        'model="gpt-5.6-terra"',
+        "-c",
+        'model_reasoning_effort="high"',
+        "app-server",
+        "--stdio",
+    ]
+
+
 def test_artifact_marker_emits_validated_document_event(tmp_path):
     document = tmp_path / "Mark 5.md"
     document.write_text("# Mark 5\n\nSuccess, slow.", encoding="utf-8")
