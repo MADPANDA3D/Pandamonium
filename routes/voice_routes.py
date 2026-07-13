@@ -347,10 +347,31 @@ def _asks_runtime_status(text: str) -> bool:
 
 
 def _asks_current_business(text: str) -> bool:
-    normalized = text.replace("’", "'")
-    if re.search(r"\bwhat(?:'s|s|\s+is)\s+up\s+with\s+the\s+business\b", normalized, re.IGNORECASE):
-        return True
-    return bool(re.search(r"\b(current|latest|today|recent|updates?|status)\b.*\b(business|clients?|mad panda)\b|\b(business|clients?|mad panda)\b.*\b(current|latest|today|recent|updates?|status)\b", normalized, re.IGNORECASE))
+    normalized = " ".join(text.replace("’", "'").split())
+    subject = r"(?:(?:the|my|our)\s+business|business|mad\s+panda(?:\s*3d)?|(?:my|our|the|all)\s+clients|clients)"
+    second_subject = rf"(?:\s*,?\s*(?:with|across|for)\s+{subject})?"
+    request_end = (
+        second_subject
+        + r"(?:\s+(?:right\s+now|today|currently|lately|please))*\s*(?:[?.!]|$)"
+        + r"(?:\s*(?:just\s+)?(?:a\s+)?(?:quick|brief|short)\s+"
+        + r"(?:update|rundown|check(?:-?in)?)(?:\s*,\s*nothing\s+(?:too\s+)?"
+        + r"(?:deep|detailed|extensive))?\s*(?:[?.!]|$))?"
+    )
+    patterns = (
+        rf"\bwhat(?:'s|s|\s+is)\s+up\s+with\s+{subject}\b{request_end}",
+        rf"\bhow(?:'s|\s+is|\s+are)\s+{subject}\s+(?:doing|going|running|looking)\b{request_end}",
+        rf"\bhow(?:'s|\s+is|\s+are)\s+{subject}\b{request_end}",
+        rf"\bhow(?:'s|\s+is|\s+are)\s+(?:things|everything)(?:\s+(?:doing|going|running|looking))?\s+(?:with|across|for)\s+{subject}\b{request_end}",
+        rf"\bwhat(?:'s|\s+is)\s+(?:happening|going\s+on)\s+(?:with|across|for)\s+{subject}\b{request_end}",
+        rf"\bwhere\s+(?:do|does)\s+.*?\bstand\s+(?:with|on|across)\s+{subject}\b{request_end}",
+        rf"\banything\s+new\s+(?:with|on|across)\s+{subject}\b{request_end}",
+        rf"\b(?:check(?:ing)?\s+in|rundown)\s+(?:with|on|of|for)\s+{subject}\b{request_end}",
+        rf"\b(?:current|latest|recent)\s+{subject}\s+(?:updates?|status|rundown)\b{request_end}",
+        rf"\b{subject}\s+(?:updates?|status|rundown)\b{request_end}",
+        rf"\b(?:updates?|status|rundown)\s+(?:with|on|of|for)\s+{subject}\b{request_end}",
+        rf"\bwhat(?:'s|\s+is)\s+the\s+(?:latest|status)\s+(?:with|on|for)\s+{subject}\b{request_end}",
+    )
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in patterns)
 
 
 def _workspace_for_text(text: str) -> str:
@@ -375,7 +396,13 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
         return "vps-codex", "vps-ops"
     if re.search(r"\bhermes\b", text, re.IGNORECASE):
         return "hermes", "home-lab"
-    if re.search(r"\b(pc codex|my codex|desktop codex|computer codex)\b|\b(?:ask|talk to|speak to|check with)\s+my computer\b", text, re.IGNORECASE):
+    if re.search(
+        r"\b(pc codex|my codex|desktop codex|computer codex)\b|"
+        r"\bcodex\s+(?:on|from)\s+my\s+(?:pc|computer)\b|"
+        r"\b(?:ask|talk to|speak to|check with)\s+my computer\b",
+        text,
+        re.IGNORECASE,
+    ):
         return "pc-codex", _workspace_for_text(text)
     if re.search(r"\b(project\s+nimbus|nimbus|home cloud|my cloud|the cloud)\b", text, re.IGNORECASE):
         return "pc-codex", "home-lab"
@@ -404,7 +431,8 @@ def _background_delegation(text: str) -> tuple[str, str] | None:
 
 
 def _is_casual_greeting(text: str) -> bool:
-    value = re.sub(r"\bjarvis\b", " ", text.lower())
+    value = text.lower().replace("’", "'")
+    value = re.sub(r"\bjarvis\b|\by'?alls?\b", " ", value)
     value = " ".join(re.sub(r"[^a-z' ]", " ", value).split())
     return bool(re.fullmatch(
         r"(?:hi|hello|hey|good (?:morning|afternoon|evening))(?: there)?"
@@ -580,7 +608,12 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         return
 
     delegation = _background_delegation(text)
-    if delegation:
+    bounded_pc_business = bool(
+        delegation
+        and delegation[0] == "pc-codex"
+        and _asks_current_business(text)
+    )
+    if delegation and not bounded_pc_business:
         worker, workspace = delegation
         label = WORKER_LABELS[worker]
         prompt = f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}"
@@ -735,17 +768,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         return
 
     if _asks_current_business(text):
-        from src.jarvis_agent import search_knowledge
-
-        background = search_knowledge(text, owner=owner, limit=6)
-        citations = []
-        for row in background.get("results") or []:
-            citations.append(f"- {row.get('source')}: {str(row.get('text') or '')[:900]}")
         prompt = (
-            "Read-only current business update for Leo. Inspect the live Business workspace and any connected read-only systems available to you. "
-            "Use the retrieved background below only as orientation, verify current state from live sources, separate updates by client, and cite dated source paths. "
-            "Return a useful executive summary with blockers and next actions.\n\nLeo asked:\n"
-            f"{text}\n\nRetrieved background:\n" + "\n".join(citations)
+            "Give Leo a bounded, read-only Business status check that preserves the exact depth he requested. "
+            "Start with the central Business command center and only the newest dated client handovers needed to answer. "
+            "Unless Leo explicitly asks for every client or a deep/full report, return at most three verified priorities in 250 words or fewer. "
+            "Do not inventory every client, run capability or service discovery, or use external connectors unless Leo explicitly named that source. "
+            "Mark stale or unknown facts clearly. Never infer meetings, schedules, workflows, deliverables, or client status. Make no changes.\n\n"
+            f"Leo's exact request:\n{text}"
         )
         try:
             task, action = await _dispatch_worker_request(
@@ -783,7 +812,6 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             reply,
             guard_reason,
             task_ids,
-            rag_sources=[row.get("source") for row in background.get("results") or []],
         )
         return
 

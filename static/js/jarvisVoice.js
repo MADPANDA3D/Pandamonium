@@ -558,6 +558,11 @@ function taskMessageElements(taskId) {
     .filter(item => item.dataset.taskId === String(taskId));
 }
 
+function taskSummaryElements(taskId) {
+  return taskMessageElements(taskId)
+    .filter(item => item.dataset.source === 'jarvis_worker_summary');
+}
+
 function rememberTask(task) {
   const taskId = String(task?.task_id || '');
   if (!taskId) return null;
@@ -627,8 +632,10 @@ function positionActivityGroup(group) {
     item.classList.contains('msg-ai')
     && ['jarvis_voice', 'jarvis_voice_live'].includes(item.dataset.source || '')
   ));
+  const firstSummary = messages.find(item => item.dataset.source === 'jarvis_worker_summary');
   const result = messages.find(item => item.dataset.source === 'agent_worker');
   if (acknowledgement) acknowledgement.after(group);
+  else if (firstSummary) firstSummary.before(group);
   else if (result) result.before(group);
   else if (group.parentElement !== box) box.appendChild(group);
 }
@@ -643,7 +650,7 @@ function restoreActivityGroupsToChat() {
 
 function positionWorkerResult(result, taskId) {
   const group = taskActivityElement(taskId);
-  if (group && result) group.after(result);
+  if (group && result && group.parentElement !== result.parentElement) group.after(result);
 }
 
 function setActivityStatus(group, task, status) {
@@ -842,6 +849,36 @@ function renderActivityEvent(event) {
   return group;
 }
 
+function findWorkerSummary(taskId, eventId, text) {
+  return taskSummaryElements(taskId).find(item => {
+    if (eventId) return item.dataset.workerEventId === eventId;
+    return String(item.querySelector('.body')?.textContent || '').trim() === text;
+  });
+}
+
+function renderWorkerSummary(event, task) {
+  const metadata = event.metadata || {};
+  const text = String(event.spoken_text || '').trim();
+  const isBrokerSummary = event.type === 'progress'
+    && (metadata.progress_summary === true || metadata.milestone === true);
+  if (!isBrokerSummary || !text || !taskVisible(task)) return null;
+
+  const eventId = String(event.event_id || '').trim();
+  const existing = findWorkerSummary(event.task_id, eventId, text);
+  if (existing) return existing;
+
+  const summary = window.chatModule?.addMessage?.('assistant', text, '', {
+    source: 'jarvis_worker_summary',
+    worker: event.worker,
+    task_id: event.task_id,
+    worker_event_id: eventId,
+    character_name: 'Jarvis',
+  }) || null;
+  if (summary && eventId) summary.dataset.workerEventId = eventId;
+  window.uiModule?.scrollHistory?.();
+  return summary;
+}
+
 async function openWorkerArtifact(event) {
   const documentId = event.metadata?.document_id;
   if (!documentId || !window.documentModule?.loadDocument) return;
@@ -953,7 +990,10 @@ async function handleWorkerEvent(event) {
     activeWorkspace = event.metadata.workspace || activeWorkspace;
     await persistVoiceTarget({ codex_thread_id: activeCodexThreadId }).catch(() => {});
   }
-  if (taskVisible(task)) renderActivityEvent(event);
+  if (taskVisible(task)) {
+    renderActivityEvent(event);
+    renderWorkerSummary(event, task);
+  }
   if (event.type === 'artifact' && isActive) await openWorkerArtifact(event);
   if (event.type === 'result'
       && event.text

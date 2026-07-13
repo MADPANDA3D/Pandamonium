@@ -228,6 +228,9 @@ async def test_live_result_keeps_raw_chat_text_and_adds_spoken_summary(tmp_path,
         def __init__(self):
             self.messages = []
 
+        def get_session(self, _session_id):
+            return type("Session", (), {"history": [message for _, message in self.messages]})()
+
         def add_message(self, session_id, message):
             self.messages.append((session_id, message))
 
@@ -250,6 +253,116 @@ async def test_live_result_keeps_raw_chat_text_and_adds_spoken_summary(tmp_path,
     assert saved["events"][0]["spoken_text"].startswith("PC Codex finished")
     assert manager.messages[0][1].content == raw
     assert manager.messages[0][1].metadata["character_name"] == "PC Codex"
+
+
+def test_broker_progress_summaries_persist_once_with_jarvis_attribution(tmp_path, monkeypatch):
+    class SessionManager:
+        def __init__(self):
+            self.session = type("Session", (), {"history": [], "message_count": 0})()
+
+        def get_session(self, _session_id):
+            return self.session
+
+        def add_message(self, _session_id, message):
+            self.session.history.append(message)
+            self.session.message_count = len(self.session.history)
+            message.metadata["_db_id"] = f"db-{len(self.session.history)}"
+
+    manager = SessionManager()
+    manager.session.history.append(jarvis_agent.ChatMessage("assistant", "Other task summary.", metadata={
+        "source": "jarvis_worker_summary",
+        "task_id": "other-task",
+        "worker_event_id": "progress-summary-1",
+        "_db_id": "db-other-task",
+    }))
+    manager.session.message_count = 1
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
+    jarvis_agent._save_task(_task())
+
+    progress = {
+        "event_id": "progress-summary-1",
+        "type": "progress",
+        "text": "Three raw worker updates remain in activity history.",
+        "spoken_text": "PC Codex has verified the three highest-priority client items.",
+        "metadata": {"progress_summary": True},
+    }
+    milestone = {
+        "event_id": "milestone-1",
+        "type": "progress",
+        "text": "The current ledger review is complete.",
+        "spoken_text": "PC Codex finished reviewing the current Business ledger.",
+        "metadata": {"milestone": True},
+    }
+    jarvis_agent._append_event("task-1", progress)
+    jarvis_agent._append_event("task-1", progress)
+    jarvis_agent._append_event("task-1", milestone)
+    jarvis_agent._append_event("task-1", {
+        "event_id": "result-1",
+        "type": "result",
+        "text": "| Client | Status |\n| --- | --- |\n| Acme | Ready |",
+        "spoken_text": "PC Codex finished. The full report is in chat.",
+        "metadata": {},
+    })
+
+    saved = jarvis_agent.get_task("task-1")
+    assert [event["event_id"] for event in saved["events"]] == [
+        "progress-summary-1", "milestone-1", "result-1",
+    ]
+    assert saved["events"][0]["text"].startswith("Three raw worker updates")
+    assert [message.content for message in manager.session.history] == [
+        "Other task summary.",
+        "PC Codex has verified the three highest-priority client items.",
+        "PC Codex finished reviewing the current Business ledger.",
+        "| Client | Status |\n| --- | --- |\n| Acme | Ready |",
+    ]
+    summary_metadata = manager.session.history[1].metadata
+    assert {key: value for key, value in summary_metadata.items() if key != "_db_id"} == {
+        "source": "jarvis_worker_summary",
+        "worker": "pc-codex",
+        "task_id": "task-1",
+        "worker_event_id": "progress-summary-1",
+        "character_name": "Jarvis",
+    }
+    assert manager.session.history[-1].metadata["source"] == "agent_worker"
+
+
+def test_progress_summary_retries_after_transient_persistence_failure(tmp_path, monkeypatch):
+    class SessionManager:
+        def __init__(self):
+            self.session = type("Session", (), {"history": [], "message_count": 0})()
+            self.failures = 1
+
+        def get_session(self, _session_id):
+            return self.session
+
+        def add_message(self, _session_id, message):
+            self.session.history.append(message)
+            self.session.message_count = len(self.session.history)
+            if self.failures:
+                self.failures -= 1
+                return
+            message.metadata["_db_id"] = "db-summary-retry-1"
+
+    manager = SessionManager()
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
+    jarvis_agent._save_task(_task())
+    event = {
+        "event_id": "summary-retry-1",
+        "type": "progress",
+        "text": "Raw progress.",
+        "spoken_text": "PC Codex verified the current priority.",
+        "metadata": {"progress_summary": True},
+    }
+
+    jarvis_agent._append_event("task-1", event)
+    assert manager.session.history == []
+    saved = jarvis_agent.get_task("task-1")
+    assert jarvis_agent._persist_progress_summary(saved, saved["events"][0]) is True
+    assert jarvis_agent._persist_progress_summary(saved, saved["events"][0]) is True
+    assert len(manager.session.history) == 1
+    assert manager.session.history[0].metadata["worker_event_id"] == "summary-retry-1"
 
 
 @pytest.mark.asyncio

@@ -91,6 +91,12 @@ assert.match(source, /fetchJson\(`\/api\/agent-tasks\/\$\{encodeURIComponent\(ta
 assert.match(source, /snapshot\.session_id !== sessionIdToRestore/);
 assert.match(source, /TERMINAL_TASK_STATES\.has\(task\.status \|\| ''\)/);
 assert.match(source, /taskMessageElements\(taskId\)\.find\(item => item\.dataset\.source === 'agent_worker'\)/);
+assert.match(source, /item\.dataset\.source === 'jarvis_worker_summary'/);
+assert.match(source, /metadata\.progress_summary === true \|\| metadata\.milestone === true/);
+assert.match(source, /source: 'jarvis_worker_summary'/);
+assert.match(source, /character_name: 'Jarvis'/);
+assert.match(source, /summary\.dataset\.workerEventId = eventId/);
+assert.match(source, /if \(eventId\) return item\.dataset\.workerEventId === eventId/);
 assert.match(source, /if \(activeWorkerTaskId === taskId\)/);
 assert.match(source, /querySelectorAll\('\.jarvis-task-approval-actions button'\)/);
 assert.doesNotMatch(source, /history\.setAttribute\('role', 'log'\)/);
@@ -128,7 +134,7 @@ assert.match(index, /id="jarvis-activity-rail"[^>]*role="region"[^>]*aria-label=
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
 assert.match(index, /jarvisVoice\.js\?v=20260712T230000Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v352'/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v353'/);
 
 // Exercise the production placement functions with a tiny dependency-free DOM.
 // The same details node must keep its rail order, then return to chat before its final result.
@@ -158,6 +164,27 @@ const acknowledgement = {
   },
 };
 const result = { dataset: { source: 'agent_worker', taskId: 'task-rail' } };
+const summary = {
+  dataset: { source: 'jarvis_worker_summary', taskId: 'task-rail', workerEventId: 'summary-1' },
+  querySelector(selector) {
+    return selector === '.body' ? { textContent: 'PC Codex verified the same result.' } : null;
+  },
+  after(node) {
+    const index = chatOrder.indexOf(summary);
+    const priorIndex = chatOrder.indexOf(node);
+    if (priorIndex >= 0) chatOrder.splice(priorIndex, 1);
+    node.parentElement = chat;
+    chatOrder.splice(index + 1, 0, node);
+  },
+  before(node) {
+    const index = chatOrder.indexOf(summary);
+    const priorIndex = chatOrder.indexOf(node);
+    if (priorIndex >= 0) chatOrder.splice(priorIndex, 1);
+    node.parentElement = chat;
+    chatOrder.splice(index, 0, node);
+  },
+};
+const unrelated = { dataset: { source: 'jarvis_voice', taskId: 'other-task' } };
 const group = {
   dataset: { taskId: 'task-rail', status: 'running' },
   parentElement: null,
@@ -169,8 +196,10 @@ const group = {
     chatOrder.splice(index + 1, 0, node);
   },
 };
-chatOrder.push(acknowledgement, result);
+chatOrder.push(acknowledgement, summary, unrelated, result);
 acknowledgement.parentElement = chat;
+summary.parentElement = chat;
+unrelated.parentElement = chat;
 result.parentElement = chat;
 const fakeDocument = {
   readyState: 'loading',
@@ -181,7 +210,7 @@ const fakeDocument = {
   querySelector() { return null; },
   querySelectorAll(selector) {
     if (selector === '.jarvis-task-activity[data-task-id]') return [group];
-    if (selector === '#chat-history .msg[data-task-id]') return [acknowledgement, result];
+    if (selector === '#chat-history .msg[data-task-id]') return [acknowledgement, summary, result];
     return [];
   },
 };
@@ -199,9 +228,12 @@ sandbox.window = sandbox;
 const executableSource = source.replace(
   "import markdownModule from './markdown.js';",
   'const markdownModule = { renderMarkdown: value => value };',
-) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, restoreActivityGroupsToChat, setActive: value => { isActive = value; } };';
+) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, restoreActivityGroupsToChat, findWorkerSummary, setActive: value => { isActive = value; } };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
+assert.equal(placement.findWorkerSummary('task-rail', 'summary-1', 'PC Codex verified the same result.'), summary);
+assert.equal(placement.findWorkerSummary('task-rail', 'summary-2', 'PC Codex verified the same result.'), undefined);
+assert.equal(placement.findWorkerSummary('task-rail', '', 'PC Codex verified the same result.'), summary);
 placement.setActive(true);
 placement.positionActivityGroup(group);
 assert.equal(group.parentElement, rail);
@@ -211,9 +243,9 @@ assert.deepEqual(railOrder, [group], 'new activity must not reorder the same rai
 group.dataset.status = 'completed';
 placement.positionActivityGroup(group);
 placement.positionWorkerResult(result, group.dataset.taskId);
-assert.deepEqual(chatOrder, [acknowledgement, group, result]);
+assert.deepEqual(chatOrder, [acknowledgement, group, summary, unrelated, result]);
 group.dataset.status = 'running';
 placement.positionActivityGroup(group);
 placement.setActive(false);
 placement.restoreActivityGroupsToChat();
-assert.deepEqual(chatOrder, [acknowledgement, group, result]);
+assert.deepEqual(chatOrder, [acknowledgement, group, summary, unrelated, result]);

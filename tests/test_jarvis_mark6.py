@@ -29,10 +29,12 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("Talk about the result Hermes found") is None
     assert _target_switch("Ask PC Codex to inspect Mark 5") is None
     assert _delegation_route("Ask PC Codex to inspect Mark 5") == ("pc-codex", "home-lab")
+    assert _delegation_route("Ask Codex on my PC for a client update") == ("pc-codex", "business")
 
 
 def test_casual_greeting_and_approval_guards_are_deterministic():
     assert _is_casual_greeting("Hey Jarvis, how you doing?")
+    assert _is_casual_greeting("What's up y'alls?")
     reply = voice_routes._casual_greeting_reply({"turns": []})
     assert "time" not in reply.lower()
     assert "london" not in reply.lower()
@@ -66,18 +68,65 @@ def test_selected_workspace_changes_only_when_the_turn_names_one():
     "Whats up with the business",
     "What is up with the business?",
     "What’s up with the business?",
+    "How are things running with the business, with my clients right now? Just a quick rundown, nothing extensive.",
+    "How are my clients doing?",
+    "Give me a quick rundown on the business.",
+    "What's up with Mad Panda 3D?",
 ])
 def test_business_update_phrase_is_deterministic(text):
     assert _asks_current_business(text)
 
 
+@pytest.mark.parametrize("text", [
+    "Explain how a business works",
+    "How are business taxes handled?",
+])
+def test_business_explanations_do_not_trigger_a_live_status_task(text):
+    assert not _asks_current_business(text)
+
+
+@pytest.mark.parametrize("text", [
+    "What business tasks should I automate today?",
+    "Give me a client update on the website code.",
+    "How should I keep my business running?",
+    "The business status page is broken.",
+    "Build me a business status dashboard.",
+    "Update on the business website code.",
+    "What is happening with business taxes?",
+    "Give me a rundown on the business status page implementation.",
+])
+def test_specific_business_work_does_not_trigger_a_portfolio_status_task(text):
+    assert not _asks_current_business(text)
+
+
+@pytest.mark.asyncio
+async def test_yalls_greeting_does_not_dispatch_or_steer_an_active_worker(monkeypatch):
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("a casual greeting must not dispatch or steer a worker")
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "What's up y'alls?",
+            "leo",
+            {"target": "jarvis", "workspace": "business", "active_task_id": "pc-task"},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["assistant_delta", "final"]
+    assert events[-1]["diagnostics"]["guard_reason"] == "casual_greeting"
+
+
 @pytest.mark.asyncio
 async def test_business_then_hermes_runs_as_distinct_background_tasks_with_jarvis_foreground(monkeypatch):
+    prompts = []
+
     async def dispatch(_session, worker, workspace, _prompt, _owner, _voice):
+        prompts.append((worker, workspace, _prompt))
         return {"task_id": f"{worker}-task", "worker": worker}, "started"
 
     monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
-    monkeypatch.setattr(jarvis_agent, "search_knowledge", lambda *_args, **_kwargs: {"results": []})
     voice_session = {"target": "jarvis", "workspace": "home-lab", "active_task_id": None}
 
     business = [
@@ -104,6 +153,70 @@ async def test_business_then_hermes_runs_as_distinct_background_tasks_with_jarvi
     assert "not current enough" in business[-1]["assistant_text"]
     assert all(event["type"] != "target_changed" for event in business + hermes)
     assert voice_session["target"] == "jarvis"
+    business_prompt = prompts[0][2]
+    assert len(business_prompt) < 1_000
+    assert "at most three verified priorities" in business_prompt
+    assert "250 words or fewer" in business_prompt
+    assert "Retrieved background" not in business_prompt
+    assert "any connected read-only systems" not in business_prompt
+
+
+@pytest.mark.asyncio
+async def test_named_pc_business_update_uses_the_bounded_business_route(monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": "pc-business", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    voice_session = {"target": "jarvis", "workspace": "home-lab", "active_task_id": None}
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Ask Codex on my PC for a quick update on my clients.",
+            "leo",
+            voice_session,
+        )
+    ]
+
+    assert calls[0][:2] == ("pc-codex", "business")
+    assert "at most three verified priorities" in calls[0][2]
+    assert events[-1]["diagnostics"]["guard_reason"] == "current_business_started"
+    assert next(event for event in events if event["type"] == "agent_task")["foreground"] is False
+    assert all(event["type"] != "target_changed" for event in events)
+    assert voice_session["target"] == "jarvis"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("text", "expected_worker", "expected_workspace"), [
+    ("Ask Hermes for the latest status on our clients.", "hermes", "home-lab"),
+    ("Ask VPS Codex for the latest status on our clients.", "vps-codex", "vps-ops"),
+])
+async def test_named_non_pc_worker_is_not_overridden_by_business_guard(
+    text,
+    expected_worker,
+    expected_workspace,
+    monkeypatch,
+):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": f"{worker}-task", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            text,
+            "leo",
+            {"target": "jarvis", "workspace": "home-lab", "active_task_id": None},
+        )
+    ]
+
+    assert calls[0][:2] == (expected_worker, expected_workspace)
+    assert events[-1]["diagnostics"]["guard_reason"] == f"delegation_started_{expected_worker}"
 
 
 @pytest.mark.asyncio

@@ -219,10 +219,57 @@ def _append_event(task_id: str, event: dict) -> None:
             task["codex_thread_id"] = metadata["codex_thread_id"]
             _save_worker_binding(task, codex_thread_id=metadata["codex_thread_id"])
         task["updated_at"] = int(time.time())
+        if event_type == "progress":
+            _persist_progress_summary(task, event)
         if event_type == "result" and not task.get("result_persisted"):
             _persist_result(task, str(event.get("text") or ""))
             task["result_persisted"] = True
         _save_task(task)
+
+
+def _persist_progress_summary(task: dict, event: dict) -> bool:
+    metadata = event.get("metadata") or {}
+    text = str(event.get("spoken_text") or "").strip()
+    is_broker_summary = metadata.get("progress_summary") is True or metadata.get("milestone") is True
+    if not _SESSION_MANAGER or not text or not is_broker_summary or not task.get("session_id"):
+        return False
+    event_id = str(event.get("event_id") or "")
+    with _LOCK:
+        try:
+            session = _SESSION_MANAGER.get_session(task["session_id"])
+            matching = [
+                message for message in session.history
+                if event_id
+                and (message.metadata or {}).get("source") == "jarvis_worker_summary"
+                and (message.metadata or {}).get("task_id") == task.get("task_id")
+                and (message.metadata or {}).get("worker_event_id") == event_id
+            ]
+            if any((message.metadata or {}).get("_db_id") for message in matching):
+                return True
+            if matching:
+                ghost_ids = {id(message) for message in matching}
+                session.history[:] = [message for message in session.history if id(message) not in ghost_ids]
+                session._history = session.history
+                session.message_count = len(session.history)
+            message = ChatMessage("assistant", text, metadata={
+                "source": "jarvis_worker_summary",
+                "worker": task.get("worker"),
+                "task_id": task.get("task_id"),
+                "worker_event_id": event_id,
+                "character_name": "Jarvis",
+            })
+            try:
+                _SESSION_MANAGER.add_message(task["session_id"], message)
+            except Exception:
+                pass
+            if not (message.metadata or {}).get("_db_id"):
+                session.history[:] = [existing for existing in session.history if existing is not message]
+                session._history = session.history
+                session.message_count = len(session.history)
+                return False
+            return True
+        except Exception:
+            return False
 
 
 def _persist_result(task: dict, text: str) -> None:
@@ -580,6 +627,9 @@ async def stream_task_events(task_id: str, after: int = -1) -> AsyncGenerator[st
     cursor = after
     while True:
         for event in task_events(task_id, cursor):
+            task = get_task(task_id)
+            if task and event.get("type") == "progress":
+                _persist_progress_summary(task, event)
             cursor = int(event.get("seq", cursor))
             yield f"id: {cursor}\ndata: {json.dumps(event)}\n\n"
         task = get_task(task_id)
