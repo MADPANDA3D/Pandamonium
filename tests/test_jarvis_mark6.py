@@ -32,6 +32,94 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _delegation_route("Ask Codex on my PC for a client update") == ("pc-codex", "business")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Open the Mark 7 document",
+        "Ask PC codecs to open the Mark 7 document",
+    ],
+)
+async def test_odysseus_document_open_routes_to_background_pc_codex(text, monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": "pc-document", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    voice_session = {"target": "jarvis", "workspace": "home-lab", "active_task_id": None}
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", voice_session,
+        )
+    ]
+
+    assert calls[0][:2] == ("pc-codex", "home-lab")
+    assert "Odysseus is the default destination" in calls[0][2]
+    assert "ODYSSEUS_ARTIFACT" in calls[0][2]
+    task = next(event for event in events if event["type"] == "agent_task")
+    assert task["foreground"] is False
+    assert all(event["type"] != "target_changed" for event in events)
+    assert voice_session["target"] == "jarvis"
+
+
+@pytest.mark.asyncio
+async def test_do_it_again_replays_the_latest_completed_worker_request(monkeypatch):
+    previous = {
+        "task_id": "old-document-task",
+        "worker": "pc-codex",
+        "workspace": "home-lab",
+        "status": "failed",
+        "prompt": "Open Mark 6 in Odysseus with ODYSSEUS_ARTIFACT.",
+    }
+    calls = []
+
+    monkeypatch.setattr(jarvis_agent, "get_task", lambda task_id: previous if task_id == previous["task_id"] else None)
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": "retry-task", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Okay, ask it to do it again",
+            "leo",
+            {
+                "target": "jarvis",
+                "workspace": "home-lab",
+                "active_task_id": None,
+                "tasks": [{"task_id": previous["task_id"]}],
+            },
+        )
+    ]
+
+    assert calls == [("pc-codex", "home-lab", previous["prompt"])]
+    assert next(event for event in events if event["type"] == "agent_task")["foreground"] is False
+    assert events[-1]["diagnostics"]["guard_reason"] == "delegation_started_pc-codex"
+
+
+@pytest.mark.asyncio
+async def test_do_it_again_without_a_recent_task_asks_for_context(monkeypatch):
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("an unbound retry must not invent a worker task")
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Ask it to do it again",
+            "leo",
+            {"target": "jarvis", "workspace": "home-lab", "active_task_id": None, "tasks": []},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["assistant_delta", "final"]
+    assert events[-1]["diagnostics"]["guard_reason"] == "retry_task_missing"
+
+
 def test_casual_greeting_and_approval_guards_are_deterministic():
     assert _is_casual_greeting("Hey Jarvis, how you doing?")
     assert _is_casual_greeting("What's up y'alls?")

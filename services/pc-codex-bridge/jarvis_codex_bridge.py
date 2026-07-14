@@ -88,7 +88,8 @@ def _task_developer_instructions(task: "Task") -> str:
         f"The selected source workspace is {source_root}. Read it using absolute paths. "
         f"{source_rule}\n"
         f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
-        "Keep generated reports and Odysseus artifacts there so Jarvis tasks do not clutter the source project.\n"
+        "Keep generated reports and generated Odysseus artifacts there so Jarvis tasks do not clutter the source project. "
+        "Existing verified text documents in the selected source workspace may be emitted directly as Odysseus artifacts.\n"
     )
 
 
@@ -133,6 +134,8 @@ class Task:
     def event(self, event_type: str, text: str, metadata: dict | None = None) -> dict:
         with self.changed:
             events = self.data.setdefault("events", [])
+            if self.data.get("status") in TERMINAL and event_type in {"result", "error", "cancelled"}:
+                return events[-1]
             event = {
                 "seq": len(events),
                 "event_id": str(uuid.uuid4()),
@@ -266,25 +269,41 @@ def _artifact_language(path: Path) -> str:
 
 
 def _extract_artifacts(task: Task, text: str) -> str:
-    workspace_root = Path(task.data["cwd"]).resolve()
+    roots = [Path(task.data["cwd"]).resolve()]
+    source_root = task.data.get("source_root")
+    if source_root and Path(source_root).resolve() not in roots:
+        roots.append(Path(source_root).resolve())
     cleaned = text
     for match in ARTIFACT_PATTERN.finditer(text):
         requested = Path(match.group(1)).expanduser()
-        candidate = (requested if requested.is_absolute() else workspace_root / requested).resolve()
-        try:
-            relative = candidate.relative_to(workspace_root)
-        except ValueError:
+        candidates = (
+            [requested.resolve()]
+            if requested.is_absolute()
+            else [(root / requested).resolve() for root in roots]
+        )
+        contained = []
+        for candidate in candidates:
+            for root in roots:
+                try:
+                    contained.append((candidate, candidate.relative_to(root)))
+                    break
+                except ValueError:
+                    continue
+        if not contained:
             task.event("error", "Codex refused an artifact path outside the approved workspace.")
             cleaned = cleaned.replace(match.group(0), "")
             continue
-        if (
-            not candidate.is_file()
-            or candidate.suffix.lower() not in ARTIFACT_SUFFIXES
-            or candidate.stat().st_size > ARTIFACT_MAX_BYTES
-        ):
+        valid = next((
+            item for item in contained
+            if item[0].is_file()
+            and item[0].suffix.lower() in ARTIFACT_SUFFIXES
+            and item[0].stat().st_size <= ARTIFACT_MAX_BYTES
+        ), None)
+        if not valid:
             task.event("error", "Codex could not open that artifact as a supported Odysseus document.")
             cleaned = cleaned.replace(match.group(0), "")
             continue
+        candidate, relative = valid
         content = candidate.read_text(encoding="utf-8")
         fingerprint = hashlib.sha256(
             f"{candidate}|{candidate.stat().st_mtime_ns}|{len(content)}".encode()

@@ -397,7 +397,7 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
     if re.search(r"\bhermes\b", text, re.IGNORECASE):
         return "hermes", "home-lab"
     if re.search(
-        r"\b(pc codex|my codex|desktop codex|computer codex)\b|"
+        r"\b(pc code(?:x|cs)|my codex|desktop codex|computer codex)\b|"
         r"\bcodex\s+(?:on|from)\s+my\s+(?:pc|computer)\b|"
         r"\b(?:ask|talk to|speak to|check with)\s+my computer\b",
         text,
@@ -427,7 +427,30 @@ def _background_delegation(text: str) -> tuple[str, str] | None:
     route = _delegation_route(text)
     if route and re.search(r"\b(?:ask|have|get|tell|send|check)\b", text, re.IGNORECASE):
         return route
+    if _is_document_open_request(text):
+        return "pc-codex", _workspace_for_text(text)
     return None
+
+
+def _is_document_open_request(text: str) -> bool:
+    return bool(
+        re.search(r"\b(?:open(?:\s+up)?|show|pull\s+up|load)\b", text, re.IGNORECASE)
+        and re.search(
+            r"\b(?:documents?|documentation|files?|notes?|mark\s+\d+(?:\.\d+)?)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_worker_retry_request(text: str) -> bool:
+    value = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
+    return bool(re.fullmatch(
+        r"(?:(?:okay|ok|well|all right|so)\s+)*(?:please\s+)?"
+        r"(?:(?:ask|tell|have|get)\s+(?:him|her|it|them)\s+to\s+)?"
+        r"(?:do|try|run|open)\s+(?:it|that)\s+again(?:\s+please)?",
+        value,
+    ))
 
 
 def _is_casual_greeting(text: str) -> bool:
@@ -608,6 +631,30 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         return
 
     delegation = _background_delegation(text)
+    retry_task = None
+    retry_requested = not delegation and _is_worker_retry_request(text)
+    if retry_requested:
+        from src.jarvis_agent import get_task
+
+        for snapshot in reversed(voice_session.get("tasks") or []):
+            candidate = get_task(str(snapshot.get("task_id") or ""))
+            if (
+                candidate
+                and candidate.get("status") in {"completed", "failed", "cancelled", "blocked"}
+                and candidate.get("worker") in WORKER_LABELS
+                and candidate.get("prompt")
+            ):
+                retry_task = candidate
+                delegation = (candidate["worker"], candidate.get("workspace") or "home-lab")
+                break
+        if not retry_task:
+            reply = "I don’t have a completed worker request in this voice session to retry. Tell me which worker and request you mean."
+            yield {"type": "assistant_delta", "text": reply}
+            yield _server_final_event(text, reply, "retry_task_missing")
+            return
+    document_open = _is_document_open_request(text) or bool(
+        retry_task and "ODYSSEUS_ARTIFACT" in str(retry_task.get("prompt") or "")
+    )
     bounded_pc_business = bool(
         delegation
         and delegation[0] == "pc-codex"
@@ -616,7 +663,16 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
     if delegation and not bounded_pc_business:
         worker, workspace = delegation
         label = WORKER_LABELS[worker]
-        prompt = f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}"
+        prompt = (
+            str(retry_task["prompt"])
+            if retry_task
+            else f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}"
+        )
+        if document_open and "ODYSSEUS_ARTIFACT" not in prompt:
+            prompt += (
+                "\n\nOdysseus is the default destination. Verify the exact text document, then open it "
+                "with the required ODYSSEUS_ARTIFACT marker. Do not use a desktop opener."
+            )
         try:
             task, action = await _dispatch_worker_request(
                 chat_session_id, worker, workspace, prompt, owner, voice_session,
@@ -625,7 +681,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             logger.warning("Jarvis could not dispatch %s task: %s", worker, str(exc)[:240])
             task, action = {}, "blocked"
         if action == "started":
-            reply = f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
+            reply = (
+                f"I’m asking {label} to retry that request. I’ll keep you updated here."
+                if retry_task
+                else f"I’m asking {label} to open that in Odysseus. I’ll keep you updated here."
+                if document_open
+                else f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
+            )
         elif action == "steered":
             reply = f"I’ve passed that follow-up to the active {label} task."
         elif action == "busy":

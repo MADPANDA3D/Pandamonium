@@ -146,6 +146,28 @@ def test_artifact_marker_emits_validated_document_event(tmp_path):
     assert event["metadata"]["content"].startswith("# Mark 5")
 
 
+def test_artifact_marker_accepts_document_from_read_only_source_root(tmp_path):
+    interaction = tmp_path / "interactions"
+    interaction.mkdir()
+    source = tmp_path / "Home Lab"
+    document = source / "Jarvis Build Folder" / "Mark 6.md"
+    document.parent.mkdir(parents=True)
+    document.write_text("# Mark 6\n\nVoice baseline.", encoding="utf-8")
+    task = _task(interaction)
+    task.data["source_root"] = str(source)
+
+    result = bridge._extract_artifacts(
+        task,
+        'Ready.\n[[ODYSSEUS_ARTIFACT path="Jarvis Build Folder/Mark 6.md" title="Mark 6 Build"]]',
+    )
+
+    assert result == "Ready."
+    event = task.data["events"][0]
+    assert event["type"] == "artifact"
+    assert event["metadata"]["title"] == "Mark 6 Build"
+    assert event["metadata"]["content"].startswith("# Mark 6")
+
+
 def test_artifact_marker_rejects_paths_outside_workspace(tmp_path):
     outside = tmp_path.parent / "outside.md"
     outside.write_text("secret", encoding="utf-8")
@@ -163,6 +185,23 @@ def test_artifact_marker_rejects_symlink_escape(tmp_path):
     bridge._extract_artifacts(task, '[[ODYSSEUS_ARTIFACT path="linked.md"]]')
     assert task.data["events"][0]["type"] == "error"
     assert all(event["type"] != "artifact" for event in task.data["events"])
+
+
+def test_invalid_artifact_cannot_be_overwritten_by_success_result(tmp_path):
+    task = _task(tmp_path)
+
+    bridge._handle_server_message(task, {
+        "method": "item/completed",
+        "params": {"item": {
+            "type": "agentMessage",
+            "phase": "final_answer",
+            "text": 'Opened it.\n[[ODYSSEUS_ARTIFACT path="missing.md"]]',
+        }},
+    })
+
+    assert task.data["status"] == "failed"
+    assert task.data.get("result") is None
+    assert [event["type"] for event in task.data["events"]] == ["error"]
 
 
 def test_commentary_milestone_marker_is_stripped_and_tagged(tmp_path):
