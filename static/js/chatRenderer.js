@@ -2250,6 +2250,7 @@ function applyTaskMessageMetadata(wrap, metadata) {
   if (metadata.source) wrap.dataset.source = String(metadata.source);
   if (metadata.task_id) wrap.dataset.taskId = String(metadata.task_id);
   if (metadata.worker) wrap.dataset.worker = String(metadata.worker);
+  if (metadata.worker_event_id) wrap.dataset.workerEventId = String(metadata.worker_event_id);
 }
 
 export function addMessage(role, content, modelName, metadata) {

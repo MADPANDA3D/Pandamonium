@@ -152,6 +152,8 @@ def test_spoken_text_policy_keeps_short_summarizes_long_and_honors_read_all(monk
 
 
 def test_voice_prewarm_wakes_tts_without_cache(monkeypatch):
+    assert voice_routes.VOICE_TTS_PREWARM_TIMEOUT_SECONDS == 30.0
+
     class FakeResponse:
         def raise_for_status(self):
             return None

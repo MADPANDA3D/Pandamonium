@@ -90,6 +90,7 @@ assert.doesNotMatch(source, /events\?after=|Could not refresh worker result in c
 assert.match(source, /fetchJson\(`\/api\/agent-tasks\/\$\{encodeURIComponent\(taskId\)\}`\)/);
 assert.match(source, /snapshot\.session_id !== sessionIdToRestore/);
 assert.match(source, /TERMINAL_TASK_STATES\.has\(task\.status \|\| ''\)/);
+assert.match(source, /events\.forEach\(event => \{\s*renderActivityEvent\(event\);\s*renderWorkerSummary\(event, task\);\s*if \(event\.event_id\) handledWorkerEventIds\.add/);
 assert.match(source, /taskMessageElements\(taskId\)\.find\(item => item\.dataset\.source === 'agent_worker'\)/);
 assert.match(source, /item\.dataset\.source === 'jarvis_worker_summary'/);
 assert.match(source, /metadata\.progress_summary === true \|\| metadata\.milestone === true/);
@@ -97,6 +98,7 @@ assert.match(source, /source: 'jarvis_worker_summary'/);
 assert.match(source, /character_name: 'Jarvis'/);
 assert.match(source, /summary\.dataset\.workerEventId = eventId/);
 assert.match(source, /if \(eventId\) return item\.dataset\.workerEventId === eventId/);
+assert.match(source, /siblings\.indexOf\(summary\) > siblings\.indexOf\(result\)\) result\.before\(summary\)/);
 assert.match(source, /if \(activeWorkerTaskId === taskId\)/);
 assert.match(source, /querySelectorAll\('\.jarvis-task-approval-actions button'\)/);
 assert.doesNotMatch(source, /history\.setAttribute\('role', 'log'\)/);
@@ -127,14 +129,20 @@ assert.doesNotMatch(style, /\.jarvis-call-panel\.has-agent-task \.jarvis-task-ti
 assert.match(rendererSource, /wrap\.dataset\.source = String\(metadata\.source\)/);
 assert.match(rendererSource, /wrap\.dataset\.taskId = String\(metadata\.task_id\)/);
 assert.match(rendererSource, /wrap\.dataset\.worker = String\(metadata\.worker\)/);
+assert.match(rendererSource, /wrap\.dataset\.workerEventId = String\(metadata\.worker_event_id\)/);
 assert.match(sessionsSource, /new CustomEvent\('odysseus:session-rendered'/);
 assert.ok((sessionsSource.match(/_notifySessionRendered\(/g) || []).length >= 4);
 assert.doesNotMatch(index, /jarvis-task-timeline/);
 assert.match(index, /id="jarvis-activity-rail"[^>]*role="region"[^>]*aria-label="Live worker activity"/);
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
-assert.match(index, /jarvisVoice\.js\?v=20260712T230000Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v353'/);
+assert.match(index, /jarvisVoice\.js\?v=20260714T001500Z/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v354'/);
+assert.match(source, /return Promise\.allSettled\(jobs\)/);
+assert.match(source, /Promise\.resolve\(\)\.then\(\(\) => window\.aiTTSManager\.checkAvailability\(\)\)/);
+const startCallSource = source.match(/async function startCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+assert.ok(startCallSource.indexOf('const voiceWarmup = prewarmVoiceStack()') < startCallSource.indexOf('await createSession(callGeneration)'));
+assert.ok(startCallSource.indexOf('await voiceWarmup') < startCallSource.indexOf('await startListening()'));
 
 // Exercise the production placement functions with a tiny dependency-free DOM.
 // The same details node must keep its rail order, then return to chat before its final result.
@@ -147,7 +155,10 @@ const moveNode = (node, parent, order) => {
   node.parentElement = parent;
   order.push(node);
 };
-const chat = { appendChild(node) { moveNode(node, chat, chatOrder); } };
+const chat = {
+  appendChild(node) { moveNode(node, chat, chatOrder); },
+  get children() { return chatOrder; },
+};
 const rail = {
   appendChild(node) { moveNode(node, rail, railOrder); },
   querySelectorAll() { return [...railOrder]; },
@@ -163,7 +174,15 @@ const acknowledgement = {
     chatOrder.splice(chatOrder.indexOf(acknowledgement) + 1, 0, node);
   },
 };
-const result = { dataset: { source: 'agent_worker', taskId: 'task-rail' } };
+const result = {
+  dataset: { source: 'agent_worker', taskId: 'task-rail' },
+  before(node) {
+    const priorIndex = chatOrder.indexOf(node);
+    if (priorIndex >= 0) chatOrder.splice(priorIndex, 1);
+    node.parentElement = chat;
+    chatOrder.splice(chatOrder.indexOf(result), 0, node);
+  },
+};
 const summary = {
   dataset: { source: 'jarvis_worker_summary', taskId: 'task-rail', workerEventId: 'summary-1' },
   querySelector(selector) {
@@ -223,17 +242,25 @@ const sandbox = {
   clearTimeout,
   setInterval,
   clearInterval,
+  fetch: () => Promise.resolve({ ok: true }),
+  aiTTSManager: { checkAvailability() { throw new Error('availability probe failed'); } },
 };
 sandbox.window = sandbox;
 const executableSource = source.replace(
   "import markdownModule from './markdown.js';",
   'const markdownModule = { renderMarkdown: value => value };',
-) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, restoreActivityGroupsToChat, findWorkerSummary, setActive: value => { isActive = value; } };';
+) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, setActive: value => { isActive = value; } };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 assert.equal(placement.findWorkerSummary('task-rail', 'summary-1', 'PC Codex verified the same result.'), summary);
 assert.equal(placement.findWorkerSummary('task-rail', 'summary-2', 'PC Codex verified the same result.'), undefined);
 assert.equal(placement.findWorkerSummary('task-rail', '', 'PC Codex verified the same result.'), summary);
+chatOrder.splice(0, chatOrder.length, acknowledgement, unrelated, result, summary);
+placement.positionWorkerSummary(summary, 'task-rail');
+assert.deepEqual(chatOrder, [acknowledgement, unrelated, summary, result], 'a restored summary must precede the final worker result');
+chatOrder.splice(0, chatOrder.length, acknowledgement, summary, unrelated, result);
+placement.positionWorkerSummary(summary, 'task-rail');
+assert.deepEqual(chatOrder, [acknowledgement, summary, unrelated, result], 'an already ordered summary must keep transcript chronology');
 placement.setActive(true);
 placement.positionActivityGroup(group);
 assert.equal(group.parentElement, rail);
@@ -249,3 +276,11 @@ placement.positionActivityGroup(group);
 placement.setActive(false);
 placement.restoreActivityGroupsToChat();
 assert.deepEqual(chatOrder, [acknowledgement, group, summary, unrelated, result]);
+placement.prewarmVoiceStack().then(results => {
+  assert.equal(results.length, 2);
+  assert.equal(results[0].status, 'fulfilled');
+  assert.equal(results[1].status, 'rejected');
+}).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

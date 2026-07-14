@@ -36,6 +36,7 @@ VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
 VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
 VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
+VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
 logger = logging.getLogger(__name__)
 _SESSION_MANAGER = None
 _SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
@@ -409,24 +410,82 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
     return None
 
 
+_NAMED_WORKER_ALIASES = (
+    ("vps-codex", r"(?:vps(?:\s+codex)?|online\s+server|public\s+server|hosting\s+server|mad\s*panda\s+hosting)"),
+    ("hermes", r"hermes"),
+    (
+        "pc-codex",
+        r"(?:pc\s+code(?:x|cs)|my\s+(?:pc(?:\s+codex)?|codex|computer)|desktop\s+codex|computer\s+codex|"
+        r"codex\s+(?:on|from)\s+my\s+(?:pc|computer)|my\s+computer|project\s+nimbus|nimbus|"
+        r"home\s+cloud|my\s+cloud|the\s+cloud)",
+    ),
+    ("jarvis", r"jarvis"),
+)
+
+
+def _named_worker_route_after(text: str, offset: int) -> tuple[str, str] | None:
+    tail = text[offset:]
+    for worker, alias in _NAMED_WORKER_ALIASES:
+        if not re.match(rf"\s*(?:the\s+)?{alias}\b", tail, re.IGNORECASE):
+            continue
+        workspace = (
+            "vps-ops"
+            if worker == "vps-codex"
+            else "home-lab"
+            if worker in {"hermes", "jarvis"}
+            else _workspace_for_text(text)
+        )
+        return worker, workspace
+    return None
+
+
 def _target_switch(text: str) -> str | None:
-    switch_phrase = r"\b(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+"
-    if re.search(switch_phrase + r"jarvis\b", text, re.IGNORECASE) or re.search(
-        r"\b(?:return|go|come)\s+(?:back\s+)?to\s+jarvis\b",
+    direct_command = re.search(
+        r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis)\b[\s,.:;-]*)*"
+        r"(?:(?:(?:can|could|would|will)\s+you|(?:can|could|may)\s+i|let\s+me)\s+)?(?:please\s+)?"
+        r"(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+",
         text,
         re.IGNORECASE,
-    ):
-        return "jarvis"
-    if not re.search(switch_phrase, text, re.IGNORECASE):
+    )
+    first_person_request = re.search(
+        r"\b(?:i\s+(?:want|need|would\s+like)|i['’]d\s+like)\s+to\s+(?:now\s+)?"
+        r"(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+",
+        text,
+        re.IGNORECASE,
+    )
+    jarvis_return = re.search(
+        r"^\s*(?:(?:okay|ok|please)\b[\s,.:;-]*)*(?:return|go|come)\s+(?:back\s+)?to\s+jarvis\b",
+        text,
+        re.IGNORECASE,
+    )
+    switch_request = direct_command or first_person_request
+    if not (switch_request or jarvis_return):
         return None
-    delegation = _delegation_route(text)
-    return delegation[0] if delegation else None
+    if jarvis_return:
+        return "jarvis"
+    route = _named_worker_route_after(text, switch_request.end())
+    return route[0] if route else None
+
+
+def _jarvis_vocative(text: str) -> bool:
+    """Recognize direct address to Jarvis without matching quoted references."""
+    return bool(re.search(
+        r"^\s*(?:(?:hey|hi|hello|okay|ok|thanks|thank\s+you|beautiful|great|good\s+(?:morning|afternoon|evening))"
+        r"[\s,.:;!-]+)?jarvis\b",
+        text,
+        re.IGNORECASE,
+    ))
 
 
 def _background_delegation(text: str) -> tuple[str, str] | None:
-    route = _delegation_route(text)
-    if route and re.search(r"\b(?:ask|have|get|tell|send|check)\b", text, re.IGNORECASE):
-        return route
+    for request in re.finditer(
+        r"\b(?:ask|have|get|tell|let|send|check(?:\s+with)?)\s+",
+        text,
+        re.IGNORECASE,
+    ):
+        route = _named_worker_route_after(text, request.end())
+        if route and route[0] != "jarvis":
+            return route
     if _is_document_open_request(text):
         return "pc-codex", _workspace_for_text(text)
     return None
@@ -465,7 +524,11 @@ def _is_casual_greeting(text: str) -> bool:
     ))
 
 
-def _casual_greeting_reply(voice_session: dict) -> str:
+def _casual_greeting_reply(text: str, voice_session: dict) -> str:
+    explicit_band = re.search(r"\bgood\s+(morning|afternoon|evening)\b", text, re.IGNORECASE)
+    if explicit_band:
+        band = explicit_band.group(1).lower()
+        return f"Good {band}, Leo. What are we working on?"
     replies = (
         "I’m doing well, Leo. What are we working on?",
         "Good to hear from you, Leo. What would you like to tackle?",
@@ -488,9 +551,10 @@ def _approval_choice(text: str) -> str | None:
 
 
 def _explicit_reply_target(text: str) -> str | None:
-    if not re.search(r"\b(?:answer|reply|respond)\b", text, re.IGNORECASE):
+    request = re.search(r"\b(?:answer|reply|respond)(?:\s+to)?\s+", text, re.IGNORECASE)
+    if not request:
         return None
-    route = _delegation_route(text)
+    route = _named_worker_route_after(text, request.end())
     return route[0] if route else None
 
 
@@ -586,7 +650,18 @@ async def _dispatch_worker_request(
 
 
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
-    target_switch = _target_switch(text)
+    selected_target = str(voice_session.get("target") or "jarvis")
+    requested_target_switch = _target_switch(text)
+    direct_jarvis_return = (
+        selected_target != "jarvis"
+        and not requested_target_switch
+        and _jarvis_vocative(text)
+    )
+    direct_jarvis_delegation = _background_delegation(text) if direct_jarvis_return else None
+    target_switch = requested_target_switch or ("jarvis" if direct_jarvis_return and not direct_jarvis_delegation else None)
+    if direct_jarvis_return and direct_jarvis_delegation:
+        selected_target = "jarvis"
+        yield {"type": "target_changed", "target": "jarvis", "workspace": _workspace_for_text(text)}
     if target_switch:
         workspace = {
             "vps-codex": "vps-ops",
@@ -618,19 +693,25 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                     "task_ids": [],
                 }
                 return
-        reply = "You’re back with Jarvis." if target_switch == "jarvis" else f"You’re connected to {label}. What would you like me to handle?"
+        reply = (
+            _casual_greeting_reply(text, voice_session)
+            if target_switch == "jarvis" and _is_casual_greeting(text)
+            else "You’re back with Jarvis."
+            if target_switch == "jarvis"
+            else f"You’re connected to {label}. What would you like me to handle?"
+        )
         yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, f"target_switch_{target_switch}")
         return
 
     if _is_casual_greeting(text):
-        reply = _casual_greeting_reply(voice_session)
+        reply = _casual_greeting_reply(text, voice_session)
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, "casual_greeting")
         return
 
-    delegation = _background_delegation(text)
+    delegation = direct_jarvis_delegation or _background_delegation(text)
     retry_task = None
     retry_requested = not delegation and _is_worker_retry_request(text)
     if retry_requested:
@@ -709,7 +790,6 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
 
     from src.jarvis_agent import find_active_task, get_task, task_action
 
-    selected_target = str(voice_session.get("target") or "jarvis")
     selected_workspace = _selected_workspace(text, str(voice_session.get("workspace") or "home-lab"))
     active = (
         find_active_task(chat_session_id, selected_target, selected_workspace, owner)
@@ -1087,7 +1167,10 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
             try:
                 try:
-                    audio = await asyncio.wait_for(asyncio.shield(job), timeout=20)
+                    audio = await asyncio.wait_for(
+                        asyncio.shield(job),
+                        timeout=VOICE_TTS_PREWARM_TIMEOUT_SECONDS,
+                    )
                     return (
                         "warmed" if audio else "failed",
                         bool(audio),
@@ -1095,7 +1178,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                         None if audio else "TTS prewarm returned no audio",
                     )
                 except asyncio.TimeoutError:
-                    return "failed", False, 20_000, "TTS prewarm exceeded 20 seconds"
+                    timeout_ms = int(VOICE_TTS_PREWARM_TIMEOUT_SECONDS * 1000)
+                    return "failed", False, timeout_ms, f"TTS prewarm exceeded {timeout_ms // 1000} seconds"
                 except Exception as exc:
                     logger.warning("Jarvis TTS prewarm failed: %s", exc)
                     return "failed", False, int((time.perf_counter() - started) * 1000), str(exc)[:200]

@@ -11,9 +11,11 @@ from routes.agent_task_routes import TaskApproval
 from routes.voice_routes import (
     _approval_choice,
     _asks_current_business,
+    _background_delegation,
     _delegation_route,
     _explicit_reply_target,
     _is_casual_greeting,
+    _jarvis_vocative,
     _pending_task_accepts_turn,
     _selected_workspace,
     _server_routed_events,
@@ -28,6 +30,20 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("Connect me to Jarvis") == "jarvis"
     assert _target_switch("Talk about the result Hermes found") is None
     assert _target_switch("Ask PC Codex to inspect Mark 5") is None
+    assert _target_switch("I would like to now talk to Hermes") == "hermes"
+    assert _target_switch("I'd like to talk to Hermes") == "hermes"
+    assert _target_switch("Can you please talk to Hermes?") == "hermes"
+    assert _target_switch("Talk to my PC") == "pc-codex"
+    assert _target_switch("Talk to PC Codex about Hermes") == "pc-codex"
+    assert _target_switch("Talk to Hermes about the VPS") == "hermes"
+    long_hermes_request = (
+        "Can you also do me one single favor? I would like to ask Hermes how Hermes is doing, "
+        "just a quick hey, and make sure that you're able to talk to Hermes as well."
+    )
+    assert _target_switch(long_hermes_request) is None
+    assert _background_delegation(long_hermes_request) == ("hermes", "home-lab")
+    assert _background_delegation("Ask PC Codex whether Hermes is reachable") == ("pc-codex", "home-lab")
+    assert _background_delegation("Ask Hermes to review the VPS status") == ("hermes", "home-lab")
     assert _delegation_route("Ask PC Codex to inspect Mark 5") == ("pc-codex", "home-lab")
     assert _delegation_route("Ask Codex on my PC for a client update") == ("pc-codex", "business")
 
@@ -120,12 +136,24 @@ async def test_do_it_again_without_a_recent_task_asks_for_context(monkeypatch):
     assert events[-1]["diagnostics"]["guard_reason"] == "retry_task_missing"
 
 
+@pytest.mark.parametrize("band", ["morning", "afternoon", "evening"])
+def test_explicit_greeting_etiquette_matches_leos_words(band):
+    text = f"Good {band}, Jarvis."
+    assert _is_casual_greeting(text)
+    assert voice_routes._casual_greeting_reply(text, {"turns": []}) == (
+        f"Good {band}, Leo. What are we working on?"
+    )
+
+
 def test_casual_greeting_and_approval_guards_are_deterministic():
     assert _is_casual_greeting("Hey Jarvis, how you doing?")
     assert _is_casual_greeting("What's up y'alls?")
-    reply = voice_routes._casual_greeting_reply({"turns": []})
+    reply = voice_routes._casual_greeting_reply("Hey Jarvis, how you doing?", {"turns": []})
     assert "time" not in reply.lower()
     assert "london" not in reply.lower()
+    assert _jarvis_vocative("Beautiful Jarvis. Great work.")
+    assert _jarvis_vocative("Good evening, Jarvis.")
+    assert not _jarvis_vocative("Tell Hermes what Jarvis said.")
     assert _approval_choice("Yes, approve it once") == "once"
     assert _approval_choice("No, deny it") == "deny"
     assert _approval_choice("Yes, no, wait") is None
@@ -250,6 +278,81 @@ async def test_business_then_hermes_runs_as_distinct_background_tasks_with_jarvi
 
 
 @pytest.mark.asyncio
+async def test_long_hermes_request_stays_background_and_does_not_switch(monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": "hermes-ping", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    text = (
+        "Can you also do me one single favor? I would like to ask Hermes how Hermes is doing, "
+        "just a quick hey, and make sure that you're able to talk to Hermes as well."
+    )
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", {"target": "jarvis", "workspace": "business"},
+        )
+    ]
+
+    assert calls[0][:2] == ("hermes", "home-lab")
+    assert next(event for event in events if event["type"] == "agent_task")["foreground"] is False
+    assert all(event["type"] != "target_changed" for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "expected_reply"),
+    [
+        ("Beautiful Jarvis. Great work.", "You’re back with Jarvis."),
+        ("Good evening, Jarvis.", "Good evening, Leo. What are we working on?"),
+    ],
+)
+async def test_direct_jarvis_address_returns_from_selected_worker_without_task(text, expected_reply, monkeypatch):
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("a direct Jarvis address must not create a worker task")
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
+    assert events[0]["target"] == "jarvis"
+    assert events[-1]["assistant_text"] == expected_reply
+
+
+@pytest.mark.asyncio
+async def test_direct_jarvis_address_can_launch_background_task_in_same_turn(monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": "pc-background", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Jarvis, ask PC Codex to inspect the Mark 6 documentation.",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert calls[0][:2] == ("pc-codex", "home-lab")
+    assert events[0] == {
+        "type": "target_changed", "target": "jarvis", "workspace": "home-lab",
+    }
+    task = next(event for event in events if event["type"] == "agent_task")
+    assert task["foreground"] is False
+    assert events[-1]["diagnostics"]["guard_reason"] == "delegation_started_pc-codex"
+
+
+@pytest.mark.asyncio
 async def test_named_pc_business_update_uses_the_bounded_business_route(monkeypatch):
     calls = []
 
@@ -331,6 +434,30 @@ async def test_target_switch_precedes_active_worker_dispatch(monkeypatch):
     assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
     assert events[0]["target"] == "hermes"
     assert events[-1]["task_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_switch_wins_over_jarvis_vocative(monkeypatch):
+    async def statuses():
+        return {"pc-codex": {"enabled": True}}
+
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("an explicit switch must not dispatch a task")
+
+    monkeypatch.setattr(jarvis_agent, "worker_statuses", statuses)
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Jarvis, talk to PC Codex.",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
+    assert events[0]["target"] == "pc-codex"
+    assert events[-1]["diagnostics"]["guard_reason"] == "target_switch_pc-codex"
 
 
 @pytest.mark.asyncio

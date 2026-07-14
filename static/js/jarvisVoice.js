@@ -856,6 +856,14 @@ function findWorkerSummary(taskId, eventId, text) {
   });
 }
 
+function positionWorkerSummary(summary, taskId) {
+  if (!summary) return;
+  const result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
+  if (!result || result.parentElement !== summary.parentElement) return;
+  const siblings = Array.from(result.parentElement?.children || []);
+  if (siblings.indexOf(summary) > siblings.indexOf(result)) result.before(summary);
+}
+
 function renderWorkerSummary(event, task) {
   const metadata = event.metadata || {};
   const text = String(event.spoken_text || '').trim();
@@ -865,7 +873,10 @@ function renderWorkerSummary(event, task) {
 
   const eventId = String(event.event_id || '').trim();
   const existing = findWorkerSummary(event.task_id, eventId, text);
-  if (existing) return existing;
+  if (existing) {
+    positionWorkerSummary(existing, event.task_id);
+    return existing;
+  }
 
   const summary = window.chatModule?.addMessage?.('assistant', text, '', {
     source: 'jarvis_worker_summary',
@@ -875,6 +886,7 @@ function renderWorkerSummary(event, task) {
     character_name: 'Jarvis',
   }) || null;
   if (summary && eventId) summary.dataset.workerEventId = eventId;
+  positionWorkerSummary(summary, event.task_id);
   window.uiModule?.scrollHistory?.();
   return summary;
 }
@@ -1089,8 +1101,9 @@ async function restoreSessionTasks(targetSessionId) {
     const group = ensureActivityGroup(task);
     const events = [...(snapshot.events || [])].sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
     events.forEach(event => {
-      if (event.event_id) handledWorkerEventIds.add(String(event.event_id));
       renderActivityEvent(event);
+      renderWorkerSummary(event, task);
+      if (event.event_id) handledWorkerEventIds.add(String(event.event_id));
     });
     if (group) {
       setActivityStatus(group, task, task.status || 'running');
@@ -1325,9 +1338,9 @@ function prewarmVoiceStack() {
     fetch('/api/voice/prewarm', { method: 'POST', credentials: 'same-origin' }),
   ];
   if (window.aiTTSManager?.checkAvailability) {
-    jobs.push(window.aiTTSManager.checkAvailability());
+    jobs.push(Promise.resolve().then(() => window.aiTTSManager.checkAvailability()));
   }
-  Promise.allSettled(jobs).catch(() => {});
+  return Promise.allSettled(jobs);
 }
 
 async function interrupt() {
@@ -1738,14 +1751,17 @@ async function startCall() {
   setAgentWorkspaceActive(activeTaskCount() > 0);
   positionVisibleActivityGroups();
   setStatus('idle', 'Connecting…');
-  const callCue = playVoiceCue('call');
   try {
+    const voiceWarmup = prewarmVoiceStack();
+    const callCue = playVoiceCue('call');
     await createSession(callGeneration);
     if (!isCurrentVoiceCall(callGeneration)) return;
     await callCue;
     if (!isCurrentVoiceCall(callGeneration)) return;
+    setStatus('idle', 'Warming voice…');
+    await voiceWarmup;
+    if (!isCurrentVoiceCall(callGeneration)) return;
     setStatus('idle');
-    prewarmVoiceStack();
     await startListening();
   } catch (error) {
     if (isCurrentVoiceCall(callGeneration)) handleError(error);
