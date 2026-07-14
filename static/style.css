@@ -41094,7 +41094,7 @@ body.theme-frosted .modal {
   position: absolute;
   left: 50%;
   bottom: clamp(28px, 7vh, 76px);
-  z-index: 2;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -39,6 +39,7 @@ let activityRestoreRevision = 0;
 let speechIdleResolvers = [];
 let playbackAbortController = null;
 let playbackAudioSources = new Set();
+let playbackScheduledUntil = 0;
 let activeWorkerTaskId = null;
 let activeCodexThreadId = null;
 let activeWorkspace = 'home-lab';
@@ -1166,7 +1167,7 @@ async function postPlaybackState(turnId, state, timings = {}, voiceSessionId = s
 
 async function playVoiceTurnAudio(turnId, timings, voiceSessionId) {
   const token = ++playbackToken;
-  return playBufferedAudio(
+  return playPcmAudioStream(
     `/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/turns/${encodeURIComponent(turnId)}/audio`,
     {}, timings, token, turnId, voiceSessionId,
   );
@@ -1377,6 +1378,7 @@ function stopPlaybackAudio() {
     try { source.stop(); } catch {}
   });
   playbackAudioSources.clear();
+  playbackScheduledUntil = 0;
   stopSphereAudio();
 }
 
@@ -1613,10 +1615,141 @@ async function ensurePlaybackContext() {
       });
       postSphereLevels('speaking', Math.max(...levels), levels);
     }, 80);
+    playbackScheduledUntil = 0;
   }
   const context = sphereAudioContext;
   await context.resume();
   return context;
+}
+
+function pcm16FromBase64(value) {
+  const bytes = Uint8Array.from(atob(value), char => char.charCodeAt(0));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const samples = new Float32Array(bytes.byteLength / 2);
+  for (let index = 0; index < samples.length; index += 1) {
+    samples[index] = view.getInt16(index * 2, true) / 32768;
+  }
+  return samples;
+}
+
+async function playPcmAudioStream(url, options, timings, token, turnId = null, voiceSessionId = sessionId) {
+  const started = performance.now();
+  const controller = new AbortController();
+  playbackAbortController = controller;
+  let reader = null;
+  try {
+    const response = await fetch(url, {
+      credentials: 'same-origin',
+      ...options,
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.body) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.detail?.message || body?.detail || body?.message || 'Audio synthesis failed');
+    }
+    if (token !== playbackToken) return null;
+
+    const context = await ensurePlaybackContext();
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let sampleRate = 0;
+    let streamDone = null;
+    let playbackStarted = false;
+    let lastSourceEnded = Promise.resolve();
+    timings.tts_chunks = 0;
+    timings.tts_blocks = 0;
+    timings.scheduler_underruns = 0;
+
+    const handleLine = line => {
+      if (!line.trim()) return;
+      const event = JSON.parse(line);
+      if (event.type === 'error') throw new Error(event.error || 'Streaming speech failed');
+      if (event.type === 'start') {
+        sampleRate = Number(event.sample_rate) || 0;
+        if (!sampleRate) throw new Error('Streaming speech returned an invalid sample rate.');
+        return;
+      }
+      if (event.type === 'block') {
+        timings.tts_blocks = Math.max(timings.tts_blocks, Number(event.index) + 1);
+        return;
+      }
+      if (event.type === 'done') {
+        streamDone = event;
+        return;
+      }
+      if (event.type !== 'audio' || !event.pcm_base64 || token !== playbackToken) return;
+      if (!sampleRate) throw new Error('Streaming speech returned audio before its sample rate.');
+
+      const samples = pcm16FromBase64(event.pcm_base64);
+      const audioBuffer = context.createBuffer(1, samples.length, sampleRate);
+      audioBuffer.copyToChannel(samples, 0);
+      const source = context.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(sphereAnalyser);
+      playbackAudioSources.add(source);
+      lastSourceEnded = new Promise(resolve => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          playbackAudioSources.delete(source);
+          if (playbackWaitResolve === finish) playbackWaitResolve = null;
+          try { source.disconnect(); } catch {}
+          resolve();
+        };
+        playbackWaitResolve = finish;
+        source.onended = finish;
+      });
+
+      const hasQueuedAudio = playbackScheduledUntil > context.currentTime + 0.005;
+      if (playbackScheduledUntil && !hasQueuedAudio) timings.scheduler_underruns += 1;
+      const beginsAt = hasQueuedAudio ? playbackScheduledUntil : context.currentTime + 0.05;
+      source.start(beginsAt);
+      playbackScheduledUntil = beginsAt + audioBuffer.duration;
+      timings.tts_chunks += 1;
+
+      if (!playbackStarted) {
+        playbackStarted = true;
+        timings.tts_first_audio_ms = performance.now() - started;
+        if (timings.turn_started_at != null) timings.end_to_first_audio_ms = performance.now() - timings.turn_started_at;
+        setStatus('speaking');
+        if (turnId) postPlaybackState(turnId, 'started', timings, voiceSessionId);
+      }
+    };
+
+    while (token === playbackToken) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      lines.forEach(handleLine);
+      if (done) break;
+    }
+    if (buffer.trim()) handleLine(buffer);
+    if (token !== playbackToken) return null;
+    if (!streamDone || !playbackStarted) throw new Error('Streaming speech ended before audio was ready.');
+
+    await lastSourceEnded;
+    if (token !== playbackToken) return null;
+    timings.tts_generation_ms = Number(streamDone.generation_ms) || performance.now() - started;
+    timings.playback_duration_ms = Number(streamDone.audio_ms) || 0;
+    timings.tts_total_ms = performance.now() - started;
+    playbackScheduledUntil = 0;
+    if (turnId) await postPlaybackState(turnId, 'completed', timings, voiceSessionId);
+    return streamDone;
+  } catch (error) {
+    if (token !== playbackToken || error?.name === 'AbortError') return null;
+    if (turnId) await postPlaybackState(turnId, 'failed', timings, voiceSessionId);
+    speechQueue = [];
+    currentSpeech = null;
+    stopPlaybackAudio();
+    setStatus('failed', error.message || 'Audio playback failed.');
+    throw error;
+  } finally {
+    reader?.cancel().catch(() => {});
+    if (playbackAbortController === controller) playbackAbortController = null;
+  }
 }
 
 async function playBufferedAudio(url, options, timings, token, turnId = null, voiceSessionId = sessionId) {
@@ -1770,6 +1903,7 @@ async function startCall() {
 
 function endCall() {
   const continuedTasks = activeTaskCount();
+  const endingSessionId = sessionId;
   voiceCallGeneration += 1;
   isActive = false;
   restoreActivityGroupsToChat();
@@ -1793,6 +1927,12 @@ function endCall() {
   unmountOrganicSphere();
   const panel = $('jarvis-call-panel');
   if (panel) panel.hidden = true;
+  if (endingSessionId) {
+    fetchJson(`/api/voice/sessions/${encodeURIComponent(endingSessionId)}/interrupt`, {
+      method: 'POST',
+      body: '{}',
+    }).catch(() => {});
+  }
   sessionId = null;
   if (!continuedTasks) chatSessionId = null;
   voiceTarget = 'jarvis';

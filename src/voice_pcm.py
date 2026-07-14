@@ -4,12 +4,42 @@ import asyncio
 import io
 import json
 import os
+import re
 import wave
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 
 TTS_INFERENCE_LOCK = asyncio.Lock()
+_SENTENCE_END = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
+
+
+def speech_blocks(text: str, *, first_max_chars: int = 280, max_chars: int = 360) -> list[str]:
+    """Split final spoken text into paragraph-first Chatterbox-safe blocks."""
+    paragraphs = [" ".join(part.split()) for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
+    blocks: list[str] = []
+
+    for paragraph in paragraphs:
+        remainder = paragraph
+        while remainder:
+            hard_limit = first_max_chars if not blocks and len(remainder) > max_chars else max_chars
+            if len(remainder) <= hard_limit:
+                blocks.append(remainder)
+                break
+
+            minimum = max(80, hard_limit // 2)
+            sentence_cuts = [
+                match.end()
+                for match in _SENTENCE_END.finditer(remainder[: hard_limit + 1])
+                if match.end() >= minimum
+            ]
+            cut = sentence_cuts[-1] if sentence_cuts else remainder.rfind(" ", minimum, hard_limit + 1)
+            if cut < minimum:
+                cut = hard_limit
+            blocks.append(remainder[:cut].strip())
+            remainder = remainder[cut:].strip()
+
+    return [block for block in blocks if block]
 
 
 async def stream_tts_pcm_segment(

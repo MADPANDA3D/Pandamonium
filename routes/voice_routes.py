@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.constants import DATA_DIR
@@ -24,7 +25,7 @@ from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import effective_user
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
-from src.voice_pcm import TTS_INFERENCE_LOCK
+from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_pcm16
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
@@ -1487,37 +1488,95 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
 
         _set_voice_status(session_id, "buffering", active_audio_turn_id=turn_id)
-        try:
-            spoken_text = await speech_turn.wait()
+
+        async def generate_audio():
             started = time.perf_counter()
-            async with TTS_INFERENCE_LOCK:
-                audio = await asyncio.to_thread(tts_service.synthesize, spoken_text, False)
-            if not audio:
-                raise RuntimeError("TTS synthesis failed")
-            if speech_turn.cancelled:
-                raise RuntimeError("Voice playback was interrupted")
-            _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
-            state = _load_state()
-            current = _session(state, session_id)
-            _append_diagnostic(current, {
-                "label": "tts",
-                "turn_id": turn_id,
-                "spoken_chars": len(spoken_text),
-                "tts_ms": int((time.perf_counter() - started) * 1000),
-                "tts_inferences": 1,
-            })
-            _save_state(state)
-            is_mp3 = audio[:3] == b"ID3" or (len(audio) >= 2 and audio[0] == 0xff and (audio[1] & 0xe0) == 0xe0)
-            return Response(
-                content=audio,
-                media_type="audio/mpeg" if is_mp3 else "audio/wav",
-                headers={"Content-Disposition": "inline; filename=jarvis.mp3" if is_mp3 else "inline; filename=jarvis.wav"},
-            )
-        except Exception as exc:
-            _set_voice_status(session_id, "failed", active_audio_turn_id=None)
-            raise HTTPException(status_code=409 if speech_turn.cancelled else 502, detail={"message": str(exc)[:240]}) from exc
-        finally:
-            _SPEECH_TURNS.pop((session_id, turn_id), None)
+            generation_ms = 0
+            audio_ms = 0
+            block_count = 0
+            spoken_text = ""
+            try:
+                spoken_text = await speech_turn.wait()
+                blocks = speech_blocks(spoken_text)
+                if not blocks:
+                    raise RuntimeError("Jarvis produced no spoken response")
+
+                sample_rate: int | None = None
+                async with TTS_INFERENCE_LOCK:
+                    for index, block in enumerate(blocks):
+                        if speech_turn.cancelled:
+                            raise RuntimeError("Voice playback was interrupted")
+                        block_started = time.perf_counter()
+                        audio = await asyncio.to_thread(tts_service.synthesize, block, False)
+                        block_generation_ms = int((time.perf_counter() - block_started) * 1000)
+                        if speech_turn.cancelled:
+                            raise RuntimeError("Voice playback was interrupted")
+                        if not audio:
+                            raise RuntimeError("TTS synthesis failed")
+                        block_rate, pcm = wav_to_pcm16(audio)
+                        if sample_rate is None:
+                            sample_rate = block_rate
+                            yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
+                        elif block_rate != sample_rate:
+                            raise RuntimeError("TTS sample rate changed during a voice turn")
+
+                        block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
+                        yield json.dumps({
+                            "type": "block",
+                            "index": index,
+                            "text_chars": len(block),
+                            "generation_ms": block_generation_ms,
+                            "audio_ms": block_audio_ms,
+                        }, separators=(",", ":")) + "\n"
+                        for frame in pcm_frames(pcm):
+                            yield json.dumps({
+                                "type": "audio",
+                                "pcm_base64": base64.b64encode(frame).decode("ascii"),
+                            }, separators=(",", ":")) + "\n"
+
+                        generation_ms += block_generation_ms
+                        audio_ms += block_audio_ms
+                        block_count += 1
+                        if speech_turn.cancelled:
+                            raise RuntimeError("Voice playback was interrupted")
+                        _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
+
+                yield json.dumps({
+                    "type": "done",
+                    "blocks": block_count,
+                    "generation_ms": generation_ms,
+                    "audio_ms": audio_ms,
+                }, separators=(",", ":")) + "\n"
+
+                state = _load_state()
+                current = _session(state, session_id)
+                _append_diagnostic(current, {
+                    "label": "tts",
+                    "turn_id": turn_id,
+                    "spoken_chars": len(spoken_text),
+                    "tts_ms": int((time.perf_counter() - started) * 1000),
+                    "tts_inferences": block_count,
+                })
+                _save_state(state)
+            except Exception as exc:
+                if speech_turn.cancelled:
+                    logger.info("Jarvis speech turn %s was interrupted", turn_id)
+                    _set_voice_status(session_id, "interrupted", active_audio_turn_id=None)
+                else:
+                    logger.exception("Jarvis speech turn %s failed", turn_id)
+                    _set_voice_status(session_id, "failed", active_audio_turn_id=None)
+                yield json.dumps({"type": "error", "error": str(exc)[:240]}) + "\n"
+            finally:
+                _SPEECH_TURNS.pop((session_id, turn_id), None)
+
+        return StreamingResponse(
+            generate_audio(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.post("/sessions/{session_id}/turns/{turn_id}/playback")
     async def update_voice_playback(session_id: str, turn_id: str, payload: VoicePlaybackUpdate):
