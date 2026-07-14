@@ -12,6 +12,7 @@ from routes.voice_routes import (
     _approval_choice,
     _asks_current_business,
     _background_delegation,
+    _background_delegations,
     _delegation_route,
     _explicit_reply_target,
     _is_casual_greeting,
@@ -44,6 +45,20 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _background_delegation(long_hermes_request) == ("hermes", "home-lab")
     assert _background_delegation("Ask PC Codex whether Hermes is reachable") == ("pc-codex", "madpanda3d")
     assert _background_delegation("Ask Hermes to review the VPS status") == ("hermes", "home-lab")
+    compound = (
+        "Pull up the Mark 7 document while you ask PC codecs to pull that up, then shoot a message "
+        "over to Hermes and ask for an update."
+    )
+    assert _background_delegations(compound) == [
+        ("pc-codex", "home-lab"),
+        ("hermes", "home-lab"),
+    ]
+    assert _background_delegations("Ask PC Codex whether Hermes is reachable") == [
+        ("pc-codex", "madpanda3d"),
+    ]
+    assert _background_delegations("Ask Hermes to open the Mark 7 document") == [
+        ("hermes", "home-lab"),
+    ]
     assert _delegation_route("Ask PC Codex to inspect Mark 5") == ("pc-codex", "home-lab")
     assert _delegation_route("Ask Codex on my PC for a client update") == ("pc-codex", "business")
 
@@ -78,6 +93,72 @@ async def test_odysseus_document_open_routes_to_background_pc_codex(text, monkey
     assert task["foreground"] is False
     assert all(event["type"] != "target_changed" for event in events)
     assert voice_session["target"] == "jarvis"
+
+
+@pytest.mark.asyncio
+async def test_compound_voice_request_starts_pc_and_hermes_as_scoped_tasks(monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": f"{worker}-task", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    text = (
+        "Jimmy a favor and pull up the Mark 7 document and while you ask PC codecs to pull that up "
+        "go ahead and shoot a message over to Hermes and just ask for an update."
+    )
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+
+    assert [(worker, workspace) for worker, workspace, _ in calls] == [
+        ("pc-codex", "home-lab"),
+        ("hermes", "home-lab"),
+    ]
+    pc_prompt, hermes_prompt = calls[0][2], calls[1][2]
+    assert "Handle only the work explicitly assigned to PC Codex" in pc_prompt
+    assert "Handle only the work explicitly assigned to Hermes" in hermes_prompt
+    assert "ODYSSEUS_ARTIFACT" in pc_prompt
+    assert "ODYSSEUS_ARTIFACT" not in hermes_prompt
+    assert [event["worker"] for event in events if event["type"] == "agent_task"] == [
+        "pc-codex", "hermes",
+    ]
+    assert events[-1]["task_ids"] == ["pc-codex-task", "hermes-task"]
+    assert events[-1]["diagnostics"]["guard_reason"] == (
+        "delegation_multi_pc-codex_started_hermes_started"
+    )
+    assert "PC Codex is opening the document in Odysseus" in events[-1]["assistant_text"]
+    assert "Hermes is handling its part" in events[-1]["assistant_text"]
+
+
+@pytest.mark.asyncio
+async def test_compound_dispatch_failure_does_not_block_the_other_worker(monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, _workspace, _prompt, _owner, _voice):
+        calls.append(worker)
+        if worker == "pc-codex":
+            raise RuntimeError("pc bridge unavailable")
+        return {"task_id": "hermes-task", "worker": worker}, "started"
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Ask PC Codex to open the Mark 7 document and shoot a message to Hermes for an update.",
+            "leo",
+            {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+
+    assert calls == ["pc-codex", "hermes"]
+    assert [event["task_id"] for event in events if event["type"] == "agent_task"] == ["hermes-task"]
+    assert events[-1]["task_ids"] == ["hermes-task"]
+    assert "PC Codex is not connected" in events[-1]["assistant_text"]
+    assert "Hermes is handling its part" in events[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio

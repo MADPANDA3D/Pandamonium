@@ -219,18 +219,22 @@ def _append_event(task_id: str, event: dict) -> None:
             task["codex_thread_id"] = metadata["codex_thread_id"]
             _save_worker_binding(task, codex_thread_id=metadata["codex_thread_id"])
         task["updated_at"] = int(time.time())
-        if event_type == "progress":
-            _persist_progress_summary(task, event)
         if event_type == "result" and not task.get("result_persisted"):
             _persist_result(task, str(event.get("text") or ""))
             task["result_persisted"] = True
+        if event_type in {"progress", "result"}:
+            _persist_worker_summary(task, event)
         _save_task(task)
 
 
-def _persist_progress_summary(task: dict, event: dict) -> bool:
+def _persist_worker_summary(task: dict, event: dict) -> bool:
     metadata = event.get("metadata") or {}
     text = str(event.get("spoken_text") or "").strip()
-    is_broker_summary = metadata.get("progress_summary") is True or metadata.get("milestone") is True
+    is_broker_summary = (
+        event.get("type") == "result"
+        or metadata.get("progress_summary") is True
+        or metadata.get("milestone") is True
+    )
     if not _SESSION_MANAGER or not text or not is_broker_summary or not task.get("session_id"):
         return False
     event_id = str(event.get("event_id") or "")
@@ -430,6 +434,9 @@ async def _enrich_worker_event(task: dict, event: dict) -> dict:
                 metadata["progress_summary"] = True
                 enriched["spoken_text"] = await _spoken_progress(task, updates)
     elif event.get("type") == "result":
+        metadata = dict(event.get("metadata") or {})
+        metadata["result_summary"] = True
+        enriched["metadata"] = metadata
         enriched["spoken_text"] = await _spoken_result(task, str(event.get("text") or ""))
     return enriched
 
@@ -628,8 +635,8 @@ async def stream_task_events(task_id: str, after: int = -1) -> AsyncGenerator[st
     while True:
         for event in task_events(task_id, cursor):
             task = get_task(task_id)
-            if task and event.get("type") == "progress":
-                _persist_progress_summary(task, event)
+            if task and event.get("type") in {"progress", "result"}:
+                _persist_worker_summary(task, event)
             cursor = int(event.get("seq", cursor))
             yield f"id: {cursor}\ndata: {json.dumps(event)}\n\n"
         task = get_task(task_id)

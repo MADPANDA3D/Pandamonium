@@ -857,25 +857,35 @@ function findWorkerSummary(taskId, eventId, text) {
   });
 }
 
-function positionWorkerSummary(summary, taskId) {
+function positionWorkerSummary(summary, taskId, afterResult = false) {
   if (!summary) return;
   const result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
   if (!result || result.parentElement !== summary.parentElement) return;
   const siblings = Array.from(result.parentElement?.children || []);
-  if (siblings.indexOf(summary) > siblings.indexOf(result)) result.before(summary);
+  const summaryIndex = siblings.indexOf(summary);
+  const resultIndex = siblings.indexOf(result);
+  if (afterResult) {
+    if (summaryIndex !== resultIndex + 1) result.after(summary);
+  } else if (summaryIndex > resultIndex) {
+    result.before(summary);
+  }
 }
 
 function renderWorkerSummary(event, task) {
   const metadata = event.metadata || {};
   const text = String(event.spoken_text || '').trim();
-  const isBrokerSummary = event.type === 'progress'
-    && (metadata.progress_summary === true || metadata.milestone === true);
+  const isResultSummary = event.type === 'result';
+  const isBrokerSummary = isResultSummary || (
+    event.type === 'progress'
+    && (metadata.progress_summary === true || metadata.milestone === true)
+  );
   if (!isBrokerSummary || !text || !taskVisible(task)) return null;
 
   const eventId = String(event.event_id || '').trim();
   const existing = findWorkerSummary(event.task_id, eventId, text);
   if (existing) {
-    positionWorkerSummary(existing, event.task_id);
+    existing.dataset.summaryType = isResultSummary ? 'result' : 'progress';
+    positionWorkerSummary(existing, event.task_id, isResultSummary);
     return existing;
   }
 
@@ -887,7 +897,8 @@ function renderWorkerSummary(event, task) {
     character_name: 'Jarvis',
   }) || null;
   if (summary && eventId) summary.dataset.workerEventId = eventId;
-  positionWorkerSummary(summary, event.task_id);
+  if (summary) summary.dataset.summaryType = isResultSummary ? 'result' : 'progress';
+  positionWorkerSummary(summary, event.task_id, isResultSummary);
   window.uiModule?.scrollHistory?.();
   return summary;
 }
@@ -1005,7 +1016,7 @@ async function handleWorkerEvent(event) {
   }
   if (taskVisible(task)) {
     renderActivityEvent(event);
-    renderWorkerSummary(event, task);
+    if (event.type !== 'result') renderWorkerSummary(event, task);
   }
   if (event.type === 'artifact' && isActive) await openWorkerArtifact(event);
   if (event.type === 'result'
@@ -1021,6 +1032,7 @@ async function handleWorkerEvent(event) {
       });
     }
     positionWorkerResult(result, taskId);
+    renderWorkerSummary(event, task);
     window.uiModule?.scrollHistory?.();
   }
   if (isActive

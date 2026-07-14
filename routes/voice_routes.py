@@ -492,18 +492,38 @@ def _jarvis_vocative(text: str) -> bool:
     ))
 
 
-def _background_delegation(text: str) -> tuple[str, str] | None:
+def _background_delegations(text: str) -> list[tuple[str, str]]:
+    matches: list[tuple[int, tuple[str, str]]] = []
     for request in re.finditer(
-        r"\b(?:ask|have|get|tell|let|send|check(?:\s+with)?)\s+",
+        r"\b(?:(?:ask|have|get|tell|let|check(?:\s+with)?)\s+|"
+        r"send\s+(?:(?:a|the)\s+message(?:\s+over)?\s+to\s+)?|"
+        r"shoot(?:\s+(?:a|the))?\s+message(?:\s+over)?\s+to\s+|"
+        r"reach\s+out\s+to\s+)",
         text,
         re.IGNORECASE,
     ):
         route = _named_worker_route_after(text, request.end())
         if route and route[0] != "jarvis":
-            return route
-    if _is_document_open_request(text):
-        return "pc-codex", _workspace_for_text(text)
-    return None
+            matches.append((request.start(), route))
+    if _is_document_open_request(text) and not any(route[0] == "pc-codex" for _, route in matches):
+        document_request = re.search(r"\b(?:open(?:\s+up)?|show|pull\s+up|load)\b", text, re.IGNORECASE)
+        document_position = document_request.start() if document_request else -1
+        if not matches or document_position < min(position for position, _ in matches):
+            matches.append((document_position, ("pc-codex", _workspace_for_text(text))))
+
+    routes: list[tuple[str, str]] = []
+    seen_workers: set[str] = set()
+    for _, route in sorted(matches, key=lambda match: match[0]):
+        if route[0] in seen_workers:
+            continue
+        seen_workers.add(route[0])
+        routes.append(route)
+    return routes
+
+
+def _background_delegation(text: str) -> tuple[str, str] | None:
+    routes = _background_delegations(text)
+    return routes[0] if routes else None
 
 
 def _is_document_open_request(text: str) -> bool:
@@ -627,6 +647,17 @@ def _server_final_event(text: str, reply: str, guard_reason: str, task_ids: list
     }
 
 
+def _business_status_prompt(text: str) -> str:
+    return (
+        "Give Leo a bounded, read-only Business status check that preserves the exact depth he requested. "
+        "Start with the central Business command center and only the newest dated client handovers needed to answer. "
+        "Unless Leo explicitly asks for every client or a deep/full report, return at most three verified priorities in 250 words or fewer. "
+        "Do not inventory every client, run capability or service discovery, or use external connectors unless Leo explicitly named that source. "
+        "Mark stale or unknown facts clearly. Never infer meetings, schedules, workflows, deliverables, or client status. Make no changes.\n\n"
+        f"Leo's exact request:\n{text}"
+    )
+
+
 async def _dispatch_worker_request(
     chat_session_id: str,
     worker: str,
@@ -672,9 +703,9 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         and not requested_target_switch
         and _jarvis_vocative(text)
     )
-    direct_jarvis_delegation = _background_delegation(text) if direct_jarvis_return else None
-    target_switch = requested_target_switch or ("jarvis" if direct_jarvis_return and not direct_jarvis_delegation else None)
-    if direct_jarvis_return and direct_jarvis_delegation:
+    direct_jarvis_delegations = _background_delegations(text) if direct_jarvis_return else []
+    target_switch = requested_target_switch or ("jarvis" if direct_jarvis_return and not direct_jarvis_delegations else None)
+    if direct_jarvis_return and direct_jarvis_delegations:
         selected_target = "jarvis"
         yield {"type": "target_changed", "target": "jarvis", "workspace": _workspace_for_text(text)}
     if target_switch:
@@ -726,9 +757,9 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         yield _server_final_event(text, reply, "casual_greeting")
         return
 
-    delegation = direct_jarvis_delegation or _background_delegation(text)
+    delegations = direct_jarvis_delegations or _background_delegations(text)
     retry_task = None
-    retry_requested = not delegation and _is_worker_retry_request(text)
+    retry_requested = not delegations and _is_worker_retry_request(text)
     if retry_requested:
         from src.jarvis_agent import get_task
 
@@ -741,7 +772,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 and candidate.get("prompt")
             ):
                 retry_task = candidate
-                delegation = (candidate["worker"], candidate.get("workspace") or "home-lab")
+                delegations = [(candidate["worker"], candidate.get("workspace") or "home-lab")]
                 break
         if not retry_task:
             reply = "I don’t have a completed worker request in this voice session to retry. Tell me which worker and request you mean."
@@ -751,56 +782,120 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
     document_open = _is_document_open_request(text) or bool(
         retry_task and "ODYSSEUS_ARTIFACT" in str(retry_task.get("prompt") or "")
     )
-    bounded_pc_business = bool(
-        delegation
-        and delegation[0] == "pc-codex"
-        and _asks_current_business(text)
-    )
-    if delegation and not bounded_pc_business:
-        worker, workspace = delegation
-        label = WORKER_LABELS[worker]
-        prompt = (
-            str(retry_task["prompt"])
-            if retry_task
-            else f"Leo asked through Jarvis voice. Handle this read-only request and report factual progress and the final result:\n\n{text}"
-        )
-        if document_open and "ODYSSEUS_ARTIFACT" not in prompt:
-            prompt += (
-                "\n\nOdysseus is the default destination. Verify the exact text document, then open it "
-                "with the required ODYSSEUS_ARTIFACT marker. Do not use a desktop opener."
+    if delegations:
+        compound = len(delegations) > 1
+        dispatches = []
+        for worker, workspace in delegations:
+            label = WORKER_LABELS[worker]
+            scope = (
+                f"This is the {label} branch of a compound Jarvis request. Handle only the work explicitly "
+                f"assigned to {label}; ignore instructions for other named workers and do not claim you contacted them.\n\n"
+                if compound
+                else ""
             )
-        try:
-            task, action = await _dispatch_worker_request(
-                chat_session_id, worker, workspace, prompt, owner, voice_session,
-            )
-        except Exception as exc:
-            logger.warning("Jarvis could not dispatch %s task: %s", worker, str(exc)[:240])
-            task, action = {}, "blocked"
-        if action == "started":
-            reply = (
-                f"I’m asking {label} to retry that request. I’ll keep you updated here."
-                if retry_task
-                else f"I’m asking {label} to open that in Odysseus. I’ll keep you updated here."
-                if document_open
-                else f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
-            )
-        elif action == "steered":
-            reply = f"I’ve passed that follow-up to the active {label} task."
-        elif action == "busy":
-            reply = f"{label} is still working and could not accept another instruction yet. You can wait, cancel it, or switch agents."
+            if retry_task:
+                prompt = str(retry_task["prompt"])
+            elif worker == "pc-codex" and _asks_current_business(text):
+                prompt = scope + _business_status_prompt(text)
+            else:
+                prompt = (
+                    f"{scope}Leo asked through Jarvis voice. Handle this read-only request and report factual "
+                    f"progress and the final result:\n\n{text}"
+                )
+            if document_open and worker == "pc-codex" and "ODYSSEUS_ARTIFACT" not in prompt:
+                prompt += (
+                    "\n\nOdysseus is the default destination. Verify the exact text document, then open it "
+                    "with the required ODYSSEUS_ARTIFACT marker. Do not use a desktop opener."
+                )
+            dispatches.append((worker, workspace, prompt))
+
+        outcomes = await asyncio.gather(*(
+            _dispatch_worker_request(chat_session_id, worker, workspace, prompt, owner, voice_session)
+            for worker, workspace, prompt in dispatches
+        ), return_exceptions=True)
+        results = []
+        for (worker, workspace, _prompt), outcome in zip(dispatches, outcomes):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+            if isinstance(outcome, Exception):
+                logger.warning("Jarvis could not dispatch %s task: %s", worker, str(outcome)[:240])
+                task, action = {}, "blocked"
+            else:
+                task, action = outcome
+            results.append((worker, workspace, task, action))
+
+        task_ids = [
+            task["task_id"] for _, _, task, action in results
+            if task.get("task_id") and action != "blocked"
+        ]
+        for worker, workspace, task, action in results:
+            if action in {"started", "steered"}:
+                yield {
+                    "type": "agent_task",
+                    "task_id": task["task_id"],
+                    "worker": worker,
+                    "workspace": workspace,
+                    "foreground": False,
+                }
+
+        if not compound:
+            worker, workspace, task, action = results[0]
+            label = WORKER_LABELS[worker]
+            if worker == "pc-codex" and _asks_current_business(text):
+                if action == "blocked":
+                    reply = "PC Codex is not connected, so I could not start the live business inspection. I have not claimed that it is running."
+                    guard_reason = "pc-codex_not_connected"
+                elif action == "busy":
+                    reply = "PC Codex is still working and could not accept another instruction yet. You can wait or cancel that task."
+                    guard_reason = "current_business_busy"
+                else:
+                    reply = (
+                        "I’m not current enough to answer that reliably, so I’m asking PC Codex to check the live Business sources now."
+                        if action == "started"
+                        else "I’m not current enough to answer that reliably, so I passed the request to the active PC Codex task."
+                    )
+                    guard_reason = f"current_business_{action}"
+            elif action == "started":
+                reply = (
+                    f"I’m asking {label} to retry that request. I’ll keep you updated here."
+                    if retry_task
+                    else f"I’m asking {label} to open that in Odysseus. I’ll keep you updated here."
+                    if document_open and worker == "pc-codex"
+                    else f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
+                )
+            elif action == "steered":
+                reply = f"I’ve passed that follow-up to the active {label} task."
+            elif action == "busy":
+                reply = f"{label} is still working and could not accept another instruction yet. You can wait, cancel it, or switch agents."
+            else:
+                reply = f"{label} is not connected, so I could not start the request."
+            if not (worker == "pc-codex" and _asks_current_business(text)):
+                guard_reason = f"delegation_{action}_{worker}"
         else:
-            reply = f"{label} is not connected, so I could not start the request."
-        task_ids = [task["task_id"]] if task.get("task_id") and action != "blocked" else []
-        if action in {"started", "steered"}:
-            yield {
-                "type": "agent_task",
-                "task_id": task["task_id"],
-                "worker": worker,
-                "workspace": workspace,
-                "foreground": False,
-            }
+            replies = []
+            for worker, _workspace, _task, action in results:
+                label = WORKER_LABELS[worker]
+                if action == "started":
+                    replies.append(
+                        f"{label} is opening the document in Odysseus."
+                        if worker == "pc-codex" and document_open
+                        else f"{label} is handling its part in the background."
+                    )
+                elif action == "steered":
+                    replies.append(f"I passed {label}'s part to its active task.")
+                elif action == "busy":
+                    replies.append(f"{label} is busy and could not accept its part yet.")
+                else:
+                    replies.append(f"{label} is not connected, so its part did not start.")
+            if any(action in {"started", "steered"} for _, _, _, action in results):
+                replies.append("I’ll keep you updated here.")
+            reply = " ".join(replies)
+            guard_reason = "delegation_multi_" + "_".join(
+                f"{worker}_{action}" for worker, _, _, action in results
+            )
+
         yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(text, reply, f"delegation_{action}_{worker}", task_ids)
+        yield _server_final_event(text, reply, guard_reason, task_ids)
         return
 
     from src.jarvis_agent import find_active_task, get_task, task_action
@@ -925,14 +1020,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         return
 
     if _asks_current_business(text):
-        prompt = (
-            "Give Leo a bounded, read-only Business status check that preserves the exact depth he requested. "
-            "Start with the central Business command center and only the newest dated client handovers needed to answer. "
-            "Unless Leo explicitly asks for every client or a deep/full report, return at most three verified priorities in 250 words or fewer. "
-            "Do not inventory every client, run capability or service discovery, or use external connectors unless Leo explicitly named that source. "
-            "Mark stale or unknown facts clearly. Never infer meetings, schedules, workflows, deliverables, or client status. Make no changes.\n\n"
-            f"Leo's exact request:\n{text}"
-        )
+        prompt = _business_status_prompt(text)
         try:
             task, action = await _dispatch_worker_request(
                 chat_session_id, "pc-codex", "business", prompt, owner, voice_session,

@@ -106,12 +106,15 @@ assert.match(source, /TERMINAL_TASK_STATES\.has\(task\.status \|\| ''\)/);
 assert.match(source, /events\.forEach\(event => \{\s*renderActivityEvent\(event\);\s*renderWorkerSummary\(event, task\);\s*if \(event\.event_id\) handledWorkerEventIds\.add/);
 assert.match(source, /taskMessageElements\(taskId\)\.find\(item => item\.dataset\.source === 'agent_worker'\)/);
 assert.match(source, /item\.dataset\.source === 'jarvis_worker_summary'/);
+assert.match(source, /const isResultSummary = event\.type === 'result'/);
 assert.match(source, /metadata\.progress_summary === true \|\| metadata\.milestone === true/);
 assert.match(source, /source: 'jarvis_worker_summary'/);
 assert.match(source, /character_name: 'Jarvis'/);
 assert.match(source, /summary\.dataset\.workerEventId = eventId/);
 assert.match(source, /if \(eventId\) return item\.dataset\.workerEventId === eventId/);
-assert.match(source, /siblings\.indexOf\(summary\) > siblings\.indexOf\(result\)\) result\.before\(summary\)/);
+assert.match(source, /if \(afterResult\)/);
+assert.match(source, /result\.after\(summary\)/);
+assert.match(source, /result\.before\(summary\)/);
 assert.match(source, /if \(activeWorkerTaskId === taskId\)/);
 assert.match(source, /querySelectorAll\('\.jarvis-task-approval-actions button'\)/);
 assert.doesNotMatch(source, /history\.setAttribute\('role', 'log'\)/);
@@ -153,7 +156,8 @@ assert.match(index, /id="jarvis-activity-rail"[^>]*role="region"[^>]*aria-label=
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
 assert.match(index, /jarvisVoice\.js\?v=20260714T084500Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v355'/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v356'/);
+assert.doesNotMatch(documentSource, /_ensureAgentMode/);
 assert.match(source, /return Promise\.allSettled\(jobs\)/);
 assert.match(source, /Promise\.resolve\(\)\.then\(\(\) => window\.aiTTSManager\.checkAvailability\(\)\)/);
 const startCallSource = source.match(/async function startCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
@@ -192,6 +196,12 @@ const acknowledgement = {
 };
 const result = {
   dataset: { source: 'agent_worker', taskId: 'task-rail' },
+  after(node) {
+    const priorIndex = chatOrder.indexOf(node);
+    if (priorIndex >= 0) chatOrder.splice(priorIndex, 1);
+    node.parentElement = chat;
+    chatOrder.splice(chatOrder.indexOf(result) + 1, 0, node);
+  },
   before(node) {
     const priorIndex = chatOrder.indexOf(node);
     if (priorIndex >= 0) chatOrder.splice(priorIndex, 1);
@@ -277,6 +287,9 @@ assert.deepEqual(chatOrder, [acknowledgement, unrelated, summary, result], 'a re
 chatOrder.splice(0, chatOrder.length, acknowledgement, summary, unrelated, result);
 placement.positionWorkerSummary(summary, 'task-rail');
 assert.deepEqual(chatOrder, [acknowledgement, summary, unrelated, result], 'an already ordered summary must keep transcript chronology');
+placement.positionWorkerSummary(summary, 'task-rail', true);
+assert.deepEqual(chatOrder, [acknowledgement, unrelated, result, summary], 'a terminal Jarvis brief must follow the full worker result');
+chatOrder.splice(0, chatOrder.length, acknowledgement, summary, unrelated, result);
 placement.setActive(true);
 placement.positionActivityGroup(group);
 assert.equal(group.parentElement, rail);
