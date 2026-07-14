@@ -341,8 +341,8 @@ def worker_catalog() -> dict[str, dict[str, Any]]:
         "pc-codex": {
             "enabled": registry["pc-codex"].enabled,
             "machine": "Local workstation",
-            "capabilities": ["local_files", "business", "home_lab", "code", "artifacts"],
-            "workspaces": ["business", "home-lab", "project-linux"],
+            "capabilities": ["local_files", "madpanda3d", "business", "home_lab", "code", "artifacts"],
+            "workspaces": ["madpanda3d", "business", "home-lab", "project-linux"],
         },
         "hermes": {
             "enabled": registry["hermes"].enabled,

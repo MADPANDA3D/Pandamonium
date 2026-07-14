@@ -42,7 +42,7 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     )
     assert _target_switch(long_hermes_request) is None
     assert _background_delegation(long_hermes_request) == ("hermes", "home-lab")
-    assert _background_delegation("Ask PC Codex whether Hermes is reachable") == ("pc-codex", "home-lab")
+    assert _background_delegation("Ask PC Codex whether Hermes is reachable") == ("pc-codex", "madpanda3d")
     assert _background_delegation("Ask Hermes to review the VPS status") == ("hermes", "home-lab")
     assert _delegation_route("Ask PC Codex to inspect Mark 5") == ("pc-codex", "home-lab")
     assert _delegation_route("Ask Codex on my PC for a client update") == ("pc-codex", "business")
@@ -177,6 +177,14 @@ def test_selected_workspace_changes_only_when_the_turn_names_one():
     assert _selected_workspace("Keep checking that", "business") == "business"
     assert _selected_workspace("Inspect Project Linux and Hyprland", "home-lab") == "project-linux"
     assert _selected_workspace("Review the client CRM", "home-lab") == "business"
+    assert _selected_workspace("Review this across all projects", "home-lab") == "madpanda3d"
+
+
+def test_pc_codex_uses_company_root_for_cross_domain_work():
+    assert _delegation_route("Ask PC Codex to inspect Charter") == ("pc-codex", "madpanda3d")
+    assert _delegation_route("Ask PC Codex to review an Academic file") == ("pc-codex", "madpanda3d")
+    assert _delegation_route("Ask PC Codex to inspect Mark 7") == ("pc-codex", "home-lab")
+    assert _delegation_route("Ask PC Codex to review the client CRM") == ("pc-codex", "business")
 
 
 @pytest.mark.parametrize("text", [

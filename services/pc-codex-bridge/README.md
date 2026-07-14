@@ -5,8 +5,8 @@ This private bridge adapts Codex App Server tasks to the Odysseus worker protoco
 PC Codex sessions run from one dedicated Jarvis interaction workspace instead of the selected source project, so their persistent App Server threads stay grouped away from Leo's normal Codex work. The logical workspace still selects the source tree Codex may read, and an explicitly approved `workspace_write` task retains that source tree as an additional write root. Configure the local paths and optional model overrides in the private service environment:
 
 ```env
-JARVIS_CODEX_WORKSPACES_JSON='{"home-lab":"/absolute/path/to/Home Lab"}'
-JARVIS_CODEX_INTERACTION_WORKSPACE=/absolute/path/to/Jarvis Codex Workspace
+JARVIS_CODEX_WORKSPACES_JSON='{"madpanda3d":"/home/leo/the-lab/MADPANDA3D","home-lab":"/absolute/path/to/Home Lab"}'
+JARVIS_CODEX_INTERACTION_WORKSPACE='/home/leo/the-lab/MADPANDA3D/Jarvis Codex Workspace'
 JARVIS_CODEX_MODEL=gpt-5.6-terra
 JARVIS_CODEX_REASONING_EFFORT=high
 ```

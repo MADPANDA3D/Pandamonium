@@ -38,6 +38,9 @@ def test_agent_tools_and_worker_defaults_are_narrow():
     assert WORKERS["pc-codex"]["enabled"] is False
     assert WORKERS["hermes"]["enabled"] is False
     assert WORKERS["vps-codex"]["enabled"] is False
+    assert WORKERS["pc-codex"]["workspaces"] == ["madpanda3d", "business", "home-lab", "project-linux"]
+    start_schema = next(schema for schema in FUNCTION_TOOL_SCHEMAS if schema["function"]["name"] == "start_agent_task")
+    assert "madpanda3d" in start_schema["function"]["parameters"]["properties"]["workspace"]["enum"]
     payload = TaskCreate(worker="pc-codex", session_id="s", workspace="home-lab", prompt="inspect")
     assert payload.permission_mode == "read_only"
     assert payload.approved is False

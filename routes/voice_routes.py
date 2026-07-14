@@ -61,7 +61,7 @@ WORKER_LABELS = {
 ACTIVE_VOICE_TARGETS = {"jarvis"} | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
-VOICE_WORKSPACES = {"business", "home-lab", "project-linux", "vps-ops"}
+VOICE_WORKSPACES = {"madpanda3d", "business", "home-lab", "project-linux", "vps-ops"}
 
 
 class VoiceSessionCreate(BaseModel):
@@ -377,18 +377,32 @@ def _asks_current_business(text: str) -> bool:
 
 
 def _workspace_for_text(text: str) -> str:
-    if re.search(r"\b(business|clients?|marketing|mad\s*panda|campaign|website|crm)\b", text, re.IGNORECASE):
+    if re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
         return "business"
     if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
         return "project-linux"
-    return "home-lab"
+    if re.search(
+        r"\b(home\s*lab|jarvis|odysseus|proxmox|truenas|project\s+nimbus|nimbus|mark\s*\d+(?:\.\d+)?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "home-lab"
+    return "madpanda3d"
 
 
 def _selected_workspace(text: str, current: str) -> str:
-    if re.search(r"\b(business|clients?|marketing|mad\s*panda|campaign|website|crm)\b", text, re.IGNORECASE):
+    if re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
         return "business"
     if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
         return "project-linux"
+    if re.search(
+        r"\b(home\s*lab|jarvis|odysseus|proxmox|truenas|project\s+nimbus|nimbus|mark\s*\d+(?:\.\d+)?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "home-lab"
+    if re.search(r"\b(madpanda3d|all\s+projects|across\s+(?:all\s+)?projects|company[-\s]wide|cross[-\s]domain)\b", text, re.IGNORECASE):
+        return "madpanda3d"
     return current
 
 
