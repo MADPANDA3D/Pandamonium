@@ -740,6 +740,10 @@ app.include_router(setup_stt_routes(stt_service))
 # Odysseus Voice Orb
 from routes.voice_routes import setup_voice_routes
 app.include_router(setup_voice_routes(session_manager, stt_service, tts_service))
+
+# Optional, fixed read-only workers for Voice Orb delegation
+from routes.agent_task_routes import setup_agent_task_routes
+app.include_router(setup_agent_task_routes(session_manager))
 logger.info("STT service initialized (provider managed via settings)")
 
 # Documents (artifacts/canvas)

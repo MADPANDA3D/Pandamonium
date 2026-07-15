@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const voice = read('static/js/voiceOrb.js');
+const workers = read('static/js/voiceOrbWorkers.js');
 const html = read('static/index.html');
 const sw = read('static/sw.js');
 
@@ -14,8 +15,16 @@ assert.match(voice, /navigator\.mediaDevices\.getUserMedia/);
 assert.match(voice, /\/api\/stt\/transcribe/);
 assert.match(voice, /\/api\/tts\/synthesize/);
 assert.match(voice, /createOscillator\(\)/);
-assert.doesNotMatch(voice, /createElement\(['"]iframe['"]\)|postMessage\(|camera|media manifest|agent-workers/iu);
+assert.doesNotMatch(voice, /createElement\(['"]iframe['"]\)|postMessage\(|camera|media manifest/iu);
+assert.match(voice, /trackWorkerTask\(event\.task\)/);
+assert.match(workers, /new EventSource\(`\/api\/agent-tasks\/\$\{encodeURIComponent\(taskId\)\}\/events`\)/);
+assert.match(workers, /\/api\/agent-tasks\?session_id=/);
+assert.match(workers, /\/cancel`/);
+assert.match(workers, /const LABELS = \{ 'pc-codex': 'PC Codex', hermes: 'Hermes', 'vps-codex': 'VPS Codex' \}/);
+assert.doesNotMatch(workers, /eval\(|new Function|querySelector\([^'"`]/);
 assert.match(html, /<canvas id="voice-orb-canvas"/);
+assert.match(html, /id="voice-worker-rail"/);
 assert.doesNotMatch(html, /organic-sphere/);
-assert.match(sw, /const CACHE_NAME = 'odysseus-v345'/);
+assert.match(sw, /const CACHE_NAME = 'odysseus-v346'/);
 assert.match(sw, /'\/static\/js\/voiceOrb\.js'/);
+assert.match(sw, /'\/static\/js\/voiceOrbWorkers\.js'/);

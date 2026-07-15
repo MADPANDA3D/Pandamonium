@@ -40476,6 +40476,38 @@ body.theme-frosted .modal {
 
 .voice-orb-panel[hidden] { display: none; }
 
+.voice-worker-rail {
+  position: fixed;
+  top: 72px;
+  right: max(24px, calc((100vw - 1180px) / 2));
+  z-index: 8350;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(44vh, 420px);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent, #8fe8ff) 28%, var(--border));
+  border-radius: 16px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--bg) 94%, #10132b);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(18px);
+}
+
+.voice-worker-rail[hidden] { display: none; }
+.voice-worker-rail > header { display: flex; justify-content: space-between; font-size: 11px; }
+.voice-worker-rail > header span { opacity: 0.58; text-transform: uppercase; letter-spacing: 0.1em; }
+.voice-worker-list { display: grid; gap: 7px; margin-top: 9px; }
+.voice-worker-task { padding: 8px; border: 1px solid var(--border); border-radius: 10px; }
+.voice-worker-task > summary { display: flex; gap: 7px; align-items: center; cursor: pointer; font-size: 11px; }
+.voice-worker-task > summary strong { font-size: 12px; }
+.voice-worker-workspace { min-width: 0; overflow: hidden; opacity: 0.62; text-overflow: ellipsis; white-space: nowrap; }
+.voice-worker-state { margin-left: auto; color: var(--accent, #8fe8ff); text-transform: capitalize; }
+.voice-worker-events { display: grid; gap: 6px; margin: 8px 0; }
+.voice-worker-event { margin: 0; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--accent, #8fe8ff) 35%, transparent); font-size: 11px; line-height: 1.45; }
+.voice-worker-event.is-error { border-color: #ff6b6b; }
+.voice-worker-event.is-result { border-color: #50fa7b; }
+.voice-worker-cancel { padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; color: inherit; background: transparent; font-size: 10px; cursor: pointer; }
+
 .voice-orb-visual {
   position: relative;
   width: 116px;
@@ -40633,6 +40665,7 @@ body.theme-frosted .modal {
 }
 
 @media (max-width: 768px) {
+  .voice-worker-rail { top: 12px; right: 12px; width: calc(100vw - 24px); max-height: 32vh; }
   .voice-orb-panel {
     right: 12px;
     bottom: calc(96px + env(safe-area-inset-bottom));
