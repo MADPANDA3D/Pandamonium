@@ -83,6 +83,8 @@ jobs:
           python -m compileall -q app.py core routes src services scripts tests
           shopt -s globstar nullglob
           for file in static/app.js static/js/**/*.js; do node --check "$file"; done
+      - name: Voice Orb media contract
+        run: node tests/test_voice_orb_media.js
       - name: Full pytest
         run: |
           mkdir -p data

@@ -44,6 +44,7 @@ jobs:
           python -m compileall -q app.py core routes src services scripts tests
           node tests/test_foreground_control.js
           node tests/test_voice_orb.js
+          node tests/test_voice_orb_media.js
           pip install -r requirements.txt
           mkdir -p data
           python -m pytest -q tests/test_voice_orb_routes.py
