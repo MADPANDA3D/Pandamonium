@@ -2,7 +2,12 @@
 
 This private bridge adapts Codex App Server tasks to the Odysseus worker protocol. It binds to localhost by default, accepts only server-mapped workspace aliases, persists Codex thread IDs, and emits replayable normalized events.
 
-PC Codex sessions run from one dedicated Jarvis interaction workspace instead of the selected source project, so their persistent App Server threads stay grouped away from Leo's normal Codex work. The logical workspace still selects the source tree Codex may read, and an explicitly approved `workspace_write` task retains that source tree as an additional write root. Configure the local paths and optional model overrides in the private service environment:
+The runtime bundle is exactly two Python files: copy
+`jarvis_codex_bridge.py` and `core/atomic_io.py` into the same install
+directory (the latter as `atomic_io.py`). The bridge intentionally remains
+usable without importing the rest of the Odysseus application.
+
+PC Codex sessions run from one dedicated Jarvis interaction workspace instead of the selected source project, so their persistent App Server threads stay grouped away from Leo's normal Codex work. The logical workspace selects the source tree Codex may read. Public worker delegation is strictly read-only; write roots and preapproved tasks are rejected. Configure the local paths and optional model overrides in the private service environment:
 
 ```env
 JARVIS_CODEX_WORKSPACES_JSON='{"madpanda3d":"/home/leo/the-lab/MADPANDA3D","home-lab":"/absolute/path/to/Home Lab"}'

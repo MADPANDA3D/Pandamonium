@@ -14,7 +14,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from core.atomic_io import atomic_write_json
+try:
+    from core.atomic_io import atomic_write_json
+except ModuleNotFoundError:
+    # The PC/VPS bridges are deployed as small standalone bundles. Their
+    # installer copies core/atomic_io.py beside this script so the exact same
+    # durability helper remains available without the full Odysseus package.
+    from atomic_io import atomic_write_json
 
 HOST = os.getenv("JARVIS_CODEX_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.getenv("JARVIS_CODEX_BRIDGE_PORT", "8040"))

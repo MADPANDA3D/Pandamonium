@@ -5,6 +5,9 @@ import http.client
 import io
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import threading
 from types import SimpleNamespace
 
@@ -14,6 +17,28 @@ SPEC = importlib.util.spec_from_file_location("jarvis_codex_bridge", BRIDGE_PATH
 bridge = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(bridge)
+
+
+def test_bridge_standalone_bundle_loads_shared_atomic_writer(tmp_path):
+    bundle = tmp_path / "bridge"
+    bundle.mkdir()
+    shutil.copy2(BRIDGE_PATH, bundle / "jarvis_codex_bridge.py")
+    shutil.copy2(Path(__file__).parents[1] / "core" / "atomic_io.py", bundle / "atomic_io.py")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import jarvis_codex_bridge as bridge; bridge.self_check(); print(bridge.atomic_write_json.__module__)",
+        ],
+        cwd=bundle,
+        env={"PATH": str(Path(sys.executable).parent)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "atomic_io"
 
 
 def _task(tmp_path: Path):
