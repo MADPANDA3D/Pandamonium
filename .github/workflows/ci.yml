@@ -203,6 +203,7 @@ jobs:
       - run: mkdir -p data
       - run: python -m pytest -q tests/test_voice_orb_routes.py
       - run: node tests/test_voice_orb_media.js
+      - run: node tests/test_voice_orb_setup.js
       - run: python scripts/voice_orb_public_scrub.py --self-test
       - run: python scripts/voice_orb_public_scrub.py
 

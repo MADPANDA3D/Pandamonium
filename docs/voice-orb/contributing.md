@@ -21,6 +21,7 @@ python -m compileall -q app.py core routes src services scripts tests
 node tests/test_foreground_control.js
 node tests/test_voice_orb.js
 node tests/test_voice_orb_media.js
+node tests/test_voice_orb_setup.js
 python scripts/voice_orb_public_scrub.py --self-test
 python scripts/voice_orb_public_scrub.py
 python -m pytest -q

@@ -4,6 +4,7 @@ import sessionModule from './sessions.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import { showError, showToast } from './ui.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
+import { renderVoiceSetup } from './voiceOrbSetup.js';
 import { trackWorkerTask } from './voiceOrbWorkers.js';
 
 const $ = id => document.getElementById(id);
@@ -230,6 +231,7 @@ async function fetchJson(url, options = {}) {
 async function ensureVoiceSession() {
   if (voiceSessionId) return;
   voiceConfig = await fetchJson('/api/voice/status');
+  renderVoiceSetup(voiceConfig.setup);
   const name = $('voice-orb-name');
   if (name) name.textContent = voiceConfig.assistant || 'Odysseus';
   const linked = sessionModule.getCurrentSessionId?.() || null;
@@ -359,6 +361,7 @@ async function startListening() {
   if (!voiceConfig?.stt?.available) {
     try {
       voiceConfig = await fetchJson('/api/voice/status');
+      renderVoiceSetup(voiceConfig.setup);
     } catch (error) {
       fail(error);
       return;
@@ -503,6 +506,9 @@ async function readVoiceEvents(response, generation) {
       } else if (event.type === 'final') {
         finalText = String(event.text || accumulated).trim();
         setReply(finalText);
+        if (event.setup && typeof event.setup === 'object') {
+          renderVoiceSetup(event.setup, { reveal: true });
+        }
       } else if (event.type === 'error') {
         throw new Error(event.text || 'Voice response failed');
       }
