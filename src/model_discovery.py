@@ -20,6 +20,8 @@ _TAILNET_SELECTION_LIMIT = 5
 _TAILNET_ISSUE_TTL = 120
 _TAILNET_PROBE_WORKERS = 4
 _TAILNET_PROBE_TIMEOUT = 1.5
+_TAILNET_PROBE_DEADLINE = 3.0
+_TAILNET_MAX_RESPONSE_BYTES = 512 * 1024
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 _TAILNET_TARGETS = (
     (8000, "/v1/models", "openai-compatible"),
@@ -252,15 +254,38 @@ class ModelDiscovery:
         self, record: Dict[str, str], peer_id: str, target: tuple
     ) -> Optional[Dict[str, Any]]:
         port, path, provider = target
+        deadline = time.monotonic() + _TAILNET_PROBE_DEADLINE
         try:
-            response = httpx.get(
+            with httpx.stream(
+                "GET",
                 f"http://{record['address']}:{port}{path}",
-                timeout=_TAILNET_PROBE_TIMEOUT,
-            )
-            if not response.is_success:
+                headers={"Accept": "application/json"},
+                follow_redirects=False,
+                timeout=httpx.Timeout(_TAILNET_PROBE_TIMEOUT),
+            ) as response:
+                if not response.is_success:
+                    return None
+                declared_length = response.headers.get("content-length")
+                if declared_length is not None:
+                    try:
+                        if not 0 <= int(declared_length) <= _TAILNET_MAX_RESPONSE_BYTES:
+                            return None
+                    except ValueError:
+                        return None
+
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    if (
+                        time.monotonic() > deadline
+                        or len(body) + len(chunk) > _TAILNET_MAX_RESPONSE_BYTES
+                    ):
+                        return None
+                    body.extend(chunk)
+            if not body:
                 return None
-            models = self._public_model_ids(response.json(), ollama=provider == "ollama")
-        except Exception:
+            payload = json.loads(body)
+            models = self._public_model_ids(payload, ollama=provider == "ollama")
+        except (httpx.HTTPError, OSError, TypeError, ValueError):
             return None
         if not models:
             return None

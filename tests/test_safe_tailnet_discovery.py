@@ -138,19 +138,30 @@ def test_probe_response_drops_network_identity_and_unsafe_model_ids(monkeypatch)
 
     class Response:
         is_success = True
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
 
         @staticmethod
-        def json():
-            return {
-                "data": [
-                    {"id": "qwen-safe"},
-                    {"id": "http://secret-host/private"},
-                    {"id": _TAILNET_A},
-                    {"id": _UNSAFE_MODEL_PATH},
-                ]
-            }
+        def iter_bytes():
+            yield json.dumps(
+                {
+                    "data": [
+                        {"id": "qwen-safe"},
+                        {"id": "http://secret-host/private"},
+                        {"id": _TAILNET_A},
+                        {"id": _UNSAFE_MODEL_PATH},
+                    ]
+                }
+            ).encode()
 
-    monkeypatch.setattr(model_discovery.httpx, "get", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(
+        model_discovery.httpx, "stream", lambda *args, **kwargs: Response()
+    )
 
     result = discovery.discover_tailnet_models([peer_id])
     rendered = json.dumps(result)
@@ -161,6 +172,35 @@ def test_probe_response_drops_network_identity_and_unsafe_model_ids(monkeypatch)
     assert "secret-host" not in rendered
     assert _UNSAFE_MODEL_PATH not in rendered
     assert "http://" not in rendered
+
+
+def test_probe_rejects_oversized_response_before_reading_body(monkeypatch):
+    class Response:
+        is_success = True
+        headers = {
+            "content-length": str(model_discovery._TAILNET_MAX_RESPONSE_BYTES + 1)
+        }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        @staticmethod
+        def iter_bytes():
+            raise AssertionError("oversized response body was read")
+
+    monkeypatch.setattr(
+        model_discovery.httpx, "stream", lambda *args, **kwargs: Response()
+    )
+    discovery = ModelDiscovery("localhost")
+
+    assert discovery._probe_tailnet_target(
+        {"address": _TAILNET_A},
+        "a" * 32,
+        model_discovery._TAILNET_TARGETS[0],
+    ) is None
 
 
 def test_discover_route_modes_and_rejects_unknown_mode(monkeypatch):
