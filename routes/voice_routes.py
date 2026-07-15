@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import io
 import json
 import logging
 import os
@@ -23,7 +26,9 @@ from core.models import ChatMessage
 from src.action_intents import classify_tool_intent
 from src.auth_helpers import require_user
 from src.agent_worker_broker import find_active_task, start_task, task_action, worker_statuses
+from src.chat_helpers import model_supports_vision
 from src.constants import DATA_DIR
+from src.document_processor import analyze_image_bytes_with_vl_result
 from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
 from src.llm_core import stream_llm
 from src.prompt_security import untrusted_context_message
@@ -42,6 +47,9 @@ VOICE_ENDPOINT_ID = os.getenv("ODYSSEUS_VOICE_ENDPOINT_ID", "").strip()
 VOICE_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "").strip()
 _STATE_LOCK = threading.RLock()
 _ACTIVE_RESPONSES: dict[str, asyncio.Task] = {}
+VOICE_FRAME_MAX_BYTES = 1024 * 1024
+VOICE_FRAME_MAX_WIDTH = 1024
+VOICE_FRAME_MAX_HEIGHT = 576
 
 
 class _StrictModel(BaseModel):
@@ -71,9 +79,17 @@ class VoiceClientState(_StrictModel):
     document: VoiceDocumentClientState = Field(default_factory=VoiceDocumentClientState)
 
 
+class VoiceFrame(_StrictModel):
+    mime: Literal["image/jpeg", "image/png"]
+    data_base64: str = Field(min_length=4, max_length=((VOICE_FRAME_MAX_BYTES + 2) // 3) * 4)
+    width: int = Field(gt=0, le=VOICE_FRAME_MAX_WIDTH)
+    height: int = Field(gt=0, le=VOICE_FRAME_MAX_HEIGHT)
+
+
 class VoiceRespondRequest(_StrictModel):
     text: str = Field(min_length=1, max_length=12_000)
     client_state: VoiceClientState | None = None
+    frame: VoiceFrame | None = None
 
 
 def _now() -> int:
@@ -162,6 +178,56 @@ def _foreground_command(text: str) -> tuple[str, str | None] | None:
         "minimize this document": ("minimize_view", "document"),
         "what view is open": ("report_view_state", None),
     }.get(normalized)
+
+
+def _media_command(text: str) -> str | None:
+    normalized = re.sub(r"[.!?,]+$", "", text.strip().lower()).strip()
+    return {
+        "open your eyes": "camera_open",
+        "what do you see": "camera_describe",
+        "describe what you see": "camera_describe",
+        "close your eyes": "camera_close",
+        "i need something motivational": "media_motivation",
+    }.get(normalized)
+
+
+def _decode_voice_frame(frame: VoiceFrame) -> dict[str, Any]:
+    """Decode and verify one bounded camera frame without persisting it."""
+    try:
+        data = base64.b64decode(frame.data_base64, validate=True)
+    except (binascii.Error, UnicodeEncodeError, ValueError) as exc:
+        raise HTTPException(422, "Invalid voice frame encoding") from exc
+    if len(data) > VOICE_FRAME_MAX_BYTES:
+        raise HTTPException(422, "Voice frame exceeds the 1 MiB limit")
+
+    expected_format = "PNG" if frame.mime == "image/png" else "JPEG"
+    magic_matches = (
+        data.startswith(b"\x89PNG\r\n\x1a\n")
+        if expected_format == "PNG"
+        else data.startswith(b"\xff\xd8\xff")
+    )
+    if not magic_matches:
+        raise HTTPException(422, "Voice frame type does not match its image bytes")
+
+    try:
+        from PIL import Image, UnidentifiedImageError
+
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            image_format = image.format
+            if width > VOICE_FRAME_MAX_WIDTH or height > VOICE_FRAME_MAX_HEIGHT:
+                raise HTTPException(422, "Voice frame dimensions exceed 1024 by 576")
+            if (width, height) != (frame.width, frame.height):
+                raise HTTPException(422, "Voice frame dimensions do not match its image bytes")
+            if image_format != expected_format:
+                raise HTTPException(422, "Voice frame type does not match its image bytes")
+            image.verify()
+    except HTTPException:
+        raise
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        raise HTTPException(422, "Voice frame is not a valid image") from exc
+
+    return {"bytes": data, "mime": frame.mime, "width": width, "height": height}
 
 
 _WORKER_NAMES = {
@@ -352,14 +418,24 @@ def _stream_piece(chunk: str) -> tuple[list[str], bool]:
     return deltas, failed
 
 
-def _append_voice_turn(session_id: str, role: str, text: str, status: str) -> None:
+def _append_voice_turn(
+    session_id: str,
+    role: str,
+    text: str,
+    status: str,
+    *,
+    model: str | None = None,
+) -> None:
     with _STATE_LOCK:
         state = _load_state()
         session = (state.get("sessions") or {}).get(session_id)
         if not isinstance(session, dict):
             return
         turns = session.setdefault("turns", [])
-        turns.append({"role": role, "text": text[:12_000], "status": status, "created_at": _now()})
+        turn = {"role": role, "text": text[:12_000], "status": status, "created_at": _now()}
+        if model:
+            turn["model"] = str(model).strip()[:200]
+        turns.append(turn)
         session["turns"] = turns[-100:]
         session["status"] = status
         session["updated_at"] = _now()
@@ -458,9 +534,11 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
         text = payload.text.strip()
         if not text:
             raise HTTPException(422, "Voice text cannot be empty")
+        decoded_frame = _decode_voice_frame(payload.frame) if payload.frame else None
         session_manager.add_message(chat.id, ChatMessage("user", text, metadata={"source": "voice_orb"}))
         _append_voice_turn(session_id, "user", text, "thinking")
         command = _foreground_command(text)
+        media_command = _media_command(text)
         calendar_args = _calendar_read_args(text)
         worker_command = _worker_command(text)
 
@@ -472,7 +550,8 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
                     previous.cancel()
                 _ACTIVE_RESPONSES[session_id] = current_task
             try:
-                if command or worker_command:
+                if command or worker_command or media_command:
+                    vision_model = ""
                     if command:
                         action, view = command
                         if action == "report_view_state":
@@ -484,7 +563,7 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
                                 ("close_view", "document"): "The document is closed.",
                                 ("minimize_view", "document"): "The document is minimized.",
                             }[(action, view)]
-                    else:
+                    elif worker_command:
                         worker_action, worker, label, requested_workspace, worker_prompt = worker_command
                         if not owner:
                             reply = "Sign in interactively before using workers."
@@ -533,9 +612,55 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
                                     else:
                                         yield _sse({"type": "worker_task", "task": task})
                                         reply = f"{label} is working in {workspace}. Voice remains available."
-                    session_manager.add_message(chat.id, ChatMessage("assistant", reply, metadata={"source": "voice_orb"}))
-                    _append_voice_turn(session_id, "assistant", reply, "ready")
-                    yield _sse({"type": "final", "text": reply, "model": voice_session.get("model"), "assistant": VOICE_PERSONA})
+                    elif media_command == "camera_describe":
+                        if decoded_frame is None:
+                            reply = "I need a current camera frame before I can describe what I see."
+                        else:
+                            url, active_model, headers = _resolve_voice_runtime(owner, chat)
+                            supports_vision = await asyncio.to_thread(
+                                model_supports_vision,
+                                active_model,
+                                url,
+                            )
+                            preferred = (url, active_model, headers) if supports_vision else None
+                            result = await asyncio.to_thread(
+                                analyze_image_bytes_with_vl_result,
+                                decoded_frame["bytes"],
+                                decoded_frame["mime"],
+                                owner,
+                                preferred,
+                            )
+                            reply = str(result.get("text") or "").strip()
+                            vision_model = str(result.get("model") or "").strip()[:200]
+                            if not reply or reply.startswith("["):
+                                reply = "I could not analyze the camera frame with a vision-capable model."
+                    else:
+                        event = {
+                            "camera_open": {"type": "ui_control", "ui_event": "camera_open"},
+                            "camera_close": {"type": "ui_control", "ui_event": "camera_close"},
+                            "media_motivation": {
+                                "type": "ui_control",
+                                "ui_event": "media_play",
+                                "media_id": "motivational-abstract",
+                            },
+                        }[media_command]
+                        yield _sse(event)
+                        reply = {
+                            "camera_open": "Opening my eyes.",
+                            "camera_close": "Closing my eyes.",
+                            "media_motivation": "Playing the built-in motivational visual.",
+                        }[media_command]
+                    metadata = {"source": "voice_orb"}
+                    if vision_model:
+                        metadata["model"] = vision_model
+                    session_manager.add_message(chat.id, ChatMessage("assistant", reply, metadata=metadata))
+                    _append_voice_turn(session_id, "assistant", reply, "ready", model=vision_model)
+                    yield _sse({
+                        "type": "final",
+                        "text": reply,
+                        "model": vision_model or voice_session.get("model"),
+                        "assistant": VOICE_PERSONA,
+                    })
                     return
 
                 calendar_result = None
