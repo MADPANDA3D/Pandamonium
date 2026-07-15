@@ -17,6 +17,11 @@ import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documen
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import {
+  CLIENT_STATE_VERSION,
+  markClientStateView,
+  registerClientStateProvider,
+} from './clientState.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -4757,6 +4762,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     if (!container) return;
 
     isOpen = true;
+    markClientStateView('document');
     // Doc was opened last → it goes in front of the email windows (clears the
     // email-front flag; the doc/email z-index alternation lives in CSS).
     document.body.classList.remove('email-front');
@@ -4796,6 +4802,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     const pane = document.createElement('div');
     pane.id = 'doc-editor-pane';
     pane.className = 'doc-editor-pane';
+    pane.addEventListener('pointerdown', () => markClientStateView('document'), true);
     // ── Mobile: make toolbar/footer buttons work on the FIRST tap with the
     // keyboard up ──
     // Normally a tap while the keyboard is open is eaten by the OS keyboard
@@ -6826,6 +6833,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       return;
     }
     isOpen = false;
+    markClientStateView('document', false);
     // On touch, closing the doc should leave the keyboard DOWN. The tap blurs
     // the textarea (keyboard starts down), but a stray refocus during teardown
     // (the view behind regaining focus, etc.) was bouncing it back up. Blur any
@@ -10967,6 +10975,17 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     return activeDocId;
   }
 
+  function _getDocumentClientState() {
+    const minimized = Modals.isMinimized('doc-panel');
+    const open = isOpen && !minimized;
+    return {
+      version: CLIENT_STATE_VERSION,
+      open,
+      minimized,
+      id: open ? activeDocId : (minimized ? _minimizedDocId : null),
+    };
+  }
+
   export function getActiveEmailComposerContext() {
     if (!activeDocId) return null;
     const doc = docs.get(activeDocId);
@@ -11033,6 +11052,8 @@ const documentModule = {
   closeLibrary,
   isLibraryOpen,
 };
+
+registerClientStateProvider('document', _getDocumentClientState);
 
 export default documentModule;
 window.documentModule = documentModule;

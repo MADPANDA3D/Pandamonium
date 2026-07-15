@@ -38,6 +38,7 @@ These are imported first and used across most features.
 |---|---|---|
 | **`ui.js`** | `showToast`, `showError`, `el`, `copyToClipboard`, `scrollHistory`, `setAutoScroll`, `autoResize`, `debounce`, `esc` | Shared UI helpers, toast notifications, scroll behavior, element accessor, text escaping. |
 | **`storage.js`** | `default` storage wrapper | LocalStorage helpers and toggle state persistence. |
+| **`clientState.js`** | `registerClientStateProvider`, `markClientStateView`, `getClientStateSnapshot` | Versioned, bounded logical Calendar/document state. `open` means visible, minimized is retained separately, and scoped snapshots report `chat` instead of promoting a background view. Fixed host schemas drop unknown fields and fail closed without DOM/content serialization. |
 | **`markdown.js`** | `mdToHtml`, `processWithThinking`, `squashOutsideCode`, `normalizeThinkingMarkup`, `extractThinkingBlocks`, `hasUnclosedThinkTag`, `startsWithReasoningPrefix` | Markdown→HTML, thinking/reasoning block parsing, code-block normalization. |
 | **`spinner.js`** | `create`, `createWhirlpool` | Loading/spinner factories for streaming and tool cards. |
 | **`keyboard-shortcuts.js`** | `initKeyboardShortcuts` | Global keyboard shortcut wiring. |

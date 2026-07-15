@@ -10,6 +10,11 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { attachColorPicker } from './colorPicker.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import {
+  CLIENT_STATE_VERSION,
+  markClientStateView,
+  registerClientStateProvider,
+} from './clientState.js';
+import {
   WEEKDAYS, WEEKDAYS_SUN, MONTHS, MON_SHORT,
   CAL_PALETTE, CAL_COLORS, _CAL_CUSTOM_GRADIENT, _TYPE_PALETTE,
   _trashIcon, _moreIcon, _bellIcon,
@@ -682,6 +687,7 @@ function _getModal() {
   document.body.appendChild(_modal);
   _modal.querySelector('#cal-close').addEventListener('click', closeCalendar);
   _modal.addEventListener('click', (e) => { if (e.target === _modal) closeCalendar(); });
+  _modal.addEventListener('pointerdown', () => markClientStateView('calendar'));
   // Make draggable — replaced ~50 lines of inline drag/dock plumbing with
   // a single call to the shared helper. Calendar doesn't support fullscreen
   // snap so no fsClass / enter/exit callbacks here.
@@ -3483,9 +3489,11 @@ function openCalendar() {
   if (Modals.isMinimized('calendar-modal')) {
     Modals.restore('calendar-modal');
     _open = true;
+    markClientStateView('calendar');
     return;
   }
   _open = true;
+  markClientStateView('calendar');
   if (_todayCount() > 0) { _markBadgeSeen(); _updateBadge(); }
   _collapseSidebar();
   const modal = _getModal();
@@ -3504,7 +3512,7 @@ function openCalendar() {
     railBtnId: 'rail-calendar',
     sidebarBtnId: 'tool-calendar-btn',
     closeFn: () => _doCloseCalendar(),
-    restoreFn: () => {},
+    restoreFn: () => markClientStateView('calendar'),
   });
   _currentDate = new Date();
   _selectedDay = _today();  // auto-show today's events on open
@@ -3590,6 +3598,7 @@ let _highlightEventUid = null;
 
 function _doCloseCalendar() {
   _open = false;
+  markClientStateView('calendar', false);
   _restoreSidebar();
   if (_modal) {
     _modal.style.display = 'none';
@@ -3615,6 +3624,17 @@ function isCalendarOpen() {
   // Treat minimized as "not open" so toggle handler will restore via Modals.toggle
   if (Modals.isMinimized('calendar-modal')) return false;
   return _open;
+}
+
+function _getCalendarClientState() {
+  const minimized = Modals.isMinimized('calendar-modal');
+  return {
+    version: CLIENT_STATE_VERSION,
+    open: _open && !minimized,
+    minimized,
+    view: _view,
+    date: _ds(_currentDate),
+  };
 }
 
 // ── Persistent cache (localStorage) ──
@@ -3716,6 +3736,8 @@ window.addEventListener('focus', () => {
 
 // Calendar reminders are stored as Notes. The Notes reminder loop owns
 // notification dispatch so calendar reminders do not fire twice.
+
+registerClientStateProvider('calendar', _getCalendarClientState);
 
 const calendarModule = { openCalendar, closeCalendar, isCalendarOpen };
 export { openCalendar, openCalendarTo, closeCalendar, isCalendarOpen };
