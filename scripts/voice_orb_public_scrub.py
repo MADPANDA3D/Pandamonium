@@ -45,6 +45,30 @@ PRIVATE_CONTENT = {
         rb"(?:ODYSSEUS|JARVIS_CODEX)_PRIVATE_WORKER_MUTATIONS", re.I
     ),
 }
+PUBLIC_PROTOCOL_FIXTURES = {
+    "routes/model_routes.py": (
+        b"10.0.0.0/8",
+        b"172.16.0.0/12",
+        b"192.168.0.0/16",
+        b"100.64.0.0/10",
+    ),
+    "src/model_discovery.py": (b"100.64.0.0/10",),
+    "tests/test_safe_tailnet_discovery.py": (
+        b"100.64.1.7",
+        b"100.64.1.8",
+        b"/home/user/",
+    ),
+    "tests/test_voice_orb_setup_status.py": (
+        b"100.64.0.10",
+        b"100.64.0.11",
+        b"100.64.0.12",
+        b"100.64.0.13",
+        b"100.64.0.99",
+        b"10.20.30.40",
+        b"10.20.30.41",
+        b"/home/private/",
+    ),
+}
 
 
 def git(*args: str) -> bytes:
@@ -168,13 +192,21 @@ def content_reasons(data: bytes) -> list[str]:
     return [label for label, pattern in PRIVATE_CONTENT.items() if pattern.search(data)]
 
 
+def content_reasons_for_path(path: str, data: bytes) -> list[str]:
+    """Ignore only exact public protocol constants and historical test fixtures."""
+    filtered = data
+    for literal in PUBLIC_PROTOCOL_FIXTURES.get(path, ()):
+        filtered = filtered.replace(literal, b"<PUBLIC_PROTOCOL_FIXTURE>")
+    return content_reasons(filtered)
+
+
 def scan_blob(label: str, path: str, data: bytes, failures: set[str]) -> None:
     reason = path_reason(path)
     if reason:
         failures.add(f"{label}:{path}: {reason}")
     if path == "scripts/voice_orb_public_scrub.py":
         return
-    for content_reason in content_reasons(data):
+    for content_reason in content_reasons_for_path(path, data):
         failures.add(f"{label}:{path}: contains {content_reason}")
 
 
@@ -230,6 +262,30 @@ def self_test() -> None:
     assert not content_reasons(b"http://127.0.0.1:7000")
     assert not content_reasons(b"https://github.com/MADPANDA3D/odysseus")
     assert not content_reasons(b"ODYSSEUS_PC_CODEX_ENABLED=false")
+    assert not content_reasons_for_path(
+        "routes/model_routes.py",
+        b'ipaddress.ip_network("100.64.0.0/10")',
+    )
+    assert content_reasons_for_path(
+        "routes/model_routes.py",
+        b"host=100.64.1.9",
+    )
+    assert not content_reasons_for_path(
+        "tests/test_safe_tailnet_discovery.py",
+        b"fixture=100.64.1.7 path=/home/user/token",
+    )
+    assert content_reasons_for_path(
+        "tests/test_safe_tailnet_discovery.py",
+        b"fixture=100.64.1.9",
+    )
+    assert not content_reasons_for_path(
+        "tests/test_voice_orb_setup_status.py",
+        b"fixture=10.20.30.40 path=/home/private/model",
+    )
+    assert content_reasons_for_path(
+        "tests/test_voice_orb_setup_status.py",
+        b"fixture=10.20.30.42",
+    )
 
     media = b"\x1aE\xdf\xa3silent-webm"
     checksum = f"sha256:{hashlib.sha256(media).hexdigest()}"

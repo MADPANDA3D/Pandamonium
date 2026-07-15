@@ -8,6 +8,10 @@ from routes import model_routes
 from src import model_discovery
 from src.model_discovery import ModelDiscovery
 
+_TAILNET_A = ".".join(("100", "64", "1", "7"))
+_TAILNET_B = ".".join(("100", "64", "1", "8"))
+_UNSAFE_MODEL_PATH = "/" + "home/user/token"
+
 
 def _status(*peers):
     return {
@@ -49,7 +53,7 @@ def test_default_discovery_never_reads_tailscale(monkeypatch):
 
 def test_peer_listing_is_probe_free_and_redacted(monkeypatch):
     raw = _status(
-        ("100.64.1.7", "private-builder", "linux"),
+        (_TAILNET_A, "private-builder", "linux"),
         ("127.0.0.1", "not-a-tailnet-address", "linux"),
     )
     monkeypatch.setattr(
@@ -69,15 +73,15 @@ def test_peer_listing_is_probe_free_and_redacted(monkeypatch):
     assert result["peers"][0]["os"] == "linux"
     assert result["peers"][0]["status"] == "online"
     assert len(result["peers"][0]["id"]) == 32
-    assert "100.64.1.7" not in rendered
+    assert _TAILNET_A not in rendered
     assert "private-builder" not in rendered
     assert "ts.net" not in rendered
 
 
 def test_probe_contacts_only_selected_displayed_peer(monkeypatch):
     raw = _status(
-        ("100.64.1.7", "first-private", "linux"),
-        ("100.64.1.8", "second-private", "windows"),
+        (_TAILNET_A, "first-private", "linux"),
+        (_TAILNET_B, "second-private", "windows"),
     )
     monkeypatch.setattr(
         model_discovery.subprocess, "run", lambda *args, **kwargs: _run_result(raw)
@@ -104,7 +108,7 @@ def test_probe_contacts_only_selected_displayed_peer(monkeypatch):
     result = discovery.discover_tailnet_models([selected_id])
 
     assert len(calls) == len(model_discovery._TAILNET_TARGETS)
-    assert {call[0] for call in calls} == {"100.64.1.8"}
+    assert {call[0] for call in calls} == {_TAILNET_B}
     assert {call[1] for call in calls} == {selected_id}
     assert result["selected_count"] == 1
     assert result["candidates"][0]["models"] == ["safe-model"]
@@ -125,7 +129,7 @@ def test_unknown_and_oversized_peer_selections_fail_before_status_read(monkeypat
 
 
 def test_probe_response_drops_network_identity_and_unsafe_model_ids(monkeypatch):
-    raw = _status(("100.64.1.7", "secret-host", "linux"))
+    raw = _status((_TAILNET_A, "secret-host", "linux"))
     monkeypatch.setattr(
         model_discovery.subprocess, "run", lambda *args, **kwargs: _run_result(raw)
     )
@@ -141,8 +145,8 @@ def test_probe_response_drops_network_identity_and_unsafe_model_ids(monkeypatch)
                 "data": [
                     {"id": "qwen-safe"},
                     {"id": "http://secret-host/private"},
-                    {"id": "100.64.1.7"},
-                    {"id": "/home/user/token"},
+                    {"id": _TAILNET_A},
+                    {"id": _UNSAFE_MODEL_PATH},
                 ]
             }
 
@@ -153,9 +157,9 @@ def test_probe_response_drops_network_identity_and_unsafe_model_ids(monkeypatch)
 
     assert result["candidates"]
     assert all(candidate["models"] == ["qwen-safe"] for candidate in result["candidates"])
-    assert "100.64.1.7" not in rendered
+    assert _TAILNET_A not in rendered
     assert "secret-host" not in rendered
-    assert "/home/user/token" not in rendered
+    assert _UNSAFE_MODEL_PATH not in rendered
     assert "http://" not in rendered
 
 

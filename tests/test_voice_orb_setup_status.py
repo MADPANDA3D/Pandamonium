@@ -109,8 +109,8 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
         voice_routes,
         "_resolve_voice_runtime",
         lambda _owner: (
-            "http://100.64.0.10:11434/v1",
-            "/home/private/model",
+            "http://192.0.2.10:11434/v1",
+            "/srv/models/private-model",
             {"Authorization": "Bearer secret"},
         ),
     )
@@ -120,9 +120,9 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
             "pc-codex": {
                 "configured": True,
                 "ready": True,
-                "capabilities": ["read_only", "task_status", "http://100.64.0.99"],
+                "capabilities": ["read_only", "task_status", "http://192.0.2.99"],
                 "workspaces": ["client-workspace"],
-                "connection": {"state": "connected", "reason": "http://100.64.0.11"},
+                "connection": {"state": "connected", "reason": "http://192.0.2.11"},
             },
             "hermes": {
                 "configured": True,
@@ -137,15 +137,15 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
     stt = _StatsService({
         "available": True,
         "provider": "endpoint:secret-stt-id",
-        "endpoint": "http://100.64.0.12",
-        "error": "/secret/stt-token",
+        "endpoint": "http://192.0.2.12",
+        "error": "/run/secrets/stt-token",
     })
     tts = _StatsService({
         "available": True,
         "provider": "browser",
         "voice": "Safe Voice",
         "speed": 1.25,
-        "endpoint": "http://100.64.0.13",
+        "endpoint": "http://192.0.2.13",
     })
     chat = _Chat()
     router = voice_routes.setup_voice_routes(_Manager(chat), stt, tts)
@@ -179,15 +179,15 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
     public_blob = json.dumps(status)
     for private_value in (
         "secret-endpoint-id",
-        "/home/private/model",
+        "/srv/models/private-model",
         "secret-stt-id",
-        "100.64.0.10",
-        "100.64.0.11",
-        "100.64.0.12",
-        "100.64.0.13",
-        "100.64.0.99",
+        "192.0.2.10",
+        "192.0.2.11",
+        "192.0.2.12",
+        "192.0.2.13",
+        "192.0.2.99",
         "/secret/token",
-        "/secret/stt-token",
+        "/run/secrets/stt-token",
         "client-workspace",
         "arbitrary-agent",
     ):
@@ -200,7 +200,7 @@ async def test_setup_status_fails_closed_without_returning_source_errors(monkeyp
     monkeypatch.setattr(voice_routes, "VOICE_MODEL", "safe-model")
 
     def unavailable_model(_owner):
-        raise HTTPException(503, "http://10.20.30.40/private model error")
+        raise HTTPException(503, "http://198.51.100.40/private model error")
 
     async def unavailable_workers():
         raise RuntimeError("worker token at /secret/token")
@@ -209,7 +209,7 @@ async def test_setup_status_fails_closed_without_returning_source_errors(monkeyp
     monkeypatch.setattr(voice_routes, "worker_statuses", unavailable_workers)
     status = await voice_routes._voice_status_snapshot(
         "alice",
-        _StatsService(RuntimeError("STT at http://10.20.30.41 failed")),
+        _StatsService(RuntimeError("STT at http://198.51.100.41 failed")),
         _StatsService({
             "available": False,
             "provider": "endpoint:private-tts",
@@ -236,8 +236,8 @@ async def test_setup_status_fails_closed_without_returning_source_errors(monkeyp
     blob = json.dumps(status)
     for private_value in (
         "private-endpoint",
-        "10.20.30.40",
-        "10.20.30.41",
+        "198.51.100.40",
+        "198.51.100.41",
         "/secret/token",
         "private-tts",
         "/secret/voice-file",
