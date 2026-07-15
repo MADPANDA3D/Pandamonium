@@ -62,6 +62,25 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_calendar",
+            "description": "Refresh and read the authenticated admin's owner-scoped Calendar cache without creating, updating, or deleting events. Resolve relative dates first and pass an explicit ISO range of no more than 366 days.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_events", "list_calendars"]},
+                    "start": {"type": "string", "maxLength": 500, "description": "Required for list_events: inclusive range start as an ISO datetime; range must be no more than 366 days"},
+                    "end": {"type": "string", "maxLength": 500, "description": "Required for list_events: exclusive range end as an ISO datetime; range must be no more than 366 days"},
+                    "calendar": {"type": "string", "maxLength": 500, "description": "Optional calendar name or identifier"},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": "Quick single web lookup for a fact or current event mid-task. NOT for 'research X' / 'do research on X' — those are deep-research jobs; use trigger_research instead.",
             "parameters": {

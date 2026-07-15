@@ -63,6 +63,7 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "resolve_contact",
     "manage_contact",
     "manage_calendar",
+    "read_calendar",
     "vault_search",
     "vault_get",
     "vault_unlock",
@@ -141,7 +142,9 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",
     "manage_webhooks", "manage_tokens", "manage_settings", "manage_contact",
-    "manage_calendar", "api_call", "app_api", "ui_control",
+    # Despite its user-facing read-only contract, read_calendar performs a
+    # CalDAV pull that can update the local cache, so plan mode must fail closed.
+    "manage_calendar", "read_calendar", "api_call", "app_api", "ui_control",
     "send_email", "reply_to_email", "bulk_email", "delete_email",
     "archive_email", "mark_email_read",
     # The draft tools create documents and download_attachment writes to

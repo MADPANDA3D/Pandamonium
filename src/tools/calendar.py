@@ -7,6 +7,7 @@ Holds the manage_calendar tool (CalDAV-backed event CRUD).
 import json
 import logging
 import re
+from datetime import timedelta
 from typing import Dict, Optional
 
 from src.tools._common import _parse_tool_args
@@ -14,6 +15,222 @@ from src.tool_utils import get_upload_handler
 from src.upload_handler import reserve_upload_references
 
 logger = logging.getLogger(__name__)
+
+
+READ_CALENDAR_DEFAULT_RESULTS = 50
+READ_CALENDAR_MAX_RESULTS = 100
+READ_CALENDAR_MAX_FIELD_CHARS = 500
+READ_CALENDAR_MAX_RESPONSE_CHARS = 20_000
+READ_CALENDAR_MAX_INTERVAL_DAYS = 366
+READ_CALENDAR_RANGE_ERROR = (
+    "list_events requires end after start and a range of no more than 366 days"
+)
+
+
+def _bounded_calendar_text(value) -> str:
+    text = str(value or "")
+    if len(text) <= READ_CALENDAR_MAX_FIELD_CHARS:
+        return text
+    return text[: READ_CALENDAR_MAX_FIELD_CHARS - 3] + "..."
+
+
+def _calendar_response_text(value) -> str:
+    return _bounded_calendar_text(value).replace("\r", " ").replace("\n", " ")
+
+
+async def do_read_calendar(content: str, owner: Optional[str] = None) -> Dict:
+    """Refresh and read one owner's Calendar data without event mutations."""
+    if not owner:
+        return {"error": "Calendar owner is required", "exit_code": 1}
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+
+    raw_action = args.get("action")
+    if not isinstance(raw_action, str):
+        return {"error": "action must be a string", "exit_code": 1}
+    if len(raw_action) > READ_CALENDAR_MAX_FIELD_CHARS:
+        return {
+            "error": f"action exceeds {READ_CALENDAR_MAX_FIELD_CHARS} characters",
+            "exit_code": 1,
+        }
+    action = raw_action.replace("-", "_").strip().lower()
+    if action not in {"list_events", "list_calendars"}:
+        return {
+            "error": "read_calendar supports only list_events and list_calendars",
+            "exit_code": 1,
+        }
+    allowed = {"action", "start", "end", "calendar", "max_results"}
+    if any(key not in allowed for key in args):
+        return {
+            "error": "read_calendar received unsupported fields",
+            "exit_code": 1,
+        }
+
+    for field in ("start", "end", "calendar"):
+        value = args.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return {"error": f"{field} must be a string", "exit_code": 1}
+        if len(value) > READ_CALENDAR_MAX_FIELD_CHARS:
+            return {
+                "error": f"{field} exceeds {READ_CALENDAR_MAX_FIELD_CHARS} characters",
+                "exit_code": 1,
+            }
+
+    max_results = args.get("max_results", READ_CALENDAR_DEFAULT_RESULTS)
+    if isinstance(max_results, bool) or not isinstance(max_results, int):
+        return {"error": "max_results must be an integer", "exit_code": 1}
+    if not 1 <= max_results <= READ_CALENDAR_MAX_RESULTS:
+        return {
+            "error": f"max_results must be between 1 and {READ_CALENDAR_MAX_RESULTS}",
+            "exit_code": 1,
+        }
+
+    from routes.calendar_routes import _parse_dt
+
+    start_dt = end_dt = None
+    if action == "list_events":
+        if not args.get("start") or not args.get("end"):
+            return {
+                "error": "list_events requires explicit start and end ISO datetimes",
+                "exit_code": 1,
+            }
+        try:
+            start_dt = _parse_dt(args["start"])
+            end_dt = _parse_dt(args["end"])
+        except ValueError as exc:
+            return {"error": f"Invalid date range: {exc}", "exit_code": 1}
+        if (
+            end_dt <= start_dt
+            or end_dt - start_dt > timedelta(days=READ_CALENDAR_MAX_INTERVAL_DAYS)
+        ):
+            return {"error": READ_CALENDAR_RANGE_ERROR, "exit_code": 1}
+
+    from src.caldav_sync import sync_caldav_direction
+
+    try:
+        sync_result = await sync_caldav_direction(owner, "pull")
+        sync_errors = list(sync_result.get("errors") or [])
+    except Exception as exc:
+        logger.warning("Read-only Calendar refresh failed: %s", type(exc).__name__)
+        sync_errors = [type(exc).__name__]
+
+    freshness = "sync_failed" if sync_errors else "fresh"
+    freshness_prefix = (
+        "Calendar freshness could not be confirmed; cached owner-scoped data follows."
+        if sync_errors
+        else ""
+    )
+
+    from core.database import CalendarCal, CalendarEvent, SessionLocal
+
+    db = SessionLocal()
+    try:
+        if action == "list_calendars":
+            rows = (
+                db.query(CalendarCal)
+                .filter(CalendarCal.owner == owner)
+                .order_by(CalendarCal.name, CalendarCal.id)
+                .limit(max_results + 1)
+                .all()
+            )
+            truncated = len(rows) > max_results
+            calendars = [
+                {
+                    "name": _bounded_calendar_text(row.name),
+                    "source": _bounded_calendar_text(row.source or "local"),
+                }
+                for row in rows[:max_results]
+            ]
+            if calendars:
+                response = f"Found {len(calendars)} calendar(s):\n" + "\n".join(
+                    f"- {_calendar_response_text(calendar['name'])}" for calendar in calendars
+                )
+            else:
+                response = "No calendars found."
+            result: Dict = {"calendars": calendars}
+        else:
+            query = db.query(CalendarEvent).join(CalendarCal).filter(
+                CalendarCal.owner == owner,
+                CalendarEvent.status != "cancelled",
+                CalendarEvent.dtstart < end_dt,
+                CalendarEvent.dtend > start_dt,
+            )
+            calendar_filter = args.get("calendar", "").strip()
+            if calendar_filter:
+                query = query.filter(
+                    (CalendarEvent.calendar_id == calendar_filter)
+                    | (CalendarCal.name == calendar_filter)
+                )
+            rows = query.order_by(CalendarEvent.dtstart).limit(max_results + 1).all()
+            truncated = len(rows) > max_results
+            events = []
+            for event in rows[:max_results]:
+                if event.all_day:
+                    start_value = event.dtstart.strftime("%Y-%m-%d")
+                    end_value = event.dtend.strftime("%Y-%m-%d")
+                else:
+                    suffix = "Z" if getattr(event, "is_utc", False) else ""
+                    start_value = event.dtstart.isoformat() + suffix
+                    end_value = event.dtend.isoformat() + suffix
+                events.append({
+                    "uid": _bounded_calendar_text(event.uid),
+                    "summary": _bounded_calendar_text(event.summary),
+                    "dtstart": start_value,
+                    "dtend": end_value,
+                    "all_day": bool(event.all_day),
+                    "description": _bounded_calendar_text(event.description),
+                    "location": _bounded_calendar_text(event.location),
+                    "calendar": _bounded_calendar_text(event.calendar.name if event.calendar else ""),
+                    "event_type": _bounded_calendar_text(event.event_type),
+                    "importance": _bounded_calendar_text(event.importance or "normal"),
+                    "rrule": _bounded_calendar_text(event.rrule),
+                })
+            if events:
+                response = (
+                    f"Found {len(events)} event(s) between {start_dt.date().isoformat()} "
+                    f"and {end_dt.date().isoformat()}:\n"
+                    + "\n".join(
+                        f"- {event['dtstart']}: {_calendar_response_text(event['summary'])}"
+                        for event in events
+                    )
+                )
+            else:
+                response = (
+                    f"No events between {start_dt.date().isoformat()} "
+                    f"and {end_dt.date().isoformat()}."
+                )
+            result = {"events": events}
+
+        if truncated:
+            response += f"\nResults were limited to {max_results}."
+        if freshness_prefix:
+            response = f"{freshness_prefix}\n\n{response}"
+        response_truncated = len(response) > READ_CALENDAR_MAX_RESPONSE_CHARS
+        result.update({
+            "response": response[:READ_CALENDAR_MAX_RESPONSE_CHARS],
+            "calendar_freshness": freshness,
+            "sync_error_count": len(sync_errors),
+            "data_truncated": truncated,
+            "response_truncated": response_truncated,
+            "max_results": max_results,
+            "field_max_chars": READ_CALENDAR_MAX_FIELD_CHARS,
+            "exit_code": 0,
+        })
+        return result
+    except Exception as exc:
+        logger.error("read_calendar failed: %s", type(exc).__name__)
+        return {
+            "error": "Calendar data could not be read",
+            "calendar_freshness": freshness,
+            "sync_error_count": len(sync_errors),
+            "exit_code": 1,
+        }
+    finally:
+        db.close()
 
 
 async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
