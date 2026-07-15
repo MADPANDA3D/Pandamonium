@@ -8,6 +8,7 @@ import themeModule from './theme.js';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
 import documentModule from './document.js';
+import { dispatchForegroundAction } from './foregroundActions.js';
 
 /**
  * Handle a ui_control SSE event — AI-driven UI manipulation.
@@ -18,6 +19,8 @@ export function handleUIControl(uiData) {
   var esc = uiModule.esc;
 
   try {
+    if (dispatchForegroundAction(uiData)) return;
+
     if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {
       var toggleMap = {
         web: 'web-toggle', bash: 'bash-toggle', rag: 'rag-toggle',

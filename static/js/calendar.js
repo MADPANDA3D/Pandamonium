@@ -3478,13 +3478,13 @@ function _wheelNav(e) {
 }
 
 function openCalendar() {
-  if (_open) return;
   // If currently minimized — restore in place, preserve all state
   if (Modals.isMinimized('calendar-modal')) {
     Modals.restore('calendar-modal');
     _open = true;
     return;
   }
+  if (_open) return;
   _open = true;
   if (_todayCount() > 0) { _markBadgeSeen(); _updateBadge(); }
   _collapseSidebar();

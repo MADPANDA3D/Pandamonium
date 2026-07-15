@@ -162,6 +162,7 @@ The largest and most central subsystem. Chat submission → backend SSE → prog
 | **`a11y.js`** | Accessibility helpers. |
 | **`platform.js`** | Platform detection (macOS/Windows/Linux) and keyboard-modifier helpers. |
 | **`escMenuStack.js`** | Stack manager for dismissible popups. |
+| **`foregroundActions.js`** | Versioned, bounded allowlist for browser-owned Calendar/document foreground actions. |
 | **`dragSort.js`** | Drag-to-sort shared behavior. |
 | **`tourHints.js`** / **`tourAutoplay.js`** | Onboarding tour helpers. |
 | **`color/hex.js`**, **`colorPicker.js`**, **`langIcons.js`**, **`util/ordinal.js`** | Small utility modules for color, language icons, and formatting. |
