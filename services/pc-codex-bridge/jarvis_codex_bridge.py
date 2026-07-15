@@ -72,6 +72,30 @@ ARTIFACT_SUFFIXES = {".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".tom
 ARTIFACT_MAX_BYTES = 2_000_000
 
 
+def _private_worker_mutations_enabled() -> bool:
+    return os.getenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _validate_task_permission(permission_mode: str, approved: bool) -> None:
+    if permission_mode == "read_only" and not approved:
+        return
+    if permission_mode == "workspace_write" and _private_worker_mutations_enabled():
+        if not approved:
+            raise PermissionError("approval_required")
+        return
+    raise PermissionError("public_tasks_read_only")
+
+
+def _approved_workspace_write(task: "Task") -> bool:
+    return (
+        _private_worker_mutations_enabled()
+        and task.data.get("permission_mode") == "workspace_write"
+        and task.data.get("approved") is True
+    )
+
+
 def _codex_command() -> list[str]:
     command = [CODEX_BIN]
     if CODEX_MODEL:
@@ -85,10 +109,15 @@ def _task_developer_instructions(task: "Task") -> str:
     source_root = task.data.get("source_root")
     if not source_root or source_root == task.data["cwd"]:
         return DEVELOPER_INSTRUCTIONS
+    source_rule = (
+        "You may modify it only within this explicitly approved workspace-write task."
+        if _approved_workspace_write(task)
+        else "Treat it as read-only."
+    )
     return (
         f"{DEVELOPER_INSTRUCTIONS.rstrip()}\n\n"
         f"The selected source workspace is {source_root}. Read it using absolute paths. "
-        "Treat it as read-only.\n"
+        f"{source_rule}\n"
         f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
         "Keep generated reports and generated Odysseus artifacts there so Jarvis tasks do not clutter the source project. "
         "Existing verified text documents in the selected source workspace may be emitted directly as Odysseus artifacts.\n"
@@ -96,7 +125,11 @@ def _task_developer_instructions(task: "Task") -> str:
 
 
 def _runtime_workspace_roots(task: "Task") -> list[str]:
-    return [task.data["cwd"]]
+    roots = [task.data["cwd"]]
+    source_root = task.data.get("source_root")
+    if _approved_workspace_write(task) and source_root not in roots:
+        roots.append(source_root)
+    return roots
 
 
 def _configured_hosts(value: str | None = None) -> tuple[str, ...]:
@@ -392,6 +425,10 @@ def _drain_stderr(proc: subprocess.Popen[str]) -> None:
 
 def _run_task(task: Task) -> None:
     try:
+        _validate_task_permission(
+            str(task.data.get("permission_mode") or "read_only"),
+            task.data.get("approved") is True,
+        )
         task.proc = subprocess.Popen(
             _codex_command(),
             stdin=subprocess.PIPE,
@@ -404,7 +441,7 @@ def _run_task(task: Task) -> None:
         task.send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "jarvis-codex-bridge", "version": "1.0"}, "capabilities": {"experimentalApi": True}}})
         _read_until(task, 1)
         task.send({"method": "initialized", "params": {}})
-        sandbox = "read-only"
+        sandbox = "workspace-write" if _approved_workspace_write(task) else "read-only"
         developer_instructions = _task_developer_instructions(task)
         resume_thread_id = task.data.get("codex_thread_id")
         if resume_thread_id:
@@ -506,8 +543,8 @@ def create_task(payload: dict) -> Task:
     if not prompt:
         raise ValueError("prompt_required")
     permission = str(payload.get("permission_mode") or "read_only")
-    if permission != "read_only" or payload.get("approved") is True:
-        raise PermissionError("public_tasks_read_only")
+    approved = payload.get("approved") is True
+    _validate_task_permission(permission, approved)
     codex_thread_id = str(payload.get("codex_thread_id") or "").strip() or None
     if codex_thread_id:
         try:
@@ -523,6 +560,7 @@ def create_task(payload: dict) -> Task:
         "cwd": cwd,
         "source_root": source_root,
         "permission_mode": permission,
+        "approved": approved,
         "prompt": prompt[:50000],
         "codex_thread_id": codex_thread_id,
         "status": "queued",

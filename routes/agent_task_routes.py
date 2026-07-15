@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.models import ChatMessage
 from src.auth_helpers import require_user
+from src.agent_worker_adapters import require_worker_task_permission
 from src.jarvis_agent import (
     configure,
     internal_token_valid,
@@ -86,8 +87,15 @@ def setup_agent_task_routes(session_manager):
 
     @router.post("/api/agent-tasks")
     async def create(payload: TaskCreate, _request: Request, owner: str = Depends(require_user)):
-        if payload.permission_mode != "read_only" or payload.approved:
-            raise HTTPException(403, "Public worker tasks are read-only")
+        try:
+            require_worker_task_permission(payload.permission_mode, payload.approved)
+        except PermissionError as exc:
+            detail = (
+                "Public worker tasks are read-only"
+                if str(exc) == "public_tasks_read_only"
+                else str(exc)
+            )
+            raise HTTPException(403, detail)
         try:
             session = session_manager.get_session(payload.session_id)
         except Exception:

@@ -154,6 +154,7 @@ def test_bridge_never_adds_source_as_a_write_root(tmp_path):
 def test_bridge_rejects_write_and_caller_preapproval(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.mkdir()
+    monkeypatch.delenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", raising=False)
     monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
     monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", tmp_path / "interaction")
 
@@ -172,6 +173,109 @@ def test_bridge_rejects_write_and_caller_preapproval(tmp_path, monkeypatch):
             assert str(exc) == "public_tasks_read_only"
         else:
             raise AssertionError("bridge accepted a write-capable task")
+
+
+def test_bridge_private_profile_allows_only_preapproved_workspace_write(tmp_path, monkeypatch):
+    class IdleThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    source = tmp_path / "source"
+    source.mkdir()
+    interaction = tmp_path / "interaction"
+    monkeypatch.setenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", "true")
+    monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
+    monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", interaction)
+    monkeypatch.setattr(bridge.threading, "Thread", IdleThread)
+
+    for payload, error in (
+        ({"permission_mode": "workspace_write", "approved": False}, "approval_required"),
+        ({"permission_mode": "read_only", "approved": True}, "public_tasks_read_only"),
+    ):
+        try:
+            bridge.create_task({
+                "session_id": "session-1",
+                "workspace": "home-lab",
+                "prompt": "Do not run this.",
+                **payload,
+            })
+        except PermissionError as exc:
+            assert str(exc) == error
+        else:
+            raise AssertionError("bridge accepted an invalid private task")
+
+    task = bridge.create_task({
+        "session_id": "session-1",
+        "workspace": "home-lab",
+        "prompt": "Apply the approved fix.",
+        "permission_mode": "workspace_write",
+        "approved": True,
+    })
+
+    try:
+        assert task.data["approved"] is True
+        assert bridge._runtime_workspace_roots(task) == [
+            str(interaction.resolve()),
+            str(source.resolve()),
+        ]
+        instructions = bridge._task_developer_instructions(task)
+        assert "explicitly approved workspace-write task" in instructions
+        assert "Treat it as read-only" not in instructions
+    finally:
+        bridge.TASKS.pop(task.task_id, None)
+
+
+def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypatch):
+    class Process:
+        def __init__(self):
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO()
+            self.stderr = io.StringIO()
+
+        def poll(self):
+            return 0
+
+    process = Process()
+    source = tmp_path / "source"
+    interaction = tmp_path / "interaction"
+    source.mkdir()
+    interaction.mkdir()
+    monkeypatch.setenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", "true")
+    monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    def read_until(task, request_id, timeout=60):
+        if request_id == 1:
+            return {}
+        if request_id == 2:
+            return {"thread": {"id": "thread-1"}}
+        task.data["status"] = "completed"
+        return {"turn": {"id": "turn-1"}}
+
+    monkeypatch.setattr(bridge, "_read_until", read_until)
+    task = bridge.Task({
+        "task_id": "task-private",
+        "worker": "pc-codex",
+        "workspace": "home-lab",
+        "cwd": str(interaction),
+        "source_root": str(source),
+        "permission_mode": "workspace_write",
+        "approved": True,
+        "prompt": "Apply the approved fix.",
+        "status": "queued",
+        "events": [],
+    })
+
+    bridge._run_task(task)
+
+    messages = [json.loads(line) for line in process.stdin.getvalue().splitlines()]
+    started = next(message for message in messages if message.get("id") == 2)
+    assert started["params"]["sandbox"] == "workspace-write"
+    assert started["params"]["runtimeWorkspaceRoots"] == [str(interaction), str(source)]
 
 
 def test_codex_command_applies_explicit_model_defaults(monkeypatch):

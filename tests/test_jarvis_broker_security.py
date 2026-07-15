@@ -13,6 +13,7 @@ import src.tool_execution as tool_execution
 from src.agent_worker_adapters import (
     CodexBridgeAdapter,
     HermesRunsAdapter,
+    _hermes_instructions,
     _last_remote_event_id,
 )
 from src.agent_tools import ToolBlock
@@ -61,7 +62,10 @@ def test_remote_resume_cursor_uses_last_stable_worker_event_id():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["codex", "hermes"])
-async def test_worker_adapters_reject_write_or_preapproved_tasks_before_network(tmp_path, adapter_kind):
+async def test_worker_adapters_reject_write_or_preapproved_tasks_before_network(
+    tmp_path, adapter_kind, monkeypatch
+):
+    monkeypatch.delenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", raising=False)
     adapter = (
         CodexBridgeAdapter("pc-codex", "http://worker.test", tmp_path / "token", enabled=True, machine="test")
         if adapter_kind == "codex"
@@ -73,6 +77,77 @@ async def test_worker_adapters_reject_write_or_preapproved_tasks_before_network(
     ):
         with pytest.raises(PermissionError, match="public_tasks_read_only"):
             await adapter.start(_task(prompt="inspect", **updates))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_kind", ["codex", "hermes"])
+async def test_worker_adapters_allow_private_preapproved_workspace_write(
+    tmp_path, adapter_kind, monkeypatch
+):
+    monkeypatch.setenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", "true")
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"task_id": "remote-1"} if adapter_kind == "codex" else {"run_id": "remote-1"}
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json, headers):
+            captured.update(url=url, payload=json, headers=headers)
+            return Response()
+
+    token = tmp_path / "token"
+    token.write_text("secret", encoding="utf-8")
+    adapter = (
+        CodexBridgeAdapter("pc-codex", "http://worker.test", token, enabled=True, machine="test")
+        if adapter_kind == "codex"
+        else HermesRunsAdapter("http://worker.test", token, enabled=True)
+    )
+    monkeypatch.setattr(agent_worker_adapters.httpx, "AsyncClient", Client)
+    task = _task(
+        prompt="Apply the approved fix.",
+        permission_mode="workspace_write",
+        approved=True,
+    )
+
+    remote = await adapter.start(task)
+
+    assert remote["remote_task_id"] == "remote-1"
+    if adapter_kind == "codex":
+        assert captured["payload"]["permission_mode"] == "workspace_write"
+        assert captured["payload"]["approved"] is True
+    else:
+        assert "Odysseus approved this task at the broker level" in captured["payload"]["instructions"]
+        assert "native tool approval gate" in captured["payload"]["instructions"]
+        task["remote_task_id"] = "remote-1"
+        await adapter.approve(task, {"choice": "once"})
+        assert captured["url"].endswith("/v1/runs/remote-1/approval")
+        assert captured["payload"]["choice"] == "once"
+
+
+@pytest.mark.asyncio
+async def test_private_worker_adapter_still_requires_write_approval(tmp_path, monkeypatch):
+    monkeypatch.setenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", "true")
+    adapter = CodexBridgeAdapter(
+        "pc-codex", "http://worker.test", tmp_path / "token", enabled=True, machine="test"
+    )
+
+    with pytest.raises(PermissionError, match="approval_required"):
+        await adapter.start(_task(permission_mode="workspace_write", approved=False))
+    with pytest.raises(PermissionError, match="public_tasks_read_only"):
+        await adapter.start(_task(permission_mode="read_only", approved=True))
 
 
 @pytest.mark.asyncio
@@ -192,7 +267,8 @@ async def test_hermes_stream_uses_sse_cursor_and_keeps_idless_repeats(tmp_path, 
     "permission_mode,approved",
     [("workspace_write", False), ("read_only", True)],
 )
-async def test_public_task_api_rejects_write_or_preapproval(permission_mode, approved):
+async def test_public_task_api_rejects_write_or_preapproval(permission_mode, approved, monkeypatch):
+    monkeypatch.delenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", raising=False)
     endpoint = _route_endpoint("/api/agent-tasks", "POST")
     payload = agent_task_routes.TaskCreate(
         worker="pc-codex",
@@ -208,6 +284,50 @@ async def test_public_task_api_rejects_write_or_preapproval(permission_mode, app
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "Public worker tasks are read-only"
+
+
+@pytest.mark.asyncio
+async def test_private_task_api_allows_only_preapproved_workspace_write(monkeypatch):
+    monkeypatch.setenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", "true")
+    captured = {}
+    manager = SimpleNamespace(
+        get_session=lambda session_id: SimpleNamespace(id=session_id, owner="alice"),
+    )
+
+    async def start_task(**values):
+        captured.update(values)
+        return {"task_id": "private-task"}
+
+    monkeypatch.setattr(agent_task_routes, "start_task", start_task)
+    router = agent_task_routes.setup_agent_task_routes(manager)
+    endpoint = next(
+        route.endpoint
+        for route in router.routes
+        if getattr(route, "path", None) == "/api/agent-tasks"
+        and "POST" in getattr(route, "methods", set())
+    )
+    payload = agent_task_routes.TaskCreate(
+        worker="pc-codex",
+        session_id="session-1",
+        workspace="home-lab",
+        prompt="Apply the approved fix.",
+        permission_mode="workspace_write",
+        approved=True,
+    )
+
+    assert await endpoint(payload, SimpleNamespace(), owner="alice") == {"task_id": "private-task"}
+    assert captured["permission_mode"] == "workspace_write"
+    assert captured["approved"] is True
+
+    for permission_mode, approved, detail in (
+        ("workspace_write", False, "approval_required"),
+        ("read_only", True, "Public worker tasks are read-only"),
+    ):
+        rejected = payload.model_copy(update={"permission_mode": permission_mode, "approved": approved})
+        with pytest.raises(HTTPException) as exc:
+            await endpoint(rejected, SimpleNamespace(), owner="alice")
+        assert exc.value.status_code == 403
+        assert exc.value.detail == detail
 
 
 def test_task_owner_helper_fails_closed_for_missing_or_wrong_owner(tmp_path, monkeypatch):
@@ -263,6 +383,69 @@ async def test_start_task_rejects_unknown_workspace_before_worker_call(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_broker_allows_only_private_preapproved_workspace_write(tmp_path, monkeypatch):
+    class Adapter:
+        enabled = True
+
+        def __init__(self):
+            self.started = []
+
+        async def start(self, task):
+            self.started.append(task)
+            return {"remote_task_id": "remote-private", "status": "queued"}
+
+    adapter = Adapter()
+    manager = SimpleNamespace(
+        get_session=lambda session_id: SimpleNamespace(id=session_id, owner="alice")
+    )
+    monkeypatch.setenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", "true")
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": adapter})
+    monkeypatch.setattr(
+        jarvis_agent,
+        "worker_catalog",
+        lambda: {"pc-codex": {"machine": "test", "workspaces": ["home-lab"]}},
+    )
+    monkeypatch.setattr(jarvis_agent, "ensure_mirror", lambda _task_id: None)
+
+    task = await jarvis_agent.start_task(
+        "pc-codex",
+        "session-1",
+        "home-lab",
+        "Apply the approved fix.",
+        permission_mode="workspace_write",
+        approved=True,
+        owner="alice",
+    )
+
+    assert task["permission_mode"] == "workspace_write"
+    assert task["approved"] is True
+    assert adapter.started[0]["approved"] is True
+
+    with pytest.raises(PermissionError, match="approval_required"):
+        await jarvis_agent.start_task(
+            "pc-codex",
+            "session-1",
+            "home-lab",
+            "Do not run this.",
+            permission_mode="workspace_write",
+            approved=False,
+            owner="alice",
+        )
+    with pytest.raises(PermissionError, match="public_tasks_read_only"):
+        await jarvis_agent.start_task(
+            "pc-codex",
+            "session-1",
+            "home-lab",
+            "Do not run this.",
+            permission_mode="read_only",
+            approved=True,
+            owner="alice",
+        )
+
+
+@pytest.mark.asyncio
 async def test_refresh_and_actions_enforce_owner_before_worker_call(tmp_path, monkeypatch):
     class Adapter:
         calls = 0
@@ -302,6 +485,7 @@ async def test_read_only_task_approval_can_only_be_denied(tmp_path, monkeypatch)
             return {"status": "running"}
 
     adapter = Adapter()
+    monkeypatch.delenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", raising=False)
     monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
     monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": adapter})
     monkeypatch.setattr(jarvis_agent, "ensure_mirror", lambda _task_id: None)
@@ -322,6 +506,44 @@ async def test_read_only_task_approval_can_only_be_denied(tmp_path, monkeypatch)
         owner="alice",
     )
     assert adapter.choices == ["deny"]
+
+
+@pytest.mark.asyncio
+async def test_private_write_task_preserves_native_approval_choices(tmp_path, monkeypatch):
+    class Adapter:
+        def __init__(self):
+            self.choices = []
+
+        async def approve(self, _task, payload):
+            self.choices.append(payload["choice"])
+            return {}
+
+        async def status(self, _task):
+            return {"status": "running"}
+
+    adapter = Adapter()
+    monkeypatch.setenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", "true")
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"hermes": adapter})
+    monkeypatch.setattr(jarvis_agent, "ensure_mirror", lambda _task_id: None)
+    jarvis_agent._save_task(_task(
+        worker="hermes",
+        status="waiting_approval",
+        permission_mode="workspace_write",
+        approved=True,
+    ))
+
+    await jarvis_agent.task_action(
+        "task-1",
+        "approval",
+        {"choice": "once"},
+        owner="alice",
+    )
+
+    assert adapter.choices == ["once"]
+    assert "mutation using normal Hermes tools" in _hermes_instructions(
+        {"permission_mode": "workspace_write", "approved": True}
+    )
 
 
 def test_event_ids_are_normalized_and_first_terminal_event_wins(tmp_path, monkeypatch):

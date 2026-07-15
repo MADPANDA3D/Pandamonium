@@ -35,18 +35,35 @@ def _hermes_run_features(features: dict[str, Any]) -> dict[str, bool]:
     }
 
 
+def require_worker_task_permission(permission_mode: str, approved: bool) -> None:
+    is_approved = approved is True
+    if permission_mode == "read_only" and not is_approved:
+        return
+    if permission_mode == "workspace_write" and _enabled(
+        "ODYSSEUS_PRIVATE_WORKER_MUTATIONS", False
+    ):
+        if not is_approved:
+            raise PermissionError("approval_required")
+        return
+    raise PermissionError("public_tasks_read_only")
+
+
 def _validated_approval_choice(task: dict[str, Any], payload: dict[str, Any]) -> str:
+    permission_mode = str(task.get("permission_mode") or "read_only")
+    require_worker_task_permission(permission_mode, task.get("approved") is True)
     choice = str(payload.get("choice") or "deny")
     if choice not in {"once", "session", "always", "deny"}:
         raise ValueError("invalid_approval_choice")
-    if str(task.get("permission_mode") or "read_only") == "read_only" and choice != "deny":
+    if permission_mode == "read_only" and choice != "deny":
         raise PermissionError("read_only_task_approval_must_deny")
     return choice
 
 
-def _require_read_only_task(task: dict[str, Any]) -> None:
-    if str(task.get("permission_mode") or "") != "read_only" or bool(task.get("approved")):
-        raise PermissionError("public_tasks_read_only")
+def _require_worker_task_permission(task: dict[str, Any]) -> None:
+    require_worker_task_permission(
+        str(task.get("permission_mode") or ""),
+        task.get("approved") is True,
+    )
 
 
 def _last_remote_event_id(task: dict[str, Any]) -> str:
@@ -66,6 +83,16 @@ def _hermes_instructions(task: dict[str, Any]) -> str:
         f"{MILESTONE_MARKER} <one completed-subtask update>. Do not use that marker for plans, activity, "
         "commands, estimates, or the final result. "
     )
+    if (
+        _enabled("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", False)
+        and task.get("permission_mode") == "workspace_write"
+        and task.get("approved") is True
+    ):
+        return base + (
+            "Odysseus approved this task at the broker level. You may attempt only the specifically requested "
+            "mutation using normal Hermes tools. Do not bypass or suppress Hermes' native tool approval gate; "
+            "no other side effects are authorized."
+        )
     return base + (
         "This run is read-only. Do not attempt file changes, installs, deletes, service operations, or other side effects."
     )
@@ -100,7 +127,7 @@ class CodexBridgeAdapter:
         return {"Authorization": f"Bearer {token}"}
 
     async def start(self, task: dict[str, Any]) -> dict[str, Any]:
-        _require_read_only_task(task)
+        _require_worker_task_permission(task)
         payload = {
             "session_id": task["session_id"],
             "workspace": task["workspace"],
@@ -211,7 +238,7 @@ class HermesRunsAdapter:
         return headers
 
     async def start(self, task: dict[str, Any]) -> dict[str, Any]:
-        _require_read_only_task(task)
+        _require_worker_task_permission(task)
         session_key = task.get("worker_session_key") or f"odysseus:{task['session_id']}:{task['workspace']}"
         task["worker_session_key"] = session_key[:256]
         payload = {

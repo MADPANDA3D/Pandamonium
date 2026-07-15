@@ -17,7 +17,7 @@ import httpx
 from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
 from core.models import ChatMessage
-from src.agent_worker_adapters import adapters, worker_catalog
+from src.agent_worker_adapters import adapters, require_worker_task_permission, worker_catalog
 
 TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
 KNOWLEDGE_MANIFEST_FILE = Path(DATA_DIR) / "jarvis_knowledge_manifest.json"
@@ -583,8 +583,7 @@ async def start_task(
         raise ValueError("unknown_worker")
     if workspace not in set(catalog[worker].get("workspaces") or []):
         raise ValueError("unknown_workspace")
-    if permission_mode != "read_only" or approved:
-        raise PermissionError("public_tasks_read_only")
+    require_worker_task_permission(permission_mode, approved)
     registry = adapters()
     if worker not in registry:
         raise ValueError("unknown_worker")
@@ -701,6 +700,10 @@ async def task_action(
         if persist_user_message:
             _persist_task_user_message(task, text, "agent_worker_reply")
     elif action == "approval":
+        require_worker_task_permission(
+            str(task.get("permission_mode") or "read_only"),
+            task.get("approved") is True,
+        )
         choice = str((payload or {}).get("choice") or "")
         if choice not in {"once", "session", "always", "deny"}:
             raise ValueError("invalid_approval_choice")
