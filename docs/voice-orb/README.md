@@ -39,6 +39,7 @@ The first camera slice does not interpret compound commands such as “Open your
 - [Troubleshooting](troubleshooting.md)
 - [Release and container process](release.md)
 - [Contributing](contributing.md)
+- [Draft upstream RFC packet](upstream-rfc-draft.md)
 - [Compatibility record](compatibility.json)
 
 ## License and public boundary
