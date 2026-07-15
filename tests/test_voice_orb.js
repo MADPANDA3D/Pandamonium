@@ -9,6 +9,8 @@ const sw = read('static/sw.js');
 
 assert.match(voice, /UI_CONTROL_ALLOWLIST = new Set\(\[\s*'open_view:calendar',\s*'close_view:document',\s*'minimize_view:document'/);
 assert.match(voice, /client_state: collectClientState\(\)/);
+assert.match(voice, /'X-Tz-Offset': String\(tzOffset\)/);
+assert.match(voice, /'X-Tz-Name': tzName/);
 assert.match(voice, /handleUIControl\(event\)/);
 assert.match(voice, /navigator\.mediaDevices\.getUserMedia/);
 assert.match(voice, /\/api\/stt\/transcribe/);

@@ -16,6 +16,65 @@ from src.upload_handler import reserve_upload_references
 logger = logging.getLogger(__name__)
 
 
+async def do_read_calendar(content: str, owner: Optional[str] = None) -> Dict:
+    """Synchronize, then read owner-scoped calendar data without mutation."""
+    if not owner:
+        return {"error": "Calendar owner is required", "exit_code": 1}
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+
+    action = str(args.get("action") or "list_events").replace("-", "_").strip().lower()
+    if action not in {"list_events", "list_calendars"}:
+        return {"error": "read_calendar supports only list_events and list_calendars", "exit_code": 1}
+    unexpected = set(args) - {"action", "start", "end", "calendar"}
+    if unexpected:
+        return {
+            "error": f"Unsupported read_calendar fields: {', '.join(sorted(unexpected))}",
+            "exit_code": 1,
+        }
+    args["action"] = action
+
+    from src.caldav_sync import sync_caldav_direction
+
+    try:
+        sync_result = await sync_caldav_direction(owner, "pull")
+    except Exception as exc:
+        logger.warning("Read-only calendar sync failed for owner: %s", type(exc).__name__)
+        sync_result = {"errors": [type(exc).__name__]}
+
+    errors = list(sync_result.get("errors") or [])
+    result = await do_manage_calendar(json.dumps(args), owner=owner)
+    if action == "list_calendars" and isinstance(result.get("calendars"), list):
+        result["calendars"] = [
+            {"name": str(calendar.get("name") or "")}
+            for calendar in result["calendars"]
+            if isinstance(calendar, dict)
+        ]
+        names = [calendar["name"] for calendar in result["calendars"] if calendar["name"]]
+        result["response"] = (
+            f"Found {len(names)} calendar(s):\n" + "\n".join(f"- {name}" for name in names)
+            if names
+            else "No calendars found."
+        )
+    elif action == "list_events" and isinstance(result.get("events"), list):
+        result["events"] = [
+            {key: value for key, value in event.items() if key != "calendar_href"}
+            for event in result["events"]
+            if isinstance(event, dict)
+        ]
+    result["calendar_freshness"] = "sync_failed" if errors else "fresh"
+    if errors:
+        result["sync_error_count"] = len(errors)
+        cached_response = str(result.get("response") or "")
+        result["response"] = (
+            "Calendar freshness could not be confirmed; cached owner-scoped data follows."
+            + (f"\n\n{cached_response}" if cached_response else "")
+        )
+    return result
+
+
 async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
     """Handle manage_calendar tool calls: list/create/update/delete calendar events (local SQLite)."""
     from datetime import datetime, timedelta

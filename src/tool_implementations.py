@@ -61,7 +61,7 @@ from src.tools.search import do_search_chats  # noqa: F401
 # Notes domain extracted to src/tools/notes.py (slice 1, #4082/#4071).
 from src.tools.notes import do_manage_notes  # noqa: F401
 # Calendar domain extracted to src/tools/calendar.py (slice 1, #4082/#4071).
-from src.tools.calendar import do_manage_calendar  # noqa: F401
+from src.tools.calendar import do_manage_calendar, do_read_calendar  # noqa: F401
 # Image domain extracted to src/tools/image.py (slice 1, #4082/#4071).
 from src.tools.image import do_edit_image  # noqa: F401
 # Research domain extracted to src/tools/research.py (slice 1, #4082/#4071).
