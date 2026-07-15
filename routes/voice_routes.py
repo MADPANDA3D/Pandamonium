@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.atomic_io import atomic_write_json
+from core.middleware import require_admin
 from core.models import ChatMessage
 from src.action_intents import classify_tool_intent
 from src.auth_helpers import require_user
@@ -123,12 +124,46 @@ def _update_voice_session(session_id: str, **fields: Any) -> dict[str, Any]:
         return dict(session)
 
 
-def _owned_voice_session(session_id: str, owner: str) -> dict[str, Any]:
+def _owned_voice_session(
+    session_id: str,
+    owner: str,
+    *,
+    session_manager=None,
+    request: Request | None = None,
+) -> dict[str, Any]:
     with _STATE_LOCK:
-        session = (_load_state().get("sessions") or {}).get(session_id)
+        state = _load_state()
+        session = (state.get("sessions") or {}).get(session_id)
         if not isinstance(session, dict):
             raise HTTPException(404, "Voice session not found")
-        if str(session.get("owner") or "") != str(owner or ""):
+
+        session_owner = str(session.get("owner") or "").strip()
+        if not session_owner:
+            linked_owner = ""
+            chat_session_id = session.get("chat_session_id")
+            if (
+                session_manager is not None
+                and isinstance(chat_session_id, str)
+                and chat_session_id.strip()
+            ):
+                try:
+                    linked_session = session_manager.get_session(chat_session_id.strip())
+                except KeyError:
+                    linked_session = None
+                linked_owner = str(getattr(linked_session, "owner", "") or "").strip()
+
+            if linked_owner:
+                session["owner"] = linked_owner
+                session["updated_at"] = _now()
+                _save_state(state)
+                session_owner = linked_owner
+            else:
+                if request is None:
+                    raise HTTPException(403, "Ownerless voice sessions are admin only")
+                require_admin(request)
+                return dict(session)
+
+        if session_owner != str(owner or "").strip():
             raise HTTPException(403, "Voice session belongs to another user")
         return dict(session)
 
@@ -508,8 +543,17 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
         return {key: session[key] for key in ("id", "chat_session_id", "assistant", "model", "status")}
 
     @router.get("/sessions/{session_id}")
-    async def get_voice_session(session_id: str, owner: str = Depends(require_user)):
-        session = _owned_voice_session(session_id, owner)
+    async def get_voice_session(
+        session_id: str,
+        request: Request,
+        owner: str = Depends(require_user),
+    ):
+        session = _owned_voice_session(
+            session_id,
+            owner,
+            session_manager=session_manager,
+            request=request,
+        )
         return {
             key: session.get(key)
             for key in ("id", "chat_session_id", "assistant", "model", "status", "turns", "created_at", "updated_at")
@@ -529,7 +573,12 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
             _set_user_time_from_request(request)
         except Exception:
             pass
-        voice_session = _owned_voice_session(session_id, owner)
+        voice_session = _owned_voice_session(
+            session_id,
+            owner,
+            session_manager=session_manager,
+            request=request,
+        )
         chat = _require_chat_session(session_manager, str(voice_session["chat_session_id"]), owner)
         text = payload.text.strip()
         if not text:
@@ -746,7 +795,12 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
         owner: str = Depends(require_user),
     ):
         _require_same_origin(request)
-        _owned_voice_session(session_id, owner)
+        _owned_voice_session(
+            session_id,
+            owner,
+            session_manager=session_manager,
+            request=request,
+        )
         task = _ACTIVE_RESPONSES.get(session_id)
         if task is not None and not task.done():
             task.cancel()

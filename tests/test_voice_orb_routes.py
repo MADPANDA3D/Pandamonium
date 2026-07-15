@@ -48,24 +48,32 @@ def _request(method="POST"):
     })
 
 
+def _authenticated_request(username, *, is_admin):
+    request = _request("GET")
+    request.state.current_user = username
+    request.app.state.auth_manager = SimpleNamespace(
+        is_configured=True,
+        is_admin=lambda user: is_admin and user == username,
+    )
+    return request
+
+
 def _endpoint(router, name):
     return next(route.endpoint for route in router.routes if route.name == name)
 
 
 def _seed_voice_state(path, owner="alice"):
-    path.write_text(json.dumps({
-        "sessions": {
-            "voice-1": {
-                "id": "voice-1",
-                "owner": owner,
-                "chat_session_id": "chat-1",
-                "assistant": "Odysseus",
-                "model": "example-model",
-                "status": "ready",
-                "turns": [],
-            }
-        }
-    }), encoding="utf-8")
+    session = {
+        "id": "voice-1",
+        "chat_session_id": "chat-1",
+        "assistant": "Odysseus",
+        "model": "example-model",
+        "status": "ready",
+        "turns": [],
+    }
+    if owner is not None:
+        session["owner"] = owner
+    path.write_text(json.dumps({"sessions": {"voice-1": session}}), encoding="utf-8")
 
 
 def test_voice_payloads_reject_unknown_control_fields():
@@ -137,6 +145,97 @@ def test_cross_owner_voice_session_is_denied(tmp_path, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         voice_routes._owned_voice_session("voice-1", "bob")
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_legacy_voice_session_backfills_linked_chat_owner(tmp_path, monkeypatch):
+    state_file = tmp_path / "voice_sessions.json"
+    _seed_voice_state(state_file, owner=None)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
+    router = voice_routes.setup_voice_routes(_Manager(_Chat(owner="alice")))
+    get_session = _endpoint(router, "get_voice_session")
+
+    result = await get_session(
+        "voice-1",
+        _authenticated_request("alice", is_admin=False),
+        "alice",
+    )
+
+    assert result["id"] == "voice-1"
+    persisted = json.loads(state_file.read_text(encoding="utf-8"))
+    assert persisted["sessions"]["voice-1"]["owner"] == "alice"
+
+
+@pytest.mark.parametrize("is_admin", [False, True])
+def test_legacy_voice_session_cannot_be_claimed_by_first_caller(
+    tmp_path,
+    monkeypatch,
+    is_admin,
+):
+    state_file = tmp_path / "voice_sessions.json"
+    _seed_voice_state(state_file, owner=None)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
+
+    with pytest.raises(HTTPException) as exc:
+        voice_routes._owned_voice_session(
+            "voice-1",
+            "bob",
+            session_manager=_Manager(_Chat(owner="alice")),
+            request=_authenticated_request("bob", is_admin=is_admin),
+        )
+
+    assert exc.value.status_code == 403
+    persisted = json.loads(state_file.read_text(encoding="utf-8"))
+    assert persisted["sessions"]["voice-1"]["owner"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_orphaned_ownerless_voice_session_is_denied_to_non_admin(tmp_path, monkeypatch):
+    state_file = tmp_path / "voice_sessions.json"
+    _seed_voice_state(state_file, owner=None)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    missing_chat = _Chat()
+    missing_chat.id = "another-chat"
+    get_session = _endpoint(
+        voice_routes.setup_voice_routes(_Manager(missing_chat)),
+        "get_voice_session",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_session(
+            "voice-1",
+            _authenticated_request("bob", is_admin=False),
+            "bob",
+        )
+
+    assert exc.value.status_code == 403
+    persisted = json.loads(state_file.read_text(encoding="utf-8"))
+    assert "owner" not in persisted["sessions"]["voice-1"]
+
+
+@pytest.mark.asyncio
+async def test_orphaned_ownerless_voice_session_remains_unclaimed_for_admin(tmp_path, monkeypatch):
+    state_file = tmp_path / "voice_sessions.json"
+    _seed_voice_state(state_file, owner=None)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    missing_chat = _Chat()
+    missing_chat.id = "another-chat"
+    get_session = _endpoint(
+        voice_routes.setup_voice_routes(_Manager(missing_chat)),
+        "get_voice_session",
+    )
+
+    session = await get_session(
+        "voice-1",
+        _authenticated_request("admin", is_admin=True),
+        "admin",
+    )
+
+    assert session["id"] == "voice-1"
+    persisted = json.loads(state_file.read_text(encoding="utf-8"))
+    assert "owner" not in persisted["sessions"]["voice-1"]
 
 
 @pytest.mark.asyncio
