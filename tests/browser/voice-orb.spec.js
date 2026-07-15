@@ -243,6 +243,41 @@ test('End Voice invalidates a pending camera permission result', async ({ page }
   })).toBe(true);
 });
 
+test('camera permission denial fails closed', async ({ page }) => {
+  await startVoice(page);
+  await page.evaluate(() => {
+    const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = constraints => {
+      if (constraints?.video) throw new DOMException('Permission denied', 'NotAllowedError');
+      return getUserMedia(constraints);
+    };
+  });
+
+  await runTurn(page, 'Open your eyes.', [{ type: 'ui_control', ui_event: 'camera_open' }]);
+
+  await expect(page.locator('#voice-orb-talk')).toHaveAttribute('data-voice-media', 'idle');
+  await expect(page.locator('#voice-orb-media-indicator')).toBeHidden();
+  await expect(page.locator('#voice-orb-detail')).toHaveText('Camera access is unavailable.');
+  await expect(page.locator('#toast')).toContainText('Camera permission was denied.');
+});
+
+test('missing browser camera API fails closed', async ({ page }) => {
+  await startVoice(page);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  await runTurn(page, 'Open your eyes.', [{ type: 'ui_control', ui_event: 'camera_open' }]);
+
+  await expect(page.locator('#voice-orb-talk')).toHaveAttribute('data-voice-media', 'idle');
+  await expect(page.locator('#voice-orb-media-indicator')).toBeHidden();
+  await expect(page.locator('#odysseus-voice-orb-media')).toHaveCount(0);
+  await expect(page.locator('#toast')).toContainText('Camera is unavailable.');
+});
+
 test('camera frames and built-in media stay bounded to exact voice controls', async ({ page }) => {
   const state = harnesses.get(page);
   await startVoice(page);
