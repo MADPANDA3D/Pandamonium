@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           base=$(python3 -c 'import json; print(json.load(open("docs/voice-orb/compatibility.json"))["upstream_commit"])')
-          git remote add canonical https://github.com/pewdiepie-archdaemon/odysseus.git
+          git remote add canonical https://github.com/odysseus-dev/odysseus.git
           git fetch --no-tags canonical dev
           git diff --binary "$base" HEAD > "$RUNNER_TEMP/voice-orb.patch"
           git worktree add "$RUNNER_TEMP/upstream-dev" canonical/dev

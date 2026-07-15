@@ -36,4 +36,4 @@ Run Docker build and security scans for release-affecting changes. Browser tests
 
 Discuss broad host-contract changes before code. Candidate upstream contributions should be small and independent: an enumerated foreground-action registry, bounded client-state reporting, read-only Calendar voice access, and stable voice/static extension seams.
 
-Track upstream [extension discussion #4439](https://github.com/pewdiepie-archdaemon/odysseus/discussions/4439), [plugin-contract PR #4241](https://github.com/pewdiepie-archdaemon/odysseus/pull/4241), and [voice issue #4118](https://github.com/pewdiepie-archdaemon/odysseus/issues/4118). Do not call this distribution a plugin until upstream ships a stable host ABI.
+Track upstream [extension discussion #4439](https://github.com/odysseus-dev/odysseus/discussions/4439), [plugin-contract PR #4241](https://github.com/odysseus-dev/odysseus/pull/4241), and [voice issue #4118](https://github.com/odysseus-dev/odysseus/issues/4118). Do not call this distribution a plugin until upstream ships a stable host ABI.
