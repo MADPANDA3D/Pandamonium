@@ -435,6 +435,47 @@ async def test_worker_stream_retries_clean_eof_until_terminal(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_broken_stream_reconciles_running_worker_until_terminal(tmp_path, monkeypatch):
+    class Adapter:
+        def __init__(self):
+            self.stream_calls = 0
+            self.status_calls = 0
+
+        async def events(self, _task):
+            self.stream_calls += 1
+            raise RuntimeError("one-consumer stream closed")
+            yield
+
+        async def status(self, _task):
+            self.status_calls += 1
+            if self.status_calls < 2:
+                return {"status": "running"}
+            return {"status": "completed", "result": "Recovered result."}
+
+    async def passthrough(_task, event):
+        return event
+
+    adapter = Adapter()
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
+    monkeypatch.setattr(jarvis_agent, "_MIRRORS", {})
+    monkeypatch.setattr(jarvis_agent, "STREAM_RECONCILE_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(jarvis_agent, "STREAM_RECONCILE_POLL_SECONDS", 0.1)
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"hermes": adapter})
+    monkeypatch.setattr(jarvis_agent, "_enrich_worker_event", passthrough)
+    jarvis_agent._save_task(_task(worker="hermes"))
+
+    await jarvis_agent._mirror("task-1")
+
+    saved = jarvis_agent.get_task("task-1")
+    assert adapter.stream_calls == 3
+    assert adapter.status_calls == 2
+    assert saved["status"] == "completed"
+    assert saved["result"] == "Recovered result."
+    assert saved["events"][-1]["type"] == "result"
+
+
+@pytest.mark.asyncio
 async def test_model_task_tools_forward_owner_and_reject_missing_identity(monkeypatch):
     captured = {}
 

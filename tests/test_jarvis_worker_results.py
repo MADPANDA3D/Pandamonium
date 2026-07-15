@@ -150,6 +150,7 @@ async def test_progress_speech_is_broker_owned_and_milestone_only(tmp_path, monk
                 "spoken_text": "Worker supplied raw milestone narration.",
                 "metadata": {"milestone": True},
             }
+            yield {"type": "cancelled", "text": "Test stream complete."}
 
     async def milestone(_task, _text):
         return "Jarvis confirms the verification subtask passed."
@@ -405,6 +406,7 @@ async def test_mirror_failure_appends_terminal_error_event(tmp_path, monkeypatch
     monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
     monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
     monkeypatch.setattr(jarvis_agent, "_MIRRORS", {})
+    monkeypatch.setattr(jarvis_agent, "STREAM_RECONCILE_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": Adapter()})
     jarvis_agent._save_task(_task())
 
@@ -413,4 +415,6 @@ async def test_mirror_failure_appends_terminal_error_event(tmp_path, monkeypatch
     saved = jarvis_agent.get_task("task-1")
     assert saved["status"] == "failed"
     assert saved["events"][0]["type"] == "error"
-    assert saved["events"][0]["text"] == "worker_stream_failed: stream broke"
+    assert saved["events"][0]["text"].startswith(
+        "worker_stream_failed: status reconciliation timed out"
+    )

@@ -27,6 +27,12 @@ OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 TERMINAL = {"completed", "failed", "cancelled", "blocked"}
 TERMINAL_EVENTS = {"result", "error", "cancelled"}
 STREAM_RETRY_LIMIT = 2
+STREAM_RECONCILE_TIMEOUT_SECONDS = max(
+    0.0, float(os.getenv("ODYSSEUS_WORKER_RECONCILE_TIMEOUT_SECONDS", "600"))
+)
+STREAM_RECONCILE_POLL_SECONDS = max(
+    0.1, float(os.getenv("ODYSSEUS_WORKER_RECONCILE_POLL_SECONDS", "2"))
+)
 WORKERS = worker_catalog()
 WORKER_LABELS = {"pc-codex": "PC Codex", "hermes": "Hermes", "vps-codex": "VPS Codex"}
 
@@ -495,7 +501,6 @@ def _persist_task_user_message(task: dict, text: str, source: str) -> None:
 
 
 async def _mirror(task_id: str) -> None:
-    last_error: Exception | None = None
     try:
         for attempt in range(STREAM_RETRY_LIMIT + 1):
             task = get_task(task_id)
@@ -510,33 +515,44 @@ async def _mirror(task_id: str) -> None:
                     _append_event(task_id, event)
                 if (get_task(task_id) or {}).get("status") in TERMINAL:
                     return
-                last_error = RuntimeError("worker_stream_ended_before_terminal_event")
                 if attempt < STREAM_RETRY_LIMIT:
                     await asyncio.sleep(0)
                     continue
                 break
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                last_error = exc
+            except Exception:
                 if attempt < STREAM_RETRY_LIMIT:
                     await asyncio.sleep(0)
                     continue
                 break
 
-        # A final status poll can recover a terminal result even when all SSE
-        # reconnects failed. refresh_task will not start a second mirror while
-        # this one remains registered in _MIRRORS.
-        task = get_task(task_id)
-        if task and task.get("status") not in TERMINAL:
+        # Some workers (notably Hermes) expose a one-consumer event queue and
+        # cannot replay after a dropped connection. Treat status polling as one
+        # bounded reconciliation phase rather than falsely failing a task that
+        # is still running remotely.
+        deadline = time.monotonic() + STREAM_RECONCILE_TIMEOUT_SECONDS
+        while True:
+            task = get_task(task_id)
+            if not task or task.get("status") in TERMINAL:
+                return
             await refresh_task(task_id, owner=task.get("owner"), _ensure_mirror=False)
-        task = get_task(task_id)
-        if task and task.get("status") not in TERMINAL:
-            _append_event(task_id, {
-                "type": "error",
-                "text": f"worker_stream_failed: {str(last_error)[:300]}",
-                "metadata": {"source": "worker_stream"},
-            })
+            task = get_task(task_id)
+            if not task or task.get("status") in TERMINAL:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(STREAM_RECONCILE_POLL_SECONDS, remaining))
+
+        _append_event(task_id, {
+            "type": "error",
+            "text": (
+                "worker_stream_failed: status reconciliation timed out; "
+                "the remote task may still be running"
+            ),
+            "metadata": {"source": "worker_stream", "reconciliation_timeout": True},
+        })
     finally:
         _MIRRORS.pop(task_id, None)
 
