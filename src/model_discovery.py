@@ -31,6 +31,14 @@ _OPAQUE_PEER_ID = re.compile(r"^[0-9a-f]{32}$")
 _SAFE_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$")
 _KNOWN_PEER_OS = {"android", "darwin", "freebsd", "ios", "linux", "windows"}
 
+# Preserve the legacy explicit helper contract for callers that still invoke
+# ``discover_tailscale_hosts`` directly. Normal model discovery no longer uses
+# this cache or reads Tailscale implicitly; the v0.3 UI uses the redacted,
+# selection-gated helpers below instead.
+_hosts_cache: List[str] = []
+_hosts_cache_time: float = 0
+_HOSTS_CACHE_TTL = 60
+
 
 def _parse_tailscale_status(raw: str) -> Dict[str, Any]:
     try:
@@ -95,7 +103,46 @@ def _tailnet_records(data: Dict[str, Any]) -> List[Dict[str, str]]:
 
 def discover_tailscale_hosts() -> List[str]:
     """Compatibility helper for explicit callers; default discovery never calls it."""
-    return [record["address"] for record in _tailnet_records(_tailscale_status())]
+    global _hosts_cache, _hosts_cache_time
+
+    now = time.time()
+    if _hosts_cache and (now - _hosts_cache_time) < _HOSTS_CACHE_TTL:
+        return list(_hosts_cache)
+
+    data = _tailscale_status()
+    hosts: List[str] = []
+
+    def append_first_ipv4(value: Any) -> None:
+        if not isinstance(value, list):
+            return
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            try:
+                address = ipaddress.ip_address(item)
+            except ValueError:
+                continue
+            if address.version == 4:
+                hosts.append(item)
+                return
+
+    self_data = data.get("Self") if isinstance(data.get("Self"), dict) else {}
+    append_first_ipv4(self_data.get("TailscaleIPs"))
+
+    peers = data.get("Peer") if isinstance(data.get("Peer"), dict) else {}
+    for peer in peers.values():
+        if not isinstance(peer, dict) or peer.get("Online") is not True:
+            continue
+        if (
+            peer.get("HostName") == "funnel-ingress-node"
+            or peer.get("OS") == "android"
+        ):
+            continue
+        append_first_ipv4(peer.get("TailscaleIPs"))
+
+    _hosts_cache = hosts
+    _hosts_cache_time = now
+    return list(hosts)
 
 
 class ModelDiscovery:
