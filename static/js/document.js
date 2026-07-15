@@ -6797,9 +6797,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       // the doc from the chat session so it doesn't reappear in that chat.
       closeFn: () => {
         // Content was already saved to the map when the panel was minimized,
-        // so just detach (don't re-read the now-removed editor).
+        // so clear its restore marker and detach without re-reading the editor.
         const id = _minimizedDocId;
         _minimizedDocId = null;
+        _markDocVisibleState(_lastSessionId, 'closed');
         if (id) _detachDocFromSession(id);
       },
       restoreFn: () => {

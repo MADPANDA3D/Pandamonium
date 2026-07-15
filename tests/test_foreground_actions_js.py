@@ -145,3 +145,33 @@ def test_core_wiring_uses_registry_without_action_specific_stream_branches():
     assert "eval(" not in registry
     assert "new Function" not in registry
     assert "'/static/js/foregroundActions.js'" in service_worker
+
+
+def test_minimized_document_close_clears_reload_restore_marker():
+    document_source = (ROOT / "static" / "js" / "document.js").read_text(
+        encoding="utf-8"
+    )
+    chip_registration = document_source[
+        document_source.index(
+            "function _ensureDocChipRegistered()"
+        ) : document_source.index("export function closePanel(direction)")
+    ]
+    close_callback = chip_registration[
+        chip_registration.index("closeFn: () => {") : chip_registration.index(
+            "restoreFn: () => {"
+        )
+    ]
+    clear_marker = "_markDocVisibleState(_lastSessionId, 'closed');"
+
+    assert clear_marker in close_callback
+    assert close_callback.index(clear_marker) < close_callback.index(
+        "_detachDocFromSession(id)"
+    )
+
+    restore = document_source[
+        document_source.index(
+            "export async function loadSessionDocs(sessionId"
+        ) : document_source.index("/** Add a document to the tabs map */")
+    ]
+    assert "localStorage.getItem(_docMinimizedKey(sessionId)) === '1'" in restore
+    assert "restoreMode && shouldRestoreMinimized && !shouldRestoreOpen" in restore
