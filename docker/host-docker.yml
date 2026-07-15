@@ -1,6 +1,7 @@
-# High-trust host Docker access. Enable only when local Docker-daemon
-# management from Cookbook is required and you accept that raw socket access
-# grants broad control over the host Docker daemon.
+# High-trust host Docker access for custom images only. The hardened Voice Orb
+# release image intentionally omits the Docker CLI, so this overlay alone does
+# not enable local Docker-daemon management. Raw socket access grants broad
+# control over the host Docker daemon.
 #   COMPOSE_FILE=docker-compose.yml:docker/host-docker.yml
 #   DOCKER_GID=<numeric host Docker group id>
 services:

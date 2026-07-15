@@ -99,32 +99,17 @@ Odysseus SSH key and add the public key to the remote server's
 ssh-copy-id -i data/ssh/id_ed25519.pub user@server
 ```
 
-**Host Docker access (explicit opt-in).** Default Docker Compose intentionally
-does not mount `/var/run/docker.sock`. You can still connect Odysseus to
-existing Ollama, vLLM, and other OpenAI-compatible endpoints without Docker
-socket access.
+**Host Docker access.** Default Docker Compose does not mount
+`/var/run/docker.sock`, and the hardened Voice Orb image intentionally does not
+ship a Docker CLI. The published alpha therefore does not support local
+Docker-daemon management, including the `docker/host-docker.yml` overlay.
 
-Cookbook/local Docker-daemon management requires the opt-in overlay below. Raw
-Docker socket access is high-trust because it can effectively grant broad
-control over the host Docker daemon. Remote server Docker workflows over SSH
-remain preferred.
-
-Place these values in `.env`, or export them in the shell before running
-`docker compose`:
-
-```bash
-COMPOSE_FILE=docker-compose.yml:docker/host-docker.yml
-DOCKER_GID=<host docker group gid>
-```
-
-Combine host Docker access with a GPU overlay when both are intentionally
-required:
-
-```bash
-COMPOSE_FILE=docker-compose.yml:docker/gpu.nvidia.yml:docker/host-docker.yml
-# or
-COMPOSE_FILE=docker-compose.yml:docker/gpu.amd.yml:docker/host-docker.yml
-```
+You can still connect Odysseus to existing Ollama, vLLM, and other
+OpenAI-compatible endpoints. Remote server workflows over SSH remain the
+preferred management path. If host-daemon control is unavoidable, use a
+separate custom image with an independently audited Docker client and accept
+that raw socket access effectively grants broad control over the host; that
+configuration is outside the supported public alpha.
 
 **Docker GPU overlays.** CPU-only users can skip this section. Cookbook can
 only detect GPUs that Docker exposes to the container — if the host runtime or
@@ -318,7 +303,7 @@ To expose Odysseus on a local network or Tailscale with HTTPS:
 2. Generate a locally-trusted cert for your LAN/Tailscale IPs using [mkcert](https://github.com/FiloSottile/mkcert):
    ```bash
    mkcert -install
-   mkcert -cert-file cert.pem -key-file key.pem 192.168.1.100 tailscale-ip
+   mkcert -cert-file cert.pem -key-file key.pem <private-lan-ip> tailscale-ip
    ```
 3. Run `uvicorn` with the generated certs:
    ```bash

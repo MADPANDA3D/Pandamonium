@@ -1,11 +1,14 @@
 # Install the v0.1 alpha
 
-The source tag and container tag for the first release are `voice-orb-v0.1.0-alpha.1`. Verify the tag exists before relying on these commands.
+The supported source and container tag is `voice-orb-v0.1.0-alpha.2`. It
+replaces alpha.1, which remains immutable but did not publish a container
+because its bundled Docker CLI failed the release security gate. Verify the
+alpha.2 tag exists before relying on these commands.
 
 ## Source install with Docker Compose
 
 ```bash
-git clone --branch voice-orb-v0.1.0-alpha.1 --depth 1 https://github.com/MADPANDA3D/odysseus.git
+git clone --branch voice-orb-v0.1.0-alpha.2 --depth 1 https://github.com/MADPANDA3D/odysseus.git
 cd odysseus
 cp .env.example .env
 docker compose config --quiet
@@ -33,6 +36,10 @@ docker image inspect "$ODYSSEUS_IMAGE" --format '{{json .RepoDigests}}'
 ```
 
 Do not treat a tag name as a cryptographic pin. The compatibility record names the source tag and upstream base; the release summary supplies the image digest.
+
+The hardened image does not bundle a Docker CLI or support mounting the host
+Docker daemon. Connect to existing model endpoints or use remote workflows
+over SSH instead.
 
 ## Optional voice overrides
 

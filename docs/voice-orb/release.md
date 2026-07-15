@@ -2,7 +2,11 @@
 
 ## Source compatibility
 
-`voice-orb-v0.1.0-alpha.1` is ported from upstream commit `c80462e4621c1a3360e5441843bb83b4691a8766`. The machine-readable record is `compatibility.json`. The public alpha branch is constructed from that upstream commit; private development history is not published wholesale.
+`voice-orb-v0.1.0-alpha.2` is ported from upstream commit `c80462e4621c1a3360e5441843bb83b4691a8766`. The machine-readable record is `compatibility.json`. The public alpha branch is constructed from that upstream commit; private development history is not published wholesale.
+
+Alpha.1 remains immutable, but its bundled Docker CLI failed the Trivy release
+gate and no container image was published. Alpha.2 removes that optional client
+from the hardened image and is the supported replacement release.
 
 ## CI gates
 
@@ -23,11 +27,11 @@ The public scrub is also required before tagging. It must fail on private notes,
 Create the annotated source tag only from a fully verified alpha commit:
 
 ```bash
-git tag -a voice-orb-v0.1.0-alpha.1 -m 'Odysseus Voice Orb v0.1.0 alpha.1'
-git push origin voice-orb-v0.1.0-alpha.1
+git tag -a voice-orb-v0.1.0-alpha.2 -m 'Odysseus Voice Orb v0.1.0 alpha.2'
+git push origin voice-orb-v0.1.0-alpha.2
 ```
 
-The tag-triggered release workflow verifies the compatibility record, runs the release gates, builds natively for `linux/amd64` and `linux/arm64`, pushes by digest, and creates one manifest tagged `voice-orb-v0.1.0-alpha.1` in GHCR.
+The tag-triggered release workflow verifies the compatibility record, runs the release gates, builds natively for `linux/amd64` and `linux/arm64`, pushes by digest, and creates one manifest tagged `voice-orb-v0.1.0-alpha.2` in GHCR.
 
 Record the resulting manifest digest in the GitHub release notes. Users should deploy `ghcr.io/madpanda3d/odysseus@sha256:DIGEST`; the tag is a discovery label, while the digest is the immutable pin.
 
