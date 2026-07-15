@@ -35,6 +35,29 @@ def _hermes_run_features(features: dict[str, Any]) -> dict[str, bool]:
     }
 
 
+def _validated_approval_choice(task: dict[str, Any], payload: dict[str, Any]) -> str:
+    choice = str(payload.get("choice") or "deny")
+    if choice not in {"once", "session", "always", "deny"}:
+        raise ValueError("invalid_approval_choice")
+    if str(task.get("permission_mode") or "read_only") == "read_only" and choice != "deny":
+        raise PermissionError("read_only_task_approval_must_deny")
+    return choice
+
+
+def _require_read_only_task(task: dict[str, Any]) -> None:
+    if str(task.get("permission_mode") or "") != "read_only" or bool(task.get("approved")):
+        raise PermissionError("public_tasks_read_only")
+
+
+def _last_remote_event_id(task: dict[str, Any]) -> str:
+    for event in reversed(task.get("events") or []):
+        event_id = str(event.get("event_id") or "")
+        metadata = event.get("metadata") or {}
+        if event_id and event.get("type") != "accepted" and not metadata.get("reconciled"):
+            return event_id
+    return ""
+
+
 def _hermes_instructions(task: dict[str, Any]) -> str:
     base = (
         "You are Hermes working for Leo through Jarvis. Give factual milestone updates and a clear final result. "
@@ -43,12 +66,6 @@ def _hermes_instructions(task: dict[str, Any]) -> str:
         f"{MILESTONE_MARKER} <one completed-subtask update>. Do not use that marker for plans, activity, "
         "commands, estimates, or the final result. "
     )
-    if task.get("approved"):
-        return base + (
-            "Odysseus approved this task at the broker level. You may attempt only the specifically requested "
-            "mutation using normal Hermes tools. Do not bypass or suppress Hermes' native tool approval gate; "
-            "no other side effects are authorized."
-        )
     return base + (
         "This run is read-only. Do not attempt file changes, installs, deletes, service operations, or other side effects."
     )
@@ -83,6 +100,7 @@ class CodexBridgeAdapter:
         return {"Authorization": f"Bearer {token}"}
 
     async def start(self, task: dict[str, Any]) -> dict[str, Any]:
+        _require_read_only_task(task)
         payload = {
             "session_id": task["session_id"],
             "workspace": task["workspace"],
@@ -111,12 +129,16 @@ class CodexBridgeAdapter:
         return response.json()
 
     async def events(self, task: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        headers = self._headers()
+        last_event_id = _last_remote_event_id(task)
+        if last_event_id:
+            headers["Last-Event-ID"] = last_event_id
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
                 "GET",
                 f"{self.url}/v1/tasks/{task['remote_task_id']}/events",
                 params={"after": -1},
-                headers=self._headers(),
+                headers=headers,
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -149,6 +171,7 @@ class CodexBridgeAdapter:
         return await self._action(task, "steer", payload)
 
     async def approve(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        payload = {**payload, "choice": _validated_approval_choice(task, payload)}
         return await self._action(task, "approval", payload)
 
     async def cancel(self, task: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +208,7 @@ class HermesRunsAdapter:
         return headers
 
     async def start(self, task: dict[str, Any]) -> dict[str, Any]:
+        _require_read_only_task(task)
         session_key = task.get("worker_session_key") or f"odysseus:{task['session_id']}:{task['workspace']}"
         task["worker_session_key"] = session_key[:256]
         payload = {
@@ -208,11 +232,15 @@ class HermesRunsAdapter:
         return response.json()
 
     async def events(self, task: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        headers = self._headers(task)
+        last_event_id = _last_remote_event_id(task)
+        if last_event_id:
+            headers["Last-Event-ID"] = last_event_id
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
                 "GET",
                 f"{self.url}/v1/runs/{task['remote_task_id']}/events",
-                headers=self._headers(task),
+                headers=headers,
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -265,9 +293,7 @@ class HermesRunsAdapter:
         raise RuntimeError("hermes_run_steer_not_supported")
 
     async def approve(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-        choice = str(payload.get("choice") or "deny")
-        if choice not in {"once", "session", "always", "deny"}:
-            raise ValueError("invalid_approval_choice")
+        choice = _validated_approval_choice(task, payload)
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(
                 f"{self.url}/v1/runs/{task['remote_task_id']}/approval",

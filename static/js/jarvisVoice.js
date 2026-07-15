@@ -2,6 +2,8 @@
 // Jarvis call mode. Separate from voiceRecorder.js dictation.
 
 import markdownModule from './markdown.js';
+import { collectClientState, handleUIControl } from './chatStream.js';
+import voiceOrbMedia from './voiceOrbMedia.js';
 
 let sessionId = null;
 let mediaRecorder = null;
@@ -66,6 +68,16 @@ const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
 const TERMINAL_TASK_STATES = new Set(['completed', 'failed', 'cancelled', 'blocked']);
+const VOICE_UI_CONTROL_ALLOWLIST = new Set([
+  'open_view:calendar',
+  'close_view:document',
+  'minimize_view:document',
+]);
+const VOICE_MEDIA_CONTROL_ALLOWLIST = new Set([
+  'camera_open',
+  'camera_close',
+  'media_play:motivational-abstract',
+]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
   'pc-codex': 'PC Codex',
@@ -262,6 +274,7 @@ function mountOrganicSphere() {
   frame.src = ORGANIC_SPHERE_URL;
   frame.loading = 'eager';
   frame.referrerPolicy = 'no-referrer';
+  frame.allow = "camera 'none'; microphone 'none'";
   frame.addEventListener('load', () => {
     logSphere('iframe-load');
     let attempts = 0;
@@ -420,6 +433,72 @@ function browserTimezoneHeaders() {
     'X-Tz-Offset': String(-new Date().getTimezoneOffset()),
     'X-Tz-Name': name,
   };
+}
+
+function mediaVoiceCommand(text) {
+  let value = String(text || '').toLowerCase().replaceAll('’', "'");
+  value = value.replace(/[^a-z0-9' ]/g, ' ').replace(/\s+/g, ' ').trim();
+  value = value.replace(/^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?/, '');
+  value = value.replace(/\s+please$/, '');
+  return {
+    'open your eyes': 'camera_open',
+    'what do you see': 'camera_describe',
+    'describe what you see': 'camera_describe',
+    'close your eyes': 'camera_close',
+    'i need something motivational': 'media_motivation',
+  }[value] || null;
+}
+
+function voiceRequestPayload(text) {
+  const payload = { text, client_state: collectClientState() };
+  if (mediaVoiceCommand(text) === 'camera_describe' && voiceOrbMedia.getState().cameraOpen) {
+    try {
+      payload.frame = voiceOrbMedia.captureFrame();
+    } catch (error) {
+      console.warn('Voice camera frame was not ready:', error?.message || String(error));
+    }
+  }
+  return payload;
+}
+
+function applyVoiceUIControl(event) {
+  const viewControl = `${event.ui_event || ''}:${event.view || ''}`;
+  if (VOICE_UI_CONTROL_ALLOWLIST.has(viewControl)) {
+    handleUIControl(event);
+    return;
+  }
+
+  const mediaControl = event.ui_event === 'media_play'
+    ? `media_play:${event.media_id || ''}`
+    : String(event.ui_event || '');
+  if (!VOICE_MEDIA_CONTROL_ALLOWLIST.has(mediaControl)) {
+    console.warn('Ignored unsupported voice UI control:', mediaControl || viewControl);
+    return;
+  }
+  if (mediaControl === 'camera_open') {
+    voiceOrbMedia.openCamera()
+      .then(() => {
+        const detail = $('jarvis-call-detail');
+        if (detail) detail.textContent = 'Camera active. Frames are shared only when you ask what I see.';
+      })
+      .catch(error => {
+        showToast(error?.name === 'NotAllowedError' ? 'Camera permission was denied.' : 'Camera is unavailable.');
+      });
+  } else if (mediaControl === 'camera_close') {
+    voiceOrbMedia.closeCamera();
+    const detail = $('jarvis-call-detail');
+    if (detail) detail.textContent = 'Camera closed.';
+  } else {
+    voiceOrbMedia.playClip(event.media_id)
+      .then(() => {
+        const detail = $('jarvis-call-detail');
+        if (detail) detail.textContent = 'Playing the built-in silent abstract loop.';
+      })
+      .catch(error => {
+        console.warn('Voice orb media playback unavailable:', error?.message || String(error));
+        showToast('The built-in media clip is unavailable.');
+      });
+  }
 }
 
 async function fetchJson(url, options = {}) {
@@ -1196,7 +1275,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...browserTimezoneHeaders() },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(voiceRequestPayload(text)),
   });
   if (!response.ok || !response.body) {
     const body = await response.json().catch(() => ({}));
@@ -1248,6 +1327,9 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
           activeWorkspace = event.workspace || activeWorkspace;
           setVoiceTarget(event.target || 'jarvis', false);
         }
+      }
+      else if (event.type === 'ui_control' && isCurrentVoiceCall(callGeneration)) {
+        applyVoiceUIControl(event);
       }
       else if (event.type === 'agent_task') {
         const currentCall = isCurrentVoiceCall(callGeneration);
@@ -1334,7 +1416,7 @@ async function sendTurn(text) {
   return fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond`, {
     method: 'POST',
     headers: browserTimezoneHeaders(),
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(voiceRequestPayload(text)),
   });
 }
 
@@ -1862,6 +1944,7 @@ function handleError(error) {
   clearTurnTimers();
   stopPlaybackAudio();
   stopTracks();
+  voiceOrbMedia.stopMedia();
   setStatus('failed', error.message || 'Voice loop failed.');
   showToast(error.message || 'Voice loop failed.');
 }
@@ -1883,6 +1966,7 @@ async function startCall() {
   }
 
   const callGeneration = ++voiceCallGeneration;
+  voiceOrbMedia.stopMedia();
   isActive = true;
   speechPaused = false;
   speechQueue = [];
@@ -1935,6 +2019,7 @@ function endCall() {
   stopSphereAudio();
   stopListening();
   stopTracks();
+  voiceOrbMedia.stopMedia();
   setStatus('idle');
   unmountOrganicSphere();
   const panel = $('jarvis-call-panel');

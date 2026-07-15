@@ -614,7 +614,7 @@ async def _execute_tool_block_impl(
     from src.tool_implementations import (
         do_search_chats, do_manage_tasks,
         do_manage_skills, do_api_call, do_manage_notes,
-        do_manage_calendar,
+        do_manage_calendar, do_read_calendar,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -809,6 +809,9 @@ async def _execute_tool_block_impl(
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)
+    elif tool == "read_calendar":
+        desc = "read_calendar"
+        result = await do_read_calendar(content, owner=owner)
     elif tool == "download_model":
         desc = "download_model"
         result = await do_download_model(content, owner=owner)
@@ -934,6 +937,8 @@ async def _execute_tool_block_impl(
 
         desc = "start_agent_task"
         try:
+            if not owner:
+                raise PermissionError("owner_required")
             args = json.loads(content or "{}")
             task = await start_task(
                 worker=str(args.get("worker") or "pc-codex"),
@@ -942,7 +947,7 @@ async def _execute_tool_block_impl(
                 prompt=str(args.get("prompt") or ""),
                 permission_mode="read_only",
                 approved=False,
-                owner=owner or "leo",
+                owner=owner,
             )
             result = {**task, "output": json.dumps(task, ensure_ascii=False), "exit_code": 0}
         except Exception as exc:
@@ -952,8 +957,10 @@ async def _execute_tool_block_impl(
 
         desc = "read_agent_task"
         try:
+            if not owner:
+                raise PermissionError("owner_required")
             args = json.loads(content or "{}")
-            task = await refresh_task(str(args.get("task_id") or ""))
+            task = await refresh_task(str(args.get("task_id") or ""), owner=owner)
             result = {**task, "output": json.dumps(task, ensure_ascii=False), "exit_code": 0}
         except Exception as exc:
             result = {"error": str(exc), "exit_code": 1}

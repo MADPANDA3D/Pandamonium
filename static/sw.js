@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v356';
+const CACHE_NAME = 'odysseus-v358';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -37,6 +37,9 @@ const PRECACHE = [
   '/static/js/chatRenderer.js',
   '/static/js/codeRunner.js',
   '/static/js/chatStream.js',
+  '/static/js/jarvisVoice.js',
+  '/static/js/voiceOrbMedia.js',
+  '/static/voice-orb-media.json',
   '/static/js/chat.js',
   '/static/js/cookbook.js',
   '/static/js/search-chat.js',

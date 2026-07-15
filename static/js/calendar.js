@@ -3478,13 +3478,13 @@ function _wheelNav(e) {
 }
 
 function openCalendar() {
-  if (_open) return;
   // If currently minimized — restore in place, preserve all state
   if (Modals.isMinimized('calendar-modal')) {
     Modals.restore('calendar-modal');
     _open = true;
     return;
   }
+  if (_open) return;
   _open = true;
   if (_todayCount() > 0) { _markBadgeSeen(); _updateBadge(); }
   _collapseSidebar();
@@ -3617,6 +3617,16 @@ function isCalendarOpen() {
   return _open;
 }
 
+function getViewState() {
+  const minimized = Modals.isMinimized('calendar-modal');
+  return {
+    open: _open && !minimized,
+    minimized,
+    view: _view,
+    date: _ds(_currentDate),
+  };
+}
+
 // ── Persistent cache (localStorage) ──
 const LS_KEY = 'odysseus-calendar-cache';
 const LS_TTL = 10 * 60 * 1000; // 10 min
@@ -3717,6 +3727,6 @@ window.addEventListener('focus', () => {
 // Calendar reminders are stored as Notes. The Notes reminder loop owns
 // notification dispatch so calendar reminders do not fire twice.
 
-const calendarModule = { openCalendar, closeCalendar, isCalendarOpen };
-export { openCalendar, openCalendarTo, closeCalendar, isCalendarOpen };
+const calendarModule = { openCalendar, closeCalendar, isCalendarOpen, getViewState };
+export { openCalendar, openCalendarTo, closeCalendar, isCalendarOpen, getViewState };
 export default calendarModule;

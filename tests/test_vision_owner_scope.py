@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 
 from src import ai_interaction
@@ -44,7 +45,7 @@ def test_auto_detected_vision_model_resolution_passes_owner(monkeypatch):
     assert all(owner == "alice" for _spec, owner in seen)
 
 
-def test_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch, tmp_path):
+def test_byte_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch):
     seen = {}
 
     def fake_resolve_vl_model(configured, owner=None):
@@ -67,10 +68,9 @@ def test_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch, tmp
 
     monkeypatch.setattr(endpoint_resolver, "resolve_vision_fallback_candidates", fake_fallbacks)
 
-    image = tmp_path / "image.png"
-    image.write_bytes(b"not-a-real-png-but-base64-is-enough")
+    image_bytes = b"not-a-real-png-but-caller-validation-is-enough"
 
-    assert dp.analyze_image_with_vl_result(str(image), owner="alice") == {
+    assert dp.analyze_image_bytes_with_vl_result(image_bytes, "image/png", owner="alice") == {
         "text": "description",
         "model": "vision-primary",
     }
@@ -82,6 +82,41 @@ def test_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch, tmp
         {"X-Test": "1"},
         120,
     )
+    image_item = seen["llm"][4][0]["content"][1]
+    assert image_item["image_url"]["url"] == (
+        "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
+    )
+
+
+def test_path_vision_analysis_delegates_to_in_memory_helper(monkeypatch, tmp_path):
+    image = tmp_path / "image.jpg"
+    image.write_bytes(b"jpeg bytes")
+    seen = {}
+
+    def fake_analyze(image_bytes, image_format, owner=None):
+        seen.update(bytes=image_bytes, format=image_format, owner=owner)
+        return {"text": "description", "model": "vision-primary"}
+
+    monkeypatch.setattr(dp, "analyze_image_bytes_with_vl_result", fake_analyze)
+
+    assert dp.analyze_image_with_vl_result(str(image), owner="alice") == {
+        "text": "description",
+        "model": "vision-primary",
+    }
+    assert seen == {"bytes": b"jpeg bytes", "format": ".jpg", "owner": "alice"}
+
+
+def test_byte_vision_analysis_rejects_unvalidated_input(monkeypatch):
+    monkeypatch.setattr(dp, "_load_vl_settings", lambda: {"vision_enabled": True})
+
+    assert dp.analyze_image_bytes_with_vl_result(b"", "image/png") == {
+        "text": "[VL model unavailable - image not analyzed]",
+        "model": "",
+    }
+    assert dp.analyze_image_bytes_with_vl_result(b"image", "image/svg+xml") == {
+        "text": "[VL model unavailable - image not analyzed]",
+        "model": "",
+    }
 
 
 def test_request_vision_call_sites_pass_owner():

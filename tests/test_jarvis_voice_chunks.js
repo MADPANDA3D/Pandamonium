@@ -155,8 +155,11 @@ assert.doesNotMatch(index, /jarvis-task-timeline/);
 assert.match(index, /id="jarvis-activity-rail"[^>]*role="region"[^>]*aria-label="Live worker activity"/);
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
-assert.match(index, /jarvisVoice\.js\?v=20260714T084500Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v356'/);
+assert.match(index, /jarvisVoice\.js\?v=20260715T120000Z/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v358'/);
+assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
+assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
+assert.doesNotMatch(serviceWorker, /motivational-abstract\.webm/);
 assert.doesNotMatch(documentSource, /_ensureAgentMode/);
 assert.match(source, /return Promise\.allSettled\(jobs\)/);
 assert.match(source, /Promise\.resolve\(\)\.then\(\(\) => window\.aiTTSManager\.checkAvailability\(\)\)/);
@@ -272,10 +275,19 @@ const sandbox = {
   aiTTSManager: { checkAvailability() { throw new Error('availability probe failed'); } },
 };
 sandbox.window = sandbox;
-const executableSource = source.replace(
-  "import markdownModule from './markdown.js';",
-  'const markdownModule = { renderMarkdown: value => value };',
-) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, setActive: value => { isActive = value; } };';
+const executableSource = source
+  .replace(
+    "import markdownModule from './markdown.js';",
+    'const markdownModule = { renderMarkdown: value => value };',
+  )
+  .replace(
+    "import { collectClientState, handleUIControl } from './chatStream.js';",
+    "const collectClientState = () => ({ active_view: 'chat' }); const handleUIControl = () => {};",
+  )
+  .replace(
+    "import voiceOrbMedia from './voiceOrbMedia.js';",
+    "const voiceOrbMedia = { getState: () => ({ cameraOpen: false }), captureFrame: () => ({}), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, setActive: value => { isActive = value; } };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 assert.equal(placement.findWorkerSummary('task-rail', 'summary-1', 'PC Codex verified the same result.'), summary);

@@ -65,6 +65,17 @@ def test_bridge_hosts_require_explicit_interfaces():
             raise AssertionError(f"wildcard host {wildcard} was accepted")
 
 
+def test_bridge_resumes_after_stable_event_id(tmp_path):
+    task = _task(tmp_path)
+    task.data["events"] = [
+        {"seq": 0, "event_id": "event-1"},
+        {"seq": 1, "event_id": "event-2"},
+    ]
+
+    assert bridge._resume_after(task, -1, "event-2") == 1
+    assert bridge._resume_after(task, 0, "missing") == 0
+
+
 def test_pc_bridge_uses_dedicated_interaction_workspace(tmp_path, monkeypatch):
     class IdleThread:
         def __init__(self, *args, **kwargs):
@@ -102,17 +113,40 @@ def test_pc_bridge_uses_dedicated_interaction_workspace(tmp_path, monkeypatch):
         bridge.TASKS.pop(task.task_id, None)
 
 
-def test_approved_write_keeps_source_as_explicit_write_root(tmp_path):
+def test_bridge_never_adds_source_as_a_write_root(tmp_path):
     interaction = tmp_path / "interactions"
     source = tmp_path / "source"
     task = _task(interaction)
     task.data.update(
-        permission_mode="workspace_write",
+        permission_mode="read_only",
         source_root=str(source),
     )
 
-    assert bridge._runtime_workspace_roots(task) == [str(interaction), str(source)]
-    assert "explicitly approved workspace-write task" in bridge._task_developer_instructions(task)
+    assert bridge._runtime_workspace_roots(task) == [str(interaction)]
+    assert "Treat it as read-only" in bridge._task_developer_instructions(task)
+
+
+def test_bridge_rejects_write_and_caller_preapproval(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
+    monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", tmp_path / "interaction")
+
+    for payload in (
+        {"permission_mode": "workspace_write", "approved": True},
+        {"permission_mode": "read_only", "approved": True},
+    ):
+        try:
+            bridge.create_task({
+                "session_id": "session-1",
+                "workspace": "home-lab",
+                "prompt": "Inspect only.",
+                **payload,
+            })
+        except PermissionError as exc:
+            assert str(exc) == "public_tasks_read_only"
+        else:
+            raise AssertionError("bridge accepted a write-capable task")
 
 
 def test_codex_command_applies_explicit_model_defaults(monkeypatch):

@@ -330,26 +330,33 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
     raise ValueError("No vision model available")
 
 
-def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> dict:
-    """Analyze an image and return both text and the model that produced it."""
-    logger.info(f"Analyzing image with VL model: {image_path}")
+def analyze_image_bytes_with_vl_result(
+    image_bytes: bytes,
+    image_format: str,
+    owner: str | None = None,
+    preferred_model: str | None = None,
+) -> dict:
+    """Analyze caller-validated image bytes without persisting them."""
     try:
+        if not isinstance(image_bytes, bytes) or not image_bytes:
+            raise ValueError("image_bytes must be non-empty bytes")
+        normalized_format = (image_format or "").strip().lower().removeprefix("image/").lstrip(".")
+        img_format = {
+            "jpg": "jpeg",
+            "jpeg": "jpeg",
+            "png": "png",
+            "gif": "gif",
+            "webp": "webp",
+        }.get(normalized_format)
+        if not img_format:
+            raise ValueError("unsupported image format")
+
         settings = _load_vl_settings()
         if not settings.get("vision_enabled", True):
             return {"text": "[Vision is disabled — enable it in Settings → Vision]", "model": ""}
         vl_model = settings.get("vision_model", "")
 
-        try:
-            url, model_id, headers = _resolve_vl_model(vl_model, owner=owner)
-        except ValueError:
-            return {"text": "[No vision model configured — set one in Settings → Vision]", "model": vl_model or ""}
-
-        with open(image_path, "rb") as f:
-            img_data = base64.b64encode(f.read()).decode("utf-8")
-
-        ext = os.path.splitext(image_path)[1].lower()
-        mime_map = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".gif": "gif", ".webp": "webp"}
-        img_format = mime_map.get(ext, "jpeg")
+        img_data = base64.b64encode(image_bytes).decode("ascii")
 
         vl_messages = [
             {
@@ -363,14 +370,41 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
         # Vision-specific fallback chain (Settings → Vision → Fallbacks). A
         # downed vision endpoint can fall through to the next configured model
         # — same shape as task/chat but its own list (`vision_model_fallbacks`).
+        _vl_candidates = []
+        requested_models = []
+        for spec in (preferred_model, vl_model):
+            if spec and spec not in requested_models:
+                requested_models.append(spec)
+        if not requested_models:
+            requested_models.append("")
+        for spec in requested_models:
+            try:
+                _vl_candidates.append(_resolve_vl_model(spec, owner=owner))
+            except ValueError:
+                continue
         try:
             from src.endpoint_resolver import resolve_vision_fallback_candidates
-            _vl_candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates(owner=owner)
+            _vl_candidates.extend(resolve_vision_fallback_candidates(owner=owner))
         except Exception:
-            _vl_candidates = [(url, model_id, headers)]
+            pass
+        if not _vl_candidates:
+            return {
+                "text": "[No vision model configured — set one in Settings → Vision]",
+                "model": preferred_model or vl_model or "",
+            }
+
+        unique_candidates = []
+        seen_candidates = set()
+        for candidate in _vl_candidates:
+            if not candidate or not candidate[0] or not candidate[1]:
+                continue
+            key = (candidate[0], candidate[1])
+            if key not in seen_candidates:
+                unique_candidates.append(candidate)
+                seen_candidates.add(key)
 
         last_err = None
-        for i, (_url, _model, _headers) in enumerate([c for c in _vl_candidates if c and c[0] and c[1]]):
+        for i, (_url, _model, _headers) in enumerate(unique_candidates):
             try:
                 description = llm_call(_url, _model, vl_messages, headers=_headers, timeout=120)
                 logger.info("VL analysis complete with model %s", _model)
@@ -382,6 +416,19 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
                 continue
         raise last_err if last_err else RuntimeError("No vision model endpoint configured")
 
+    except Exception as e:
+        logger.error(f"VL model unavailable: {e}")
+        return {"text": "[VL model unavailable - image not analyzed]", "model": ""}
+
+
+def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> dict:
+    """Analyze an image path and return both text and the model that produced it."""
+    logger.info(f"Analyzing image with VL model: {image_path}")
+    try:
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+        image_format = os.path.splitext(image_path)[1] or ".jpeg"
+        return analyze_image_bytes_with_vl_result(image_bytes, image_format, owner=owner)
     except Exception as e:
         logger.error(f"VL model unavailable: {e}")
         return {"text": "[VL model unavailable - image not analyzed]", "model": ""}

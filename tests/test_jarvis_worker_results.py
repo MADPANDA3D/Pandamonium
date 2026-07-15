@@ -388,7 +388,7 @@ async def test_reconciled_result_also_gets_spoken_summary(tmp_path, monkeypatch)
     monkeypatch.setattr(jarvis_agent, "_spoken_result", summary)
     jarvis_agent._save_task(_task())
 
-    saved = await jarvis_agent.refresh_task("task-1")
+    saved = await jarvis_agent.refresh_task("task-1", owner="leo")
 
     assert saved["events"][0]["text"] == "Raw reconciled result"
     assert saved["events"][0]["spoken_text"].startswith("PC Codex completed")

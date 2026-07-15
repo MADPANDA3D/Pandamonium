@@ -8,6 +8,24 @@ import themeModule from './theme.js';
 import markdownModule from './markdown.js';
 import sessionModule from './sessions.js';
 import documentModule from './document.js';
+import calendarModule from './calendar.js';
+import * as Modals from './modalManager.js';
+
+export function collectClientState() {
+  const calendar = calendarModule.getViewState();
+  const documentOpen = documentModule.isPanelOpen();
+  const documentMinimized = Modals.isMinimized('doc-panel');
+  const foreground = Modals.getForegroundState();
+  return {
+    active_view: foreground.active_view || (calendar.open ? 'calendar' : documentOpen ? 'document' : 'chat'),
+    calendar,
+    document: {
+      open: documentOpen,
+      minimized: documentMinimized,
+      id: documentOpen || documentMinimized ? documentModule.getCurrentDocId() : null,
+    },
+  };
+}
 
 /**
  * Handle a ui_control SSE event — AI-driven UI manipulation.
@@ -142,6 +160,16 @@ export function handleUIControl(uiData) {
         // persists across refresh (saved with the message). No ephemeral
         // chip injection needed here anymore.
       }
+
+    } else if (uiEvent === 'open_view' && uiData.view === 'calendar') {
+      calendarModule.openCalendar();
+
+    } else if (uiEvent === 'close_view' && uiData.view === 'document') {
+      if (Modals.isMinimized('doc-panel')) Modals.close('doc-panel');
+      else if (documentModule.isPanelOpen()) documentModule.closePanel();
+
+    } else if (uiEvent === 'minimize_view' && uiData.view === 'document') {
+      if (documentModule.isPanelOpen()) documentModule.closePanel('down');
 
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
@@ -290,6 +318,7 @@ export function notifyResearchComplete(sessionId, query) {
 
 const chatStream = {
   handleUIControl,
+  collectClientState,
   notifyStreamComplete,
   insertStreamDoneToast,
   notifyResearchComplete,

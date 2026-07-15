@@ -5,9 +5,15 @@ import wave
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from routes import tts_routes, voice_routes
 from src.voice_pcm import pcm_frames, speech_blocks, wav_to_pcm16
+
+
+@pytest.fixture(autouse=True)
+def _single_user_voice_mode(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
 
 
 def _wav_payload(sample_rate=24_000, frames=24_000):

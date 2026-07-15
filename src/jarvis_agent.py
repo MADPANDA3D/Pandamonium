@@ -14,6 +14,7 @@ from typing import Any, AsyncGenerator
 
 import httpx
 
+from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
 from core.models import ChatMessage
 from src.agent_worker_adapters import adapters, worker_catalog
@@ -24,6 +25,8 @@ BRIDGE_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/ody
 JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
 OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 TERMINAL = {"completed", "failed", "cancelled", "blocked"}
+TERMINAL_EVENTS = {"result", "error", "cancelled"}
+STREAM_RETRY_LIMIT = 2
 WORKERS = worker_catalog()
 WORKER_LABELS = {"pc-codex": "PC Codex", "hermes": "Hermes", "vps-codex": "VPS Codex"}
 
@@ -46,10 +49,7 @@ def _read_json(path: Path, default: dict) -> dict:
 
 
 def _write_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(value, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_json(str(path), value, indent=2)
 
 
 def _token() -> str:
@@ -74,6 +74,32 @@ def get_task(task_id: str) -> dict | None:
         return _tasks().get("tasks", {}).get(task_id)
 
 
+def require_task_owner(task_id: str, owner: str | None) -> dict:
+    """Return a task only when it belongs to the authenticated owner."""
+    identity = str(owner or "").strip()
+    if not identity:
+        raise PermissionError("owner_required")
+    task = get_task(task_id)
+    if not task:
+        raise KeyError(task_id)
+    if str(task.get("owner") or "") != identity:
+        raise PermissionError("task_owner_mismatch")
+    return task
+
+
+def require_session_owner(session_id: str, owner: str) -> Any:
+    """Fail closed unless the linked chat session belongs to the task owner."""
+    if not _SESSION_MANAGER:
+        raise RuntimeError("session_manager_unavailable")
+    try:
+        session = _SESSION_MANAGER.get_session(session_id)
+    except Exception as exc:
+        raise KeyError(session_id) from exc
+    if getattr(session, "owner", None) != owner:
+        raise PermissionError("session_owner_mismatch")
+    return session
+
+
 def find_active_task(
     session_id: str,
     worker: str,
@@ -81,6 +107,10 @@ def find_active_task(
     owner: str | None = None,
 ) -> dict | None:
     """Return the newest nonterminal task for this chat and worker."""
+    identity = str(owner or "").strip()
+    if not identity:
+        raise PermissionError("owner_required")
+    require_session_owner(session_id, identity)
     with _LOCK:
         matches = [
             task
@@ -89,7 +119,7 @@ def find_active_task(
             and task.get("worker") == worker
             and (workspace is None or task.get("workspace") == workspace)
             and task.get("status") not in TERMINAL
-            and (owner is None or task.get("owner") in (None, owner))
+            and task.get("owner") == identity
         ]
     return max(matches, key=lambda task: (task.get("updated_at", 0), task.get("created_at", 0)), default=None)
 
@@ -191,13 +221,20 @@ def _append_event(task_id: str, event: dict) -> None:
             return
         events = task.setdefault("events", [])
         event_id = str(event.get("event_id") or "")
-        if event_id and any(existing.get("event_id") == event_id for existing in events):
+        if event_id and any(str(existing.get("event_id") or "") == event_id for existing in events):
+            return
+        # A remote stream and a status reconciliation can observe completion at
+        # the same time. Once one terminal event lands, all later events are
+        # stale and must not change the outcome or resurrect the task.
+        if task.get("status") in TERMINAL or any(
+            existing.get("type") in TERMINAL_EVENTS for existing in events
+        ):
             return
         event = dict(event)
         event["seq"] = len(events)
         event["task_id"] = task_id
         event["worker"] = task.get("worker")
-        event.setdefault("event_id", str(uuid.uuid4()))
+        event["event_id"] = event_id or str(uuid.uuid4())
         if event.get("type") == "artifact":
             event = _persist_artifact(task, event)
         events.append(event)
@@ -458,20 +495,40 @@ def _persist_task_user_message(task: dict, text: str, source: str) -> None:
 
 
 async def _mirror(task_id: str) -> None:
+    last_error: Exception | None = None
     try:
+        for attempt in range(STREAM_RETRY_LIMIT + 1):
+            task = get_task(task_id)
+            if not task or task.get("status") in TERMINAL:
+                return
+            adapter = adapters()[task["worker"]]
+            try:
+                async for event in adapter.events(task):
+                    if (get_task(task_id) or {}).get("status") in TERMINAL:
+                        return
+                    event = await _enrich_worker_event(task, event)
+                    _append_event(task_id, event)
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                if attempt < STREAM_RETRY_LIMIT:
+                    await asyncio.sleep(0)
+                    continue
+                break
+
+        # A final status poll can recover a terminal result even when all SSE
+        # reconnects failed. refresh_task will not start a second mirror while
+        # this one remains registered in _MIRRORS.
         task = get_task(task_id)
-        if not task:
-            return
-        adapter = adapters()[task["worker"]]
-        async for event in adapter.events(task):
-            event = await _enrich_worker_event(task, event)
-            _append_event(task_id, event)
-    except Exception as exc:
+        if task and task.get("status") not in TERMINAL:
+            await refresh_task(task_id, owner=task.get("owner"), _ensure_mirror=False)
         task = get_task(task_id)
         if task and task.get("status") not in TERMINAL:
             _append_event(task_id, {
                 "type": "error",
-                "text": f"worker_stream_failed: {str(exc)[:300]}",
+                "text": f"worker_stream_failed: {str(last_error)[:300]}",
                 "metadata": {"source": "worker_stream"},
             })
     finally:
@@ -492,9 +549,20 @@ async def start_task(
     prompt: str,
     permission_mode: str = "read_only",
     approved: bool = False,
-    owner: str = "leo",
+    owner: str | None = None,
     codex_thread_id: str | None = None,
 ) -> dict:
+    owner = str(owner or "").strip()
+    if not owner:
+        raise PermissionError("owner_required")
+    require_session_owner(session_id, owner)
+    catalog = worker_catalog()
+    if worker not in catalog:
+        raise ValueError("unknown_worker")
+    if workspace not in set(catalog[worker].get("workspaces") or []):
+        raise ValueError("unknown_workspace")
+    if permission_mode != "read_only" or approved:
+        raise PermissionError("public_tasks_read_only")
     registry = adapters()
     if worker not in registry:
         raise ValueError("unknown_worker")
@@ -502,7 +570,7 @@ async def start_task(
     if not adapter.enabled:
         now = int(time.time())
         task = {
-            "task_id": f"blocked-{worker}-{now}",
+            "task_id": f"blocked-{worker}-{uuid.uuid4()}",
             "worker": worker,
             "session_id": session_id,
             "workspace": workspace,
@@ -516,8 +584,6 @@ async def start_task(
         }
         _save_task(task)
         return task
-    if permission_mode != "read_only" and not approved:
-        raise PermissionError("approval_required")
     binding = get_worker_binding(session_id, worker, workspace)
     codex_thread_id = codex_thread_id or binding.get("codex_thread_id")
     now = int(time.time())
@@ -555,8 +621,13 @@ async def start_task(
     return get_task(task["task_id"]) or task
 
 
-async def refresh_task(task_id: str) -> dict:
-    task = get_task(task_id)
+async def refresh_task(
+    task_id: str,
+    *,
+    owner: str,
+    _ensure_mirror: bool = True,
+) -> dict:
+    task = require_task_owner(task_id, owner)
     if not task:
         raise KeyError(task_id)
     try:
@@ -577,7 +648,8 @@ async def refresh_task(task_id: str) -> dict:
         task = get_task(task_id) or task
     except Exception:
         pass
-    ensure_mirror(task_id)
+    if _ensure_mirror:
+        ensure_mirror(task_id)
     return task
 
 
@@ -587,8 +659,9 @@ async def task_action(
     payload: dict | None = None,
     *,
     persist_user_message: bool = True,
+    owner: str,
 ) -> dict:
-    task = get_task(task_id)
+    task = require_task_owner(task_id, owner)
     if not task:
         raise KeyError(task_id)
     adapter = adapters()[task["worker"]]
@@ -606,6 +679,11 @@ async def task_action(
         if persist_user_message:
             _persist_task_user_message(task, text, "agent_worker_reply")
     elif action == "approval":
+        choice = str((payload or {}).get("choice") or "")
+        if choice not in {"once", "session", "always", "deny"}:
+            raise ValueError("invalid_approval_choice")
+        if str(task.get("permission_mode") or "read_only") == "read_only" and choice != "deny":
+            raise PermissionError("read_only_task_approval_must_deny")
         await adapter.approve(task, payload or {})
         if persist_user_message:
             _persist_task_user_message(task, str((payload or {}).get("spoken_text") or "").strip(), "agent_worker_approval")
@@ -613,7 +691,7 @@ async def task_action(
         await adapter.cancel(task)
     else:
         raise ValueError("unknown_task_action")
-    return await refresh_task(task_id)
+    return await refresh_task(task_id, owner=owner)
 
 
 async def worker_statuses() -> dict[str, dict[str, Any]]:
@@ -629,7 +707,13 @@ async def worker_statuses() -> dict[str, dict[str, Any]]:
     return catalog
 
 
-async def stream_task_events(task_id: str, after: int = -1) -> AsyncGenerator[str, None]:
+async def stream_task_events(
+    task_id: str,
+    after: int = -1,
+    *,
+    owner: str,
+) -> AsyncGenerator[str, None]:
+    require_task_owner(task_id, owner)
     ensure_mirror(task_id)
     cursor = after
     while True:

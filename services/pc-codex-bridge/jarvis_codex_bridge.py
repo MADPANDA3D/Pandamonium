@@ -14,6 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from core.atomic_io import atomic_write_json
+
 HOST = os.getenv("JARVIS_CODEX_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.getenv("JARVIS_CODEX_BRIDGE_PORT", "8040"))
 TOKEN_FILE = Path(os.getenv("JARVIS_CODEX_BRIDGE_TOKEN_FILE", str(Path.home() / ".config/jarvis/agent-bridge-token")))
@@ -77,16 +79,10 @@ def _task_developer_instructions(task: "Task") -> str:
     source_root = task.data.get("source_root")
     if not source_root or source_root == task.data["cwd"]:
         return DEVELOPER_INSTRUCTIONS
-    permission = task.data.get("permission_mode")
-    source_rule = (
-        "You may modify it only within this explicitly approved workspace-write task."
-        if permission == "workspace_write"
-        else "Treat it as read-only."
-    )
     return (
         f"{DEVELOPER_INSTRUCTIONS.rstrip()}\n\n"
         f"The selected source workspace is {source_root}. Read it using absolute paths. "
-        f"{source_rule}\n"
+        "Treat it as read-only.\n"
         f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
         "Keep generated reports and generated Odysseus artifacts there so Jarvis tasks do not clutter the source project. "
         "Existing verified text documents in the selected source workspace may be emitted directly as Odysseus artifacts.\n"
@@ -94,11 +90,7 @@ def _task_developer_instructions(task: "Task") -> str:
 
 
 def _runtime_workspace_roots(task: "Task") -> list[str]:
-    roots = [task.data["cwd"]]
-    source_root = task.data.get("source_root")
-    if task.data.get("permission_mode") == "workspace_write" and source_root not in roots:
-        roots.append(source_root)
-    return roots
+    return [task.data["cwd"]]
 
 
 def _configured_hosts(value: str | None = None) -> tuple[str, ...]:
@@ -107,6 +99,17 @@ def _configured_hosts(value: str | None = None) -> tuple[str, ...]:
     if not hosts or any(host in {"0.0.0.0", "::"} for host in hosts):
         raise RuntimeError("bridge_hosts_must_be_explicit")
     return hosts
+
+
+def _resume_after(task: "Task", after: int, last_event_id: str) -> int:
+    if not last_event_id:
+        return after
+    with task.lock:
+        matched = next((
+            event for event in task.data.get("events", [])
+            if str(event.get("event_id") or "") == last_event_id
+        ), None)
+    return int(matched.get("seq", after)) if matched is not None else after
 
 
 class Task:
@@ -127,9 +130,7 @@ class Task:
     def save(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         path = STATE_DIR / f"{self.task_id}.json"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
+        atomic_write_json(str(path), self.data, indent=2)
 
     def event(self, event_type: str, text: str, metadata: dict | None = None) -> dict:
         with self.changed:
@@ -397,7 +398,7 @@ def _run_task(task: Task) -> None:
         task.send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "jarvis-codex-bridge", "version": "1.0"}, "capabilities": {"experimentalApi": True}}})
         _read_until(task, 1)
         task.send({"method": "initialized", "params": {}})
-        sandbox = "workspace-write" if task.data["permission_mode"] == "workspace_write" else "read-only"
+        sandbox = "read-only"
         developer_instructions = _task_developer_instructions(task)
         resume_thread_id = task.data.get("codex_thread_id")
         if resume_thread_id:
@@ -499,10 +500,8 @@ def create_task(payload: dict) -> Task:
     if not prompt:
         raise ValueError("prompt_required")
     permission = str(payload.get("permission_mode") or "read_only")
-    if permission not in {"read_only", "workspace_write"}:
-        raise ValueError("invalid_permission_mode")
-    if permission == "workspace_write" and payload.get("approved") is not True:
-        raise PermissionError("approval_required")
+    if permission != "read_only" or payload.get("approved") is True:
+        raise PermissionError("public_tasks_read_only")
     codex_thread_id = str(payload.get("codex_thread_id") or "").strip() or None
     if codex_thread_id:
         try:
@@ -624,6 +623,8 @@ class Handler(BaseHTTPRequestHandler):
             _json(self, 404, {"error": "not_found"})
             return
         after = int((parse_qs(parsed.query).get("after") or ["-1"])[0])
+        last_event_id = str(self.headers.get("Last-Event-ID") or "").strip()
+        after = _resume_after(task, after, last_event_id)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")

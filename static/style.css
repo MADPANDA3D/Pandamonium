@@ -40979,6 +40979,37 @@ body.theme-frosted .modal {
 .jarvis-call-orb::after {
   content: none;
 }
+.odysseus-voice-orb-media {
+  z-index: 0;
+  opacity: 0.72;
+  filter: saturate(0.86) contrast(1.08) brightness(0.72);
+}
+.jarvis-call-orb[data-voice-media="camera"]::before,
+.jarvis-call-orb[data-voice-media="camera-pending"]::before,
+.jarvis-call-orb[data-voice-media="clip"]::before {
+  position: absolute;
+  top: 76px;
+  right: 18px;
+  z-index: 3;
+  padding: 4px 7px;
+  border: 1px solid rgba(112, 237, 245, 0.44);
+  border-radius: 999px;
+  background: rgba(4, 7, 12, 0.76);
+  color: #70edf5;
+  content: 'MEDIA ACTIVE';
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+.jarvis-call-orb[data-voice-media="camera"]::before {
+  border-color: rgba(255, 107, 122, 0.56);
+  color: #ff8a97;
+  content: 'CAMERA ACTIVE';
+}
+.jarvis-call-orb[data-voice-media="camera-pending"]::before {
+  content: 'CAMERA REQUESTED';
+}
 .jarvis-call-orb-preview {
   display: none;
 }
@@ -40995,6 +41026,7 @@ body.theme-frosted .modal {
   background: transparent;
   opacity: 0;
   transition: opacity 0.2s ease;
+  z-index: 1;
 }
 .jarvis-call-orb.has-frame .jarvis-organic-frame {
   opacity: 1;

@@ -4,9 +4,15 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from routes import voice_routes
 from src.user_time import get_user_tz_name, get_user_tz_offset
+
+
+@pytest.fixture(autouse=True)
+def _single_user_voice_mode(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
 
 
 class FakeSessionManager:

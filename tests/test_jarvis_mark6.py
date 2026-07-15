@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -15,12 +16,14 @@ from routes.voice_routes import (
     _background_delegations,
     _delegation_route,
     _explicit_reply_target,
+    _foreground_command,
     _is_casual_greeting,
     _jarvis_vocative,
     _pending_task_accepts_turn,
     _selected_workspace,
     _server_routed_events,
     _target_switch,
+    VoiceRespondRequest,
 )
 from src.agent_worker_adapters import HermesRunsAdapter, _hermes_instructions, _hermes_run_features
 
@@ -61,6 +64,53 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     ]
     assert _delegation_route("Ask PC Codex to inspect Mark 5") == ("pc-codex", "home-lab")
     assert _delegation_route("Ask Codex on my PC for a client update") == ("pc-codex", "business")
+
+
+def test_foreground_commands_are_narrow_and_client_state_rejects_unknown_fields():
+    assert _foreground_command("Jarvis, open the Calendar") == ("open_view", "calendar")
+    assert _foreground_command("Close this document") == ("close_view", "document")
+    assert _foreground_command("Minimize the active document") == ("minimize_view", "document")
+    assert _foreground_command("What view is open?") == ("report_view_state", None)
+    assert _foreground_command("Open https://example.com") is None
+    assert _foreground_command("Run this script in the page") is None
+
+    with pytest.raises(ValidationError):
+        VoiceRespondRequest.model_validate({
+            "text": "Open Calendar",
+            "client_state": {"active_view": "chat", "selector": "body"},
+        })
+
+
+@pytest.mark.asyncio
+async def test_foreground_control_uses_allowlisted_ui_events_and_reported_state():
+    state = {
+        "target": "jarvis",
+        "workspace": "home-lab",
+        "_client_state": {
+            "active_view": "calendar",
+            "calendar": {"open": True, "minimized": False, "view": "week", "date": "2026-07-15"},
+            "document": {"open": False, "minimized": True, "id": "doc-1"},
+        },
+    }
+    opened = [
+        event async for event in _server_routed_events(
+            "chat-1", "Open Calendar", "leo", state,
+        )
+    ]
+    assert opened[0] == {
+        "type": "ui_control", "ui_event": "open_view", "view": "calendar",
+    }
+    assert opened[-1]["diagnostics"]["guard_reason"] == "foreground_open_view"
+
+    reported = [
+        event async for event in _server_routed_events(
+            "chat-1", "What view is open?", "leo", state,
+        )
+    ]
+    assert [event["type"] for event in reported] == ["assistant_delta", "final"]
+    assert reported[-1]["assistant_text"] == (
+        "Calendar is the active view in week view, centered on 2026-07-15."
+    )
 
 
 @pytest.mark.asyncio
@@ -599,8 +649,8 @@ async def test_selected_codex_followup_steers_without_duplicate_persistence(monk
         calls.append(("find", session_id, worker, workspace, owner))
         return active
 
-    async def action(task_id, name, payload, *, persist_user_message=True):
-        calls.append(("action", task_id, name, payload, persist_user_message))
+    async def action(task_id, name, payload, *, persist_user_message=True, owner=None):
+        calls.append(("action", task_id, name, payload, persist_user_message, owner))
         return active
 
     monkeypatch.setattr(jarvis_agent, "find_active_task", find_active)
@@ -619,7 +669,7 @@ async def test_selected_codex_followup_steers_without_duplicate_persistence(monk
     assert result == "steered"
     assert calls == [
         ("find", "chat-1", "pc-codex", "business", "leo"),
-        ("action", "task-1", "steer", {"prompt": "Add the CRM check."}, False),
+        ("action", "task-1", "steer", {"prompt": "Add the CRM check."}, False, "leo"),
     ]
 
 
@@ -661,6 +711,11 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
 
 def test_active_task_lookup_is_workspace_scoped(tmp_path, monkeypatch):
     monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
     for task_id, workspace, updated in (
         ("home", "home-lab", 10),
         ("business", "business", 5),
@@ -737,9 +792,8 @@ def test_hermes_instructions_preserve_broker_and_native_approval_boundaries():
 
     assert "This run is read-only" in read_only
     assert "Do not attempt file changes" in read_only
-    assert "approved this task at the broker level" in approved
-    assert "only the specifically requested mutation" in approved
-    assert "Do not bypass or suppress Hermes' native tool approval gate" in approved
+    assert approved == read_only
+    assert "mutation" not in approved
     assert "[[ODYSSEUS_MILESTONE]] <one completed-subtask update>" in read_only
 
 
@@ -781,17 +835,27 @@ async def test_codex_thread_binding_is_scoped_to_session_and_workspace(tmp_path,
 
     adapter = FakeAdapter()
     monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
-    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
     monkeypatch.setattr(jarvis_agent, "_MIRRORS", {})
     monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": adapter})
     monkeypatch.setattr(
         jarvis_agent,
         "worker_catalog",
-        lambda: {"pc-codex": {"enabled": True, "machine": "workstation"}},
+        lambda: {
+            "pc-codex": {
+                "enabled": True,
+                "machine": "workstation",
+                "workspaces": ["home-lab"],
+            }
+        },
     )
 
-    await jarvis_agent.start_task("pc-codex", "session-a", "home-lab", "first")
+    await jarvis_agent.start_task("pc-codex", "session-a", "home-lab", "first", owner="leo")
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    await jarvis_agent.start_task("pc-codex", "session-a", "home-lab", "second")
+    await jarvis_agent.start_task("pc-codex", "session-a", "home-lab", "second", owner="leo")
     assert adapter.started_with == [None, "019f5022-a520-7de0-9208-018cd2d4d222"]

@@ -7,9 +7,9 @@ hardening:
   1. HSTS is emitted only for HTTPS requests, including those reaching
      the app over a reverse proxy (`X-Forwarded-Proto: https`).
   2. HSTS is absent on plain HTTP so local/dev deployments are unaffected.
-  3. `Permissions-Policy` locks down camera/geolocation but preserves
-     same-origin microphone access (`microphone=(self)`), so the app's
-     own voice/STT flow (`getUserMedia({ audio: true })`) keeps working.
+  3. `Permissions-Policy` locks camera/microphone access to the same origin and
+     disables geolocation, so the app's own media flows keep working without
+     granting embedded cross-origin content access.
 """
 
 from fastapi import FastAPI
@@ -55,13 +55,14 @@ def test_hsts_present_via_x_forwarded_proto_https():
     )
 
 
-def test_permissions_policy_locks_camera_and_geolocation_but_allows_self_microphone():
+def test_permissions_policy_allows_same_origin_media_and_disables_geolocation():
     response = _client().get("/")
 
     policy = response.headers["permissions-policy"]
-    assert policy == "camera=(), microphone=(self), geolocation=()"
+    assert policy == "camera=(self), microphone=(self), geolocation=()"
 
-    # Explicitly pin the contract the reviewer flagged: an empty allowlist
-    # would also block the app's own same-origin voice/STT button.
+    # Empty allowlists would also block the app's own same-origin media buttons.
+    assert "camera=()" not in policy
+    assert "camera=(self)" in policy
     assert "microphone=()" not in policy
     assert "microphone=(self)" in policy

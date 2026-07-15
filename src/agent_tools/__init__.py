@@ -87,7 +87,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
              "get_runtime_status", "start_agent_task", "read_agent_task", "search_jarvis_knowledge",
-             "manage_notes", "manage_calendar",
+             "manage_notes", "manage_calendar", "read_calendar",
              "resolve_contact", "manage_contact",
              # Email tool names come from BUILTIN_EMAIL_TOOLS (unioned below)
              # so the fence regex, dispatch, and non-admin blocklist all cover

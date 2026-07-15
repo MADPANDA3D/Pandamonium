@@ -14,16 +14,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.constants import DATA_DIR
+from core.atomic_io import atomic_write_json
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
-from src.auth_helpers import effective_user
+from src.auth_helpers import require_user
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
 from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_pcm16
 
@@ -38,6 +39,9 @@ VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
 VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
 VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
+VOICE_FRAME_MAX_BYTES = 1024 * 1024
+VOICE_FRAME_MAX_WIDTH = 1024
+VOICE_FRAME_MAX_HEIGHT = 576
 logger = logging.getLogger(__name__)
 _SESSION_MANAGER = None
 _SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
@@ -45,7 +49,13 @@ _SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
 DESKTOP_ACTIONS = {"open_grafana_big_screen", "open_odysseus"}
 DEFERRED_ACTIONS = {"start_local_codex_task", "start_hermes_task", "read_task_status"}
 SAFE_ACTIONS = DESKTOP_ACTIONS | DEFERRED_ACTIONS
-JARVIS_TOOLS = {"get_runtime_status", "start_agent_task", "read_agent_task", "search_jarvis_knowledge"}
+JARVIS_TOOLS = {
+    "get_runtime_status",
+    "start_agent_task",
+    "read_agent_task",
+    "search_jarvis_knowledge",
+    "read_calendar",
+}
 VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private orchestrator and conversational partner.
 The active system build is Mark 6 - Jarvis Voice-First Agent Operating System. Unless Leo explicitly mentions scripture, Bible study, or another domain, references to a numbered Mark mean indexed Jarvis architecture builds.
 Answer naturally with enough substance for the question: usually one to four short spoken paragraphs, and more when Leo explicitly asks for a deep explanation. Never describe pacing, pauses, or speaking style.
@@ -83,8 +93,46 @@ class VoiceActionRequest(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
 
 
+class VoiceCalendarClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    open: bool = False
+    minimized: bool = False
+    view: Literal["month", "week", "year", "agenda"] | None = None
+    date: str | None = Field(default=None, max_length=40)
+
+
+class VoiceDocumentClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    open: bool = False
+    minimized: bool = False
+    id: str | None = Field(default=None, max_length=200)
+
+
+class VoiceClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    active_view: Literal["calendar", "document", "chat"] | None = None
+    calendar: VoiceCalendarClientState = Field(default_factory=VoiceCalendarClientState)
+    document: VoiceDocumentClientState = Field(default_factory=VoiceDocumentClientState)
+
+
+class VoiceFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mime: Literal["image/jpeg", "image/png"]
+    data_base64: str = Field(min_length=4, max_length=1_500_000)
+    width: int = Field(gt=0, le=VOICE_FRAME_MAX_WIDTH)
+    height: int = Field(gt=0, le=VOICE_FRAME_MAX_HEIGHT)
+
+
 class VoiceRespondRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     text: str
+    client_state: VoiceClientState | None = None
+    frame: VoiceFrame | None = None
 
 
 class VoiceTargetUpdate(BaseModel):
@@ -156,10 +204,7 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
-    VOICE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = VOICE_STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    tmp.replace(VOICE_STATE_FILE)
+    atomic_write_json(str(VOICE_STATE_FILE), state, indent=2)
 
 
 def _set_voice_status(session_id: str, status: str, **fields: Any) -> dict:
@@ -190,6 +235,28 @@ def _session(state: dict, session_id: str) -> dict:
     return session
 
 
+def _owned_session(state: dict, session_id: str, owner: str) -> dict:
+    session = _session(state, session_id)
+    stored_owner = session.get("owner")
+    if stored_owner is None:
+        chat_owner = None
+        chat_session_id = str(session.get("chat_session_id") or "")
+        if chat_session_id and _SESSION_MANAGER:
+            try:
+                chat_owner = getattr(_SESSION_MANAGER.get_session(chat_session_id), "owner", None)
+            except Exception:
+                chat_owner = None
+        if chat_owner == owner:
+            session["owner"] = owner
+            _save_state(state)
+            stored_owner = owner
+        else:
+            raise HTTPException(status_code=403, detail={"message": "Voice session has no verified owner"})
+    if stored_owner != owner:
+        raise HTTPException(status_code=403, detail={"message": "Voice session does not belong to this user"})
+    return session
+
+
 def _append_turn(session: dict, role: str, text: str, status: str, task_id: str | None = None) -> dict:
     turn = {
         "id": str(uuid.uuid4()),
@@ -215,7 +282,7 @@ def _detect_safe_action(text: str) -> str | None:
     return None
 
 
-async def _execute_action(payload: VoiceActionRequest) -> dict:
+async def _execute_action(payload: VoiceActionRequest, owner: str) -> dict:
     action = payload.action.strip()
     if action not in SAFE_ACTIONS:
         raise HTTPException(status_code=403, detail={"message": "action_not_allowed", "action": action})
@@ -224,6 +291,7 @@ async def _execute_action(payload: VoiceActionRequest) -> dict:
         "task_id": str(uuid.uuid4()),
         "action": action,
         "session_id": payload.session_id,
+        "owner": owner,
         "status": "queued",
         "prompt": payload.prompt,
         "created_at": _now(),
@@ -250,7 +318,7 @@ async def _execute_action(payload: VoiceActionRequest) -> dict:
                 task.update({"status": "blocked", "reason": "task_id_required"})
             else:
                 try:
-                    return await refresh_task(requested_task_id)
+                    return await refresh_task(requested_task_id, owner=owner)
                 except KeyError:
                     task.update({"status": "failed", "reason": "task_not_found"})
         else:
@@ -267,7 +335,7 @@ async def _execute_action(payload: VoiceActionRequest) -> dict:
                     payload.prompt or "Inspect the requested work and report back.",
                     "read_only",
                     False,
-                    "leo",
+                    owner,
                 )
             except Exception as exc:
                 task.update({"status": "failed", "reason": str(exc)[:240]})
@@ -537,6 +605,129 @@ def _is_document_open_request(text: str) -> bool:
     )
 
 
+def _foreground_command(text: str) -> tuple[str, str | None] | None:
+    """Return one narrow, browser-owned foreground action for exact voice requests."""
+    value = text.lower().replace("’", "'")
+    value = " ".join(re.sub(r"[^a-z0-9' ]", " ", value).split())
+    value = re.sub(r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?", "", value)
+    value = re.sub(r"\s+please$", "", value)
+
+    if re.fullmatch(r"(?:open|show|pull up)(?: the| my)? calendar", value):
+        return "open_view", "calendar"
+    if re.fullmatch(r"(?:close|dismiss)(?: the)?(?: this| my| current| active)? document", value):
+        return "close_view", "document"
+    if re.fullmatch(r"(?:minimize|hide|put away)(?: the)?(?: this| my| current| active)? document", value):
+        return "minimize_view", "document"
+    if re.fullmatch(
+        r"(?:what|which)(?: view| window| panel)?(?: is|'s)(?: currently)? (?:open|active)|"
+        r"what am i (?:looking at|viewing)|report(?: the)? current view",
+        value,
+    ):
+        return "report_view_state", None
+    return None
+
+
+def _media_command(text: str) -> str | None:
+    """Return one exact, single-purpose camera/media action."""
+    value = text.lower().replace("’", "'")
+    value = " ".join(re.sub(r"[^a-z0-9' ]", " ", value).split())
+    value = re.sub(r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?", "", value)
+    value = re.sub(r"\s+please$", "", value)
+    return {
+        "open your eyes": "camera_open",
+        "what do you see": "camera_describe",
+        "describe what you see": "camera_describe",
+        "close your eyes": "camera_close",
+        "i need something motivational": "media_motivation",
+    }.get(value)
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    index = 2
+    sof_markers = {
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+        0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+    }
+    while index + 4 <= len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        while index < len(data) and data[index] == 0xFF:
+            index += 1
+        if index >= len(data):
+            break
+        marker = data[index]
+        index += 1
+        if marker in {0x01, *range(0xD0, 0xDA)}:
+            continue
+        if index + 2 > len(data):
+            break
+        segment_length = int.from_bytes(data[index:index + 2], "big")
+        if segment_length < 2 or index + segment_length > len(data):
+            break
+        if marker in sof_markers and segment_length >= 7:
+            height = int.from_bytes(data[index + 3:index + 5], "big")
+            width = int.from_bytes(data[index + 5:index + 7], "big")
+            return width, height
+        index += segment_length
+    return None
+
+
+def _decode_voice_frame(frame: VoiceFrame) -> dict[str, Any]:
+    try:
+        data = base64.b64decode(frame.data_base64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={"message": "Invalid voice frame encoding"}) from exc
+    if not data or len(data) > VOICE_FRAME_MAX_BYTES:
+        raise HTTPException(status_code=422, detail={"message": "Voice frame exceeds the 1 MiB limit"})
+
+    if frame.mime == "image/png":
+        if len(data) < 24 or not data.startswith(b"\x89PNG\r\n\x1a\n") or data[12:16] != b"IHDR":
+            dimensions = None
+        else:
+            dimensions = (
+                int.from_bytes(data[16:20], "big"),
+                int.from_bytes(data[20:24], "big"),
+            )
+    else:
+        dimensions = _jpeg_dimensions(data)
+
+    if not dimensions:
+        raise HTTPException(status_code=422, detail={"message": "Voice frame type does not match its image bytes"})
+    width, height = dimensions
+    if width > VOICE_FRAME_MAX_WIDTH or height > VOICE_FRAME_MAX_HEIGHT:
+        raise HTTPException(status_code=422, detail={"message": "Voice frame dimensions exceed 1024 by 576"})
+    if (width, height) != (frame.width, frame.height):
+        raise HTTPException(status_code=422, detail={"message": "Voice frame dimensions do not match its image bytes"})
+    return {"bytes": data, "mime": frame.mime, "width": width, "height": height}
+
+
+def _describe_client_view(client_state: dict[str, Any] | None) -> str:
+    state = client_state or {}
+    active = state.get("active_view")
+    calendar = state.get("calendar") if isinstance(state.get("calendar"), dict) else {}
+    document = state.get("document") if isinstance(state.get("document"), dict) else {}
+
+    if active == "calendar" and calendar.get("open"):
+        view = str(calendar.get("view") or "month")
+        date = str(calendar.get("date") or "").strip()
+        suffix = f", centered on {date}" if date else ""
+        return f"Calendar is the active view in {view} view{suffix}."
+    if active == "document" and (document.get("open") or document.get("minimized")):
+        doc_id = str(document.get("id") or "").strip()
+        suffix = f" The active document ID is {doc_id}." if doc_id else ""
+        return f"The document workspace is the active view.{suffix}"
+    if calendar.get("minimized"):
+        return "The main chat is active, and Calendar is minimized."
+    if document.get("minimized"):
+        return "The main chat is active, and a document is minimized."
+    if active == "chat":
+        return "The main chat is the active view."
+    return "I cannot confirm the current Odysseus view from this turn."
+
+
 def _is_worker_retry_request(text: str) -> bool:
     value = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
     return bool(re.fullmatch(
@@ -677,6 +868,7 @@ async def _dispatch_worker_request(
                     "steer",
                     {"prompt": prompt},
                     persist_user_message=False,
+                    owner=owner,
                 )
                 return active, "steered"
             except Exception as exc:
@@ -696,6 +888,89 @@ async def _dispatch_worker_request(
 
 
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
+    media = _media_command(text)
+    if media:
+        vision_model = ""
+        if media == "camera_describe":
+            frame = voice_session.get("_frame")
+            if not isinstance(frame, dict) or not isinstance(frame.get("bytes"), bytes):
+                reply = "My camera is not open, so I cannot see anything yet."
+            else:
+                from src.chat_helpers import model_supports_vision
+                from src.document_processor import analyze_image_bytes_with_vl_result
+
+                preferred_model = (
+                    JARVIS_MODEL
+                    if model_supports_vision(JARVIS_MODEL, JARVIS_CHAT_URL)
+                    else None
+                )
+                result = await asyncio.to_thread(
+                    analyze_image_bytes_with_vl_result,
+                    frame["bytes"],
+                    frame["mime"],
+                    owner,
+                    preferred_model,
+                )
+                description = str(result.get("text") or "").strip()
+                vision_model = str(result.get("model") or "")
+                if not description or description.startswith("["):
+                    reply = "I could not analyze the camera frame with a vision-capable model."
+                else:
+                    reply = description
+        else:
+            event = {
+                "camera_open": {"type": "ui_control", "ui_event": "camera_open"},
+                "camera_close": {"type": "ui_control", "ui_event": "camera_close"},
+                "media_motivation": {
+                    "type": "ui_control",
+                    "ui_event": "media_play",
+                    "media_id": "motivational-abstract",
+                },
+            }[media]
+            yield event
+            reply = {
+                "camera_open": "Opening my eyes.",
+                "camera_close": "Closing my eyes.",
+                "media_motivation": "Playing the built-in motivational visual.",
+            }[media]
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(
+            text,
+            reply,
+            media,
+            vision_model=vision_model,
+        )
+        return
+
+    foreground = _foreground_command(text)
+    if foreground:
+        action, view = foreground
+        client_state = voice_session.get("_client_state")
+        if action == "report_view_state":
+            reply = _describe_client_view(client_state)
+        else:
+            document_state = (
+                client_state.get("document")
+                if isinstance(client_state, dict) and isinstance(client_state.get("document"), dict)
+                else {}
+            )
+            if action == "minimize_view" and document_state.get("minimized"):
+                reply = "The document is already minimized."
+            elif action in {"close_view", "minimize_view"} and client_state and not (
+                document_state.get("open") or document_state.get("minimized")
+            ):
+                reply = "There is no active document to close." if action == "close_view" else "There is no active document to minimize."
+            else:
+                yield {"type": "ui_control", "ui_event": action, "view": view}
+                reply = {
+                    "open_view": "Opening Calendar.",
+                    "close_view": "Closing the active document.",
+                    "minimize_view": "Minimizing the active document.",
+                }[action]
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, f"foreground_{action}")
+        return
+
     selected_target = str(voice_session.get("target") or "jarvis")
     requested_target_switch = _target_switch(text)
     direct_jarvis_return = (
@@ -910,7 +1185,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
     if (
         not pending
         or pending.get("session_id") != chat_session_id
-        or pending.get("owner") not in (None, owner)
+        or pending.get("owner") != owner
         or not _pending_task_accepts_turn(pending, text, selected_target)
     ):
         pending = active
@@ -924,6 +1199,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                     "approval",
                     {"choice": choice, "spoken_text": text},
                     persist_user_message=False,
+                    owner=owner,
                 )
                 verb = "denied" if choice == "deny" else "approved once"
                 reply = f"I {verb} that request for {WORKER_LABELS.get(pending['worker'], 'the worker')}."
@@ -946,6 +1222,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "reply",
                 {"answers": _question_answers(pending, text)},
                 persist_user_message=False,
+                owner=owner,
             )
             reply = f"I passed your answer to {WORKER_LABELS.get(pending['worker'], 'the worker')}."
             guard = "worker_question_reply"
@@ -1075,7 +1352,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         if (
             pending
             and pending.get("session_id") == chat_session_id
-            and pending.get("owner") in (None, owner)
+            and pending.get("owner") == owner
         ):
             pending_voice_task = _pending_task_accepts_turn(
                 pending,
@@ -1083,7 +1360,9 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
                 str(voice_session.get("target") or "jarvis"),
             )
     if (
-        _target_switch(text)
+        _media_command(text)
+        or _foreground_command(text)
+        or _target_switch(text)
         or _is_casual_greeting(text)
         or _background_delegation(text)
         or _asks_runtime_status(text)
@@ -1221,7 +1500,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
     router = APIRouter(prefix="/api/voice", tags=["voice"])
 
     @router.get("/status")
-    async def voice_status():
+    async def voice_status(_owner: str = Depends(require_user)):
         try:
             from src.settings import load_settings
 
@@ -1244,7 +1523,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         }
 
     @router.post("/prewarm")
-    async def prewarm_voice_brain():
+    async def prewarm_voice_brain(_owner: str = Depends(require_user)):
         async def prewarm_tts() -> tuple[str, bool | None, int | None, str | None]:
             if not tts_service:
                 return "unavailable", None, None, None
@@ -1327,7 +1606,11 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         }
 
     @router.post("/sessions")
-    async def create_voice_session(request: Request, payload: VoiceSessionCreate):
+    async def create_voice_session(
+        request: Request,
+        payload: VoiceSessionCreate,
+        owner: str = Depends(require_user),
+    ):
         _set_user_time_from_request(request)
         state = _load_state()
         session_id = str(uuid.uuid4())
@@ -1335,7 +1618,12 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         if session_manager:
             if chat_session_id:
                 try:
-                    session_manager.get_session(chat_session_id)
+                    linked = session_manager.get_session(chat_session_id)
+                    linked_owner = getattr(linked, "owner", None)
+                    if linked_owner != owner and not (not owner and linked_owner is None):
+                        raise HTTPException(status_code=403, detail={"message": "Chat session does not belong to this user"})
+                except HTTPException:
+                    raise
                 except Exception:
                     chat_session_id = None
             if not chat_session_id:
@@ -1345,10 +1633,11 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     name=_chat_session_name(),
                     endpoint_url=JARVIS_CHAT_URL,
                     model=JARVIS_MODEL,
-                    owner=effective_user(request),
+                    owner=owner,
                 )
         session = {
             "id": session_id,
+            "owner": owner,
             "chat_session_id": chat_session_id,
             "mode": payload.mode,
             "status": "listening",
@@ -1367,11 +1656,15 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         return session
 
     @router.get("/sessions/{session_id}")
-    async def get_voice_session(session_id: str):
-        return _session(_load_state(), session_id)
+    async def get_voice_session(session_id: str, owner: str = Depends(require_user)):
+        return _owned_session(_load_state(), session_id, owner)
 
     @router.post("/sessions/{session_id}/target")
-    async def update_voice_target(session_id: str, payload: VoiceTargetUpdate):
+    async def update_voice_target(
+        session_id: str,
+        payload: VoiceTargetUpdate,
+        owner: str = Depends(require_user),
+    ):
         if payload.target not in ACTIVE_VOICE_TARGETS:
             raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
         if payload.target != "jarvis":
@@ -1383,7 +1676,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         if payload.workspace not in VOICE_WORKSPACES:
             raise HTTPException(status_code=400, detail={"message": "Unknown voice workspace"})
         state = _load_state()
-        session = _session(state, session_id)
+        session = _owned_session(state, session_id, owner)
         session["target"] = payload.target
         session["workspace"] = payload.workspace
         if payload.task_id is not None:
@@ -1400,22 +1693,36 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         }
 
     @router.post("/sessions/{session_id}/turns")
-    async def add_voice_turn(session_id: str, payload: VoiceTurnCreate):
+    async def add_voice_turn(
+        session_id: str,
+        payload: VoiceTurnCreate,
+        owner: str = Depends(require_user),
+    ):
         state = _load_state()
-        session = _session(state, session_id)
+        session = _owned_session(state, session_id, owner)
         turn = _append_turn(session, payload.role, payload.text, payload.status or "recorded", payload.task_id)
         _save_state(state)
         return turn
 
     @router.post("/sessions/{session_id}/respond")
-    async def respond_to_voice_turn(session_id: str, payload: VoiceRespondRequest, request: Request):
+    async def respond_to_voice_turn(
+        session_id: str,
+        payload: VoiceRespondRequest,
+        request: Request,
+        owner: str = Depends(require_user),
+    ):
         _set_user_time_from_request(request)
         text = payload.text.strip()
         if not text:
             raise HTTPException(status_code=400, detail={"message": "Voice turn text is required"})
 
         state = _load_state()
-        session = _session(state, session_id)
+        session = _owned_session(state, session_id, owner)
+        turn_session = dict(session)
+        if payload.client_state:
+            turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
+        if payload.frame:
+            turn_session["_frame"] = _decode_voice_frame(payload.frame)
         user_turn = _append_turn(session, "user", text, "thinking")
         _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
         _save_state(state)
@@ -1424,7 +1731,10 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         diagnostics: dict[str, Any]
         action = _detect_safe_action(text)
         if action:
-            task = await _execute_action(VoiceActionRequest(action=action, session_id=session_id, prompt=text))
+            task = await _execute_action(
+                VoiceActionRequest(action=action, session_id=session_id, prompt=text),
+                owner,
+            )
             reply = "Running that in the background, sir."
             diagnostics = {
                 "model": JARVIS_MODEL,
@@ -1438,8 +1748,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 reply, diagnostics, agent_task_ids = await _jarvis_reply(
                     str(session.get("chat_session_id") or ""),
                     text,
-                    effective_user(request),
-                    session,
+                    owner,
+                    turn_session,
                 )
             except Exception as exc:
                 session["status"] = "failed"
@@ -1492,14 +1802,23 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         }
 
     @router.post("/sessions/{session_id}/respond/stream")
-    async def stream_voice_response(session_id: str, payload: VoiceRespondRequest, request: Request):
+    async def stream_voice_response(
+        session_id: str,
+        payload: VoiceRespondRequest,
+        request: Request,
+        owner: str = Depends(require_user),
+    ):
         _set_user_time_from_request(request)
         text = payload.text.strip()
         if not text:
             raise HTTPException(status_code=400, detail={"message": "Voice turn text is required"})
-        owner = effective_user(request)
         state = _load_state()
-        session = _session(state, session_id)
+        session = _owned_session(state, session_id, owner)
+        turn_session = dict(session)
+        if payload.client_state:
+            turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
+        if payload.frame:
+            turn_session["_frame"] = _decode_voice_frame(payload.frame)
         user_turn = _append_turn(session, "user", text, "thinking")
         _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
         speech_turn = _register_speech_turn(session_id)
@@ -1512,7 +1831,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 final: dict[str, Any] | None = None
                 yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
                 yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
-                async for event in _jarvis_events(chat_session_id, text, owner, session):
+                async for event in _jarvis_events(chat_session_id, text, owner, turn_session):
                     if event.get("type") in {"target_changed", "agent_task"}:
                         event_state = _load_state()
                         event_session = _session(event_state, session_id)
@@ -1581,8 +1900,12 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     @router.get("/sessions/{session_id}/turns/{turn_id}/audio")
-    async def stream_voice_turn_audio(session_id: str, turn_id: str):
-        _session(_load_state(), session_id)
+    async def stream_voice_turn_audio(
+        session_id: str,
+        turn_id: str,
+        owner: str = Depends(require_user),
+    ):
+        _owned_session(_load_state(), session_id, owner)
         speech_turn = _SPEECH_TURNS.get((session_id, turn_id))
         if not speech_turn:
             raise HTTPException(status_code=404, detail={"message": "Voice audio turn not found"})
@@ -1681,7 +2004,13 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         )
 
     @router.post("/sessions/{session_id}/turns/{turn_id}/playback")
-    async def update_voice_playback(session_id: str, turn_id: str, payload: VoicePlaybackUpdate):
+    async def update_voice_playback(
+        session_id: str,
+        turn_id: str,
+        payload: VoicePlaybackUpdate,
+        owner: str = Depends(require_user),
+    ):
+        _owned_session(_load_state(), session_id, owner)
         status_for_state = {
             "started": "speaking",
             "completed": "ready",
@@ -1707,9 +2036,13 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         return {"session_id": session_id, "turn_id": turn_id, "status": session["status"]}
 
     @router.post("/sessions/{session_id}/diagnostics")
-    async def add_voice_diagnostic(session_id: str, payload: VoiceDiagnosticCreate):
+    async def add_voice_diagnostic(
+        session_id: str,
+        payload: VoiceDiagnosticCreate,
+        owner: str = Depends(require_user),
+    ):
         state = _load_state()
-        session = _session(state, session_id)
+        session = _owned_session(state, session_id, owner)
         _append_diagnostic(session, {
             "label": payload.label[:80],
             "client": True,
@@ -1720,7 +2053,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         return {"ok": True}
 
     @router.post("/sessions/{session_id}/interrupt")
-    async def interrupt_voice_session(session_id: str):
+    async def interrupt_voice_session(session_id: str, owner: str = Depends(require_user)):
+        _owned_session(_load_state(), session_id, owner)
         for (voice_session_id, _turn_id), speech_turn in list(_SPEECH_TURNS.items()):
             if voice_session_id == session_id:
                 await speech_turn.cancel()
@@ -1741,23 +2075,27 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         return {"session_id": session_id, "status": "interrupted"}
 
     @router.post("/actions")
-    async def run_voice_action(payload: VoiceActionRequest):
-        task = await _execute_action(payload)
-
+    async def run_voice_action(payload: VoiceActionRequest, owner: str = Depends(require_user)):
+        state = _load_state()
+        if payload.session_id:
+            _owned_session(state, payload.session_id, owner)
+        task = await _execute_action(payload, owner)
         state = _load_state()
         state.setdefault("actions", {})[task["task_id"]] = task
         if payload.session_id and payload.session_id in state.get("sessions", {}):
-            session = state["sessions"][payload.session_id]
+            session = _owned_session(state, payload.session_id, owner)
             session.setdefault("tasks", []).append(task)
             session["updated_at"] = _now()
         _save_state(state)
         return task
 
     @router.get("/actions/{task_id}")
-    async def get_voice_action(task_id: str):
+    async def get_voice_action(task_id: str, owner: str = Depends(require_user)):
         action = _load_state().get("actions", {}).get(task_id)
         if not action:
             raise HTTPException(status_code=404, detail={"message": "Voice action not found"})
+        if action.get("owner") != owner:
+            raise HTTPException(status_code=403, detail={"message": "Voice action does not belong to this user"})
         return action
 
     return router
