@@ -26,6 +26,7 @@ from core.middleware import require_admin
 from core.models import ChatMessage
 from src.action_intents import classify_tool_intent
 from src.auth_helpers import require_user
+from src.agent_worker_adapters import WORKER_IDS
 from src.agent_worker_broker import find_active_task, start_task, task_action, worker_statuses
 from src.chat_helpers import model_supports_vision
 from src.constants import DATA_DIR
@@ -51,6 +52,7 @@ _ACTIVE_RESPONSES: dict[str, asyncio.Task] = {}
 VOICE_FRAME_MAX_BYTES = 1024 * 1024
 VOICE_FRAME_MAX_WIDTH = 1024
 VOICE_FRAME_MAX_HEIGHT = 576
+VOICE_SETUP_STATUS_TIMEOUT_SECONDS = 6.0
 
 
 class _StrictModel(BaseModel):
@@ -289,6 +291,156 @@ def _worker_command(text: str) -> tuple[str, str, str, str | None, str | None] |
     return "start", worker, label, start.group(2), start.group(3).strip()
 
 
+def _setup_status_command(text: str) -> bool:
+    """Match one exact, read-only setup check and reject compound requests."""
+    normalized = re.sub(r"[.!?]+$", "", text.strip().lower()).strip()
+    return normalized == "check voice setup"
+
+
+def _safe_service_stats(service: Any, label: str) -> dict[str, Any]:
+    if service is None:
+        return {"available": False, "provider": "disabled"}
+    try:
+        value = service.get_stats()
+    except Exception as exc:
+        logger.warning("%s status unavailable: %s", label, type(exc).__name__)
+        return {"available": False, "provider": "disabled"}
+    return value if isinstance(value, dict) else {"available": False, "provider": "disabled"}
+
+
+def _setup_provider_kind(value: Any) -> str:
+    provider = str(value or "").strip().lower()
+    if not provider or provider == "disabled":
+        return "disabled"
+    if provider.startswith("endpoint:"):
+        return "endpoint"
+    if provider in {"browser", "local"}:
+        return provider
+    return "configured"
+
+
+def _setup_voice_name(value: Any) -> str:
+    name = " ".join(str(value or "").split())[:80]
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._'-]{0,79}", name):
+        return name
+    return ""
+
+
+def _setup_voice_speed(value: Any) -> float:
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return speed if 0.25 <= speed <= 4 else 1.0
+
+
+async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any) -> dict[str, Any]:
+    """Build one redacted setup snapshot shared by HTTP status and voice."""
+    stt = _safe_service_stats(stt_service, "STT")
+    tts = _safe_service_stats(tts_service, "TTS")
+
+    model_configured = False
+    try:
+        endpoint_url, model, _headers = _resolve_voice_runtime(owner)
+        model_configured = bool(endpoint_url and model)
+    except Exception as exc:
+        logger.warning("Voice model status unavailable: %s", type(exc).__name__)
+
+    try:
+        raw_workers = await asyncio.wait_for(
+            worker_statuses(),
+            timeout=VOICE_SETUP_STATUS_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("Voice worker status unavailable: %s", type(exc).__name__)
+        raw_workers = {}
+    if not isinstance(raw_workers, dict):
+        raw_workers = {}
+
+    workers: list[dict[str, Any]] = []
+    for worker_id in WORKER_IDS:
+        details = raw_workers.get(worker_id)
+        details = details if isinstance(details, dict) else {}
+        configured = bool(details.get("configured"))
+        ready = bool(configured and details.get("ready"))
+        workers.append({
+            "id": worker_id,
+            "configured": configured,
+            "ready": ready,
+            "status": "ready" if ready else ("unavailable" if configured else "not_configured"),
+        })
+
+    stt_available = bool(stt.get("available"))
+    tts_available = bool(tts.get("available"))
+    core_ready = model_configured and stt_available and tts_available
+    guidance: list[str] = []
+    if core_ready:
+        guidance.append("Core voice setup is ready.")
+    else:
+        guidance.append("Voice setup needs attention.")
+        if not model_configured:
+            guidance.append("Configure an available chat model for Voice Orb.")
+        if not stt_available:
+            guidance.append("Enable an available speech-to-text provider.")
+        if not tts_available:
+            guidance.append("Enable an available text-to-speech provider.")
+
+    ready_workers = sum(1 for worker in workers if worker["ready"])
+    if ready_workers:
+        guidance.append(
+            f"{ready_workers} of {len(workers)} optional fixed read-only workers are ready."
+        )
+    else:
+        guidance.append("Optional fixed read-only workers are not ready.")
+
+    setup = {
+        "version": 1,
+        "command": "Check voice setup.",
+        "core_ready": core_ready,
+        "model": {
+            "configured": model_configured,
+            "selection": (
+                "endpoint_override"
+                if VOICE_ENDPOINT_ID
+                else ("model_override" if VOICE_MODEL else "default")
+            ),
+        },
+        "speech_to_text": {
+            "available": stt_available,
+            "provider": _setup_provider_kind(stt.get("provider")),
+        },
+        "text_to_speech": {
+            "available": tts_available,
+            "provider": _setup_provider_kind(tts.get("provider")),
+            "voice": _setup_voice_name(tts.get("voice")),
+        },
+        "workers": {
+            "optional": True,
+            "ready_count": ready_workers,
+            "total": len(workers),
+            "items": workers,
+        },
+        "guidance": guidance,
+        "text": " ".join(guidance),
+    }
+    return {
+        "assistant": VOICE_PERSONA,
+        "model_override": "configured" if VOICE_MODEL else None,
+        "endpoint_override_configured": bool(VOICE_ENDPOINT_ID),
+        "stt": {
+            "available": stt_available,
+            "provider": _setup_provider_kind(stt.get("provider")),
+        },
+        "tts": {
+            "available": tts_available,
+            "provider": _setup_provider_kind(tts.get("provider")),
+            "voice": _setup_voice_name(tts.get("voice")),
+            "speed": _setup_voice_speed(tts.get("speed", 1)),
+        },
+        "setup": setup,
+    }
+
+
 def _describe_client_view(client_state: VoiceClientState | None) -> str:
     if client_state is None:
         return "I cannot confirm the current view because the browser did not report its state."
@@ -481,21 +633,8 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
     router = APIRouter(prefix="/api/voice", tags=["voice"])
 
     @router.get("/status")
-    async def voice_status(_owner: str = Depends(require_user)):
-        stt = stt_service.get_stats() if stt_service is not None else {"available": False, "provider": "disabled"}
-        tts = tts_service.get_stats() if tts_service is not None else {"available": False, "provider": "disabled"}
-        return {
-            "assistant": VOICE_PERSONA,
-            "model_override": VOICE_MODEL or None,
-            "endpoint_override_configured": bool(VOICE_ENDPOINT_ID),
-            "stt": {"available": bool(stt.get("available")), "provider": stt.get("provider", "disabled")},
-            "tts": {
-                "available": bool(tts.get("available")),
-                "provider": tts.get("provider", "disabled"),
-                "voice": tts.get("voice", ""),
-                "speed": tts.get("speed", 1),
-            },
-        }
+    async def voice_status(owner: str = Depends(require_user)):
+        return await _voice_status_snapshot(owner, stt_service, tts_service)
 
     @router.post("/sessions")
     async def create_voice_session(
@@ -590,6 +729,7 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
         media_command = _media_command(text)
         calendar_args = _calendar_read_args(text)
         worker_command = _worker_command(text)
+        setup_requested = _setup_status_command(text)
 
         async def generate():
             current_task = asyncio.current_task()
@@ -599,9 +739,14 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
                     previous.cancel()
                 _ACTIVE_RESPONSES[session_id] = current_task
             try:
-                if command or worker_command or media_command:
+                if command or worker_command or media_command or setup_requested:
                     vision_model = ""
-                    if command:
+                    setup_snapshot: dict[str, Any] | None = None
+                    if setup_requested:
+                        status = await _voice_status_snapshot(owner, stt_service, tts_service)
+                        setup_snapshot = status["setup"]
+                        reply = setup_snapshot["text"]
+                    elif command:
                         action, view = command
                         if action == "report_view_state":
                             reply = _describe_client_view(payload.client_state)
@@ -704,12 +849,15 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
                         metadata["model"] = vision_model
                     session_manager.add_message(chat.id, ChatMessage("assistant", reply, metadata=metadata))
                     _append_voice_turn(session_id, "assistant", reply, "ready", model=vision_model)
-                    yield _sse({
+                    final_event = {
                         "type": "final",
                         "text": reply,
                         "model": vision_model or voice_session.get("model"),
                         "assistant": VOICE_PERSONA,
-                    })
+                    }
+                    if setup_snapshot is not None:
+                        final_event["setup"] = setup_snapshot
+                    yield _sse(final_event)
                     return
 
                 calendar_result = None
