@@ -464,10 +464,17 @@ async function sendTranscript(text, generation) {
   setState('thinking');
   responseController = new AbortController();
   try {
+    const tzOffset = -new Date().getTimezoneOffset();
+    let tzName = '';
+    try { tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (_) {}
     const response = await fetch(`/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/respond`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tz-Offset': String(tzOffset),
+        'X-Tz-Name': tzName,
+      },
       body: JSON.stringify({ text, client_state: collectClientState() }),
       signal: responseController.signal,
     });

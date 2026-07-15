@@ -97,6 +97,7 @@ _COMMON_TOOL_NAMES = {
     "mark_email_read",
     "pipeline",
     "python",
+    "read_calendar",
     "read_email",
     "read_file",
     "reply_to_email",

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -84,6 +85,23 @@ def test_foreground_commands_are_exact_and_enumerated():
     assert voice_routes._foreground_command("what view is open?") == ("report_view_state", None)
     assert voice_routes._foreground_command("open https://example.test") is None
     assert voice_routes._foreground_command("run this script") is None
+
+
+def test_calendar_voice_intent_is_read_only_and_resolves_local_ranges():
+    now = datetime(2026, 7, 15, 14, 30, tzinfo=timezone.utc)
+    assert voice_routes._calendar_read_args("What's on my calendar tomorrow?", now) == {
+        "action": "list_events",
+        "start": "2026-07-16T00:00:00",
+        "end": "2026-07-17T00:00:00",
+    }
+    assert voice_routes._calendar_read_args("Compare my calendar today and tomorrow", now) == {
+        "action": "list_events",
+        "start": "2026-07-15T00:00:00",
+        "end": "2026-07-17T00:00:00",
+    }
+    assert voice_routes._calendar_read_args("Show my calendars", now) == {"action": "list_calendars"}
+    assert voice_routes._calendar_read_args("Create a calendar event tomorrow", now) is None
+    assert voice_routes._calendar_read_args("How does Calendar sync work?", now) is None
 
 
 def test_runtime_prefers_linked_session_without_endpoint_override(monkeypatch):
@@ -173,3 +191,84 @@ async def test_foreground_response_emits_only_allowlisted_ui_control(tmp_path, m
     assert '"view": "calendar"' in body
     assert "selector" not in body
     assert "script" not in body
+
+
+@pytest.mark.asyncio
+async def test_calendar_voice_read_uses_owner_scoped_wrapper_without_enabling_tools(tmp_path, monkeypatch):
+    state_file = tmp_path / "voice_sessions.json"
+    _seed_voice_state(state_file)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
+    monkeypatch.setattr(voice_routes, "VOICE_ENDPOINT_ID", "")
+    monkeypatch.setattr(voice_routes, "VOICE_MODEL", "")
+    seen = {}
+
+    async def read_calendar(content, owner=None):
+        seen["calendar_args"] = json.loads(content)
+        seen["owner"] = owner
+        return {
+            "response": "One event.",
+            "events": [{"summary": "Planning", "dtstart": "2026-07-16T09:00:00"}],
+            "calendar_freshness": "fresh",
+            "exit_code": 0,
+        }
+
+    async def fake_stream(_url, _model, messages, **kwargs):
+        seen["messages"] = messages
+        assert kwargs["tool_choice_none"] is True
+        yield 'data: {"delta": "You have planning at nine."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(voice_routes, "do_read_calendar", read_calendar)
+    monkeypatch.setattr(voice_routes, "stream_llm", fake_stream)
+    chat = _Chat()
+    router = voice_routes.setup_voice_routes(_Manager(chat))
+    respond = _endpoint(router, "respond_to_voice_turn")
+    response = await respond(
+        "voice-1",
+        _request(),
+        voice_routes.VoiceRespondRequest(text="What's on my calendar tomorrow?"),
+        "alice",
+    )
+
+    body = "".join([part async for part in response.body_iterator])
+    assert seen["owner"] == "alice"
+    assert seen["calendar_args"]["action"] == "list_events"
+    assert any("UNTRUSTED SOURCE DATA" in str(message.get("content")) for message in seen["messages"])
+    assert '"type": "final"' in body
+    assert "You have planning at nine." in body
+
+
+@pytest.mark.asyncio
+async def test_calendar_voice_read_always_speaks_freshness_failure(tmp_path, monkeypatch):
+    state_file = tmp_path / "voice_sessions.json"
+    _seed_voice_state(state_file)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
+
+    async def read_calendar(_content, owner=None):
+        assert owner == "alice"
+        return {
+            "response": "Cached: no events.",
+            "events": [],
+            "calendar_freshness": "sync_failed",
+            "sync_error_count": 1,
+            "exit_code": 0,
+        }
+
+    async def fake_stream(*_args, **kwargs):
+        assert kwargs["tool_choice_none"] is True
+        yield 'data: {"delta": "There are no cached events."}\n\n'
+
+    monkeypatch.setattr(voice_routes, "do_read_calendar", read_calendar)
+    monkeypatch.setattr(voice_routes, "stream_llm", fake_stream)
+    chat = _Chat()
+    respond = _endpoint(voice_routes.setup_voice_routes(_Manager(chat)), "respond_to_voice_turn")
+    response = await respond(
+        "voice-1",
+        _request(),
+        voice_routes.VoiceRespondRequest(text="What's on my calendar tomorrow?"),
+        "alice",
+    )
+
+    body = "".join([part async for part in response.body_iterator])
+    assert "Calendar freshness could not be confirmed" in body
+    assert "private host" not in body
