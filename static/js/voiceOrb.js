@@ -3,6 +3,7 @@
 import sessionModule from './sessions.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import { showError, showToast } from './ui.js';
+import voiceOrbMedia from './voiceOrbMedia.js';
 import { trackWorkerTask } from './voiceOrbWorkers.js';
 
 const $ = id => document.getElementById(id);
@@ -11,6 +12,12 @@ const UI_CONTROL_ALLOWLIST = new Set([
   'close_view:document',
   'minimize_view:document',
 ]);
+const MEDIA_CONTROL_ALLOWLIST = new Set([
+  'camera_open',
+  'camera_close',
+  'media_play:motivational-abstract',
+]);
+const FRAME_PROMPTS = new Set(['what do you see', 'describe what you see']);
 const STATE_COPY = {
   idle: 'Ready',
   listening: 'Listening',
@@ -38,10 +45,39 @@ let responseController = null;
 let playbackAudio = null;
 let cueContext = null;
 let orbEnergy = 0;
+let presentedMediaMode = '';
+
+function hasOnlyKeys(event, allowed) {
+  return Object.keys(event).every(key => allowed.has(key));
+}
+
+function mediaControlKey(event) {
+  return event.ui_event === 'media_play'
+    ? `media_play:${event.media_id || ''}`
+    : String(event.ui_event || '');
+}
 
 export function voiceUIControlAllowed(event) {
   if (!event || typeof event !== 'object') return false;
-  return UI_CONTROL_ALLOWLIST.has(`${event.ui_event || ''}:${event.view || ''}`);
+  const viewControl = `${event.ui_event || ''}:${event.view || ''}`;
+  if (UI_CONTROL_ALLOWLIST.has(viewControl)) {
+    return hasOnlyKeys(event, new Set(['type', 'ui_event', 'view']));
+  }
+  const mediaControl = mediaControlKey(event);
+  if (!MEDIA_CONTROL_ALLOWLIST.has(mediaControl)) return false;
+  return hasOnlyKeys(
+    event,
+    new Set(event.ui_event === 'media_play' ? ['type', 'ui_event', 'media_id'] : ['type', 'ui_event']),
+  );
+}
+
+export function framePromptAllowed(text) {
+  const normalized = String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/, '')
+    .replace(/\s+/g, ' ');
+  return FRAME_PROMPTS.has(normalized);
 }
 
 function panel() {
@@ -80,6 +116,22 @@ function setTranscript(text) {
 function setReply(text) {
   const node = $('voice-orb-reply');
   if (node) node.textContent = text || '';
+}
+
+function syncMediaPresentation() {
+  const state = voiceOrbMedia.getState();
+  const next = state.pending ? 'camera-pending' : state.mode;
+  if (next === presentedMediaMode) return;
+  presentedMediaMode = next;
+  const indicator = $('voice-orb-media-indicator');
+  if (!indicator) return;
+  const label = {
+    'camera-pending': 'Camera permission requested',
+    camera: 'Camera on',
+    clip: 'Media playing',
+  }[next] || '';
+  indicator.textContent = label;
+  indicator.hidden = !label;
 }
 
 function getCueContext() {
@@ -164,6 +216,7 @@ function drawOrb() {
   context.arc(cx, cy, base * pulse, 0, Math.PI * 2);
   context.fill();
   orbEnergy *= 0.92;
+  syncMediaPresentation();
   requestAnimationFrame(drawOrb);
 }
 
@@ -444,8 +497,7 @@ async function readVoiceEvents(response, generation) {
         accumulated += event.text || '';
         setReply(accumulated);
       } else if (event.type === 'ui_control') {
-        if (voiceUIControlAllowed(event)) handleUIControl(event);
-        else console.warn('Ignored unsupported Voice Orb UI control.');
+        applyVoiceUIControl(event);
       } else if (event.type === 'worker_task' && event.task) {
         trackWorkerTask(event.task);
       } else if (event.type === 'final') {
@@ -459,6 +511,57 @@ async function readVoiceEvents(response, generation) {
   }
   if (!finalText) throw new Error('Voice response ended without a final answer');
   return finalText;
+}
+
+function applyVoiceUIControl(event) {
+  if (!voiceUIControlAllowed(event)) {
+    console.warn('Ignored unsupported Voice Orb UI control.');
+    return;
+  }
+  const viewControl = `${event.ui_event || ''}:${event.view || ''}`;
+  if (UI_CONTROL_ALLOWLIST.has(viewControl)) {
+    handleUIControl(event);
+    return;
+  }
+  const detail = $('voice-orb-detail');
+  const mediaControl = mediaControlKey(event);
+  if (mediaControl === 'camera_open') {
+    voiceOrbMedia.openCamera().then(state => {
+      syncMediaPresentation();
+      if (!state.cameraOpen) return;
+      if (detail) detail.textContent = 'Camera active. A frame is shared only when you ask what is visible.';
+    }).catch(error => {
+      syncMediaPresentation();
+      if (detail) detail.textContent = 'Camera access is unavailable.';
+      showToast(error?.name === 'NotAllowedError' ? 'Camera permission was denied.' : 'Camera is unavailable.');
+    });
+  } else if (mediaControl === 'camera_close') {
+    voiceOrbMedia.closeCamera();
+    syncMediaPresentation();
+    if (detail) detail.textContent = 'Camera closed.';
+  } else {
+    voiceOrbMedia.playClip('motivational-abstract').then(state => {
+      syncMediaPresentation();
+      if (state.clipId !== 'motivational-abstract') return;
+      if (detail) detail.textContent = 'Playing the built-in silent abstract loop.';
+    }).catch(error => {
+      console.warn('Voice Orb media playback unavailable:', error?.message || String(error));
+      syncMediaPresentation();
+      showToast('The built-in media clip is unavailable.');
+    });
+  }
+}
+
+function voiceRequestPayload(text) {
+  const payload = { text, client_state: collectClientState() };
+  if (framePromptAllowed(text) && voiceOrbMedia.getState().cameraOpen) {
+    try {
+      payload.frame = voiceOrbMedia.captureFrame();
+    } catch (error) {
+      console.warn('Voice Orb camera frame was not ready:', error?.message || String(error));
+    }
+  }
+  return payload;
 }
 
 async function sendTranscript(text, generation) {
@@ -478,7 +581,7 @@ async function sendTranscript(text, generation) {
         'X-Tz-Offset': String(tzOffset),
         'X-Tz-Name': tzName,
       },
-      body: JSON.stringify({ text, client_state: collectClientState() }),
+      body: JSON.stringify(voiceRequestPayload(text)),
       signal: responseController.signal,
     });
     const reply = await readVoiceEvents(response, generation);
@@ -494,6 +597,8 @@ function fail(error) {
   console.warn('Voice Orb error:', error?.message || String(error));
   stopCapture(true);
   stopPlayback();
+  voiceOrbMedia.stopMedia();
+  syncMediaPresentation();
   setState('failed', error?.message || 'Voice mode is unavailable.');
   playCue('error');
   showError(error?.message || 'Voice mode is unavailable.');
@@ -504,6 +609,8 @@ export async function openVoiceOrb() {
     panel().hidden = false;
     return;
   }
+  voiceOrbMedia.stopMedia();
+  syncMediaPresentation();
   active = true;
   callGeneration += 1;
   const root = panel();
@@ -524,6 +631,8 @@ export async function closeVoiceOrb() {
   if (!active && panel()?.hidden) return;
   active = false;
   callGeneration += 1;
+  voiceOrbMedia.stopMedia();
+  syncMediaPresentation();
   await interruptResponse();
   stopCapture(true);
   stopPlayback();
