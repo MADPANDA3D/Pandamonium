@@ -8,10 +8,11 @@ This release is a maintained fork, not an installable plugin. Odysseus does not 
 
 | Version | Source tag | Additive scope |
 |---|---|---|
-| v0.1-alpha.1 | `voice-orb-v0.1.0-alpha.1` | Voice conversation, foreground control, Calendar reads, and optional read-only workers |
+| v0.1-alpha.1 | `voice-orb-v0.1.0-alpha.1` | Immutable source release; its container was blocked by the security gate |
+| v0.1-alpha.2 | `voice-orb-v0.1.0-alpha.2` | Camera-free Voice Orb with the hardened container remediation |
 | v0.2-alpha.1 | `voice-orb-v0.2.0-alpha.1` | User-initiated camera frames and allowlisted local media |
 
-v0.2 keeps the v0.1 contracts and adds the camera/media boundary described below. Both remain maintained-fork releases, not plugins.
+v0.2 keeps the v0.1 contracts and adds the camera/media boundary described below. These remain maintained-fork releases, not plugins.
 
 ## v0.2-alpha scope
 

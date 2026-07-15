@@ -6,8 +6,8 @@
 
 | Release | Tag | Upstream base | Scope |
 |---|---|---|---|
-| v0.1.0-alpha.1 | `voice-orb-v0.1.0-alpha.1` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Immutable source rollback; container blocked by Trivy |
-| v0.1.0-alpha.2 | `voice-orb-v0.1.0-alpha.2` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Removes the bundled Docker CLI from the hardened image |
+| v0.1.0-alpha.1 | `voice-orb-v0.1.0-alpha.1` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Voice, foreground control, Calendar, and read-only workers; container blocked by Trivy |
+| v0.1.0-alpha.2 | `voice-orb-v0.1.0-alpha.2` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Same camera-free scope with the bundled Docker CLI removed from the hardened image |
 | v0.2.0-alpha.1 | `voice-orb-v0.2.0-alpha.1` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Adds bounded camera frames and allowlisted local media |
 
 ## CI gates

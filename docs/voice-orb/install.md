@@ -48,6 +48,6 @@ Copy only the settings you need from `docs/voice-orb/voice-orb.env.example` into
 
 ## Upgrade and rollback
 
-Back up `data/` before changing versions. Pull or check out an immutable release tag, run `docker compose config --quiet`, then recreate the app. Roll back by restoring the previous source tag or image digest. v0.2 adds no database migration; its client-state and frame request fields are optional. Use `voice-orb-v0.1.0-alpha.1` to remove the camera/media capability entirely.
+Back up `data/` before changing versions. Pull or check out an immutable release tag, run `docker compose config --quiet`, then recreate the app. Roll back by restoring the previous source tag or image digest. v0.2 adds no database migration; its client-state and frame request fields are optional. Use `voice-orb-v0.1.0-alpha.2` to remove the camera/media capability entirely while retaining the hardened container remediation.
 
 Docker Desktop and WSL2 are best-effort for this alpha. Linux `amd64` and `arm64` are the release-gated platforms.
