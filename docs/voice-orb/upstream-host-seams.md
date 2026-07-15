@@ -1,6 +1,4 @@
-# Draft upstream RFC packet: small host seams for Voice Orb
-
-> **Posting status:** Public-safe draft for review in the maintained fork. Do not post this packet upstream before the v0.3 demo and release evidence exist. Refresh every dated value in the compatibility section before posting.
+# Upstream host seams: Voice Orb dogfood evidence
 
 ## Purpose
 
@@ -14,7 +12,7 @@ Snapshot verified 2026-07-15 against the canonical [`odysseus-dev/odysseus`](htt
 
 | Upstream thread | Current state | Relevance to this packet |
 |---|---|---|
-| [Extension discussion #4439](https://github.com/odysseus-dev/odysseus/discussions/4439) | Active Ideas discussion; GitHub rendered 9 comments and 32 replies | A recurring thread favors thin, dogfooded seams before external plugins and calls out the danger of freezing unsettled internals; no stable external contract has been accepted. |
+| [Extension discussion #4439](https://github.com/odysseus-dev/odysseus/discussions/4439) | Active Ideas discussion; GitHub rendered 9 comments and 33 replies | A recurring thread favors thin, dogfooded seams before external plugins and calls out the danger of freezing unsettled internals; no stable external contract has been accepted. |
 | [Plugin-contract PR #4241](https://github.com/odysseus-dev/odysseus/pull/4241) | Open, unmerged, non-draft PR with four commits targeting `dev` | Its dogfood review validates some facade ideas but still identifies unfinished tool/provider dispatch and chat-render boundaries. It is design input, not a released ABI. |
 | [Hands-free voice issue #4118](https://github.com/odysseus-dev/odysseus/issues/4118) | Open; `enhancement` and `ready for review`; unassigned; zero comments or linked development | It proposes a continuous STT → chat → TTS loop using existing services. Voice Orb is related prior art, but this packet does not replace or claim that issue. |
 
@@ -30,9 +28,11 @@ The conservative interpretation is: stabilize the smallest core-owned adapters f
 
 This RFC asks upstream to evaluate four contracts, not to adopt the fork's product surface or maintenance burden.
 
-## Bounded demo scope after v0.3
+## Sanitized demo scope
 
-Use a clean, authenticated deployment and neutral demonstration data. The recording should show only the following sequence:
+The [sanitized demo protocol and release evidence](demo.md) use a clean,
+authenticated deployment and neutral demonstration data. The demo is limited
+to the following sequence:
 
 1. Start a linked voice conversation through the current/default Odysseus model.
 2. Demonstrate interruption and End Voice stopping microphone and playback.
@@ -40,9 +40,11 @@ Use a clean, authenticated deployment and neutral demonstration data. The record
 4. Ask one read-only Calendar question and show either fresh synchronized results or the explicit stale-data warning.
 5. Say `Open your eyes.`, then separately `What do you see?`, and finally `Close your eyes.` to demonstrate permission, one-frame analysis, and track shutdown.
 6. Say `I need something motivational.` to play the checksummed, same-origin, silent demonstration clip, then stop it by switching modes or ending Voice.
-7. Optionally show one neutral read-only worker task, clearly separated from the host-seam request.
 
-Do not demonstrate arbitrary DOM control, Calendar mutation, background capture, continuous recording, face recognition, arbitrary media URLs, remote code installation, approval elevation, or any operator-specific infrastructure.
+Do not demonstrate arbitrary DOM control, Calendar mutation, background
+capture, continuous recording, face recognition, arbitrary media URLs, remote
+code installation, worker execution, Tailnet topology, approval elevation, or
+any operator-specific infrastructure.
 
 ## Threat model
 
@@ -118,34 +120,31 @@ This is not a remote loader. It must not add package discovery, a marketplace, P
 
 Each contribution should target current canonical `dev`, include focused tests and documentation, and be reviewable without any later contribution. If upstream declines one seam, the others should remain viable.
 
-## Exact compatibility evidence
-
-### Preparation snapshot — 2026-07-15
+## Exact compatibility and release evidence
 
 | Evidence | Exact value |
 |---|---|
 | Canonical repository / branch | [`odysseus-dev/odysseus`](https://github.com/odysseus-dev/odysseus), `dev` |
 | Live canonical `dev` head | [`c80462e4621c1a3360e5441843bb83b4691a8766`](https://github.com/odysseus-dev/odysseus/commit/c80462e4621c1a3360e5441843bb83b4691a8766) |
-| Fork compatibility record | `v0.2.0-alpha.1`, distribution `maintained-fork`, upstream base `c80462e4621c1a3360e5441843bb83b4691a8766`, `plugin_abi: null` |
-| v0.2 integration base used for this draft | `fe8d31f0698975cf11dab8127ee29fa0767196d2` |
-| Relationship to canonical base | Base is an ancestor; 15 integration commits; 66 files changed; 7,499 insertions and 96 deletions |
+| Immutable fork release | [`voice-orb-v0.3.0-beta.1`](https://github.com/MADPANDA3D/odysseus/releases/tag/voice-orb-v0.3.0-beta.1) at `f726621efe9d313f6d49bc5eb3c6de4c32316a36` |
+| Compatibility record | `v0.3.0-beta.1`, distribution `maintained-fork`, upstream base `c80462e4621c1a3360e5441843bb83b4691a8766`, `plugin_abi: null` |
+| Relationship to canonical base | Base is an ancestor; 25 public integration commits; 73 files changed; 9,499 insertions and 156 deletions |
 | Declared release platforms | `linux/amd64` and `linux/arm64` |
-| v0.2 publication state | Source tag and container digest were not yet published when this snapshot was prepared; they must not be represented as released evidence |
-| Local full-suite check | CPython 3.12: 4,657 passed, 3 skipped, 75 warnings |
-| Local focused contracts | `test_foreground_control.js`, `test_voice_orb.js`, and `test_voice_orb_media.js` all exited 0 |
-| Public/docs hygiene | Scrub self-test passed; full public scrub passed; diff, heading, table, local-link, and canonical-link checks passed |
+| Release workflow | [`29435057533`](https://github.com/MADPANDA3D/odysseus/actions/runs/29435057533); metadata, dependencies, secret scan, static/unit/Compose/browser, Docker, Trivy, and native publication passed |
+| Local full suite | CPython 3.11: 4,667 passed, 3 skipped |
+| Release full suite | CPython 3.11: 4,666 passed, 4 skipped, 8 warnings |
+| Focused contracts | Foreground, voice, media, and setup Node contracts passed; five Chromium fake-device lifecycle cases passed |
+| Physical camera gate | Logitech C920 label observed; one bounded JPEG met the 1024 by 576 and 1 MiB limits; all tracks ended and no video-device handle remained |
+| Current-upstream reapply | Binary public delta applied cleanly to live canonical `dev`; compile, four Node contracts, and 25 focused Python tests passed |
+| Public/release hygiene | Scrub self-test and full scrub, dependency audit, full-history secret scan, Docker build, and blocking HIGH/CRITICAL Trivy scan passed |
+| OCI index | `ghcr.io/madpanda3d/odysseus@sha256:816f68c9b5cc4d093abd4be6e015822280d6d269f9ea8821c3c33ce444991017` |
+| `linux/amd64` manifest | `sha256:0d5a566485712c5dd0e0057161a92dd3d01e3e74efb006787d07b4c7146966e1` |
+| `linux/arm64` manifest | `sha256:c77fbe56b2464fa2690ae82d9a38ae3ae68c855b4296cbf01db3100b54ea317e` |
+| Anonymous registry readback | Tag, immutable index, amd64, and arm64 GETs returned HTTP 200; registry-header and raw-body digests matched exactly |
 
-The dated snapshot is orientation, not the release evidence to post after v0.3.
-
-### Required refresh before posting
-
-- [ ] Replace the preparation commit with the immutable v0.3 source tag and commit.
-- [ ] Confirm the live canonical `dev` SHA and rerun the public-delta apply/drift check.
-- [ ] Record exact full-suite, focused browser, Node contract, public scrub, dependency, secret-scan, Docker, and Trivy results from the v0.3 release run.
-- [ ] Record the multi-architecture manifest digest and per-architecture image digests.
-- [ ] Link a sanitized demo captured from the immutable v0.3 build.
-- [ ] Recheck #4439, #4241, and #4118 for status or direction changes and update this packet.
-- [ ] Remove this posting-status note and any stale preparation-only value.
+The release evidence is bounded to the public fork. It does not claim that a
+private deployment, worker, Calendar account, or network topology is part of
+the upstream proposal.
 
 ## Proposed upstream ask
 
