@@ -2,13 +2,18 @@
 
 ## Source compatibility
 
-`voice-orb-v0.2.0-alpha.1` remains ported from upstream commit `c80462e4621c1a3360e5441843bb83b4691a8766`. The machine-readable record is `compatibility.json`. The public alpha branch is constructed from that upstream commit; private development history is not published wholesale.
+`voice-orb-v0.3.0-beta.1` remains ported from upstream commit `c80462e4621c1a3360e5441843bb83b4691a8766`. The machine-readable record is `compatibility.json`. The public beta branch is constructed from that upstream commit; private development history is not published wholesale.
 
 | Release | Tag | Upstream base | Scope |
 |---|---|---|---|
 | v0.1.0-alpha.1 | `voice-orb-v0.1.0-alpha.1` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Voice, foreground control, Calendar, and read-only workers; container blocked by Trivy |
 | v0.1.0-alpha.2 | `voice-orb-v0.1.0-alpha.2` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Same camera-free scope with the bundled Docker CLI removed from the hardened image |
 | v0.2.0-alpha.1 | `voice-orb-v0.2.0-alpha.1` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Adds bounded camera frames and allowlisted local media |
+| v0.3.0-beta.1 | `voice-orb-v0.3.0-beta.1` | `c80462e4621c1a3360e5441843bb83b4691a8766` | Adds guided setup status/text parity, honest fixed-worker readiness, and explicit admin-only Tailnet list-then-selected-probe |
+
+v0.3 adds no database migration. Provider credentials remain in Settings and
+worker credentials remain in mounted token files; setup guidance never speaks
+credential values or paths. This remains a maintained fork, not a plugin.
 
 ## CI gates
 
@@ -26,17 +31,17 @@ The public scrub is also required before tagging. It must fail on private notes,
 
 ## Publish
 
-Create the annotated source tag only from a fully verified alpha commit:
+Create the annotated source tag only from a fully verified beta commit:
 
 ```bash
-git tag -a voice-orb-v0.2.0-alpha.1 -m 'Odysseus Voice Orb v0.2.0 alpha.1'
-git push origin voice-orb-v0.2.0-alpha.1
+git tag -a voice-orb-v0.3.0-beta.1 -m 'Odysseus Voice Orb v0.3.0-beta.1'
+git push origin voice-orb-v0.3.0-beta.1
 ```
 
-The tag-triggered release workflow verifies the compatibility record, runs the release gates, builds natively for `linux/amd64` and `linux/arm64`, pushes by digest, and creates one manifest tagged `voice-orb-v0.2.0-alpha.1` in GHCR.
+The tag-triggered release workflow verifies the compatibility record, runs the release gates, builds natively for `linux/amd64` and `linux/arm64`, pushes by digest, and creates one manifest tagged `voice-orb-v0.3.0-beta.1` in GHCR.
 
 Record the resulting manifest digest in the GitHub release notes. Users should deploy `ghcr.io/madpanda3d/odysseus@sha256:DIGEST`; the tag is a discovery label, while the digest is the immutable pin.
 
 ## Nightly drift check
 
-The non-release upstream compatibility workflow reapplies the public alpha delta to current upstream `dev`, then runs bounded syntax and focused tests. It never publishes an image. A failure is a drift signal, not permission to merge upstream changes automatically.
+The non-release upstream compatibility workflow reapplies the public beta delta to current upstream `dev`, then runs bounded syntax and focused tests. It never publishes an image. A failure is a drift signal, not permission to merge upstream changes automatically.

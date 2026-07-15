@@ -7,6 +7,20 @@
 3. Check `/api/voice/status` while authenticated. It should report bounded STT/TTS readiness without endpoint secrets.
 4. Review `docker compose logs --tail=200 odysseus` for error categories. Do not paste unredacted logs into a public issue.
 
+## Guided setup reports missing configuration
+
+- Say exactly `Check voice setup.` and compare its spoken reply with the
+  `setup.text` and `setup.guidance` fields from authenticated
+  `/api/voice/status`; they come from the same server snapshot.
+- Configure model, STT, and TTS credentials in Settings. Configure worker
+  credentials through restrictive mounted token files, never through a spoken
+  command or chat message.
+- Optional workers do not block `core_ready`. A fixed worker is ready only when
+  it is explicitly configured and its bounded health check succeeds.
+- Status intentionally omits endpoint URLs, private addresses, workspace names,
+  token values and paths, and raw errors. Inspect private service logs locally
+  when the bounded guidance is insufficient.
+
 ## Microphone permission fails
 
 - Use `http://localhost` or HTTPS; browsers block media APIs in other insecure contexts.
@@ -17,7 +31,7 @@
 ## Camera permission fails or stays pending
 
 - Use `http://localhost` or HTTPS and allow camera access for the exact origin.
-- Say the single-purpose command `Open your eyes.`; compound open-and-describe phrases are intentionally unsupported in v0.2.
+- Say the single-purpose command `Open your eyes.`; compound open-and-describe phrases remain intentionally unsupported in v0.3.
 - If the ideal 1024 by 576 request is overconstrained, Voice Orb retries once with generic video constraints.
 - End Voice, hide the page, or say `Close your eyes.` before retrying. A stopped pending request cannot reopen the camera later.
 - If the browser reports permission loss or the camera track ends, Voice Orb closes the camera automatically.
@@ -46,7 +60,23 @@ Enable STT in Settings. Browser STT is not supported equally by every browser. L
 - Confirm the token file exists inside the Odysseus process/container and has restrictive permissions.
 - Confirm the worker advertises the expected fixed ID and read-only capability.
 - Hermes fails closed if it cannot prove enforced read-only operation.
+- Do not infer worker or cluster readiness from a visible Tailnet peer or discovered model endpoint.
 - Do not fix connectivity by exposing an unauthenticated worker on a public or wildcard interface.
+
+Voice setup never speaks worker credentials or token paths. Mount or repair the
+token privately, then rerun `Check voice setup.`
+
+## Tailnet discovery returns no peers or models
+
+- Sign in as an administrator. Normal users cannot list or probe Tailnet peers.
+- Request `tailnet_peers` first. It lists short-lived opaque IDs without probing
+  any peer; hostnames, addresses, and Tailnet names are intentionally absent.
+- Probe only explicitly selected IDs with `tailnet_probe`, repeating
+  `peer_id=OPAQUE_ID` for no more than five IDs. Re-list peers if an ID expires.
+- A selected peer may legitimately expose no supported model-list target.
+- Check the existing Tailscale connection outside Voice Orb if the list is
+  empty. Do not solve discovery by running `tailscale up`, changing ACLs or
+  Funnel, enrolling devices, scanning unselected peers, or widening a bind.
 
 ## Old UI remains after upgrade
 
@@ -54,4 +84,4 @@ Confirm the running source tag or image digest, then perform a normal reload. If
 
 ## Architecture or container failure
 
-The release gate covers Linux `amd64` and `arm64`. Inspect the manifest with `docker buildx imagetools inspect IMAGE@sha256:DIGEST`. Docker Desktop/WSL2 remain best-effort for the alpha.
+The release gate covers Linux `amd64` and `arm64`. Inspect the manifest with `docker buildx imagetools inspect IMAGE@sha256:DIGEST`. Docker Desktop/WSL2 remain best-effort for the beta.

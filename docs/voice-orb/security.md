@@ -1,6 +1,6 @@
 # Security model
 
-Voice Orb adds microphone, camera, local-media, and optional worker trust boundaries to an already powerful self-hosted application. Authentication stays enabled by default, and the alpha intentionally keeps its public capability set narrow.
+Voice Orb adds microphone, camera, local-media, and optional worker trust boundaries to an already powerful self-hosted application. Authentication stays enabled by default, and the beta intentionally keeps its public capability set narrow.
 
 ## Browser control boundary
 
@@ -20,7 +20,7 @@ Playback accepts an allowlisted manifest ID, never a caller URL or filesystem pa
 
 ## Worker boundary
 
-Workers are disabled until explicitly configured. The public alpha accepts `read_only` tasks only, rejects caller-provided approval elevation, uses fixed adapter IDs, and verifies ownership in broker helpers so internal callers cannot bypass route checks. Worker tokens come from files, not public status or request bodies.
+Workers are disabled until explicitly configured. The public beta accepts `read_only` tasks only, rejects caller-provided approval elevation, uses fixed adapter IDs, and verifies ownership in broker helpers so internal callers cannot bypass route checks. Worker tokens come from files, not public status or request bodies.
 
 Run worker services with least privilege, a dedicated OS account, a read-only execution profile, and a neutral workspace allowlist. Do not mount the Docker socket or writable host directories merely to make a worker pass a health check.
 

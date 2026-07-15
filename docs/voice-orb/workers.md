@@ -4,13 +4,13 @@ Workers are optional and disabled by default. A clean installation with no worke
 
 ## Fixed adapters
 
-| ID | Purpose | Alpha default |
+| ID | Purpose | Beta default |
 |---|---|---|
 | `pc-codex` | Codex bridge on an explicitly configured workstation | Disabled, read-only |
 | `hermes` | Hermes task service that advertises enforced read-only capability | Disabled, fail-closed |
 | `vps-codex` | Codex bridge on an explicitly configured server | Disabled, read-only |
 
-The alpha does not load arbitrary Python modules or accept caller-selected adapters. Labels, workspace allowlists, and capabilities come from neutral configuration and the worker's bounded health response.
+The beta does not load arbitrary Python modules or accept caller-selected adapters. Labels, workspace allowlists, and capabilities come from neutral configuration and the worker's bounded health response.
 
 ## Configuration
 
@@ -42,7 +42,7 @@ Hermes is ready only when `/v1/capabilities` reports run submission, SSE events,
 - Caller-supplied approval flags do not upgrade permission.
 - `pc-codex` and `vps-codex` must invoke their bridge in a read-only sandbox/profile.
 - Hermes remains unavailable unless its health/capability response proves that the service enforces read-only execution. A prompt telling Hermes not to write is not enforcement.
-- Approval prompts in the public alpha may only be denied or cancelled. Workspace-write approval is intentionally deferred.
+- Approval prompts in the public beta may only be denied or cancelled. Workspace-write approval is intentionally deferred.
 
 ## Lifecycle
 

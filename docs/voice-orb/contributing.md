@@ -1,6 +1,6 @@
 # Contributing to Voice Orb
 
-Open Voice Orb changes against the maintained fork's alpha branch. Follow the root `CONTRIBUTING.md` and keep each pull request focused.
+Open Voice Orb changes against the maintained fork's beta branch. Follow the root `CONTRIBUTING.md` and keep each pull request focused.
 
 ## Public-scope rules
 
@@ -8,7 +8,7 @@ Open Voice Orb changes against the maintained fork's alpha branch. Follow the ro
 - Never add private Mark Notes, `.whoami`, handovers, personal or client data, private topology, credentials, cloned voices, or unlicensed media.
 - Reuse Odysseus sessions, provider settings, Calendar paths, modals, SSE, and static modules before adding a new API.
 - Do not add arbitrary selectors, DOM/script execution, arbitrary URLs, caller-selected Python modules, or source-rewriting installers.
-- Keep workers disabled by default and read-only in the public alpha.
+- Keep workers disabled by default and read-only in the public beta.
 - Add no production dependency when the browser platform, Python standard library, or an existing dependency covers the requirement.
 - Keep camera capture user-initiated and ephemeral. Never add recording, background capture, face recognition, remote viewing, raw-frame persistence, or frame diagnostics.
 - Add media only through `static/voice-orb-media.json`, with a canonical same-origin path, explicit provenance/license, and immutable checksum. Arbitrary URLs, actor/JARVIS voice clones, copyrighted clips, and undeclared audio bundles are prohibited.
