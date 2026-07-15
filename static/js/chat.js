@@ -23,6 +23,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
+import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -1741,6 +1742,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
             if (data === '[DONE]') {
               _streamSawDone = true;
+              emitVoiceLifecycle('stream-complete', {
+                source: 'chat',
+                reason: 'completed',
+                sessionId: streamSessionId,
+              });
               // Always update background map if entry exists (even if user switched back)
               var bgDone = _backgroundStreams.get(streamSessionId);
               if (bgDone && !_isBg) {
@@ -3503,6 +3509,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   // defeating the whole point. Only the Stop button cancels the server run.
   export function abortCurrentRequest(stopServer = false) {
     if (currentAbort) {
+      emitVoiceLifecycle('stream-interrupted', {
+        source: 'chat',
+        reason: stopServer ? 'user' : 'navigation',
+        ...(_streamSessionId ? { sessionId: _streamSessionId } : {}),
+      });
       currentAbort.abort();
       // Don't set to null here - let catch block handle it
     }

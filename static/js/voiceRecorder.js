@@ -1,5 +1,7 @@
 // static/js/voiceRecorder.js
 
+import { emitVoiceLifecycle } from './voiceLifecycle.js';
+
 /**
  * Voice recording with optional Speech-to-Text transcription.
  *
@@ -15,6 +17,7 @@ let audioChunks = [];
 let isRecording = false;
 let recordingStartTime = null;
 let recordingInterval = null;
+let recordingStopReason = 'completed';
 
 // Browser STT state
 let _recognition = null;
@@ -152,12 +155,14 @@ export function startRecording(onFileCreated, showToast, showError) {
   // Check for secure context (getUserMedia requires HTTPS or localhost)
   if (!window.isSecureContext) {
     if (showError) showError('Microphone requires HTTPS. Use a reverse proxy with SSL or access via localhost.');
+    emitVoiceLifecycle('capture-stopped', { source: 'recorder', reason: 'unavailable' });
     _resetRecordingUI();
     return;
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     if (showError) showError('Microphone not supported in this browser.');
+    emitVoiceLifecycle('capture-stopped', { source: 'recorder', reason: 'unavailable' });
     _resetRecordingUI();
     return;
   }
@@ -176,6 +181,11 @@ export function startRecording(onFileCreated, showToast, showError) {
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop());
+        emitVoiceLifecycle('capture-stopped', {
+          source: 'recorder',
+          reason: recordingStopReason,
+        });
+        recordingStopReason = 'completed';
 
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         const provider = _sttProvider;
@@ -217,6 +227,11 @@ export function startRecording(onFileCreated, showToast, showError) {
 
       mediaRecorder.start();
       isRecording = true;
+      recordingStopReason = 'completed';
+      emitVoiceLifecycle('capture-started', {
+        source: 'recorder',
+        reason: 'started',
+      });
       recordingStartTime = new Date();
 
       // Start browser STT if that's the provider
@@ -230,6 +245,12 @@ export function startRecording(onFileCreated, showToast, showError) {
     })
     .catch(error => {
       console.error('Microphone access error:', error);
+      emitVoiceLifecycle('capture-stopped', {
+        source: 'recorder',
+        reason: error.name === 'NotAllowedError'
+          ? 'denied'
+          : (error.name === 'NotFoundError' ? 'unavailable' : 'error'),
+      });
       if (showError) {
         if (error.name === 'NotAllowedError') {
           showError('Microphone access denied. Check browser permissions.');
@@ -248,6 +269,7 @@ export function startRecording(onFileCreated, showToast, showError) {
  */
 export function stopRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
+    recordingStopReason = 'user';
     mediaRecorder.stop();
     // isRecording will be set to false in _resetRecordingUI called from onstop
   } else {

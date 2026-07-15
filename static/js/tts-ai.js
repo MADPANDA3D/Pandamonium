@@ -1,6 +1,8 @@
 // static/js/tts-ai.js
 // AI Text-to-Speech Module — supports server TTS and browser Web Speech API
 
+import { emitVoiceLifecycle } from './voiceLifecycle.js';
+
 class AITTSManager {
     constructor() {
         this.currentAudio = null;
@@ -23,9 +25,22 @@ class AITTSManager {
         this._streamButton = null;
         this._streamResetFn = null;
         this._streamDebounceTimer = null;
+        this._lifecycleActive = false;
 
         // Check if TTS service is available
         this.checkAvailability();
+    }
+
+    _emitLifecycleStarted() {
+        if (this._lifecycleActive) return;
+        this._lifecycleActive = true;
+        emitVoiceLifecycle('tts-started', { source: 'tts', reason: 'started' });
+    }
+
+    _emitLifecycleIdle(reason = 'completed', force = false) {
+        if (!this._lifecycleActive && !force) return;
+        this._lifecycleActive = false;
+        emitVoiceLifecycle('tts-idle', { source: 'tts', reason });
     }
 
     async checkAvailability() {
@@ -173,7 +188,7 @@ class AITTSManager {
 
     async play(text) {
         // Stop current audio if playing
-        this.stop();
+        this.stop('stopped');
 
         const plainText = this.extractPlainText(text);
         if (!plainText) return;
@@ -186,13 +201,24 @@ class AITTSManager {
             const audioUrl = await this.synthesize(text);
 
             this.currentAudio = new Audio(audioUrl);
-            await this.currentAudio.play();
+            const audio = this.currentAudio;
+            audio.addEventListener('ended', () => {
+                if (this.currentAudio === audio) this.currentAudio = null;
+                this.isPlaying = false;
+                this._emitLifecycleIdle('completed');
+            }, { once: true });
+            audio.addEventListener('error', () => {
+                if (this.currentAudio === audio) this.currentAudio = null;
+                this.isPlaying = false;
+                this._emitLifecycleIdle('error');
+            }, { once: true });
+            await audio.play();
             this.isPlaying = true;
-            // Note: onended should be set by the caller (addAITTSButton)
-            // to reset button state when audio finishes
+            this._emitLifecycleStarted();
 
         } catch (error) {
             console.error('Failed to play audio:', error);
+            this._emitLifecycleIdle('error', true);
             throw error;
         }
     }
@@ -206,19 +232,28 @@ class AITTSManager {
 
             utterance.onend = () => {
                 this.isPlaying = false;
+                this._emitLifecycleIdle('completed');
                 resolve();
             };
             utterance.onerror = (e) => {
                 this.isPlaying = false;
+                this._emitLifecycleIdle('error');
                 reject(new Error('Browser TTS error: ' + e.error));
             };
 
             window.speechSynthesis.speak(utterance);
             this.isPlaying = true;
+            this._emitLifecycleStarted();
         });
     }
 
-    stop() {
+    stop(reason = 'user') {
+        const hadActivity = this._lifecycleActive
+            || this.isPlaying
+            || this._processing
+            || this._streamActive
+            || this._queue.length > 0
+            || !!this.currentAudio;
         // Cancel streaming TTS
         this._streamActive = false;
         if (this._streamDebounceTimer) {
@@ -244,6 +279,7 @@ class AITTSManager {
             this.currentAudio = null;
             this.isPlaying = false;
         }
+        this._emitLifecycleIdle(reason, hadActivity);
     }
 
     /**
@@ -317,11 +353,13 @@ class AITTSManager {
                     audio.onended = () => {
                         this.isPlaying = false;
                         if (this.currentAudio === audio) this.currentAudio = null;
+                        this._emitLifecycleIdle('completed');
                         resolve();
                     };
                     audio.onerror = (e) => {
                         this.isPlaying = false;
                         if (this.currentAudio === audio) this.currentAudio = null;
+                        this._emitLifecycleIdle('error');
                         reject(new Error('Audio playback error'));
                     };
                     audio.onpause = () => {
@@ -331,9 +369,13 @@ class AITTSManager {
                     };
                     audio.play().then(() => {
                         this.isPlaying = true;
+                        this._emitLifecycleStarted();
                     }).catch(reject);
                 });
             }
+        } catch (error) {
+            this._emitLifecycleIdle('error', true);
+            throw error;
         } finally {
             if (resetFn) resetFn();
         }
@@ -511,7 +553,7 @@ export function addAITTSButton(messageElement, text) {
 // Stop audio when navigating away
 window.addEventListener('beforeunload', () => {
     if (window.aiTTSManager) {
-        window.aiTTSManager.stop();
+        window.aiTTSManager.stop('navigation');
     }
 });
 
