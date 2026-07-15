@@ -1036,12 +1036,16 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
     retry_task = None
     retry_requested = not delegations and _is_worker_retry_request(text)
     if retry_requested:
-        from src.jarvis_agent import get_task
+        from src.jarvis_agent import require_task_owner
 
         for snapshot in reversed(voice_session.get("tasks") or []):
-            candidate = get_task(str(snapshot.get("task_id") or ""))
+            try:
+                candidate = require_task_owner(str(snapshot.get("task_id") or ""), owner)
+            except (KeyError, PermissionError):
+                continue
             if (
                 candidate
+                and candidate.get("session_id") == chat_session_id
                 and candidate.get("status") in {"completed", "failed", "cancelled", "blocked"}
                 and candidate.get("worker") in WORKER_LABELS
                 and candidate.get("prompt")

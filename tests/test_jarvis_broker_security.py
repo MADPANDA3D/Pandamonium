@@ -48,7 +48,11 @@ def _task(**updates):
 def test_remote_resume_cursor_uses_last_stable_worker_event_id():
     task = _task(events=[
         {"type": "accepted", "event_id": "broker-accepted"},
-        {"type": "progress", "event_id": "remote-1"},
+        {
+            "type": "progress",
+            "event_id": "remote-1",
+            "metadata": {"remote_event_id": "remote-1"},
+        },
         {"type": "result", "event_id": "reconciled", "metadata": {"reconciled": True}},
     ])
 
@@ -110,15 +114,77 @@ async def test_codex_stream_reconnect_sends_last_stable_event_id(tmp_path, monke
         remote_task_id="remote-task",
         events=[
             {"type": "accepted", "event_id": "broker-accepted"},
-            {"type": "progress", "event_id": "remote-1"},
+            {
+                "type": "progress",
+                "event_id": "remote-1",
+                "metadata": {"remote_event_id": "remote-1"},
+            },
         ],
     )
 
     events = [event async for event in adapter.events(task)]
 
     assert events[0]["event_id"] == "remote-2"
+    assert events[0]["metadata"]["remote_event_id"] == "remote-2"
     assert captured["params"] == {"after": -1}
     assert captured["headers"]["Last-Event-ID"] == "remote-1"
+
+
+@pytest.mark.asyncio
+async def test_hermes_stream_uses_sse_cursor_and_keeps_idless_repeats(tmp_path, monkeypatch):
+    captured = {}
+
+    class Response:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_lines(self):
+            yield "id: hermes-2"
+            yield 'data: {"event":"reasoning.available","text":"same"}'
+            yield 'data: {"event":"reasoning.available","text":"same"}'
+            yield 'data: {"event":"reasoning.available","text":"same"}'
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, method, url, headers):
+            captured.update(method=method, url=url, headers=headers)
+            return Response()
+
+    token = tmp_path / "token"
+    token.write_text("secret", encoding="utf-8")
+    adapter = HermesRunsAdapter("http://hermes.test", token, enabled=True)
+    monkeypatch.setattr(agent_worker_adapters.httpx, "AsyncClient", Client)
+    task = _task(
+        worker="hermes",
+        events=[{
+            "type": "progress",
+            "event_id": "hermes-1",
+            "metadata": {"remote_event_id": "hermes-1"},
+        }],
+    )
+
+    events = [event async for event in adapter.events(task)]
+
+    assert captured["headers"]["Last-Event-ID"] == "hermes-1"
+    assert events[0]["event_id"] == "hermes-2"
+    assert events[0]["metadata"]["remote_event_id"] == "hermes-2"
+    assert events[1]["event_id"] != events[2]["event_id"]
+    assert "remote_event_id" not in events[1]["metadata"]
+    assert "remote_event_id" not in events[2]["metadata"]
 
 
 @pytest.mark.asyncio

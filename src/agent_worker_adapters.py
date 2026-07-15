@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
+import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Protocol
@@ -51,10 +51,10 @@ def _require_read_only_task(task: dict[str, Any]) -> None:
 
 def _last_remote_event_id(task: dict[str, Any]) -> str:
     for event in reversed(task.get("events") or []):
-        event_id = str(event.get("event_id") or "")
         metadata = event.get("metadata") or {}
-        if event_id and event.get("type") != "accepted" and not metadata.get("reconciled"):
-            return event_id
+        remote_event_id = str(metadata.get("remote_event_id") or "")
+        if remote_event_id:
+            return remote_event_id
     return ""
 
 
@@ -148,6 +148,9 @@ class CodexBridgeAdapter:
                     event.pop("seq", None)
                     event["worker"] = self.worker
                     metadata = dict(event.get("metadata") or {})
+                    remote_event_id = str(event.get("event_id") or "")
+                    if remote_event_id:
+                        metadata["remote_event_id"] = remote_event_id
                     thread_id = metadata.get("codex_thread_id")
                     if thread_id:
                         metadata["codex_deep_link"] = f"codex://threads/{thread_id}"
@@ -243,19 +246,26 @@ class HermesRunsAdapter:
                 headers=headers,
             ) as response:
                 response.raise_for_status()
+                sse_event_id = ""
                 async for line in response.aiter_lines():
+                    if line.startswith("id:"):
+                        sse_event_id = line[3:].strip()
+                        continue
                     if not line.startswith("data: "):
                         continue
                     raw = json.loads(line[6:])
                     event = self._normalize(raw)
                     if event:
-                        event.setdefault(
-                            "event_id",
-                            str(raw.get("event_id") or raw.get("id") or hashlib.sha256(
-                                json.dumps(raw, sort_keys=True, default=str).encode()
-                            ).hexdigest()),
+                        remote_event_id = str(
+                            sse_event_id or raw.get("event_id") or raw.get("id") or ""
                         )
+                        metadata = dict(event.get("metadata") or {})
+                        if remote_event_id:
+                            metadata["remote_event_id"] = remote_event_id
+                        event["metadata"] = metadata
+                        event["event_id"] = remote_event_id or str(uuid.uuid4())
                         yield event
+                    sse_event_id = ""
 
     def _normalize(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         kind = str(raw.get("event") or "")

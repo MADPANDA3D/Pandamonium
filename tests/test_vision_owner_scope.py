@@ -119,6 +119,62 @@ def test_byte_vision_analysis_rejects_unvalidated_input(monkeypatch):
     }
 
 
+def test_byte_vision_analysis_rejects_echoed_inline_frame(monkeypatch):
+    image_bytes = b"private-camera-frame"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    monkeypatch.setattr(
+        dp,
+        "_load_vl_settings",
+        lambda: {"vision_enabled": True, "vision_model": "vision-primary"},
+    )
+    monkeypatch.setattr(
+        dp,
+        "_resolve_vl_model",
+        lambda _configured, owner=None: ("http://vision.test", "vision-primary", {}),
+    )
+    monkeypatch.setattr(
+        dp,
+        "llm_call",
+        lambda *_args, **_kwargs: f"data:image/png;base64,{encoded}",
+    )
+    from src import endpoint_resolver
+
+    monkeypatch.setattr(endpoint_resolver, "resolve_vision_fallback_candidates", lambda owner=None: [])
+
+    result = dp.analyze_image_bytes_with_vl_result(image_bytes, "image/png", owner="alice")
+    assert result == {
+        "text": "[Vision response rejected because it contained inline image data]",
+        "model": "vision-primary",
+    }
+    assert encoded not in result["text"]
+
+
+def test_byte_vision_errors_never_log_upstream_response_body(monkeypatch, caplog):
+    secret_echo = "data:image/png;base64," + ("A" * 700)
+    monkeypatch.setattr(
+        dp,
+        "_load_vl_settings",
+        lambda: {"vision_enabled": True, "vision_model": "vision-primary"},
+    )
+    monkeypatch.setattr(
+        dp,
+        "_resolve_vl_model",
+        lambda _configured, owner=None: ("http://vision.test", "vision-primary", {}),
+    )
+    monkeypatch.setattr(
+        dp,
+        "llm_call",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(secret_echo)),
+    )
+    from src import endpoint_resolver
+
+    monkeypatch.setattr(endpoint_resolver, "resolve_vision_fallback_candidates", lambda owner=None: [])
+
+    result = dp.analyze_image_bytes_with_vl_result(b"frame", "image/png", owner="alice")
+    assert result["text"].startswith("[VL model unavailable")
+    assert secret_echo not in caplog.text
+
+
 def test_request_vision_call_sites_pass_owner():
     chat_source = (ROOT / "src" / "chat_handler.py").read_text()
     processor_source = (ROOT / "src" / "document_processor.py").read_text()

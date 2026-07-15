@@ -217,12 +217,20 @@ async def test_do_it_again_replays_the_latest_completed_worker_request(monkeypat
         "task_id": "old-document-task",
         "worker": "pc-codex",
         "workspace": "home-lab",
+        "session_id": "chat-1",
+        "owner": "leo",
         "status": "failed",
         "prompt": "Open Mark 6 in Odysseus with ODYSSEUS_ARTIFACT.",
     }
     calls = []
 
-    monkeypatch.setattr(jarvis_agent, "get_task", lambda task_id: previous if task_id == previous["task_id"] else None)
+    monkeypatch.setattr(
+        jarvis_agent,
+        "require_task_owner",
+        lambda task_id, owner: previous
+        if task_id == previous["task_id"] and owner == previous["owner"]
+        else (_ for _ in ()).throw(PermissionError("task_owner_mismatch")),
+    )
 
     async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
         calls.append((worker, workspace, prompt))
@@ -246,6 +254,35 @@ async def test_do_it_again_replays_the_latest_completed_worker_request(monkeypat
     assert calls == [("pc-codex", "home-lab", previous["prompt"])]
     assert next(event for event in events if event["type"] == "agent_task")["foreground"] is False
     assert events[-1]["diagnostics"]["guard_reason"] == "delegation_started_pc-codex"
+
+
+@pytest.mark.asyncio
+async def test_do_it_again_never_replays_another_owners_task(monkeypatch):
+    monkeypatch.setattr(
+        jarvis_agent,
+        "require_task_owner",
+        lambda _task_id, _owner: (_ for _ in ()).throw(PermissionError("task_owner_mismatch")),
+    )
+
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("cross-owner retry must not dispatch")
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-alice",
+            "Ask it to do it again",
+            "alice",
+            {
+                "target": "jarvis",
+                "workspace": "home-lab",
+                "tasks": [{"task_id": "task-owned-by-bob"}],
+            },
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["assistant_delta", "final"]
+    assert events[-1]["diagnostics"]["guard_reason"] == "retry_task_missing"
 
 
 @pytest.mark.asyncio

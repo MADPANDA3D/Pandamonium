@@ -5,6 +5,7 @@ import os
 import logging
 import mimetypes
 import base64
+import re
 import tempfile
 from typing import List, Dict, Any
 
@@ -407,6 +408,18 @@ def analyze_image_bytes_with_vl_result(
         for i, (_url, _model, _headers) in enumerate(unique_candidates):
             try:
                 description = llm_call(_url, _model, vl_messages, headers=_headers, timeout=120)
+                description = str(description or "").strip()
+                if (
+                    f"data:image/{img_format};base64," in description.casefold()
+                    or img_data in description
+                    or re.search(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{512,}={0,2}(?![A-Za-z0-9+/])", description)
+                ):
+                    logger.warning("Vision response rejected because it contained inline media data")
+                    return {
+                        "text": "[Vision response rejected because it contained inline image data]",
+                        "model": _model,
+                    }
+                description = description[:8_000]
                 logger.info("VL analysis complete with model %s", _model)
                 return {"text": description, "model": _model}
             except Exception as e:
@@ -417,7 +430,7 @@ def analyze_image_bytes_with_vl_result(
         raise last_err if last_err else RuntimeError("No vision model endpoint configured")
 
     except Exception as e:
-        logger.error(f"VL model unavailable: {e}")
+        logger.error("VL model unavailable: %s", type(e).__name__)
         return {"text": "[VL model unavailable - image not analyzed]", "model": ""}
 
 
@@ -430,7 +443,7 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
         image_format = os.path.splitext(image_path)[1] or ".jpeg"
         return analyze_image_bytes_with_vl_result(image_bytes, image_format, owner=owner)
     except Exception as e:
-        logger.error(f"VL model unavailable: {e}")
+        logger.error("VL model unavailable: %s", type(e).__name__)
         return {"text": "[VL model unavailable - image not analyzed]", "model": ""}
 
 
