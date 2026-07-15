@@ -34,9 +34,16 @@ Choose one in Settings:
 
 Server-generated TTS may use the existing Odysseus cache under `data/tts_cache/`. See the [privacy lifecycle](privacy.md).
 
+## Vision
+
+Visual description reuses the existing owner-scoped Odysseus model settings. Voice Orb first tries the active conversation model when that endpoint reports or matches a vision-capable model. It then uses the configured Vision model and its existing Vision fallback chain. No remote or paid vision model is selected, prewarmed, or provisioned automatically.
+
+Only the exact `What do you see?` or `Describe what you see.` command sends one current frame. If no vision-capable model succeeds, the Orb says that it could not analyze the frame; it does not silently route the image to an unrelated provider.
+
 ## Provider checks
 
 1. Confirm a normal text chat completes with the selected model.
 2. Open Settings and test STT and TTS independently.
 3. Open Voice Orb and grant microphone permission.
 4. If an endpoint fails, check the endpoint's own health and Odysseus logs; the public status response intentionally omits credentials and endpoint URLs.
+5. For camera description, enable Vision in Settings and test the selected Vision model with a normal image before using Voice Orb.

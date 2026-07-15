@@ -10,6 +10,8 @@ Open Voice Orb changes against the maintained fork's alpha branch. Follow the ro
 - Do not add arbitrary selectors, DOM/script execution, arbitrary URLs, caller-selected Python modules, or source-rewriting installers.
 - Keep workers disabled by default and read-only in the public alpha.
 - Add no production dependency when the browser platform, Python standard library, or an existing dependency covers the requirement.
+- Keep camera capture user-initiated and ephemeral. Never add recording, background capture, face recognition, remote viewing, raw-frame persistence, or frame diagnostics.
+- Add media only through `static/voice-orb-media.json`, with a canonical same-origin path, explicit provenance/license, and immutable checksum. Arbitrary URLs, actor/JARVIS voice clones, copyrighted clips, and undeclared audio bundles are prohibited.
 
 ## Required checks
 
@@ -18,6 +20,9 @@ git diff --check
 python -m compileall -q app.py core routes src services scripts tests
 node tests/test_foreground_control.js
 node tests/test_voice_orb.js
+node tests/test_voice_orb_media.js
+python scripts/voice_orb_public_scrub.py --self-test
+python scripts/voice_orb_public_scrub.py
 python -m pytest -q
 docker compose config --quiet
 npm ci

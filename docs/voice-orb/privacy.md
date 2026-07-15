@@ -20,7 +20,15 @@ Worker prompts, progress, and results may be retained in owner-scoped broker sta
 
 ## Camera
 
-v0.1 does not request camera access, attach a video surface, capture frames, or perform visual analysis. Camera support belongs to a separately reviewed v0.2 release with its own permission and deletion tests.
+Camera use is user-initiated. `Open your eyes.` requests browser permission and displays the live camera beneath the transparent orb canvas; the browser's camera-use indicator remains authoritative. Camera and clip playback are mutually exclusive.
+
+`What do you see?` and `Describe what you see.` capture one current frame. The request accepts JPEG or PNG only, no larger than 1024 by 576 and approximately 1 MiB decoded. Odysseus validates base64, declared MIME, image signature, and dimensions. The frame exists only in browser/request memory: Voice Orb does not save it, cache it, add it to diagnostics, or log its bytes. Normal history retains only the spoken question, resulting description, and model metadata.
+
+Every camera track stops on `Close your eyes.`, End Voice, voice error, permission loss, track-ended, page hide, hidden-page transition, or a switch to clip playback. A generation token prevents a late permission response from reopening a stopped camera. This release does not continuously sample, record, identify faces, monitor remotely, or retain camera imagery.
+
+## Built-in media
+
+Clip playback accepts a same-origin manifest ID only. v0.2 includes one first-party silent abstract demonstration loop dedicated under CC0 1.0; its source, attribution, license, and SHA-256 checksum are recorded in the media manifest and provenance README. It includes no actor likeness, cloned voice, third-party audio, or copyrighted motivational footage. Large clips are not placed in the service-worker cache.
 
 ## Public repository boundary
 

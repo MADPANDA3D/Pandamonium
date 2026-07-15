@@ -26,7 +26,7 @@
 
 ## Odysseus Voice Orb alpha
 
-This maintained fork adds an authenticated, first-party voice surface, bounded foreground controls, and optional read-only worker delegation. It is an alpha fork distribution, **not an installable Odysseus plugin**; upstream does not yet expose a stable application-plugin contract.
+This maintained fork adds an authenticated, first-party voice surface, bounded foreground controls, optional read-only worker delegation, and user-initiated camera/media controls. It is an alpha fork distribution, **not an installable Odysseus plugin**; upstream does not yet expose a stable application-plugin contract.
 
 The alpha works with no workers configured and uses the current/default Odysseus model unless an operator chooses an explicit voice-model override. Start with the [Voice Orb overview](docs/voice-orb/README.md), then read [installation](docs/voice-orb/install.md), [provider setup](docs/voice-orb/providers.md), and the [security model](docs/voice-orb/security.md).
 
@@ -50,7 +50,7 @@ Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration
 ## Features
 
 - **Chat + Agents** — local/API models, tools, MCP, files, shell, skills, and memory.
-- **Voice Orb (alpha fork)** — interruptible speech, synthesized cues, safe view controls, and optional read-only workers.
+- **Voice Orb (alpha fork)** — interruptible speech, safe view controls, optional read-only workers, and bounded camera/media commands.
 - **Cookbook** — hardware-aware model recommendations, downloads, and serving.
 - **Deep Research** — multi-step web research with source reading and report generation.
 - **Compare** — blind side-by-side model testing and synthesis.
