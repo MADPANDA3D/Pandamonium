@@ -26,6 +26,17 @@ def _token(path: Path) -> str:
         return ""
 
 
+def _health_failure(exc: Exception) -> dict[str, str]:
+    """Return a stable, non-sensitive connection failure classification."""
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    error_code = str(exc) if isinstance(exc, RuntimeError) else ""
+    if error_code.endswith("_token_missing"):
+        return {"state": "auth_required", "reason": "token_missing"}
+    if status_code in {401, 403}:
+        return {"state": "auth_required", "reason": "authentication_failed"}
+    return {"state": "unreachable", "reason": "connection_failed"}
+
+
 def _hermes_run_features(features: dict[str, Any]) -> dict[str, bool]:
     """Normalize Hermes capability names across compatible API revisions."""
     return {
@@ -213,10 +224,16 @@ class CodexBridgeAdapter:
             async with httpx.AsyncClient(timeout=5) as client:
                 response = await client.get(f"{self.url}/health")
             response.raise_for_status()
-            return {"state": "connected", "machine": self.machine, **response.json()}
+            payload = response.json()
+            payload = payload if isinstance(payload, dict) else {}
+            return {
+                "state": "connected",
+                "machine": self.machine,
+                "protocol": "codex-bridge",
+                "protocol_ready": bool(payload.get("app_server")),
+            }
         except Exception as exc:
-            state = "auth_required" if "token_missing" in str(exc) or "401" in str(exc) else "unreachable"
-            return {"state": state, "machine": self.machine, "error": str(exc)[:160]}
+            return {"machine": self.machine, **_health_failure(exc)}
 
 
 class HermesRunsAdapter:
@@ -357,16 +374,26 @@ class HermesRunsAdapter:
                 public.raise_for_status()
                 capabilities = await client.get(f"{self.url}/v1/capabilities", headers=self._headers())
             capabilities.raise_for_status()
-            features = capabilities.json().get("features") or {}
-            return {
+            capabilities_payload = capabilities.json()
+            features = (
+                capabilities_payload.get("features") or {}
+                if isinstance(capabilities_payload, dict)
+                else {}
+            )
+            public_payload = public.json()
+            public_payload = public_payload if isinstance(public_payload, dict) else {}
+            result = {
                 "state": "connected",
                 "machine": self.machine,
-                "version": public.json().get("version"),
+                "protocol": "hermes-runs",
                 **_hermes_run_features(features),
             }
+            version = str(public_payload.get("version") or "").strip()
+            if version:
+                result["version"] = version[:80]
+            return result
         except Exception as exc:
-            state = "auth_required" if "token_missing" in str(exc) or "401" in str(exc) else "unreachable"
-            return {"state": state, "machine": self.machine, "error": str(exc)[:160]}
+            return {"machine": self.machine, **_health_failure(exc)}
 
 
 PC_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/odysseus-agent-bridge-token"))
@@ -403,18 +430,27 @@ def worker_catalog() -> dict[str, dict[str, Any]]:
     return {
         "pc-codex": {
             "enabled": registry["pc-codex"].enabled,
+            "configured": registry["pc-codex"].enabled,
+            "ready": False,
+            "adapter": "codex-bridge",
             "machine": "Local workstation",
             "capabilities": ["local_files", "madpanda3d", "business", "home_lab", "code", "artifacts"],
             "workspaces": ["madpanda3d", "business", "home-lab", "project-linux"],
         },
         "hermes": {
             "enabled": registry["hermes"].enabled,
+            "configured": registry["hermes"].enabled,
+            "ready": False,
+            "adapter": "hermes-runs",
             "machine": "Hermes laptop",
             "capabilities": ["remote_agent", "approvals", "session_memory"],
             "workspaces": ["home-lab"],
         },
         "vps-codex": {
             "enabled": registry["vps-codex"].enabled,
+            "configured": registry["vps-codex"].enabled,
+            "ready": False,
+            "adapter": "codex-bridge",
             "machine": "Remote server",
             "capabilities": ["vps_code", "vps_observer", "vps_operations"],
             "workspaces": ["vps-ops"],

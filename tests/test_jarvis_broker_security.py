@@ -61,6 +61,79 @@ def test_remote_resume_cursor_uses_last_stable_worker_event_id():
 
 
 @pytest.mark.asyncio
+async def test_worker_health_redacts_transport_details(tmp_path, monkeypatch):
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            raise RuntimeError("dial failed at http://private-host.test:8040/?token=secret")
+
+    token = tmp_path / "token"
+    token.write_text("secret", encoding="utf-8")
+    adapter = CodexBridgeAdapter(
+        "pc-codex", "http://private-host.test:8040", token, enabled=True, machine="test"
+    )
+    monkeypatch.setattr(agent_worker_adapters.httpx, "AsyncClient", Client)
+
+    health = await adapter.health()
+
+    assert health == {
+        "machine": "test",
+        "state": "unreachable",
+        "reason": "connection_failed",
+    }
+    assert "private-host" not in json.dumps(health)
+    assert "secret" not in json.dumps(health)
+
+
+@pytest.mark.asyncio
+async def test_worker_status_reports_configuration_and_readiness(monkeypatch):
+    class Adapter:
+        enabled = True
+
+        async def health(self):
+            return {
+                "state": "connected",
+                "machine": "test",
+                "protocol": "codex-bridge",
+                "protocol_ready": True,
+            }
+
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": Adapter()})
+    monkeypatch.setattr(
+        jarvis_agent,
+        "worker_catalog",
+        lambda: {
+            "pc-codex": {
+                "enabled": True,
+                "configured": True,
+                "ready": False,
+                "adapter": "codex-bridge",
+                "capabilities": ["code"],
+                "workspaces": ["workspace"],
+            }
+        },
+    )
+
+    status = (await jarvis_agent.worker_statuses())["pc-codex"]
+
+    assert status["configured"] is True
+    assert status["ready"] is True
+    assert status["enabled"] is True
+    assert status["adapter"] == "codex-bridge"
+    assert status["connection"]["state"] == "connected"
+    assert "url" not in status["connection"]
+    assert "error" not in status["connection"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["codex", "hermes"])
 async def test_worker_adapters_reject_write_or_preapproved_tasks_before_network(
     tmp_path, adapter_kind, monkeypatch

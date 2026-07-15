@@ -724,10 +724,14 @@ async def worker_statuses() -> dict[str, dict[str, Any]]:
     registry = adapters()
     results = await asyncio.gather(*(adapter.health() for adapter in registry.values()))
     for (worker, adapter), health in zip(registry.items(), results):
+        configured = bool(adapter.enabled)
+        ready = configured and health.get("state") == "connected"
         catalog[worker] = {
             **catalog[worker],
             "connection": health,
-            "enabled": adapter.enabled and health.get("state") == "connected",
+            "configured": configured,
+            "ready": ready,
+            "enabled": ready,
         }
     return catalog
 
