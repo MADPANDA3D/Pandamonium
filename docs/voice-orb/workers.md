@@ -48,7 +48,7 @@ Hermes is ready only when `/v1/capabilities` reports run submission, SSE events,
 
 The broker records stable event IDs, accepts only the first terminal worker event, retries a broken event stream twice from the last event ID, and performs one bounded status reconciliation. End Voice stops microphone and playback but does not silently cancel an already delegated task. A user may cancel one worker while another continues.
 
-Only an interactive Odysseus user session may invoke voice orchestration. Bearer API tokens cannot start or steer v0.1 voice workers, and task/session ownership is enforced inside broker helpers as well as routes.
+Only an interactive Odysseus user session may invoke voice orchestration. Bearer API tokens cannot start or steer Voice Orb workers, and task/session ownership is enforced inside broker helpers as well as routes.
 
 ## Health output
 

@@ -2,7 +2,7 @@
 
 ## The Orb says voice mode is unavailable
 
-1. Confirm you are signed in through the browser; v0.1 does not permit bearer-token voice orchestration.
+1. Confirm you are signed in through the browser; Voice Orb does not permit bearer-token voice orchestration.
 2. Confirm a normal text chat works with the current/default model.
 3. Check `/api/voice/status` while authenticated. It should report bounded STT/TTS readiness without endpoint secrets.
 4. Review `docker compose logs --tail=200 odysseus` for error categories. Do not paste unredacted logs into a public issue.
@@ -14,7 +14,23 @@
 - Close another application holding the device exclusively.
 - End Voice and reopen it after changing permission.
 
-The camera is intentionally unused in v0.1.
+## Camera permission fails or stays pending
+
+- Use `http://localhost` or HTTPS and allow camera access for the exact origin.
+- Say the single-purpose command `Open your eyes.`; compound open-and-describe phrases are intentionally unsupported in v0.2.
+- If the ideal 1024 by 576 request is overconstrained, Voice Orb retries once with generic video constraints.
+- End Voice, hide the page, or say `Close your eyes.` before retrying. A stopped pending request cannot reopen the camera later.
+- If the browser reports permission loss or the camera track ends, Voice Orb closes the camera automatically.
+
+If the camera indicator or hardware LED remains active after any stop path, close the tab, revoke site permission, and report the browser/OS and reproduction steps without attaching captured imagery.
+
+## The Orb cannot describe what it sees
+
+Open the camera first, wait for a visible live frame, then use exactly `What do you see?` or `Describe what you see.` Configure and test a Vision model in Settings. The active conversation model is tried first only when vision-capable, followed by the configured Vision model and fallback chain. Failure does not persist or reroute the frame elsewhere.
+
+## The motivational visual does not play
+
+Use exactly `I need something motivational.` Voice Orb plays the local `motivational-abstract` manifest ID, not a URL. Confirm `/static/voice-orb-media.json` and its same-origin WebM return successfully. The bundled demonstration is silent by design; spoken feedback still comes from the configured TTS provider. A checksum or manifest mismatch is a release defect, not a reason to bypass the allowlist.
 
 ## There is text but no speech
 

@@ -1,11 +1,11 @@
-# Install the v0.1 alpha
+# Install the v0.2 alpha
 
-The source tag and container tag for the first release are `voice-orb-v0.1.0-alpha.1`. Verify the tag exists before relying on these commands.
+The source and container tag for this release is `voice-orb-v0.2.0-alpha.1`. The prior `voice-orb-v0.1.0-alpha.1` tag remains an immutable camera-free rollback point. Verify a tag exists before relying on these commands.
 
 ## Source install with Docker Compose
 
 ```bash
-git clone --branch voice-orb-v0.1.0-alpha.1 --depth 1 https://github.com/MADPANDA3D/odysseus.git
+git clone --branch voice-orb-v0.2.0-alpha.1 --depth 1 https://github.com/MADPANDA3D/odysseus.git
 cd odysseus
 cp .env.example .env
 docker compose config --quiet
@@ -14,7 +14,7 @@ docker compose up -d --build
 
 Open `http://localhost:7000`. Read the generated first-admin password from `docker compose logs odysseus`, sign in interactively, and replace that password immediately. Keep `AUTH_ENABLED=true` and `LOCALHOST_BYPASS=false` for Docker, LAN, reverse-proxy, and shared installations.
 
-The Voice Orb works without a worker. Configure a normal Odysseus model first, then choose STT and TTS in Settings. Microphone APIs require `localhost` or HTTPS.
+The Voice Orb works without a worker. Configure a normal Odysseus model first, then choose STT, TTS, and an optional Vision model in Settings. Browser microphone and camera APIs require `localhost` or HTTPS. Camera permission is requested only after the exact `Open your eyes.` command.
 
 ## Immutable container install
 
@@ -40,6 +40,6 @@ Copy only the settings you need from `docs/voice-orb/voice-orb.env.example` into
 
 ## Upgrade and rollback
 
-Back up `data/` before changing versions. Pull or check out an immutable release tag, run `docker compose config --quiet`, then recreate the app. Roll back by restoring the previous source tag or image digest; v0.1 adds no database migration and its request fields are optional.
+Back up `data/` before changing versions. Pull or check out an immutable release tag, run `docker compose config --quiet`, then recreate the app. Roll back by restoring the previous source tag or image digest. v0.2 adds no database migration; its client-state and frame request fields are optional. Use `voice-orb-v0.1.0-alpha.1` to remove the camera/media capability entirely.
 
 Docker Desktop and WSL2 are best-effort for this alpha. Linux `amd64` and `arm64` are the release-gated platforms.
