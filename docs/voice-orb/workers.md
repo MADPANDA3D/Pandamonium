@@ -54,6 +54,10 @@ Only an interactive Odysseus user session may invoke voice orchestration. Bearer
 
 Normal status may expose only `configured`, `ready`, adapter ID, bounded capabilities, neutral workspace identifiers, and connection state. Endpoint URLs, IP addresses, token paths, token contents, and raw upstream errors must not be returned.
 
+The Voice Orb setup summary is narrower: it includes only each fixed worker ID,
+`configured`, `ready`, a normalized status, and at most 16 logical capability
+names. It omits workspace names and connection reasons entirely.
+
 ## Voice commands
 
 With one approved workspace, use exact commands such as “Ask PC Codex to inspect the failing tests,” “Ask Hermes to summarize the current project state,” or “Cancel PC Codex.” When a worker has several workspaces, name one: “Ask PC Codex in demo to inspect the failing tests.”

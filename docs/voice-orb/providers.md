@@ -47,3 +47,17 @@ Only the exact `What do you see?` or `Describe what you see.` command sends one 
 3. Open Voice Orb and grant microphone permission.
 4. If an endpoint fails, check the endpoint's own health and Odysseus logs; the public status response intentionally omits credentials and endpoint URLs.
 5. For camera description, enable Vision in Settings and test the selected Vision model with a normal image before using Voice Orb.
+
+## Authenticated setup check
+
+`GET /api/voice/status` includes a versioned `setup` object for an authenticated
+interactive user. It reports whether a voice model resolves, whether STT and TTS
+are available, the selected provider kind, the current bounded voice name, and
+health/capability summaries for only the three fixed optional workers. Optional
+workers do not determine `core_ready`.
+
+The exact spoken command `Check voice setup.` returns the same `setup` object and
+the same server-generated `guidance` and `text` fields. Compound variants are not
+setup commands. The response never includes endpoint URLs, private addresses,
+workspace names, token values or paths, or raw source errors, and it never speaks
+credential setup instructions.

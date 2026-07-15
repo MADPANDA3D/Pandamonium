@@ -28,7 +28,15 @@ Run worker services with least privilege, a dedicated OS account, a read-only ex
 
 Keep Odysseus on loopback or behind an authenticated HTTPS reverse proxy/private access gateway. Keep model and worker ports private. Restrict `ALLOWED_ORIGINS`, set `SECURE_COOKIES=true` behind HTTPS, and never enable the development localhost bypass on a shared deployment.
 
-v0.2 performs no Tailnet discovery, port scanning, ACL changes, Funnel configuration, device enrollment, or wildcard-interface binding.
+Default model discovery never reads Tailscale state. Tailnet discovery is an
+admin-only, explicit two-step operation: `tailnet_peers` returns short-lived
+opaque IDs without probing, then `tailnet_probe` accepts no more than five IDs
+from that listing and checks only fixed model-list targets. Results omit peer
+hostnames, addresses, Tailnet names, URLs, and raw errors.
+
+This path performs no agent discovery, blind or unselected Tailnet scan,
+`tailscale up`, ACL or Funnel change, device enrollment, or wildcard-interface
+binding. Unknown discovery modes fail closed.
 
 ## Release controls
 
