@@ -508,7 +508,13 @@ async def _mirror(task_id: str) -> None:
                         return
                     event = await _enrich_worker_event(task, event)
                     _append_event(task_id, event)
-                return
+                if (get_task(task_id) or {}).get("status") in TERMINAL:
+                    return
+                last_error = RuntimeError("worker_stream_ended_before_terminal_event")
+                if attempt < STREAM_RETRY_LIMIT:
+                    await asyncio.sleep(0)
+                    continue
+                break
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

@@ -182,6 +182,7 @@ async def test_every_third_progress_summary_is_per_task_and_milestone_resets_win
             for index, text in enumerate(updates[task["task_id"]]):
                 metadata = {"milestone": True} if text == "A milestone" else {}
                 yield {"type": "progress", "text": text, "metadata": metadata}
+            yield {"type": "cancelled", "text": "Test stream complete."}
 
     calls = []
 

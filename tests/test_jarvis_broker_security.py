@@ -336,6 +336,39 @@ async def test_worker_stream_retries_twice_and_dedupes_replay(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_worker_stream_retries_clean_eof_until_terminal(tmp_path, monkeypatch):
+    class Adapter:
+        def __init__(self):
+            self.calls = 0
+
+        async def events(self, _task):
+            self.calls += 1
+            if self.calls == 3:
+                yield {"event_id": "result-1", "type": "result", "text": "Done."}
+            return
+
+    async def passthrough(_task, event):
+        return event
+
+    adapter = Adapter()
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
+    monkeypatch.setattr(jarvis_agent, "_MIRRORS", {})
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": adapter})
+    monkeypatch.setattr(jarvis_agent, "_enrich_worker_event", passthrough)
+    jarvis_agent._save_task(_task())
+
+    await jarvis_agent._mirror("task-1")
+
+    saved = jarvis_agent.get_task("task-1")
+    assert adapter.calls == 3
+    assert [(event["event_id"], event["type"]) for event in saved["events"]] == [
+        ("result-1", "result"),
+    ]
+    assert saved["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_model_task_tools_forward_owner_and_reject_missing_identity(monkeypatch):
     captured = {}
 
