@@ -22,6 +22,7 @@ from core.atomic_io import atomic_write_json
 from core.models import ChatMessage
 from src.action_intents import classify_tool_intent
 from src.auth_helpers import require_user
+from src.agent_worker_broker import find_active_task, start_task, task_action, worker_statuses
 from src.constants import DATA_DIR
 from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
 from src.llm_core import stream_llm
@@ -161,6 +162,30 @@ def _foreground_command(text: str) -> tuple[str, str | None] | None:
         "minimize this document": ("minimize_view", "document"),
         "what view is open": ("report_view_state", None),
     }.get(normalized)
+
+
+_WORKER_NAMES = {
+    "pc codex": ("pc-codex", "PC Codex"),
+    "hermes": ("hermes", "Hermes"),
+    "vps codex": ("vps-codex", "VPS Codex"),
+}
+
+
+def _worker_command(text: str) -> tuple[str, str, str, str | None, str | None] | None:
+    normalized = re.sub(r"[.!?]+$", "", text.strip(), flags=re.I).strip()
+    cancel = re.fullmatch(r"cancel\s+(pc codex|hermes|vps codex)", normalized, flags=re.I)
+    if cancel:
+        worker, label = _WORKER_NAMES[cancel.group(1).lower()]
+        return "cancel", worker, label, None, None
+    start = re.fullmatch(
+        r"ask\s+(pc codex|hermes|vps codex)(?:\s+in\s+([A-Za-z0-9][A-Za-z0-9._-]{0,63}))?\s+to\s+(.+)",
+        normalized,
+        flags=re.I | re.S,
+    )
+    if not start:
+        return None
+    worker, label = _WORKER_NAMES[start.group(1).lower()]
+    return "start", worker, label, start.group(2), start.group(3).strip()
 
 
 def _describe_client_view(client_state: VoiceClientState | None) -> str:
@@ -437,6 +462,7 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
         _append_voice_turn(session_id, "user", text, "thinking")
         command = _foreground_command(text)
         calendar_args = _calendar_read_args(text)
+        worker_command = _worker_command(text)
 
         async def generate():
             current_task = asyncio.current_task()
@@ -446,17 +472,67 @@ def setup_voice_routes(session_manager, stt_service=None, tts_service=None) -> A
                     previous.cancel()
                 _ACTIVE_RESPONSES[session_id] = current_task
             try:
-                if command:
-                    action, view = command
-                    if action == "report_view_state":
-                        reply = _describe_client_view(payload.client_state)
+                if command or worker_command:
+                    if command:
+                        action, view = command
+                        if action == "report_view_state":
+                            reply = _describe_client_view(payload.client_state)
+                        else:
+                            yield _sse({"type": "ui_control", "ui_event": action, "view": view})
+                            reply = {
+                                ("open_view", "calendar"): "Calendar is open.",
+                                ("close_view", "document"): "The document is closed.",
+                                ("minimize_view", "document"): "The document is minimized.",
+                            }[(action, view)]
                     else:
-                        yield _sse({"type": "ui_control", "ui_event": action, "view": view})
-                        reply = {
-                            ("open_view", "calendar"): "Calendar is open.",
-                            ("close_view", "document"): "The document is closed.",
-                            ("minimize_view", "document"): "The document is minimized.",
-                        }[(action, view)]
+                        worker_action, worker, label, requested_workspace, worker_prompt = worker_command
+                        if not owner:
+                            reply = "Sign in interactively before using workers."
+                        elif worker_action == "cancel":
+                            active_task = find_active_task(chat.id, worker, owner)
+                            if not active_task:
+                                reply = f"{label} has no active task in this chat."
+                            else:
+                                task = await task_action(active_task["task_id"], "cancel", owner=owner)
+                                yield _sse({"type": "worker_task", "task": task})
+                                reply = f"{label}'s task is cancelled."
+                        else:
+                            workers = await worker_statuses()
+                            details = workers.get(worker) or {}
+                            workspaces = list(details.get("workspaces") or [])
+                            if not details.get("ready"):
+                                reply = f"{label} is not ready."
+                            else:
+                                workspace = requested_workspace
+                                if workspace:
+                                    workspace = next(
+                                        (item for item in workspaces if item.casefold() == workspace.casefold()),
+                                        workspace,
+                                    )
+                                elif len(workspaces) == 1:
+                                    workspace = workspaces[0]
+                                elif len(workspaces) > 1:
+                                    reply = f"Choose a workspace for {label}: {', '.join(workspaces)}."
+                                    workspace = None
+                                else:
+                                    reply = f"{label} has no approved workspace."
+                                    workspace = None
+                                if workspace and workspace not in workspaces:
+                                    reply = f"{workspace} is not an approved workspace for {label}."
+                                elif workspace:
+                                    try:
+                                        task = await start_task(
+                                            worker,
+                                            chat.id,
+                                            workspace,
+                                            worker_prompt or "",
+                                            owner=owner,
+                                        )
+                                    except Exception:
+                                        reply = f"{label} could not accept that task."
+                                    else:
+                                        yield _sse({"type": "worker_task", "task": task})
+                                        reply = f"{label} is working in {workspace}. Voice remains available."
                     session_manager.add_message(chat.id, ChatMessage("assistant", reply, metadata={"source": "voice_orb"}))
                     _append_voice_turn(session_id, "assistant", reply, "ready")
                     yield _sse({"type": "final", "text": reply, "model": voice_session.get("model"), "assistant": VOICE_PERSONA})

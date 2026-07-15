@@ -3,6 +3,7 @@
 import sessionModule from './sessions.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import { showError, showToast } from './ui.js';
+import { trackWorkerTask } from './voiceOrbWorkers.js';
 
 const $ = id => document.getElementById(id);
 const UI_CONTROL_ALLOWLIST = new Set([
@@ -445,6 +446,8 @@ async function readVoiceEvents(response, generation) {
       } else if (event.type === 'ui_control') {
         if (voiceUIControlAllowed(event)) handleUIControl(event);
         else console.warn('Ignored unsupported Voice Orb UI control.');
+      } else if (event.type === 'worker_task' && event.task) {
+        trackWorkerTask(event.task);
       } else if (event.type === 'final') {
         finalText = String(event.text || accumulated).trim();
         setReply(finalText);
