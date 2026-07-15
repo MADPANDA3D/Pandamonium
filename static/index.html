@@ -1017,6 +1017,55 @@
         </div>
       </div>
       <button type="button" id="voice-orb-close" class="voice-orb-close" title="End voice" aria-label="End voice">&times;</button>
+      <details id="voice-orb-setup" class="voice-orb-setup">
+        <summary>
+          <span>Setup status</span>
+          <span id="voice-orb-setup-summary" class="voice-orb-setup-summary" role="status">Not checked</span>
+        </summary>
+        <div class="voice-orb-setup-content">
+          <p id="voice-orb-setup-text" class="voice-orb-setup-text" aria-live="polite">Open Voice Orb to check setup.</p>
+          <div class="voice-orb-setup-grid" role="list" aria-label="Voice setup readiness">
+            <div role="listitem">
+              <span>Model</span>
+              <strong id="voice-orb-setup-model">Not checked</strong>
+            </div>
+            <div role="listitem">
+              <span>Speech to text</span>
+              <strong id="voice-orb-setup-stt">Not checked</strong>
+            </div>
+            <div role="listitem">
+              <span>Text to speech</span>
+              <strong id="voice-orb-setup-tts">Not checked</strong>
+            </div>
+          </div>
+          <section class="voice-orb-setup-section" aria-labelledby="voice-orb-fixed-workers-title">
+            <div class="voice-orb-setup-section-heading">
+              <h3 id="voice-orb-fixed-workers-title">Fixed workers</h3>
+              <span>Optional · read-only</span>
+            </div>
+            <p id="voice-orb-setup-workers-summary">Worker status has not been checked.</p>
+            <ul id="voice-orb-setup-workers" class="voice-orb-setup-workers"></ul>
+          </section>
+          <aside class="voice-orb-credential-guidance" aria-label="Credential safety">
+            <strong>Credential safety</strong>
+            <p>Paste tokens through Settings/configuration or mount token files. Never speak credentials into Voice Orb.</p>
+          </aside>
+          <section class="voice-orb-setup-section" aria-labelledby="voice-orb-tailnet-title">
+            <div class="voice-orb-setup-section-heading">
+              <h3 id="voice-orb-tailnet-title">Optional Tailnet inspection</h3>
+              <span>User initiated</span>
+            </div>
+            <p>Peers are listed only after you click Inspect. Only peers you select are probed.</p>
+            <div class="voice-orb-tailnet-actions">
+              <button type="button" id="voice-orb-tailnet-list">Inspect Tailnet peers</button>
+              <button type="button" id="voice-orb-tailnet-probe" disabled>Probe selected peers</button>
+            </div>
+            <p id="voice-orb-tailnet-status" class="voice-orb-tailnet-status" role="status" aria-live="polite">Not inspected.</p>
+            <ul id="voice-orb-tailnet-peers" class="voice-orb-tailnet-peers" aria-label="Selectable Tailnet peers"></ul>
+            <ul id="voice-orb-tailnet-results" class="voice-orb-tailnet-results" aria-label="Tailnet model-server candidates"></ul>
+          </section>
+        </div>
+      </details>
     </section>
     <section id="voice-worker-rail" class="voice-worker-rail" aria-label="Worker activity" aria-live="polite" hidden>
       <header><strong>Worker activity</strong><span>Read-only</span></header>
@@ -2501,7 +2550,7 @@
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
 <script type="module" src="/static/js/chat.js?v=20260630toolmetrics"></script>
-<script type="module" src="/static/js/voiceOrb.js?v=20260715alpha1"></script>
+<script type="module" src="/static/js/voiceOrb.js?v=20260715beta1"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>

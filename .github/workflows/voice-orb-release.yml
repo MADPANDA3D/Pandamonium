@@ -85,6 +85,8 @@ jobs:
           for file in static/app.js static/js/**/*.js; do node --check "$file"; done
       - name: Voice Orb media contract
         run: node tests/test_voice_orb_media.js
+      - name: Voice Orb setup browser contract
+        run: node tests/test_voice_orb_setup.js
       - name: Full pytest
         run: |
           mkdir -p data

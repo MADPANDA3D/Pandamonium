@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test';
 
 const harnesses = new WeakMap();
+const SETUP_TEXT = 'Core voice setup is ready. 2 of 3 optional fixed read-only workers are ready.';
+
+function setupSnapshot(text = SETUP_TEXT, workers = [
+  { id: 'pc-codex', configured: true, ready: true, status: 'ready', capabilities: ['read_only'] },
+  { id: 'hermes', configured: true, ready: true, status: 'ready', capabilities: ['read_only', 'questions'] },
+  { id: 'vps-codex', configured: false, ready: false, status: 'not_configured', capabilities: [] },
+]) {
+  return {
+    version: 1,
+    core_ready: true,
+    text,
+    model: { configured: true, selection: 'default' },
+    speech_to_text: { available: true, provider: 'endpoint' },
+    text_to_speech: { available: true, provider: 'browser' },
+    workers: { optional: true, ready_count: 2, total: 3, items: workers },
+  };
+}
 
 function deferred() {
   let resolve;
@@ -21,6 +38,8 @@ async function installVoiceRoutes(page) {
     workerEventRequested: false,
     workerGate: null,
     workerListRequests: 0,
+    tailnetListRequests: 0,
+    tailnetProbeRequests: [],
   };
   harnesses.set(page, state);
 
@@ -29,6 +48,7 @@ async function installVoiceRoutes(page) {
       assistant: 'Odysseus',
       stt: { available: true, provider: 'endpoint:test' },
       tts: { available: false, provider: 'disabled', voice: '', speed: 1 },
+      setup: setupSnapshot(),
     },
   }));
   await page.route('**/api/voice/sessions', route => route.fulfill({
@@ -74,6 +94,33 @@ async function installVoiceRoutes(page) {
       }]),
     });
   });
+  await page.route(url => url.pathname === '/api/discover', route => {
+    const mode = route.request().url().includes('mode=tailnet_probe') ? 'tailnet_probe' : 'tailnet_peers';
+    if (mode === 'tailnet_peers') {
+      state.tailnetListRequests += 1;
+      return route.fulfill({
+        json: {
+          mode,
+          peers: [{ id: 'a'.repeat(32), os: 'linux', status: 'online', address: '192.0.2.10' }],
+          raw_url: 'http://192.0.2.10',
+        },
+      });
+    }
+    const url = new URL(route.request().url());
+    state.tailnetProbeRequests.push(url.searchParams.getAll('peer_id'));
+    return route.fulfill({
+      json: {
+        mode,
+        candidates: [{
+          peer_id: 'a'.repeat(32),
+          provider: 'ollama',
+          models: ['safe-model:latest'],
+          capabilities: ['model-list'],
+          url: 'http://192.0.2.10:11434',
+        }],
+      },
+    });
+  });
   await page.route('**/static/voice-orb-media.json', route => {
     state.manifestRequests += 1;
     return route.continue();
@@ -95,7 +142,9 @@ async function runTurn(page, text, events = []) {
     await expect(panel).toHaveAttribute('data-state', 'listening');
   }
   state.transcripts.push(text);
-  state.responseEvents.push([...events, { type: 'final', text: 'Done.' }]);
+  state.responseEvents.push(events.some(event => event.type === 'final')
+    ? events
+    : [...events, { type: 'final', text: 'Done.' }]);
   await page.locator('#voice-orb-talk').click();
   await expect.poll(() => state.requests.length).toBe(before + 1);
   await expect(panel).toHaveAttribute('data-state', 'idle');
@@ -123,6 +172,41 @@ test.beforeEach(async ({ page }) => {
     };
   });
   await page.goto('/static/index.html');
+});
+
+test('setup status is mirrored and Tailnet inspection stays explicit', async ({ page }) => {
+  const state = harnesses.get(page);
+  await startVoice(page);
+
+  await expect(page.locator('#voice-orb-setup-text')).toHaveText(SETUP_TEXT);
+  await expect(page.locator('#voice-orb-setup-workers-summary')).toContainText('Fixed worker cluster');
+  await expect(page.locator('#voice-orb-setup-workers')).not.toContainText('discovered');
+  expect(state.tailnetListRequests).toBe(0);
+  expect(state.tailnetProbeRequests).toEqual([]);
+
+  const spokenText = 'Voice setup needs attention. Optional fixed read-only workers are not ready.';
+  await runTurn(page, 'Check voice setup.', [{
+    type: 'final',
+    text: spokenText,
+    setup: setupSnapshot(spokenText, [
+      { id: 'pc-codex', configured: true, ready: true, status: 'ready', capabilities: ['read_only'] },
+      { id: 'discovered-agent', configured: true, ready: true, status: 'ready', capabilities: ['write'] },
+    ]),
+  }]);
+  await expect(page.locator('#voice-orb-setup')).toHaveAttribute('open', '');
+  await expect(page.locator('#voice-orb-setup-text')).toHaveText(spokenText);
+  await expect(page.locator('#voice-orb-setup-workers-summary')).not.toContainText('cluster');
+  expect(state.tailnetListRequests).toBe(0);
+
+  await page.getByRole('button', { name: 'Inspect Tailnet peers' }).click();
+  await expect.poll(() => state.tailnetListRequests).toBe(1);
+  await expect(page.locator('#voice-orb-tailnet-peers')).toContainText('linux · online');
+  await expect(page.locator('#voice-orb-tailnet-peers')).not.toContainText('192.0.2');
+  await page.locator('#voice-orb-tailnet-peers input[type="checkbox"]').check();
+  await page.getByRole('button', { name: 'Probe selected peers' }).click();
+  await expect.poll(() => state.tailnetProbeRequests).toEqual([['a'.repeat(32)]]);
+  await expect(page.locator('#voice-orb-tailnet-results')).toContainText('safe-model:latest');
+  await expect(page.locator('#voice-orb-setup')).not.toContainText('192.0.2.10');
 });
 
 test('voice orb uses the fake microphone and stops it on close', async ({ page }) => {

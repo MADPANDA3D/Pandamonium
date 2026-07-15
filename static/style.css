@@ -40598,6 +40598,88 @@ body.theme-frosted .modal {
   line-height: 1.45;
 }
 
+.voice-orb-setup { grid-column: 1 / -1; min-width: 0; border-top: 1px solid color-mix(in srgb, var(--accent, #8fe8ff) 20%, transparent); }
+.voice-orb-setup > summary {
+  display: flex;
+  gap: 10px;
+  padding-top: 10px;
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.voice-orb-setup-summary { margin-left: auto; letter-spacing: 0; text-transform: none; }
+.voice-orb-setup-summary[data-state="ready"] { color: #50fa7b; }
+.voice-orb-setup-summary[data-state="attention"] { color: #ffb86c; }
+.voice-orb-setup-content {
+  display: grid;
+  max-height: min(52vh, 500px);
+  gap: 8px;
+  margin-top: 9px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.voice-orb-setup-text,
+.voice-orb-setup-section,
+.voice-orb-credential-guidance {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.voice-orb-setup-text { border-left-color: var(--accent, #8fe8ff); color: color-mix(in srgb, var(--fg) 82%, transparent); }
+.voice-orb-setup-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.voice-orb-setup-grid > div { display: grid; gap: 3px; min-width: 0; padding: 7px; border: 1px solid var(--border); border-radius: 8px; }
+.voice-orb-setup-grid span,
+.voice-orb-setup-section-heading span { color: color-mix(in srgb, var(--fg) 48%, transparent); font-size: 8px; text-transform: uppercase; }
+.voice-orb-setup-grid strong { overflow-wrap: anywhere; font-size: 9px; }
+.voice-orb-setup-section { display: grid; gap: 6px; }
+.voice-orb-setup-section-heading { display: flex; justify-content: space-between; gap: 8px; }
+.voice-orb-setup-section h3,
+.voice-orb-credential-guidance strong { margin: 0; font-size: 10px; }
+.voice-orb-setup-section p,
+.voice-orb-credential-guidance p { margin: 0; color: color-mix(in srgb, var(--fg) 60%, transparent); }
+.voice-orb-setup-workers,
+.voice-orb-tailnet-peers,
+.voice-orb-tailnet-results,
+.voice-orb-tailnet-result ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.voice-orb-setup-worker,
+.voice-orb-tailnet-result { display: grid; gap: 3px; padding: 6px; border-left: 2px solid color-mix(in srgb, var(--fg) 24%, transparent); }
+.voice-orb-setup-worker[data-state="ready"] { border-left-color: #50fa7b; }
+.voice-orb-setup-worker[data-state="unavailable"] { border-left-color: #ffb86c; }
+.voice-orb-setup-worker > div,
+.voice-orb-tailnet-result > p:first-child { display: flex; justify-content: space-between; gap: 6px; }
+.voice-orb-setup-worker p { overflow-wrap: anywhere; }
+.voice-orb-credential-guidance { border-color: color-mix(in srgb, var(--accent, #8fe8ff) 28%, var(--border)); }
+.voice-orb-tailnet-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.voice-orb-tailnet-actions button {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.voice-orb-tailnet-actions button:disabled { opacity: 0.42; cursor: not-allowed; }
+.voice-orb-tailnet-status { min-height: 1.4em; }
+.voice-orb-tailnet-peer { display: flex; gap: 6px; padding: 5px; border: 1px solid var(--border); border-radius: 7px; }
+.voice-orb-tailnet-peer input { margin-top: 2px; accent-color: var(--accent, #8fe8ff); }
+.voice-orb-tailnet-peer label { display: grid; min-width: 0; cursor: pointer; }
+.voice-orb-tailnet-peer code,
+.voice-orb-tailnet-result code { overflow-wrap: anywhere; color: var(--accent, #8fe8ff); font-size: 9px; }
+.voice-orb-tailnet-peer label span,
+.voice-orb-tailnet-result li { overflow-wrap: anywhere; color: color-mix(in srgb, var(--fg) 56%, transparent); font-size: 9px; }
+.voice-orb-tailnet-result ul { padding-left: 12px; list-style: disc; }
+.voice-orb-setup > summary:focus-visible,
+.voice-orb-tailnet-actions button:focus-visible,
+.voice-orb-tailnet-peer input:focus-visible { outline: 2px solid var(--accent, #8fe8ff); outline-offset: 2px; }
+
 .voice-orb-turns {
   display: flex;
   max-height: 116px;
@@ -40706,4 +40788,6 @@ body.theme-frosted .modal {
   }
   .voice-orb-visual { width: 88px; height: 88px; }
   .voice-orb-turns { max-height: 88px; }
+  .voice-orb-setup-content { max-height: 48vh; }
+  .voice-orb-setup-grid { grid-template-columns: 1fr; }
 }
