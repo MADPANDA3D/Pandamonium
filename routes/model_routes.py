@@ -1763,10 +1763,23 @@ def setup_model_routes(model_discovery):
         return result
 
     @router.get("/discover")
-    def discover_local(request: Request):
-        """Scan local network for model servers on common ports."""
+    def discover_local(
+        request: Request,
+        mode: str = Query("configured"),
+        peer_ids: Optional[List[str]] = Query(None, alias="peer_id"),
+    ):
+        """Discover configured servers or explicitly selected Tailnet peers."""
         require_admin(request)
-        return model_discovery.discover_models()
+        if mode in {"configured", "default"}:
+            return model_discovery.discover_models()
+        if mode == "tailnet_peers":
+            return model_discovery.list_tailnet_peers()
+        if mode == "tailnet_probe":
+            try:
+                return model_discovery.discover_tailnet_models(peer_ids or [])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="unsupported discovery mode")
 
     # ---- Admin: model endpoints CRUD ----
 
