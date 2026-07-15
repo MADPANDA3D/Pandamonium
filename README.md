@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
+  <a href="docs/voice-orb/README.md">Voice Orb Alpha</a> ·
   <a href="docs/setup.md">Setup Guide</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="ROADMAP.md">Roadmap</a>
@@ -22,6 +23,14 @@
 </p>
 
 ---
+
+## Odysseus Voice Orb alpha
+
+This maintained fork adds an authenticated, first-party voice surface, bounded foreground controls, and optional read-only worker delegation. It is an alpha fork distribution, **not an installable Odysseus plugin**; upstream does not yet expose a stable application-plugin contract.
+
+The alpha works with no workers configured and uses the current/default Odysseus model unless an operator chooses an explicit voice-model override. Start with the [Voice Orb overview](docs/voice-orb/README.md), then read [installation](docs/voice-orb/install.md), [provider setup](docs/voice-orb/providers.md), and the [security model](docs/voice-orb/security.md).
+
+The public fork remains AGPL-3.0-or-later. Private development notes, personal or business data, private network topology, credentials, and assets without clear redistribution rights are intentionally excluded.
 
 ## Quick Start
 
@@ -41,6 +50,7 @@ Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration
 ## Features
 
 - **Chat + Agents** — local/API models, tools, MCP, files, shell, skills, and memory.
+- **Voice Orb (alpha fork)** — interruptible speech, synthesized cues, safe view controls, and optional read-only workers.
 - **Cookbook** — hardware-aware model recommendations, downloads, and serving.
 - **Deep Research** — multi-step web research with source reading and report generation.
 - **Compare** — blind side-by-side model testing and synthesis.
