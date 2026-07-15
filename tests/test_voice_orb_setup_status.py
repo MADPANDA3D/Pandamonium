@@ -104,7 +104,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
     _seed_voice_state(state_file)
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
     monkeypatch.setattr(voice_routes, "VOICE_ENDPOINT_ID", "secret-endpoint-id")
-    monkeypatch.setattr(voice_routes, "VOICE_MODEL", "/home/private/model")
+    monkeypatch.setattr(voice_routes, "VOICE_MODEL", "voice-model")
     monkeypatch.setattr(
         voice_routes,
         "_resolve_voice_runtime",
@@ -120,6 +120,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
             "pc-codex": {
                 "configured": True,
                 "ready": True,
+                "capabilities": ["read_only", "task_status", "http://100.64.0.99"],
                 "workspaces": ["client-workspace"],
                 "connection": {"state": "connected", "reason": "http://100.64.0.11"},
             },
@@ -151,6 +152,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
     status = await _endpoint(router, "voice_status")("alice")
 
     setup = status["setup"]
+    assert status["model_override"] == "voice-model"
     assert setup["core_ready"] is True
     assert setup["model"] == {"configured": True, "selection": "endpoint_override"}
     assert setup["speech_to_text"] == {"available": True, "provider": "endpoint"}
@@ -161,6 +163,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
     }
     assert setup["workers"]["ready_count"] == 1
     assert [item["id"] for item in setup["workers"]["items"]] == list(WORKER_IDS)
+    assert setup["workers"]["items"][0]["capabilities"] == ["read_only", "task_status"]
 
     response = await _endpoint(router, "respond_to_voice_turn")(
         "voice-1",
@@ -182,6 +185,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
         "100.64.0.11",
         "100.64.0.12",
         "100.64.0.13",
+        "100.64.0.99",
         "/secret/token",
         "/secret/stt-token",
         "client-workspace",
@@ -193,7 +197,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
 @pytest.mark.asyncio
 async def test_setup_status_fails_closed_without_returning_source_errors(monkeypatch):
     monkeypatch.setattr(voice_routes, "VOICE_ENDPOINT_ID", "private-endpoint")
-    monkeypatch.setattr(voice_routes, "VOICE_MODEL", "/secret/model-path")
+    monkeypatch.setattr(voice_routes, "VOICE_MODEL", "safe-model")
 
     def unavailable_model(_owner):
         raise HTTPException(503, "http://10.20.30.40/private model error")
@@ -232,7 +236,6 @@ async def test_setup_status_fails_closed_without_returning_source_errors(monkeyp
     blob = json.dumps(status)
     for private_value in (
         "private-endpoint",
-        "/secret/model-path",
         "10.20.30.40",
         "10.20.30.41",
         "/secret/token",

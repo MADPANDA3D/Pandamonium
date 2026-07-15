@@ -334,6 +334,17 @@ def _setup_voice_speed(value: Any) -> float:
     return speed if 0.25 <= speed <= 4 else 1.0
 
 
+def _setup_logical_names(value: Any, *, limit: int = 16) -> list[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    names = {
+        str(item).strip()
+        for item in value
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", str(item).strip())
+    }
+    return sorted(names)[:limit]
+
+
 async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any) -> dict[str, Any]:
     """Build one redacted setup snapshot shared by HTTP status and voice."""
     stt = _safe_service_stats(stt_service, "STT")
@@ -368,6 +379,7 @@ async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any)
             "configured": configured,
             "ready": ready,
             "status": "ready" if ready else ("unavailable" if configured else "not_configured"),
+            "capabilities": _setup_logical_names(details.get("capabilities")),
         })
 
     stt_available = bool(stt.get("available"))
@@ -425,7 +437,7 @@ async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any)
     }
     return {
         "assistant": VOICE_PERSONA,
-        "model_override": "configured" if VOICE_MODEL else None,
+        "model_override": VOICE_MODEL or None,
         "endpoint_override_configured": bool(VOICE_ENDPOINT_ID),
         "stt": {
             "available": stt_available,
