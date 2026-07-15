@@ -2,6 +2,12 @@
 
 Thanks for helping. The project is moving quickly, so the best contributions are focused, easy to review, and easy to test.
 
+## Voice Orb fork contributions
+
+Voice Orb work in this maintained fork follows the same small-PR rule as upstream. Read the [Voice Orb contributor guide](docs/voice-orb/contributing.md) before changing voice, foreground-control, or worker surfaces. The public repository must never contain private Mark Notes, handovers, personal or client data, private topology, credentials, cloned voices, or media without redistribution rights.
+
+The alpha is a maintained fork, not a plugin. Do not add installers that rewrite Odysseus source files, inject scripts, accept arbitrary selectors or URLs, or dynamically load caller-selected worker modules.
+
 ## Branch model
 
 Odysseus has two branches:
@@ -130,4 +136,3 @@ Issues with only "help", "does not work", or a screenshot without context may be
 Do not post secrets, API keys, private logs, personal documents, or public IPs in issues or pull requests.
 
 For security reports, follow [SECURITY.md](SECURITY.md).
-

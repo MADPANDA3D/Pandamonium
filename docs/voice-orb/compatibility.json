@@ -1,0 +1,20 @@
+{
+  "product": "Odysseus Voice Orb",
+  "release": "v0.1.0-alpha.1",
+  "source_tag": "voice-orb-v0.1.0-alpha.1",
+  "distribution": "maintained-fork",
+  "upstream_repository": "https://github.com/pewdiepie-archdaemon/odysseus",
+  "upstream_branch": "dev",
+  "upstream_commit": "c80462e4621c1a3360e5441843bb83b4691a8766",
+  "license": "AGPL-3.0-or-later",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "plugin_abi": null,
+  "container": {
+    "repository": "ghcr.io/madpanda3d/odysseus",
+    "tag": "voice-orb-v0.1.0-alpha.1",
+    "digest": null
+  }
+}
