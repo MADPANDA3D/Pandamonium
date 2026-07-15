@@ -678,6 +678,7 @@
     <div class="rail-resize-handle" id="rail-resize-handle"></div>
     <!-- Static: core actions -->
     <button class="icon-rail-btn" id="rail-search-btn" title="Search conversations (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
+    <button class="icon-rail-btn" id="rail-voice-orb" title="Odysseus Voice Orb" aria-label="Open Odysseus Voice Orb"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="5.5" ry="9" transform="rotate(45 12 12)"/></svg></button>
     <button class="icon-rail-btn rail-new-chat" id="rail-new-session" title="New chat"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     <button class="icon-rail-btn" id="rail-delete-session" title="Delete session">&#x2715;</button>
     <div class="rail-separator"></div>
@@ -999,6 +1000,23 @@
     })();
     </script>
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
+    <section id="voice-orb-panel" class="voice-orb-panel" data-state="idle" hidden aria-label="Odysseus live voice">
+      <button type="button" id="voice-orb-talk" class="voice-orb-visual" title="Speak" aria-label="Speak">
+        <canvas id="voice-orb-canvas" class="voice-orb-canvas" aria-hidden="true"></canvas>
+      </button>
+      <div class="voice-orb-copy">
+        <div class="voice-orb-topline">
+          <span id="voice-orb-name" class="voice-orb-name">Odysseus</span>
+          <span id="voice-orb-status" class="voice-orb-status" role="status">Ready</span>
+        </div>
+        <div id="voice-orb-detail" class="voice-orb-detail">Odysseus is ready.</div>
+        <div class="voice-orb-turns" aria-live="polite">
+          <span id="voice-orb-transcript" class="voice-orb-turn is-user"></span>
+          <span id="voice-orb-reply" class="voice-orb-turn is-assistant"></span>
+        </div>
+      </div>
+      <button type="button" id="voice-orb-close" class="voice-orb-close" title="End voice" aria-label="End voice">&times;</button>
+    </section>
 
     <!-- Attachments strip -->
     <div id="attach-strip" class="attach-strip"></div>
@@ -1148,6 +1166,9 @@
           </div>
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
+          </button>
+          <button type="button" class="voice-orb-input" id="voice-orb-input" title="Odysseus Voice Orb" aria-label="Open Odysseus Voice Orb">
+            <span class="voice-orb-input-core" aria-hidden="true"></span>
           </button>
         </div>
       </div>
@@ -2475,6 +2496,7 @@
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
 <script type="module" src="/static/js/chat.js?v=20260630toolmetrics"></script>
+<script type="module" src="/static/js/voiceOrb.js?v=20260715alpha1"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>

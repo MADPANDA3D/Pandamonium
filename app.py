@@ -736,6 +736,10 @@ from services.stt import get_stt_service
 stt_service = get_stt_service()
 from routes.stt_routes import setup_stt_routes
 app.include_router(setup_stt_routes(stt_service))
+
+# Odysseus Voice Orb
+from routes.voice_routes import setup_voice_routes
+app.include_router(setup_voice_routes(session_manager, stt_service, tts_service))
 logger.info("STT service initialized (provider managed via settings)")
 
 # Documents (artifacts/canvas)

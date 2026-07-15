@@ -40451,3 +40451,197 @@ body.theme-frosted .modal {
   .compare-grid[data-cols] { grid-template-columns: 1fr !important; overflow-y: auto; }
   .compare-pane { min-height: 60dvh; }
 }
+
+/* Odysseus Voice Orb — first-party Canvas/CSS surface. */
+.voice-orb-panel {
+  position: fixed;
+  right: max(24px, calc((100vw - 1180px) / 2));
+  bottom: 112px;
+  z-index: 8400;
+  width: min(420px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) 28px;
+  gap: 14px;
+  align-items: center;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent, #8fe8ff) 38%, var(--border));
+  border-radius: 22px;
+  color: var(--fg);
+  background:
+    radial-gradient(circle at 14% 25%, color-mix(in srgb, var(--accent, #8fe8ff) 16%, transparent), transparent 42%),
+    color-mix(in srgb, var(--bg) 94%, #10132b);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(22px);
+}
+
+.voice-orb-panel[hidden] { display: none; }
+
+.voice-orb-visual {
+  position: relative;
+  width: 116px;
+  height: 116px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 50%;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.voice-orb-visual:focus-visible,
+.voice-orb-input:focus-visible {
+  outline: 2px solid var(--accent, #8fe8ff);
+  outline-offset: 4px;
+}
+
+.voice-orb-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  filter: saturate(1.08);
+}
+
+.voice-orb-copy { min-width: 0; }
+
+.voice-orb-topline {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.voice-orb-name {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-orb-status {
+  color: color-mix(in srgb, var(--accent, #8fe8ff) 88%, white);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.voice-orb-detail {
+  margin-top: 4px;
+  color: color-mix(in srgb, var(--fg) 64%, transparent);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.voice-orb-turns {
+  display: flex;
+  max-height: 116px;
+  margin-top: 11px;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.voice-orb-turn:empty { display: none; }
+
+.voice-orb-turn {
+  display: block;
+  padding-left: 9px;
+  border-left: 2px solid color-mix(in srgb, var(--accent, #8fe8ff) 32%, transparent);
+  color: color-mix(in srgb, var(--fg) 82%, transparent);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.voice-orb-turn.is-user { color: color-mix(in srgb, var(--fg) 58%, transparent); }
+
+.voice-orb-close {
+  align-self: start;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  background: transparent;
+  font-size: 20px;
+  line-height: 24px;
+  cursor: pointer;
+}
+
+.voice-orb-close:hover,
+.voice-orb-close:focus-visible {
+  border-color: var(--border);
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.voice-orb-panel[data-state="listening"] {
+  border-color: color-mix(in srgb, #82efff 62%, var(--border));
+}
+
+.voice-orb-panel[data-state="speaking"] {
+  border-color: color-mix(in srgb, #958aff 62%, var(--border));
+}
+
+.voice-orb-panel[data-state="failed"] {
+  border-color: color-mix(in srgb, #ff6b6b 64%, var(--border));
+}
+
+.voice-orb-input {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent, #8fe8ff) 28%, var(--border));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg) 88%, #252052);
+  box-shadow: inset 0 0 10px color-mix(in srgb, var(--accent, #8fe8ff) 13%, transparent);
+  cursor: pointer;
+}
+
+.voice-orb-input-core {
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, var(--accent, #8fe8ff) 35%, #665cff 100%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent, #8fe8ff) 58%, transparent);
+}
+
+.voice-orb-input::before,
+.voice-orb-input::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent, #8fe8ff) 58%, transparent);
+  border-radius: 50%;
+  transform: rotate(45deg) scaleY(0.58);
+}
+
+.voice-orb-input::after { transform: rotate(-45deg) scaleY(0.58); }
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb-panel,
+  .voice-orb-input { transition: none; }
+}
+
+@media (max-width: 768px) {
+  .voice-orb-panel {
+    right: 12px;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    width: calc(100vw - 24px);
+    grid-template-columns: 88px minmax(0, 1fr) 26px;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 18px;
+  }
+  .voice-orb-visual { width: 88px; height: 88px; }
+  .voice-orb-turns { max-height: 88px; }
+}
