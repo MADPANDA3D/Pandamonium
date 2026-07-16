@@ -73,6 +73,57 @@ def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch,
     assert voice_session["stores_raw_audio"] is False
 
 
+def test_direct_gordon_turn_persists_foreground_identity(monkeypatch, tmp_path):
+    async def fake_gordon_reply(_session, text, _owner, voice_session=None):
+        assert voice_session["target"] == "hermes"
+        return "Good evening, Leo. This is Gordon.", {
+            "model": "hermes-agent",
+            "transcript_chars": len(text),
+            "assistant_chars": 34,
+            "guard_reason": "direct_gordon",
+            "direct_target": "hermes",
+            "character_name": "Gordon",
+        }, []
+
+    manager = FakeSessionManager()
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    monkeypatch.setattr(voice_routes, "_jarvis_reply", fake_gordon_reply)
+    app = FastAPI()
+    app.include_router(voice_routes.setup_voice_routes(manager))
+    client = TestClient(app)
+
+    created = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
+    state = json.loads((tmp_path / "voice_sessions.json").read_text())
+    state["sessions"][created["id"]]["target"] = "hermes"
+    (tmp_path / "voice_sessions.json").write_text(json.dumps(state), encoding="utf-8")
+
+    response = client.post(
+        f"/api/voice/sessions/{created['id']}/respond",
+        json={"text": "Good evening. Is this Gordon?"},
+    )
+
+    assert response.status_code == 200
+    assistant = manager.messages[created["chat_session_id"]][-1]
+    assert assistant.content == "Good evening, Leo. This is Gordon."
+    assert assistant.metadata["source"] == "direct_worker_voice"
+    assert assistant.metadata["character_name"] == "Gordon"
+    assert assistant.metadata["target"] == "hermes"
+    assert assistant.metadata.get("task_id") is None
+
+
+def test_direct_gordon_speech_never_uses_jarvis_summarizer(monkeypatch):
+    async def must_not_summarize(*_args, **_kwargs):
+        raise AssertionError("direct Gordon speech must not pass through Jarvis")
+
+    monkeypatch.setattr(voice_routes, "_select_spoken_text", must_not_summarize)
+    final = {
+        "assistant_text": "Gordon's direct answer.",
+        "diagnostics": {"direct_target": "hermes"},
+    }
+
+    assert asyncio.run(voice_routes._spoken_text_for_final("Tell me", final)) == "Gordon's direct answer."
+
+
 def test_voice_session_title_uses_browser_timezone_context(monkeypatch, tmp_path):
     seen = []
 

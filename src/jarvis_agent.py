@@ -581,6 +581,35 @@ def ensure_mirror(task_id: str) -> None:
     _MIRRORS[task_id] = asyncio.create_task(_mirror(task_id))
 
 
+async def direct_hermes_turn(
+    session_id: str,
+    prompt: str,
+    *,
+    owner: str | None,
+    workspace: str = "home-lab",
+) -> str:
+    """Talk to Gordon directly without creating a Jarvis broker task."""
+    identity = str(owner or "").strip()
+    if not identity:
+        raise PermissionError("owner_required")
+    require_session_owner(session_id, identity)
+    catalog = worker_catalog()
+    if workspace not in set(catalog["hermes"].get("workspaces") or []):
+        raise ValueError("unknown_workspace")
+    adapter = adapters()["hermes"]
+    if not adapter.enabled:
+        raise RuntimeError("hermes_not_connected")
+    scope = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"odysseus:gordon:{identity}:{session_id}:{workspace}",
+    )
+    return await adapter.direct_chat(
+        session_id=f"odysseus-gordon-{scope}",
+        session_key=f"odysseus:gordon:{scope}",
+        message=prompt,
+    )
+
+
 async def start_task(
     worker: str,
     session_id: str,

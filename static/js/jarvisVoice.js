@@ -26,6 +26,12 @@ let sphereSmoothedVolume = 0;
 let sphereSmoothedLevels = Array(8).fill(0);
 let playbackToken = 0;
 let voiceTarget = 'jarvis';
+let targetUpdatePromise = Promise.resolve();
+let targetUpdateFailure = null;
+let targetSelectionRevision = 0;
+let voiceSessionReady = false;
+let confirmedVoiceTargetState = null;
+let pendingVoiceTargetState = null;
 let speechQueue = [];
 let speechQueueRunning = false;
 let currentSpeech = null;
@@ -86,6 +92,7 @@ const WORKER_LABELS = {
   hermes: 'Hermes',
   'vps-codex': 'VPS Codex',
 };
+const VOICE_TARGET_LABELS = { ...WORKER_LABELS, hermes: 'Gordon' };
 let workerCatalog = {
   jarvis: { enabled: true, machine: 'Nimbus', connection: { state: 'connected' } },
   'pc-codex': { enabled: true, machine: 'Local workstation', connection: { state: 'checking' } },
@@ -283,7 +290,7 @@ function mountOrganicSphere() {
 
   const frame = document.createElement('iframe');
   frame.className = 'jarvis-organic-frame';
-  frame.title = 'Jarvis organic voice sphere';
+  frame.title = `${VOICE_TARGET_LABELS[voiceTarget] || voiceTarget} organic voice sphere`;
   frame.src = ORGANIC_SPHERE_URL;
   frame.loading = 'eager';
   frame.referrerPolicy = 'no-referrer';
@@ -392,6 +399,7 @@ function setStatus(next, detail = '') {
     talkBtn.disabled = next === 'connecting' || next === 'thinking' || next === 'transcribing';
     talkBtn.innerHTML = next === 'listening' ? ICON_STOP : ICON_MIC;
     talkBtn.title = talkTitle(next);
+    talkBtn.setAttribute('aria-label', talkTitle(next));
   }
   if (railBtn) {
     railBtn.classList.toggle('active', isActive);
@@ -438,18 +446,19 @@ function statusLabel(value) {
 }
 
 function detailLabel(value) {
+  const voiceName = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
   return {
-    idle: 'Jarvis is standing by.',
+    idle: `${voiceName} is standing by.`,
     connecting: 'Opening the microphone and voice session.',
     listening: 'Listening for your turn.',
     transcribing: 'Reading your speech.',
-    thinking: 'Jarvis is thinking.',
+    thinking: `${voiceName} is thinking.`,
     worker: 'A connected worker is active.',
-    buffering: 'Preparing Jarvis voice.',
-    speaking: 'Jarvis is responding.',
+    buffering: `Preparing ${voiceName} voice.`,
+    speaking: `${voiceName} is responding.`,
     interrupted: 'Redirecting.',
     background: 'Running in the background, sir.',
-    ready: 'Jarvis is standing by.',
+    ready: `${voiceName} is standing by.`,
     failed: 'The call loop hit an error.',
   }[value] || '';
 }
@@ -458,12 +467,13 @@ function talkTitle(value) {
   if (value === 'connecting') return 'Connecting microphone';
   if (value === 'listening') return 'Stop listening';
   if (value === 'speaking' || value === 'buffering') return 'Interrupt';
-  return 'Speak to Jarvis';
+  return `Speak to ${VOICE_TARGET_LABELS[voiceTarget] || voiceTarget}`;
 }
 
 function sphereTitle(value) {
-  if (!isActive) return 'Jarvis live call';
-  if (value === 'speaking' || value === 'buffering') return 'Interrupt Jarvis';
+  const voiceName = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+  if (!isActive) return `${voiceName} live call`;
+  if (value === 'speaking' || value === 'buffering') return `Interrupt ${voiceName}`;
   return END_VOICE_LABEL;
 }
 
@@ -603,7 +613,7 @@ function refreshAgentControl() {
   const meta = $('jarvis-agent-meta');
   const state = $('jarvis-agent-state');
   const cancel = $('jarvis-agent-cancel');
-  if (name) name.textContent = WORKER_LABELS[voiceTarget] || voiceTarget;
+  if (name) name.textContent = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
   if (meta) {
     const taskText = tasks ? `${tasks} active task${tasks === 1 ? '' : 's'}` : (connection === 'connected' ? 'ready' : connection.replace(/_/g, ' '));
     meta.textContent = `${details.machine || 'worker'} · ${activeWorkspace || 'workspace unbound'} · ${taskText}`;
@@ -620,12 +630,36 @@ function refreshAgentControl() {
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-checked', active ? 'true' : 'false');
     button.disabled = worker !== 'jarvis' && !item.enabled;
+    const label = button.querySelector('span');
+    if (label) label.textContent = VOICE_TARGET_LABELS[worker] || worker;
     const detail = button.querySelector('small');
     if (detail) {
       const itemState = item.connection?.state || (item.enabled ? 'connected' : 'gated');
       detail.textContent = `${item.machine || 'worker'} · ${itemState.replace(/_/g, ' ')}`;
     }
   });
+}
+
+function refreshVoiceIdentity(refreshDetail = false) {
+  const voiceName = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+  document.querySelectorAll('.jarvis-call-name').forEach(element => {
+    element.textContent = voiceName;
+  });
+  const panel = $('jarvis-call-panel');
+  if (panel) panel.setAttribute('aria-label', `${voiceName} live voice`);
+  const detail = $('jarvis-call-detail');
+  if (refreshDetail && detail) detail.textContent = detailLabel(status);
+  const talk = $('jarvis-call-talk');
+  if (talk) {
+    talk.title = talkTitle(status);
+    talk.setAttribute('aria-label', talkTitle(status));
+  }
+  const input = $('jarvis-input-sphere');
+  if (input) {
+    input.title = sphereTitle(status);
+    input.setAttribute('aria-label', sphereTitle(status));
+  }
+  if (organicSphereFrame) organicSphereFrame.title = `${voiceName} organic voice sphere`;
 }
 
 async function loadWorkerCatalog() {
@@ -641,29 +675,122 @@ async function loadWorkerCatalog() {
 function setVoiceTarget(worker, persist = true) {
   const details = workerCatalog[worker];
   if (worker !== 'jarvis' && details && !details.enabled) {
-    showToast(`${WORKER_LABELS[worker] || worker} is not connected yet.`);
+    showToast(`${VOICE_TARGET_LABELS[worker] || worker} is not connected yet.`);
     return false;
   }
   voiceTarget = worker;
   setAgentMenuOpen(false);
   setAgentWorkspaceActive(worker !== 'jarvis' || activeTaskCount() > 0);
   refreshAgentControl();
-  if (persist) persistVoiceTarget().catch(error => console.warn('Could not save voice target:', error));
+  refreshVoiceIdentity(true);
+  if (persist) {
+    targetSelectionRevision += 1;
+    if (!sessionId || !voiceSessionReady) {
+      pendingVoiceTargetState = {
+        target: voiceTarget,
+        workspace: activeWorkspace,
+      };
+    } else {
+      queueVoiceTargetUpdate({}, {
+        failSafe: true,
+        selectionRevision: targetSelectionRevision,
+      });
+    }
+  }
   return true;
 }
 
-function persistVoiceTarget(extra = {}) {
-  if (!sessionId) return Promise.resolve();
-  return fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/target`, {
+function voiceTargetState(extra = {}) {
+  return {
+    target: voiceTarget,
+    workspace: activeWorkspace,
+    task_id: activeWorkerTaskId || '',
+    codex_thread_id: activeCodexThreadId,
+    ...extra,
+  };
+}
+
+function persistVoiceTarget(payload = voiceTargetState(), voiceSessionId = sessionId) {
+  if (!voiceSessionId) return Promise.resolve();
+  return fetchJson(`/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/target`, {
     method: 'POST',
-    body: JSON.stringify({
-      target: voiceTarget,
-      workspace: activeWorkspace,
-      task_id: activeWorkerTaskId || '',
-      codex_thread_id: activeCodexThreadId,
-      ...extra,
-    }),
+    body: JSON.stringify(payload),
   });
+}
+
+function restoreConfirmedVoiceTarget(voiceSessionId) {
+  if (!confirmedVoiceTargetState || confirmedVoiceTargetState.session_id !== voiceSessionId) return;
+  activeWorkspace = confirmedVoiceTargetState.workspace || 'home-lab';
+  setVoiceTarget(confirmedVoiceTargetState.target || 'jarvis', false);
+}
+
+function queueVoiceTargetUpdate(extra = {}, options = {}) {
+  const payload = voiceTargetState(extra);
+  const voiceSessionId = sessionId;
+  const selectionRevision = options.selectionRevision ?? targetSelectionRevision;
+  const failSafe = Boolean(options.failSafe);
+  if (!voiceSessionId || !voiceSessionReady) return targetUpdatePromise;
+
+  const queuedUpdate = targetUpdatePromise
+    .catch(() => {})
+    .then(() => {
+      if (sessionId !== voiceSessionId || !voiceSessionReady) return null;
+      return persistVoiceTarget(payload, voiceSessionId);
+    })
+    .then(result => {
+      if (sessionId === voiceSessionId && voiceSessionReady) {
+        confirmedVoiceTargetState = { ...payload, session_id: voiceSessionId };
+        if (selectionRevision === targetSelectionRevision) targetUpdateFailure = null;
+      }
+      return result;
+    })
+    .catch(error => {
+      if (failSafe && sessionId === voiceSessionId && selectionRevision === targetSelectionRevision) {
+        const label = VOICE_TARGET_LABELS[payload.target] || payload.target;
+        targetUpdateFailure = new Error(`Could not switch to ${label}. Your message was not sent.`);
+        restoreConfirmedVoiceTarget(voiceSessionId);
+        throw targetUpdateFailure;
+      }
+      throw error;
+    });
+
+  targetUpdatePromise = queuedUpdate;
+  queuedUpdate.catch(error => {
+    console.warn('Could not save voice target:', error);
+    if (targetUpdatePromise === queuedUpdate) targetUpdatePromise = Promise.resolve();
+  });
+  return queuedUpdate;
+}
+
+async function awaitVoiceTargetReady() {
+  while (true) {
+    const pendingUpdate = targetUpdatePromise;
+    try {
+      await pendingUpdate;
+    } catch (error) {
+      if (pendingUpdate !== targetUpdatePromise) continue;
+      const safeError = targetUpdateFailure || error;
+      if (safeError === targetUpdateFailure) targetUpdateFailure = null;
+      throw safeError;
+    }
+    if (pendingUpdate !== targetUpdatePromise) continue;
+    if (targetUpdateFailure) {
+      const safeError = targetUpdateFailure;
+      targetUpdateFailure = null;
+      throw safeError;
+    }
+    if (
+      !sessionId
+      || !voiceSessionReady
+      || confirmedVoiceTargetState?.session_id !== sessionId
+      || confirmedVoiceTargetState?.target !== voiceTarget
+      || confirmedVoiceTargetState?.workspace !== activeWorkspace
+    ) {
+      const label = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+      throw new Error(`Could not confirm ${label} as the voice target. Your message was not sent.`);
+    }
+    return confirmedVoiceTargetState;
+  }
 }
 
 function setAgentWorkspaceActive(active) {
@@ -1174,7 +1301,7 @@ async function handleWorkerEvent(event) {
   if (event.metadata?.codex_thread_id && eventBelongsToActiveVoiceTask) {
     activeCodexThreadId = event.metadata.codex_thread_id;
     activeWorkspace = event.metadata.workspace || activeWorkspace;
-    await persistVoiceTarget({ codex_thread_id: activeCodexThreadId }).catch(() => {});
+    await queueVoiceTargetUpdate({ codex_thread_id: activeCodexThreadId }).catch(() => {});
   }
   if (taskVisible(task)) {
     renderActivityEvent(event);
@@ -1214,7 +1341,7 @@ async function handleWorkerEvent(event) {
     workerStreams.delete(taskId);
     if (activeWorkerTaskId === taskId) {
       activeWorkerTaskId = null;
-      await persistVoiceTarget({ task_id: '' }).catch(() => {});
+      await queueVoiceTargetUpdate({ task_id: '' }).catch(() => {});
     }
     if (isActive) setAgentWorkspaceActive(voiceTarget !== 'jarvis' || activeTaskCount() > 0);
   }
@@ -1350,6 +1477,8 @@ async function playVoiceTurnAudio(turnId, timings, voiceSessionId) {
 async function streamTurn(text, timings, turnStarted, callGeneration) {
   if (!sessionId) await createSession(callGeneration);
   if (!isCurrentVoiceCall(callGeneration) || !sessionId) throw new Error('Voice call ended.');
+  await awaitVoiceTargetReady();
+  if (!isCurrentVoiceCall(callGeneration) || !sessionId) throw new Error('Voice call ended.');
   const turnSessionId = sessionId;
   const turnChatSessionId = chatSessionId;
   liveAssistantMessage = null;
@@ -1409,6 +1538,11 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
         if (isCurrentVoiceCall(callGeneration)) {
           activeWorkspace = event.workspace || activeWorkspace;
           setVoiceTarget(event.target || 'jarvis', false);
+          confirmedVoiceTargetState = {
+            ...voiceTargetState(),
+            session_id: turnSessionId,
+          };
+          targetUpdateFailure = null;
         }
       }
       else if (event.type === 'ui_control' && isCurrentVoiceCall(callGeneration)) {
@@ -1436,7 +1570,10 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
           activeWorkspace = taskWorkspace;
           if (event.foreground !== false) setVoiceTarget(event.worker || 'pc-codex', false);
           else setAgentWorkspaceActive(true);
-          persistVoiceTarget({ task_id: activeWorkerTaskId }).catch(() => {});
+          queueVoiceTargetUpdate(
+            { task_id: activeWorkerTaskId },
+            { failSafe: event.foreground !== false },
+          ).catch(() => {});
           refreshAgentControl();
         }
         followWorkerTask(event.task_id, currentCall);
@@ -1458,6 +1595,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
 }
 
 async function createSession(callGeneration = voiceCallGeneration) {
+  const selectionRevisionAtStart = targetSelectionRevision;
   const activeChatSessionId = window.sessionModule?.getCurrentSessionId?.() || null;
   const session = await fetchJson('/api/voice/sessions', {
     method: 'POST',
@@ -1471,13 +1609,35 @@ async function createSession(callGeneration = voiceCallGeneration) {
   sessionId = session.id;
   chatSessionId = session.chat_session_id || null;
   const savedTarget = session.target || 'jarvis';
-  voiceTarget = 'jarvis';
-  activeWorkspace = session.workspace || 'home-lab';
+  const savedWorkspace = session.workspace || 'home-lab';
   activeWorkerTaskId = session.active_task_id || null;
   activeCodexThreadId = session.codex_thread_id || null;
+  confirmedVoiceTargetState = {
+    session_id: session.id,
+    target: savedTarget,
+    workspace: savedWorkspace,
+    task_id: activeWorkerTaskId || '',
+    codex_thread_id: activeCodexThreadId,
+  };
+  if (!pendingVoiceTargetState && targetSelectionRevision === selectionRevisionAtStart) {
+    activeWorkspace = savedWorkspace;
+    setVoiceTarget(savedTarget, false);
+  }
   if (chatSessionId) await openLinkedChatSession(chatSessionId, callGeneration);
   if (!isCurrentVoiceCall(callGeneration)) return null;
-  setVoiceTarget(savedTarget, false);
+  voiceSessionReady = true;
+  if (pendingVoiceTargetState || targetSelectionRevision !== selectionRevisionAtStart) {
+    if (pendingVoiceTargetState) {
+      activeWorkspace = pendingVoiceTargetState.workspace || 'home-lab';
+      setVoiceTarget(pendingVoiceTargetState.target || 'jarvis', false);
+    }
+    queueVoiceTargetUpdate({}, {
+      failSafe: true,
+      selectionRevision: targetSelectionRevision,
+    });
+    await awaitVoiceTargetReady();
+    pendingVoiceTargetState = null;
+  }
   return session;
 }
 
@@ -1507,6 +1667,7 @@ async function transcribe(blob) {
 
 async function sendTurn(text) {
   if (!sessionId) await createSession();
+  await awaitVoiceTargetReady();
   return fetchJson(`/api/voice/sessions/${encodeURIComponent(sessionId)}/respond`, {
     method: 'POST',
     headers: browserTimezoneHeaders(),
@@ -2106,7 +2267,13 @@ async function startCall() {
   brainTurnInProgress = false;
   activeWorkerTaskId = null;
   activeCodexThreadId = null;
-  activeWorkspace = 'home-lab';
+  activeWorkspace = pendingVoiceTargetState?.workspace || 'home-lab';
+  if (pendingVoiceTargetState?.target) voiceTarget = pendingVoiceTargetState.target;
+  targetUpdatePromise = Promise.resolve();
+  targetUpdateFailure = null;
+  targetSelectionRevision = 0;
+  voiceSessionReady = false;
+  confirmedVoiceTargetState = null;
   liveAssistantMessage = null;
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
@@ -2137,6 +2304,8 @@ async function startCall() {
     await interruptVoiceSession(failedSessionId);
     if (sessionId === failedSessionId) sessionId = null;
     if (voiceCallGeneration !== invalidatedGeneration) return;
+    voiceSessionReady = false;
+    confirmedVoiceTargetState = null;
     handleError(error);
   }
 }
@@ -2177,6 +2346,15 @@ function endCall() {
   sessionId = null;
   if (!continuedTasks) chatSessionId = null;
   voiceTarget = 'jarvis';
+  activeWorkspace = 'home-lab';
+  targetUpdatePromise = Promise.resolve();
+  targetUpdateFailure = null;
+  targetSelectionRevision = 0;
+  voiceSessionReady = false;
+  confirmedVoiceTargetState = null;
+  pendingVoiceTargetState = null;
+  refreshAgentControl();
+  refreshVoiceIdentity(true);
   if (!continuedTasks) activeWorkerTaskId = null;
   liveAssistantMessage = null;
   if (continuedTasks) showToast(`Voice ended. ${continuedTasks === 1 ? 'The active task continues' : `${continuedTasks} active tasks continue`}.`);
@@ -2294,7 +2472,7 @@ function bind() {
   });
 
   window.addEventListener('message', handleSphereMessage);
-  setVoiceTarget('jarvis');
+  setVoiceTarget('jarvis', false);
   loadWorkerCatalog().catch(() => {});
   setStatus('idle');
   const currentSession = currentChatSessionId();

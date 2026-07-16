@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -253,6 +254,64 @@ class HermesRunsAdapter:
         if task and task.get("worker_session_key"):
             headers["X-Hermes-Session-Key"] = task["worker_session_key"]
         return headers
+
+    async def direct_chat(
+        self,
+        *,
+        session_id: str,
+        session_key: str,
+        message: str,
+    ) -> str:
+        """Run one persistent, read-only foreground conversation turn."""
+        if not self.enabled:
+            raise RuntimeError("hermes_not_connected")
+        headers = self._headers()
+        headers["X-Hermes-Session-Id"] = session_id[:256]
+        headers["X-Hermes-Session-Key"] = session_key[:256]
+        payload = {
+            "model": "hermes-agent",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are speaking directly with Leo as Gordon, your installed operator identity on this "
+                        "Hermes runtime. Do not call yourself Hermes and do not say you are "
+                        "assisting through Jarvis. Preserve your installed identity and security instructions. "
+                        "This foreground voice channel is conversational and read-only: do not change files, "
+                        "deploy, install, delete, send messages, approve requests, or perform any other external "
+                        "side effect. Operational work must use the separate approval-capable background task "
+                        "path. Be concise, direct, and truthful for spoken conversation."
+                    ),
+                },
+                {"role": "user", "content": message},
+            ],
+            "stream": False,
+            "tools": [],
+            "tool_choice": "none",
+        }
+        async with httpx.AsyncClient(timeout=300) as client:
+            response = await client.post(
+                f"{self.url}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+        response.raise_for_status()
+        body = response.json()
+        choices = body.get("choices") if isinstance(body, dict) else None
+        content = (
+            choices[0].get("message", {}).get("content")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict)
+            else ""
+        )
+        reply = re.sub(
+            r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>",
+            "",
+            str(content or ""),
+            flags=re.IGNORECASE,
+        ).strip()
+        if not reply:
+            raise RuntimeError("hermes_direct_chat_empty")
+        return reply
 
     async def start(self, task: dict[str, Any]) -> dict[str, Any]:
         _require_worker_task_permission(task)

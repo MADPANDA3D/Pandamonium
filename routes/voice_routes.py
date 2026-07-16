@@ -74,6 +74,7 @@ WORKER_LABELS = {
     "hermes": "Hermes",
     "vps-codex": "VPS Codex",
 }
+VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon"}
 ACTIVE_VOICE_TARGETS = {"jarvis"} | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
@@ -412,6 +413,15 @@ async def _select_spoken_text(prompt: str, response_text: str) -> str:
     return _bounded_spoken_text(response_text)
 
 
+async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
+    response_text = str(final["assistant_text"])
+    if (final.get("diagnostics") or {}).get("direct_target"):
+        if _asks_read_all(prompt) and len(response_text) <= 4000:
+            return response_text
+        return _bounded_spoken_text(response_text)
+    return await _select_spoken_text(prompt, response_text)
+
+
 def _num_predict_for_text(text: str) -> int:
     if re.search(r"\b(detail|detailed|explain|deep dive|walk me through|long answer)\b", text, flags=re.IGNORECASE):
         return VOICE_LONG_NUM_PREDICT
@@ -484,7 +494,7 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
     """Map Leo's stable names to fixed workers and server-controlled workspaces."""
     if re.search(r"\b(vps|online server|public server|hosting server|mad\s*panda hosting)\b", text, re.IGNORECASE):
         return "vps-codex", "vps-ops"
-    if re.search(r"\bhermes\b", text, re.IGNORECASE):
+    if re.search(r"\b(?:hermes|gordon)\b", text, re.IGNORECASE):
         return "hermes", "home-lab"
     if re.search(
         r"\b(pc code(?:x|cs)|my codex|desktop codex|computer codex)\b|"
@@ -501,7 +511,7 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
 
 _NAMED_WORKER_ALIASES = (
     ("vps-codex", r"(?:vps(?:\s+codex)?|online\s+server|public\s+server|hosting\s+server|mad\s*panda\s+hosting)"),
-    ("hermes", r"hermes"),
+    ("hermes", r"(?:hermes|gordon)"),
     (
         "pc-codex",
         r"(?:pc\s+code(?:x|cs)|my\s+(?:pc(?:\s+codex)?|codex|computer)|desktop\s+codex|computer\s+codex|"
@@ -1512,7 +1522,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "vps-codex": "vps-ops",
             "hermes": "home-lab",
         }.get(target_switch, _workspace_for_text(text))
-        label = WORKER_LABELS.get(target_switch, "Jarvis")
+        label = VOICE_TARGET_LABELS.get(target_switch, "Jarvis")
         if target_switch != "jarvis":
             from src.jarvis_agent import worker_statuses
 
@@ -1550,7 +1560,41 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         yield _server_final_event(text, reply, f"target_switch_{target_switch}")
         return
 
-    if _is_casual_greeting(text):
+    if selected_target == "hermes":
+        try:
+            from src.jarvis_agent import direct_hermes_turn
+
+            reply = await direct_hermes_turn(
+                chat_session_id,
+                text,
+                owner=owner,
+                workspace="home-lab",
+            )
+        except Exception as exc:
+            logger.warning("Direct Gordon turn failed: %s", str(exc)[:200])
+            reply = "Gordon is unavailable, so I did not send that through Jarvis."
+            yield {"type": "assistant_delta", "text": reply, "model": "Odysseus"}
+            yield _server_final_event(
+                text,
+                reply,
+                "direct_gordon_unavailable",
+                direct_target="hermes",
+                character_name="Odysseus",
+                model="odysseus-router",
+            )
+            return
+        yield {"type": "assistant_delta", "text": reply, "model": "Gordon"}
+        yield _server_final_event(
+            text,
+            reply,
+            "direct_gordon",
+            direct_target="hermes",
+            character_name="Gordon",
+            model="hermes-agent",
+        )
+        return
+
+    if selected_target == "jarvis" and _is_casual_greeting(text):
         reply = _casual_greeting_reply(text, voice_session)
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, "casual_greeting")
@@ -1962,6 +2006,18 @@ def _append_chat_message(session_manager, session: dict, role: str, text: str, *
         logger.warning("Failed to append Jarvis voice turn to chat session %s: %s", chat_session_id, exc)
 
 
+def _assistant_identity_metadata(diagnostics: dict[str, Any]) -> dict[str, str]:
+    character_name = str(diagnostics.get("character_name") or "").strip()
+    direct_target = str(diagnostics.get("direct_target") or "").strip()
+    if not character_name or not direct_target:
+        return {}
+    return {
+        "source": "direct_worker_voice",
+        "character_name": character_name,
+        "target": direct_target,
+    }
+
+
 def setup_voice_routes(session_manager=None, tts_service=None):
     global _SESSION_MANAGER
     _SESSION_MANAGER = session_manager
@@ -2255,6 +2311,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             voice_status="speaking",
             task_id=linked_task_id,
             diagnostics=diagnostics,
+            **_assistant_identity_metadata(diagnostics),
         )
         _append_diagnostic(session, diagnostics)
         session["status"] = "speaking"
@@ -2315,7 +2372,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     yield f"data: {json.dumps(event)}\n\n"
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
-                spoken_text = await _select_spoken_text(text, str(final["assistant_text"]))
+                spoken_text = await _spoken_text_for_final(text, final)
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 await speech_turn.complete(spoken_text)
                 current_state = _load_state()
@@ -2343,6 +2400,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     voice_status="speaking",
                     task_id=task_ids[0] if task_ids else None,
                     diagnostics=final["diagnostics"],
+                    **_assistant_identity_metadata(final["diagnostics"]),
                 )
                 _append_diagnostic(current, final["diagnostics"])
                 _save_state(current_state)

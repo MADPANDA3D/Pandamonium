@@ -478,6 +478,130 @@ async def test_long_hermes_request_stays_background_and_does_not_switch(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_selected_hermes_talks_directly_to_gordon_without_broker_task(monkeypatch):
+    calls = []
+
+    async def direct(session_id, text, *, owner, workspace):
+        calls.append((session_id, text, owner, workspace))
+        return "Good evening, Leo. This is Gordon."
+
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("a direct Gordon turn must not create a broker task")
+
+    monkeypatch.setattr(jarvis_agent, "direct_hermes_turn", direct)
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Is this Gordon?",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert calls == [("chat-1", "Is this Gordon?", "leo", "home-lab")]
+    assert [event["type"] for event in events] == ["assistant_delta", "final"]
+    assert events[0] == {
+        "type": "assistant_delta",
+        "text": "Good evening, Leo. This is Gordon.",
+        "model": "Gordon",
+    }
+    assert events[-1]["task_ids"] == []
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon"
+    assert events[-1]["diagnostics"]["direct_target"] == "hermes"
+    assert events[-1]["diagnostics"]["character_name"] == "Gordon"
+
+
+@pytest.mark.asyncio
+async def test_selected_hermes_greeting_reaches_gordon(monkeypatch):
+    calls = []
+
+    async def direct(session_id, text, *, owner, workspace):
+        calls.append((session_id, text, owner, workspace))
+        return "Good evening, Leo. Gordon here."
+
+    def must_not_use_jarvis_greeting(*_args, **_kwargs):
+        raise AssertionError("Jarvis greeting handling captured a direct Gordon turn")
+
+    monkeypatch.setattr(jarvis_agent, "direct_hermes_turn", direct)
+    monkeypatch.setattr(voice_routes, "_casual_greeting_reply", must_not_use_jarvis_greeting)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Good evening, how are you?",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert calls == [("chat-1", "Good evening, how are you?", "leo", "home-lab")]
+    assert events[-1]["assistant_text"] == "Good evening, Leo. Gordon here."
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon"
+
+
+@pytest.mark.asyncio
+async def test_direct_gordon_failure_does_not_fall_back_to_jarvis_broker(monkeypatch):
+    async def fail_direct(*_args, **_kwargs):
+        raise RuntimeError("Hermes direct endpoint unavailable")
+
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("direct failure must not become a background Hermes task")
+
+    monkeypatch.setattr(jarvis_agent, "direct_hermes_turn", fail_direct)
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Are you there, Gordon?",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["assistant_delta", "final"]
+    assert all(event["type"] != "agent_task" for event in events)
+    assert events[-1]["task_ids"] == []
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon_unavailable"
+    assert events[-1]["diagnostics"]["character_name"] == "Odysseus"
+    assert "did not send that through Jarvis" in events[-1]["assistant_text"]
+
+
+@pytest.mark.asyncio
+async def test_jarvis_selected_ask_hermes_stays_background_brokered(monkeypatch):
+    calls = []
+
+    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
+        calls.append((worker, workspace, prompt))
+        return {"task_id": "hermes-background", "worker": worker}, "started"
+
+    async def must_not_call_direct(*_args, **_kwargs):
+        raise AssertionError("a Jarvis delegation must not enter direct Gordon chat")
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(jarvis_agent, "direct_hermes_turn", must_not_call_direct)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Ask Hermes for an update.",
+            "leo",
+            {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+
+    assert calls[0][:2] == ("hermes", "home-lab")
+    task = next(event for event in events if event["type"] == "agent_task")
+    assert task == {
+        "type": "agent_task",
+        "task_id": "hermes-background",
+        "worker": "hermes",
+        "workspace": "home-lab",
+        "foreground": False,
+    }
+    assert events[-1]["diagnostics"]["guard_reason"] == "delegation_started_hermes"
+    assert "direct_target" not in events[-1]["diagnostics"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("text", "expected_reply"),
     [
@@ -637,7 +761,7 @@ async def test_explicit_switch_wins_over_jarvis_vocative(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_old_worker_question_does_not_capture_new_target_turn(monkeypatch):
+async def test_old_worker_question_does_not_capture_direct_gordon_turn(monkeypatch):
     monkeypatch.setattr(jarvis_agent, "get_task", lambda _task_id: {
         "task_id": "pc-question",
         "worker": "pc-codex",
@@ -648,14 +772,20 @@ async def test_old_worker_question_does_not_capture_new_target_turn(monkeypatch)
     monkeypatch.setattr(jarvis_agent, "find_active_task", lambda *_args: None)
     monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [])
 
-    async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
-        assert (worker, workspace, prompt) == ("hermes", "home-lab", "Handle this with Hermes.")
-        return {"task_id": "hermes-task", "worker": worker}, "started"
+    async def direct(session_id, text, *, owner, workspace):
+        assert (session_id, text, owner, workspace) == (
+            "chat-1", "Handle this with Hermes.", "leo", "home-lab",
+        )
+        return "I have this, Leo."
+
+    async def must_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("a selected Hermes turn must not create a broker task")
 
     async def must_not_reply(*_args, **_kwargs):
         raise AssertionError("the old PC question captured a Hermes turn")
 
-    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(jarvis_agent, "direct_hermes_turn", direct)
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", must_not_dispatch)
     monkeypatch.setattr(jarvis_agent, "task_action", must_not_reply)
 
     events = [
@@ -668,7 +798,9 @@ async def test_old_worker_question_does_not_capture_new_target_turn(monkeypatch)
         )
     ]
 
-    assert next(event for event in events if event["type"] == "agent_task")["worker"] == "hermes"
+    assert all(event["type"] != "agent_task" for event in events)
+    assert events[-1]["assistant_text"] == "I have this, Leo."
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon"
 
 
 @pytest.mark.asyncio

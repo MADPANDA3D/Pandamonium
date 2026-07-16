@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -336,6 +337,66 @@ async def test_hermes_stream_uses_sse_cursor_and_keeps_idless_repeats(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_hermes_direct_chat_uses_scoped_foreground_session_and_read_only_gordon_contract(
+    tmp_path, monkeypatch
+):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "  Good evening, Leo.  "}}]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json, headers):
+            captured.update(url=url, payload=json, headers=headers)
+            return Response()
+
+    token = tmp_path / "token"
+    token.write_text("secret", encoding="utf-8")
+    adapter = HermesRunsAdapter("http://hermes.test/", token, enabled=True)
+    monkeypatch.setattr(agent_worker_adapters.httpx, "AsyncClient", Client)
+
+    reply = await adapter.direct_chat(
+        session_id="odysseus-gordon-foreground-session",
+        session_key="odysseus:gordon:memory-scope",
+        message="Good evening. Is this Gordon?",
+    )
+
+    assert reply == "Good evening, Leo."
+    assert captured["url"] == "http://hermes.test/v1/chat/completions"
+    assert captured["client_kwargs"] == {"timeout": 300}
+    assert captured["headers"] == {
+        "Authorization": "Bearer secret",
+        "X-Hermes-Session-Id": "odysseus-gordon-foreground-session",
+        "X-Hermes-Session-Key": "odysseus:gordon:memory-scope",
+    }
+    assert captured["payload"]["model"] == "hermes-agent"
+    assert captured["payload"]["stream"] is False
+    assert captured["payload"]["tools"] == []
+    assert captured["payload"]["tool_choice"] == "none"
+    assert captured["payload"]["messages"][1] == {
+        "role": "user",
+        "content": "Good evening. Is this Gordon?",
+    }
+    system_prompt = captured["payload"]["messages"][0]["content"]
+    assert "directly with Leo as Gordon" in system_prompt
+    assert "conversational and read-only" in system_prompt
+    assert "Operational work" in system_prompt
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "permission_mode,approved",
     [("workspace_write", False), ("read_only", True)],
@@ -428,6 +489,99 @@ def test_linked_session_owner_helper_fails_closed(monkeypatch):
     monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", None)
     with pytest.raises(RuntimeError, match="session_manager_unavailable"):
         jarvis_agent.require_session_owner("session-1", "alice")
+
+
+@pytest.mark.asyncio
+async def test_direct_hermes_turn_enforces_owner_and_scopes_session_to_owner_chat_workspace(
+    monkeypatch,
+):
+    calls = []
+    requested_sessions = []
+
+    class Adapter:
+        enabled = True
+
+        async def direct_chat(self, **values):
+            calls.append(values)
+            return "This is Gordon."
+
+    def get_session(session_id):
+        requested_sessions.append(session_id)
+        return SimpleNamespace(id=session_id, owner="alice")
+
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=get_session),
+    )
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"hermes": Adapter()})
+    monkeypatch.setattr(
+        jarvis_agent,
+        "worker_catalog",
+        lambda: {"hermes": {"workspaces": ["home-lab"]}},
+    )
+
+    reply = await jarvis_agent.direct_hermes_turn(
+        "chat-session-1",
+        "Good evening. Is this Gordon?",
+        owner=" alice ",
+        workspace="home-lab",
+    )
+
+    scope = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        "odysseus:gordon:alice:chat-session-1:home-lab",
+    )
+    assert reply == "This is Gordon."
+    assert requested_sessions == ["chat-session-1"]
+    assert calls == [{
+        "session_id": f"odysseus-gordon-{scope}",
+        "session_key": f"odysseus:gordon:{scope}",
+        "message": "Good evening. Is this Gordon?",
+    }]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "owner,workspace,error,message",
+    [
+        (None, "home-lab", PermissionError, "owner_required"),
+        ("bob", "home-lab", PermissionError, "session_owner_mismatch"),
+        ("alice", "other", ValueError, "unknown_workspace"),
+    ],
+)
+async def test_direct_hermes_turn_rejects_invalid_scope_before_worker_call(
+    owner, workspace, error, message, monkeypatch
+):
+    class Adapter:
+        enabled = True
+        calls = 0
+
+        async def direct_chat(self, **_values):
+            self.calls += 1
+            return "must not be reached"
+
+    adapter = Adapter()
+    manager = SimpleNamespace(
+        get_session=lambda session_id: SimpleNamespace(id=session_id, owner="alice")
+    )
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
+    monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"hermes": adapter})
+    monkeypatch.setattr(
+        jarvis_agent,
+        "worker_catalog",
+        lambda: {"hermes": {"workspaces": ["home-lab"]}},
+    )
+
+    with pytest.raises(error, match=message):
+        await jarvis_agent.direct_hermes_turn(
+            "chat-session-1",
+            "Hello",
+            owner=owner,
+            workspace=workspace,
+        )
+
+    assert adapter.calls == 0
 
 
 @pytest.mark.asyncio
