@@ -42,6 +42,12 @@ VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
 VOICE_FRAME_MAX_BYTES = 1024 * 1024
 VOICE_FRAME_MAX_WIDTH = 1024
 VOICE_FRAME_MAX_HEIGHT = 576
+VOICE_CONTROL_MAX_CHARS = 280
+PERSISTENT_APPROVAL_PATTERN = (
+    r"\b(?:always|all|session|permanent(?:ly)?|indefinitely|forever|blanket|ongoing|default|everything|"
+    r"every(?:\s+(?:time|request))?|each\s+request|all(?:\s+future)?\s+requests?|all\s+time|"
+    r"future\s+requests?)\b|\ball\b.{0,120}\brequests?\b|from now on|until further notice"
+)
 logger = logging.getLogger(__name__)
 _SESSION_MANAGER = None
 _SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
@@ -56,12 +62,12 @@ JARVIS_TOOLS = {
     "search_jarvis_knowledge",
     "read_calendar",
 }
-VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private orchestrator and conversational partner.
-The active system build is Mark 6 - Jarvis Voice-First Agent Operating System. Unless Leo explicitly mentions scripture, Bible study, or another domain, references to a numbered Mark mean indexed Jarvis architecture builds.
-Answer naturally with enough substance for the question: usually one to four short spoken paragraphs, and more when Leo explicitly asks for a deep explanation. Never describe pacing, pauses, or speaking style.
-For casual greetings, answer in no more than two sentences. Do not volunteer Leo's location, local time, system status, scheduling options, or a capability menu unless he asks. Do not repeat wording or facts already stated in recent turns.
-You coordinate work; you do not pretend to have inspected systems you have not inspected. Use get_runtime_status for runtime or model questions. Use search_jarvis_knowledge for curated background. For latest, current, or business-update requests, use background knowledge and start a read-only pc-codex task to inspect current sources.
-Model-initiated delegation is always read-only. Tell Leo briefly that work is running in the background, then let worker events deliver progress and the final result. Never invent worker results, runtime facts, paths, or endpoint details."""
+VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private Mark 7/8 voice orchestrator.
+Be terse and conversational: normally one or two spoken sentences unless Leo asks for depth. Never describe pacing or offer a capability menu.
+Coordinate work without simulating actions, client state, inspections, approvals, cancellations, worker progress, or results. Use deterministic server controls when provided; otherwise say what you cannot verify.
+Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
+PC Codex owns local project, code, and document inspection. VPS Codex is only for work that explicitly names the VPS. Hermes is explicit-only; never infer or auto-dispatch Hermes.
+Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
 
 WORKER_LABELS = {
     "pc-codex": "PC Codex",
@@ -605,41 +611,128 @@ def _is_document_open_request(text: str) -> bool:
     )
 
 
-def _foreground_command(text: str) -> tuple[str, str | None] | None:
-    """Return one narrow, browser-owned foreground action for exact voice requests."""
+def _voice_words(text: str) -> str:
     value = text.lower().replace("’", "'")
-    value = " ".join(re.sub(r"[^a-z0-9' ]", " ", value).split())
-    value = re.sub(r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?", "", value)
-    value = re.sub(r"\s+please$", "", value)
+    return " ".join(re.sub(r"[^a-z0-9' ]", " ", value).split())
 
-    if re.fullmatch(r"(?:open|show|pull up)(?: the| my)? calendar", value):
-        return "open_view", "calendar"
-    if re.fullmatch(r"(?:close|dismiss)(?: the)?(?: this| my| current| active)? document", value):
-        return "close_view", "document"
-    if re.fullmatch(r"(?:minimize|hide|put away)(?: the)?(?: this| my| current| active)? document", value):
-        return "minimize_view", "document"
+
+def _voice_command_words(text: str) -> str:
+    value = _voice_words(text)
+    prefixes = (
+        r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?",
+        r"^(?:can|could|would|will) you (?:please )?",
+        r"^i (?:want|need|would like)(?: you)? to (?:please )?",
+        r"^(?:actually )?do me (?:a )?favor(?: and)? (?:please )?",
+        r"^actually ",
+        r"^(?:go ahead and|please) ",
+    )
+    for _ in range(3):
+        previous = value
+        for pattern in prefixes:
+            value = re.sub(pattern, "", value)
+        if value == previous:
+            break
+    return re.sub(r"\s+please$", "", value).strip()
+
+
+def _normalized_voice_control(text: str) -> str:
+    """Normalize bounded Whisper filler without widening the browser control surface."""
+    if not text or len(text) > VOICE_CONTROL_MAX_CHARS:
+        return ""
+    return _voice_command_words(text)
+
+
+def _voice_control_intent(text: str) -> tuple[str, str, str | None] | None:
+    value = _normalized_voice_control(text)
+    if not value or re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return None
+    # Leading filler containing "and" is stripped above; any remaining connector
+    # would make this more than one browser-owned action.
+    if re.search(r"\b(?:and|then|also)\b", value):
+        return None
+
+    document_suffix = (
+        r"(?: (?:that|which) is (?:showing|open)(?: you know)?(?: this is)?(?: right now)?"
+        r"| (?:showing|open)(?: right now)?)?"
+        r"(?: so (?:that )?it (?:goes away|is gone))?"
+    )
+    if re.fullmatch(r"(?:open|opens|show|shows|pull up)(?: the| my)? calendar", value):
+        return "foreground", "open_view", "calendar"
     if re.fullmatch(
-        r"(?:what|which)(?: view| window| panel)?(?: is|'s)(?: currently)? (?:open|active)|"
+        rf"(?:close|dismiss)(?: the)?(?: this| my| current| active)? document{document_suffix}",
+        value,
+    ):
+        return "foreground", "close_view", "document"
+    if re.fullmatch(
+        rf"(?:minimize|hide|put away)(?: the)?(?: this| my| current| active)? document{document_suffix}",
+        value,
+    ):
+        return "foreground", "minimize_view", "document"
+    if re.fullmatch(
+        r"(?:what|which)(?: view| window| panel)(?: is|'s)(?: currently)? (?:open|active)(?: right now)?|"
+        r"(?:what|which)(?: view| window| panel) do i have open(?: right now)?|"
         r"what am i (?:looking at|viewing)|report(?: the)? current view",
         value,
     ):
-        return "report_view_state", None
+        return "foreground", "report_view_state", None
+    media = {
+        "open your eyes": "camera_open",
+        "open eyes": "camera_open",
+        "open the camera": "camera_open",
+        "what do you see": "camera_describe",
+        "describe what you see": "camera_describe",
+        "describe the camera": "camera_describe",
+        "close your eyes": "camera_close",
+        "close eyes": "camera_close",
+        "close the camera": "camera_close",
+        "i need something motivational": "media_motivation",
+        "need something motivational": "media_motivation",
+        "i want something motivational": "media_motivation",
+        "want something motivational": "media_motivation",
+        "show me something motivational": "media_motivation",
+        "play something motivational": "media_motivation",
+    }.get(value)
+    return ("media", media, None) if media else None
+
+
+def _foreground_command(text: str) -> tuple[str, str | None] | None:
+    """Return one narrow, browser-owned foreground action."""
+    intent = _voice_control_intent(text)
+    if intent and intent[0] == "foreground":
+        return intent[1], intent[2]
     return None
 
 
 def _media_command(text: str) -> str | None:
-    """Return one exact, single-purpose camera/media action."""
-    value = text.lower().replace("’", "'")
-    value = " ".join(re.sub(r"[^a-z0-9' ]", " ", value).split())
-    value = re.sub(r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?", "", value)
-    value = re.sub(r"\s+please$", "", value)
-    return {
-        "open your eyes": "camera_open",
-        "what do you see": "camera_describe",
-        "describe what you see": "camera_describe",
-        "close your eyes": "camera_close",
-        "i need something motivational": "media_motivation",
-    }.get(value)
+    """Return one narrow, single-purpose camera/media action."""
+    intent = _voice_control_intent(text)
+    return intent[1] if intent and intent[0] == "media" else None
+
+
+def _unsupported_voice_control(text: str) -> bool:
+    """Keep near-known, unsafe, or compound browser controls out of the LLM."""
+    if _voice_control_intent(text) or _is_document_open_request(text):
+        return False
+    value = _normalized_voice_control(text)
+    detection_value = value or _voice_words(text)
+    raw = text.lower().replace("’", "'")
+    known_target = bool(re.search(
+        r"\b(?:calendar|documents?|eyes|camera|motivational|current view|window|panel)\b",
+        raw,
+    ))
+    arbitrary_browser_target = bool(re.search(
+        r"(?:https?://|\b(?:browser|page|settings|menu|button|tab|script|selector)\b)",
+        raw,
+    ))
+    command_like = bool(re.match(
+        r"(?:open|opens|show|shows|pull up|close|dismiss|minimize|hide|put away|report|run|execute|click|navigate)\b",
+        detection_value,
+    ))
+    control_word = bool(re.search(
+        r"\b(?:open|opens|show|shows|close|dismiss|minimize|hide|describe|play|need|want|report|active)\b",
+        detection_value,
+    ))
+    return (known_target and control_word) or (arbitrary_browser_target and command_like)
 
 
 def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
@@ -764,9 +857,15 @@ def _casual_greeting_reply(text: str, voice_session: dict) -> str:
 
 
 def _approval_choice(text: str) -> str | None:
+    if not text or len(text) > VOICE_CONTROL_MAX_CHARS:
+        return None
     value = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
+    if re.search(PERSISTENT_APPROVAL_PATTERN, value):
+        return None
+    if re.search(r"\byes\b", value) and re.search(r"\bno\b", value):
+        return None
     deny = bool(re.search(r"\b(?:deny|decline|reject|don't|do not|no)\b", value))
-    approve = bool(re.search(r"\b(?:approve|approved|yes|okay|ok|go ahead|do it|proceed)\b", value))
+    approve = bool(re.search(r"\b(?:approve|approved)\b", value))
     if deny == approve:
         return None
     if deny:
@@ -777,11 +876,338 @@ def _approval_choice(text: str) -> str | None:
 
 
 def _explicit_reply_target(text: str) -> str | None:
+    if not text or len(text) > VOICE_CONTROL_MAX_CHARS:
+        return None
     request = re.search(r"\b(?:answer|reply|respond)(?:\s+to)?\s+", text, re.IGNORECASE)
     if not request:
         return None
     route = _named_worker_route_after(text, request.end())
     return route[0] if route else None
+
+
+def _named_task_workers(text: str) -> list[str]:
+    workers = []
+    for worker, alias in _NAMED_WORKER_ALIASES:
+        if worker != "jarvis" and re.search(rf"\b(?:the\s+)?{alias}\b", text, re.IGNORECASE):
+            workers.append(worker)
+    return workers
+
+
+_TASK_WORKSPACE_PATTERNS = (
+    ("vps-ops", r"\bvps[\s-]+ops\b"),
+    ("project-linux", r"\bproject[\s-]+linux\b"),
+    ("home-lab", r"\bhome[\s-]+lab\b"),
+    ("madpanda3d", r"\b(?:madpanda3d|mad\s+panda\s+3d)\b"),
+    ("business", r"\bbusiness\b"),
+)
+
+
+def _spoken_task_workspaces(text: str) -> list[str]:
+    return [workspace for workspace, pattern in _TASK_WORKSPACE_PATTERNS if re.search(pattern, text, re.IGNORECASE)]
+
+
+def _task_control_intent(text: str) -> tuple[str, str | None, str | None] | None:
+    """Parse one complete task command; descriptive or partial prose stays conversational."""
+    command = _voice_command_words(text)
+    workers = _named_task_workers(text)
+    worker = workers[0] if len(workers) == 1 else None
+    workspaces = _spoken_task_workspaces(text)
+    worker_pattern = "(?:" + "|".join(
+        alias for candidate, alias in _NAMED_WORKER_ALIASES if candidate != "jarvis"
+    ) + ")"
+    workspace_pattern = r"(?:business|home[\s-]+lab|project[\s-]+linux|madpanda3d|mad\s+panda\s+3d|vps[\s-]+ops)"
+    persistent_prefix = bool(re.match(
+        r"^(?:(?:for (?:this|the) session|from now on|until further notice)|"
+        r"(?:always|permanently|forever|indefinitely)) approve\b",
+        command,
+    ))
+    negative_wrapper = bool(
+        re.match(
+            r"^(?:i (?:do not|don't|never) (?:want|need)(?: you)? to|(?:do not|don't|never)) "
+            r"(?:cancel|stop|approve|deny|decline|reject)\b",
+            command,
+        )
+        or re.match(r"^do nothing\b.*\b(?:tasks?|requests?|runs?|jobs?)\b", command)
+        or re.match(
+            r"^i (?:want|need) (?:none|nothing)\b.*\b(?:cancell?(?:ed|ing)?|stopp?ed|approve(?:d)?)\b",
+            command,
+        )
+    )
+    cancel_prefix = bool(re.match(r"^(?:cancel|stop)\b", command))
+    approval_prefix = bool(re.match(
+        r"^(?:(?:yes|no) )?(?:approve|deny|decline|reject)\b",
+        command,
+    ))
+    named_reply = bool(worker and any(
+        re.match(rf"^(?:answer|reply|respond)(?: to)? (?:the )?{alias}\b", command)
+        for candidate, alias in _NAMED_WORKER_ALIASES
+        if candidate == worker
+    ))
+    unnamed_reply = bool(re.match(
+        r"^(?:answer|reply|respond)(?: to)? (?:that|the) (?:worker )?question\b",
+        command,
+    ))
+    stand_down = bool(worker and any(
+        re.fullmatch(
+            rf"(?:tell|ask) (?:the )?{alias} (?:to )?stand down"
+            rf"(?: (?:in|from) (?:the )?{workspace_pattern}(?: workspace)?)?"
+            r"(?: for me| right now| now)?",
+            command,
+        )
+        for candidate, alias in _NAMED_WORKER_ALIASES
+        if candidate == worker
+    ))
+    tell_reply = bool(worker and any(
+        re.match(rf"^tell (?:the )?{alias} (?:the answer is|use|choose|select)\b", command)
+        for candidate, alias in _NAMED_WORKER_ALIASES
+        if candidate == worker
+    ))
+    command_like = (
+        negative_wrapper
+        or persistent_prefix
+        or cancel_prefix
+        or approval_prefix
+        or named_reply
+        or unnamed_reply
+        or stand_down
+        or tell_reply
+    )
+    if len(text) > VOICE_CONTROL_MAX_CHARS:
+        return ("rejected", worker, None) if command_like else None
+    if negative_wrapper:
+        return "rejected", worker, None
+    if not command_like:
+        return None
+
+    negative = bool(re.search(r"\b(?:don't|do not|never|not|none|nothing|neither|nor|zero)\b", command))
+    if re.search(r"\bno\b", command) and not re.match(r"^no (?:deny|decline|reject)\b", command):
+        negative = True
+    if (cancel_prefix or approval_prefix) and negative:
+        return "rejected", worker, None
+    persistent_approval = bool(
+        re.search(r"\bapprove(?:d)?\b", command)
+        and re.search(PERSISTENT_APPROVAL_PATTERN, command)
+    )
+    if persistent_prefix or (approval_prefix and persistent_approval):
+        return "persistent_approval", worker, None
+    if len(workers) > 1 or len(workspaces) > 1:
+        return "invalid", worker, None
+
+    workspace_suffix = rf"(?: (?:in|from) (?:the )?{workspace_pattern}(?: workspace)?)?"
+    polite_suffix = r"(?: for me| right now| now)?"
+    cancel_target = (
+        rf"(?:"
+        rf"(?:the )?{worker_pattern} (?:the )?{workspace_pattern} (?:task|request|run|job)"
+        rf"|"
+        rf"(?:the )?{worker_pattern}(?: (?:task|request|run|job))?"
+        rf"|(?:the )?(?:task|request|run|job)(?: (?:for|from|on) (?:the )?{worker_pattern})?"
+        rf"|(?:the )?{workspace_pattern} (?:task|request|run|job)"
+        rf"|(?:it|that|this)(?: (?:task|request|run|job))?"
+        rf")"
+    )
+    if cancel_prefix:
+        if re.fullmatch(rf"(?:cancel|stop) {cancel_target}{workspace_suffix}{polite_suffix}", command):
+            return "cancel", worker, None
+        return "invalid", worker, None
+    if stand_down:
+        return "cancel", worker, None
+
+    if approval_prefix:
+        approval_command = re.sub(r"^(?:yes|no) ", "", command)
+        approval_target = (
+            rf"(?:"
+            rf"(?:the )?{worker_pattern}(?: (?:request|approval))?"
+            rf"|(?:the )?{workspace_pattern} (?:request|approval)"
+            rf"|(?:the|that|this) (?:request|approval)"
+            rf"|(?:it|that|this)"
+            rf")?"
+        )
+        if not re.fullmatch(
+            rf"(?:approve|deny|decline|reject)(?: {approval_target})?(?: once)?{workspace_suffix}{polite_suffix}",
+            approval_command,
+        ):
+            return "invalid", worker, None
+        return "approval", worker, _approval_choice(text)
+
+    if named_reply or unnamed_reply:
+        controls = re.findall(r"\b(?:cancel|stop|approve|deny|decline|reject|answer|reply|respond)\b", command)
+        if len(workers) > 1 or len(set(controls)) > 1:
+            return "invalid", worker, None
+        return "reply", worker, text
+    if tell_reply:
+        if len(workers) > 1 or re.search(r"\b(?:cancel|stop|approve|deny|decline|reject)\b", command):
+            return "invalid", worker, None
+        return "reply", worker, text
+    return "invalid", worker, None
+
+
+def _select_broker_task(
+    chat_session_id: str,
+    owner: str,
+    action: str,
+    named_worker: str | None,
+    spoken_workspace: str | None,
+) -> tuple[dict | None, str]:
+    from src.jarvis_agent import list_active_tasks
+
+    statuses = {
+        "approval": {"waiting_approval"},
+        "reply": {"waiting"},
+        "cancel": {"queued", "running", "waiting", "waiting_approval"},
+    }[action]
+    tasks = list_active_tasks(
+        chat_session_id,
+        owner,
+        worker=named_worker,
+        workspace=spoken_workspace,
+        statuses=statuses,
+    )
+    if not tasks:
+        return None, "missing"
+    if len(tasks) > 1:
+        return None, "ambiguous"
+    return tasks[0], "found"
+
+
+async def _run_task_control(
+    chat_session_id: str,
+    text: str,
+    owner: str,
+    voice_session: dict,
+    *,
+    selected_reply: bool = False,
+) -> tuple[str, str, list[str]] | None:
+    intent = _task_control_intent(text)
+    workspaces = _spoken_task_workspaces(text)
+    spoken_workspace = workspaces[0] if len(workspaces) == 1 else None
+    selected_task = None
+    if not intent:
+        selected_target = str(voice_session.get("target") or "jarvis")
+        if not selected_reply or selected_target not in WORKER_LABELS:
+            return None
+        try:
+            selected_task, selection = _select_broker_task(
+                chat_session_id, owner, "reply", selected_target, spoken_workspace,
+            )
+        except RuntimeError:
+            return None
+        if selection == "missing":
+            return None
+        if selection == "ambiguous":
+            return (
+                "More than one worker question matches. Use the matching task card.",
+                "worker_reply_ambiguous",
+                [],
+            )
+        intent = ("reply", selected_target, text)
+    action, named_worker, value = intent
+    if action == "rejected":
+        return "I did not run that task control.", "worker_control_rejected", []
+    if action == "persistent_approval":
+        return (
+            "Voice can only approve one broker-authorized request once, or deny it. I did not grant persistent approval.",
+            "worker_approval_persistent_refused",
+            [],
+        )
+    if action == "invalid":
+        return "Please give me one task control at a time.", "worker_control_compound", []
+
+    if selected_task is None:
+        task, selection = _select_broker_task(
+            chat_session_id,
+            owner,
+            action,
+            named_worker,
+            spoken_workspace,
+        )
+    else:
+        task, selection = selected_task, "found"
+    label = WORKER_LABELS.get(named_worker or "", "worker")
+    if selection == "missing":
+        return (
+            f"I could not find an eligible active {label} task in this chat.",
+            f"worker_{action}_missing",
+            [],
+        )
+    if selection == "ambiguous":
+        return (
+            "More than one task matches. Name the worker and workspace, or use the matching task card.",
+            f"worker_{action}_ambiguous",
+            [],
+        )
+
+    assert task is not None
+    task_id = str(task["task_id"])
+    label = WORKER_LABELS.get(str(task.get("worker") or ""), "the worker")
+    from src.jarvis_agent import task_action
+
+    if action == "approval":
+        if value not in {"once", "deny"}:
+            return (
+                "Say approve once or deny. Voice cannot grant session or permanent approval.",
+                "worker_approval_unclear",
+                [task_id],
+            )
+        if value == "once" and not (
+            task.get("permission_mode") == "workspace_write" and task.get("approved") is True
+        ):
+            return (
+                f"That {label} task is not broker-authorized for writes, so voice can only deny the request.",
+                "worker_approval_not_authorized",
+                [task_id],
+            )
+        try:
+            await task_action(
+                task_id,
+                "approval",
+                {"choice": value, "spoken_text": text},
+                persist_user_message=False,
+                owner=owner,
+            )
+        except Exception as exc:
+            logger.warning("Voice worker approval failed: %s", str(exc)[:200])
+            return "I could not submit that approval; the task remains paused.", "worker_approval_failed", [task_id]
+        verb = "denied" if value == "deny" else "approved once"
+        return f"I {verb} the {label} request.", f"worker_approval_{value}", [task_id]
+
+    if action == "cancel":
+        try:
+            updated = await task_action(
+                task_id,
+                "cancel",
+                persist_user_message=False,
+                owner=owner,
+            )
+        except Exception as exc:
+            logger.warning("Voice worker cancellation failed: %s", str(exc)[:200])
+            return (
+                f"I could not request cancellation for {label}; it may still be running.",
+                "worker_cancel_failed",
+                [task_id],
+            )
+        if updated.get("status") == "cancelled":
+            return f"The {label} task is cancelled.", "worker_cancelled", [task_id]
+        return (
+            f"Cancellation requested for {label}. I’ll report the terminal state when the broker receives it.",
+            "worker_cancel_requested",
+            [task_id],
+        )
+
+    answer = str(value or text)
+    if ":" in answer and answer.split(":", 1)[1].strip():
+        answer = answer.split(":", 1)[1].strip()
+    try:
+        await task_action(
+            task_id,
+            "reply",
+            {"answers": _question_answers(task, answer)},
+            persist_user_message=False,
+            owner=owner,
+        )
+    except Exception as exc:
+        logger.warning("Voice worker reply failed: %s", str(exc)[:200])
+        return "I could not submit that answer; the task is still waiting.", "worker_question_reply_failed", [task_id]
+    return f"I passed your answer to {label}.", "worker_question_reply", [task_id]
 
 
 def _pending_task_accepts_turn(task: dict | None, text: str, selected_target: str) -> bool:
@@ -849,16 +1275,95 @@ def _business_status_prompt(text: str) -> str:
     )
 
 
+def _prior_voice_exchange(voice_session: dict) -> str:
+    turns = [
+        turn for turn in voice_session.get("turns", [])
+        if isinstance(turn, dict)
+        and turn.get("role") in {"user", "assistant"}
+        and isinstance(turn.get("text"), str)
+    ]
+    assistant_index = next(
+        (index for index in range(len(turns) - 1, -1, -1) if turns[index]["role"] == "assistant"),
+        None,
+    )
+    if assistant_index is None:
+        return "none"
+    user = next(
+        (turns[index]["text"].strip() for index in range(assistant_index - 1, -1, -1) if turns[index]["role"] == "user"),
+        "",
+    )
+    assistant = turns[assistant_index]["text"].strip()
+    return f"Leo: {user[:950]}\nJarvis: {assistant[:950]}"[:2000]
+
+
+def _logical_client_state(voice_session: dict) -> dict[str, Any]:
+    source = voice_session.get("_client_state")
+    if not isinstance(source, dict):
+        return {}
+    state: dict[str, Any] = {}
+    if source.get("active_view") in {"calendar", "document", "chat"}:
+        state["active_view"] = source["active_view"]
+    for name in ("calendar", "document"):
+        raw = source.get(name)
+        if not isinstance(raw, dict):
+            continue
+        allowed = {key: raw[key] for key in ("open", "minimized") if isinstance(raw.get(key), bool)}
+        if name == "calendar":
+            if raw.get("view") in {"month", "week", "year", "agenda"}:
+                allowed["view"] = raw["view"]
+            if isinstance(raw.get("date"), str):
+                allowed["date"] = raw["date"][:40]
+        elif isinstance(raw.get("id"), str):
+            allowed["id"] = raw["id"][:200]
+        state[name] = allowed
+    return state
+
+
+def _worker_context_envelope(
+    worker: str,
+    workspace: str,
+    permission_mode: str,
+    exact_request: str,
+    voice_session: dict,
+    task_instructions: str | None = None,
+) -> str:
+    request = str(exact_request or "").strip()[:4000]
+    instructions = str(task_instructions or "").strip()[:4000]
+    prior = _prior_voice_exchange(voice_session)
+    client_state = json.dumps(_logical_client_state(voice_session), separators=(",", ":"), sort_keys=True)
+    instruction_block = f"task_instructions(<=4000):\n{instructions}\n" if instructions and instructions != request else ""
+    return (
+        "[JARVIS_CONTEXT v1]\n"
+        f"worker={worker}; workspace={workspace}; permission={permission_mode}\n"
+        f"exact_request(<=4000):\n{request}\n"
+        f"{instruction_block}"
+        f"prior_exchange(<=2000):\n{prior}\n"
+        f"client_state={client_state}\n"
+        "rules: branch=assigned worker/workspace only; evidence=verify facts and mark unknowns; "
+        "output=concise factual progress/final; never simulate actions or other workers."
+    )
+
+
 async def _dispatch_worker_request(
     chat_session_id: str,
     worker: str,
     workspace: str,
     prompt: str,
     owner: str,
-    _voice_session: dict,
+    voice_session: dict,
 ) -> tuple[dict, str]:
     from src.jarvis_agent import find_active_task, start_task, task_action
 
+    permission_mode = "read_only"
+    exact_request = str(voice_session.get("_exact_request") or prompt)
+    prompt = _worker_context_envelope(
+        worker,
+        workspace,
+        permission_mode,
+        exact_request,
+        voice_session,
+        task_instructions=prompt,
+    )
     active = find_active_task(chat_session_id, worker, workspace, owner)
     if active:
         if worker in {"pc-codex", "vps-codex"} and active.get("status") not in {"waiting", "waiting_approval"}:
@@ -880,7 +1385,7 @@ async def _dispatch_worker_request(
         chat_session_id,
         workspace,
         prompt,
-        "read_only",
+        permission_mode,
         False,
         owner,
     )
@@ -888,6 +1393,7 @@ async def _dispatch_worker_request(
 
 
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
+    voice_session["_exact_request"] = text
     media = _media_command(text)
     if media:
         vision_model = ""
@@ -954,9 +1460,11 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 if isinstance(client_state, dict) and isinstance(client_state.get("document"), dict)
                 else {}
             )
-            if action == "minimize_view" and document_state.get("minimized"):
+            if action in {"close_view", "minimize_view"} and not isinstance(client_state, dict):
+                reply = "I cannot confirm an active document from this turn, so I did not change the view."
+            elif action == "minimize_view" and document_state.get("minimized"):
                 reply = "The document is already minimized."
-            elif action in {"close_view", "minimize_view"} and client_state and not (
+            elif action in {"close_view", "minimize_view"} and not (
                 document_state.get("open") or document_state.get("minimized")
             ):
                 reply = "There is no active document to close." if action == "close_view" else "There is no active document to minimize."
@@ -969,6 +1477,22 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 }[action]
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, f"foreground_{action}")
+        return
+
+    task_control = await _run_task_control(chat_session_id, text, owner, voice_session)
+    if task_control:
+        reply, guard, task_ids = task_control
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard, task_ids)
+        return
+
+    if _unsupported_voice_control(text):
+        reply = (
+            "I did not run that control. I can handle one allowlisted Calendar, document, camera, "
+            "or built-in motivational action at a time."
+        )
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "unsupported_voice_control")
         return
 
     selected_target = str(voice_session.get("target") or "jarvis")
@@ -1177,65 +1701,19 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         yield _server_final_event(text, reply, guard_reason, task_ids)
         return
 
-    from src.jarvis_agent import find_active_task, get_task, task_action
-
     selected_workspace = _selected_workspace(text, str(voice_session.get("workspace") or "home-lab"))
-    active = (
-        find_active_task(chat_session_id, selected_target, selected_workspace, owner)
-        if selected_target != "jarvis"
-        else None
+
+    selected_reply = await _run_task_control(
+        chat_session_id,
+        text,
+        owner,
+        voice_session,
+        selected_reply=True,
     )
-    pending = get_task(str(voice_session.get("active_task_id") or ""))
-    if (
-        not pending
-        or pending.get("session_id") != chat_session_id
-        or pending.get("owner") != owner
-        or not _pending_task_accepts_turn(pending, text, selected_target)
-    ):
-        pending = active
-
-    if pending and pending.get("status") == "waiting_approval":
-        choice = _approval_choice(text)
-        if choice:
-            try:
-                await task_action(
-                    pending["task_id"],
-                    "approval",
-                    {"choice": choice, "spoken_text": text},
-                    persist_user_message=False,
-                    owner=owner,
-                )
-                verb = "denied" if choice == "deny" else "approved once"
-                reply = f"I {verb} that request for {WORKER_LABELS.get(pending['worker'], 'the worker')}."
-                guard = f"worker_approval_{choice}"
-            except Exception as exc:
-                logger.warning("Voice worker approval failed: %s", str(exc)[:200])
-                reply = "I could not submit that approval. The task remains paused."
-                guard = "worker_approval_failed"
-        else:
-            reply = "That task is waiting for approval. Please say approve once or deny."
-            guard = "worker_approval_unclear"
+    if selected_reply:
+        reply, guard, task_ids = selected_reply
         yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(text, reply, guard, [pending["task_id"]])
-        return
-
-    if pending and pending.get("status") == "waiting":
-        try:
-            await task_action(
-                pending["task_id"],
-                "reply",
-                {"answers": _question_answers(pending, text)},
-                persist_user_message=False,
-                owner=owner,
-            )
-            reply = f"I passed your answer to {WORKER_LABELS.get(pending['worker'], 'the worker')}."
-            guard = "worker_question_reply"
-        except Exception as exc:
-            logger.warning("Voice worker reply failed: %s", str(exc)[:200])
-            reply = "I could not submit that answer. The task is still waiting for input."
-            guard = "worker_question_reply_failed"
-        yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(text, reply, guard, [pending["task_id"]])
+        yield _server_final_event(text, reply, guard, task_ids)
         return
 
     if _asks_runtime_status(text):
@@ -1348,31 +1826,17 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
-    pending_voice_task = False
-    if voice_session.get("active_task_id"):
-        from src.jarvis_agent import get_task
-
-        pending = get_task(str(voice_session["active_task_id"]))
-        if (
-            pending
-            and pending.get("session_id") == chat_session_id
-            and pending.get("owner") == owner
-        ):
-            pending_voice_task = _pending_task_accepts_turn(
-                pending,
-                text,
-                str(voice_session.get("target") or "jarvis"),
-            )
     if (
         _media_command(text)
         or _foreground_command(text)
+        or _unsupported_voice_control(text)
+        or _task_control_intent(text)
         or _target_switch(text)
         or _is_casual_greeting(text)
         or _background_delegation(text)
         or _asks_runtime_status(text)
         or _asks_current_business(text)
         or str(voice_session.get("target") or "jarvis") != "jarvis"
-        or pending_voice_task
     ):
         async for event in _server_routed_events(chat_session_id, text, owner, voice_session):
             yield event

@@ -106,13 +106,14 @@ def require_session_owner(session_id: str, owner: str) -> Any:
     return session
 
 
-def find_active_task(
+def list_active_tasks(
     session_id: str,
-    worker: str,
+    owner: str,
+    worker: str | None = None,
     workspace: str | None = None,
-    owner: str | None = None,
-) -> dict | None:
-    """Return the newest nonterminal task for this chat and worker."""
+    statuses: set[str] | None = None,
+) -> list[dict]:
+    """Return broker-owned nonterminal tasks for one authenticated chat."""
     identity = str(owner or "").strip()
     if not identity:
         raise PermissionError("owner_required")
@@ -122,12 +123,28 @@ def find_active_task(
             task
             for task in (_tasks().get("tasks") or {}).values()
             if task.get("session_id") == session_id
-            and task.get("worker") == worker
+            and (worker is None or task.get("worker") == worker)
             and (workspace is None or task.get("workspace") == workspace)
             and task.get("status") not in TERMINAL
+            and (statuses is None or task.get("status") in statuses)
             and task.get("owner") == identity
         ]
-    return max(matches, key=lambda task: (task.get("updated_at", 0), task.get("created_at", 0)), default=None)
+    return sorted(
+        matches,
+        key=lambda task: (task.get("updated_at", 0), task.get("created_at", 0)),
+        reverse=True,
+    )
+
+
+def find_active_task(
+    session_id: str,
+    worker: str,
+    workspace: str | None = None,
+    owner: str | None = None,
+) -> dict | None:
+    """Return the newest nonterminal task for this chat and worker."""
+    matches = list_active_tasks(session_id, str(owner or ""), worker, workspace)
+    return matches[0] if matches else None
 
 
 def task_events(task_id: str, after: int = -1) -> list[dict]:

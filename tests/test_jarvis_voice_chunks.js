@@ -35,6 +35,9 @@ assert.match(source, /SPOKEN_WORKER_EVENTS = new Set\(\['progress', 'question', 
 assert.match(source, /DURABLE_SPEECH_TYPES = new Set\(\['question', 'approval_required', 'error'\]\)/);
 assert.match(source, /event\.spoken_text \|\| `\$\{label\} finished\. The full result is in chat\.`/);
 assert.doesNotMatch(source, /enqueueSpeech\(event\.text/);
+assert.match(source, /is requesting approval\. Please take a look\./);
+assert.match(source, /has a question\. Please take a look\./);
+assert.match(source, /hit a problem\. Please take a look\./);
 assert.match(source, /WORKER_SPEECH_MAX_CHARS = 700/);
 assert.match(source, /VOICE_RMS_THRESHOLD = 0\.018/);
 assert.match(source, /VOICE_SAMPLE_INTERVAL_MS = 140/);
@@ -127,7 +130,11 @@ assert.match(source, /window\.confirm\('Cancel the active task\?'\)/);
 assert.match(source, /agent-tasks\/\$\{encodeURIComponent\(taskId\)\}\/cancel/);
 assert.match(source, /Voice ended\./);
 const endCallBody = source.match(/function endCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+const setStatusBody = source.match(/function setStatus\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.doesNotMatch(endCallBody, /workerStreams\.forEach|workerStreams\.clear|handledWorkerEventIds = new Set/);
+assert.doesNotMatch(endCallBody, /unmountOrganicSphere/);
+assert.doesNotMatch(setStatusBody, /unmountOrganicSphere/);
+assert.match(endCallBody, /deferCallPanelClose\(panel, closingGeneration\)/);
 assert.match(source, /isActive = false;\s*restoreActivityGroupsToChat\(\)/);
 assert.match(source, /if \(!continuedTasks\) chatSessionId = null/);
 assert.match(source, /loadDocument\(documentId, \{ side: 'left' \}\)/);
@@ -137,6 +144,9 @@ assert.match(documentSource, /if \(divider\.dataset\.dragBound === '1'\) return/
 assert.match(style, /body\.jarvis-voice-active \.chat-container \{\s*margin-right: 34vw/);
 assert.match(style, /body\.jarvis-voice-active \.msg table \{\s*max-width: none/);
 assert.match(style, /\.jarvis-call-panel \{[\s\S]*?right: 0;[\s\S]*?width: 34vw;[\s\S]*?background: transparent/);
+assert.match(style, /\.jarvis-call-panel \{[\s\S]*?transform: translateX\(100%\);[\s\S]*?transition: transform 280ms/);
+assert.match(style, /\.jarvis-call-panel\.is-open \{\s*transform: translateX\(0\)/);
+assert.match(style, /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.jarvis-call-panel \{\s*transition: none;/);
 assert.match(style, /\.jarvis-activity-rail \{[\s\S]*?top: min\(34vw, 52dvh\)/);
 assert.match(style, /\.jarvis-task-activity > summary/);
 assert.match(style, /\.jarvis-task-activity-history/);
@@ -155,17 +165,30 @@ assert.doesNotMatch(index, /jarvis-task-timeline/);
 assert.match(index, /id="jarvis-activity-rail"[^>]*role="region"[^>]*aria-label="Live worker activity"/);
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
-assert.match(index, /jarvisVoice\.js\?v=20260715T120000Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v358'/);
+assert.match(index, /style\.css\?v=20260715T235844Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260715T235844Z/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v359'/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
 assert.doesNotMatch(serviceWorker, /motivational-abstract\.webm/);
 assert.doesNotMatch(documentSource, /_ensureAgentMode/);
-assert.match(source, /return Promise\.allSettled\(jobs\)/);
-assert.match(source, /Promise\.resolve\(\)\.then\(\(\) => window\.aiTTSManager\.checkAvailability\(\)\)/);
+assert.match(source, /VOICE_PREWARM_TIMEOUT_MS = 2500/);
+assert.match(source, /return Promise\.allSettled\(jobs\)\.then/);
+assert.match(source, /boundedPrewarm\('client_tts_probe', \(\) => window\.aiTTSManager\.checkAvailability\(\)\)/);
 const startCallSource = source.match(/async function startCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
-assert.ok(startCallSource.indexOf('const voiceWarmup = prewarmVoiceStack()') < startCallSource.indexOf('await createSession(callGeneration)'));
-assert.ok(startCallSource.indexOf('await voiceWarmup') < startCallSource.indexOf('await startListening()'));
+const microphoneStart = startCallSource.indexOf('const microphoneReady = requestMicrophone(callGeneration)');
+const sessionStart = startCallSource.indexOf('const sessionReady = createSession(callGeneration)');
+const readinessWait = startCallSource.indexOf('await Promise.all([microphoneReady, sessionReady])');
+const readinessCue = startCallSource.indexOf("await playVoiceCue('call')");
+const recorderStart = startCallSource.indexOf('await startListening(requestedStream, callGeneration)');
+assert.ok(microphoneStart >= 0 && microphoneStart < readinessWait);
+assert.ok(sessionStart >= 0 && sessionStart < readinessWait);
+assert.ok(startCallSource.indexOf('prewarmVoiceStack().catch') < readinessWait);
+assert.ok(readinessWait < readinessCue && readinessCue < recorderStart);
+assert.doesNotMatch(startCallSource, /await prewarmVoiceStack/);
+assert.match(startCallSource, /catch \(error\) \{\s*if \(!isCurrentVoiceCall\(callGeneration\)\) return;\s*const failedSessionId = sessionId;\s*const invalidatedGeneration = \+\+voiceCallGeneration;[\s\S]*?await interruptVoiceSession\(failedSessionId\);\s*if \(sessionId === failedSessionId\) sessionId = null;\s*if \(voiceCallGeneration !== invalidatedGeneration\) return;\s*handleError\(error\)/);
+const createSessionSource = source.match(/async function createSession\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
+assert.match(createSessionSource, /if \(!isCurrentVoiceCall\(callGeneration\)\) \{\s*await interruptVoiceSession\(session\.id\);\s*return null;\s*\}\s*sessionId = session\.id/);
 
 // Exercise the production placement functions with a tiny dependency-free DOM.
 // The same details node must keep its rail order, then return to chat before its final result.
@@ -249,12 +272,20 @@ acknowledgement.parentElement = chat;
 summary.parentElement = chat;
 unrelated.parentElement = chat;
 result.parentElement = chat;
+let orbUnmounts = 0;
+let exposeFakeOrb = false;
+const fakeOrb = { classList: { remove(value) { if (value === 'has-frame') orbUnmounts += 1; } } };
 const fakeDocument = {
   readyState: 'loading',
-  documentElement: { dataset: {} },
+  documentElement: { dataset: {}, classList: { toggle() {} } },
   body: { classList: { toggle() {} } },
   addEventListener() {},
-  getElementById(id) { return id === 'chat-history' ? chat : (id === 'jarvis-activity-rail' ? rail : null); },
+  getElementById(id) {
+    if (id === 'chat-history') return chat;
+    if (id === 'jarvis-activity-rail') return rail;
+    if (id === 'jarvis-call-orb' && exposeFakeOrb) return fakeOrb;
+    return null;
+  },
   querySelector() { return null; },
   querySelectorAll(selector) {
     if (selector === '.jarvis-task-activity[data-task-id]') return [group];
@@ -262,8 +293,16 @@ const fakeDocument = {
     return [];
   },
 };
+const sandboxConsole = {
+  info() {},
+  warn: (...args) => console.warn(...args),
+  error: (...args) => {
+    if (args[0] === 'Jarvis voice error:' && args[1]?.message === 'microphone rejected') return;
+    console.error(...args);
+  },
+};
 const sandbox = {
-  console,
+  console: sandboxConsole,
   document: fakeDocument,
   navigator: {},
   performance: { now: () => 0 },
@@ -272,7 +311,7 @@ const sandbox = {
   setInterval,
   clearInterval,
   fetch: () => Promise.resolve({ ok: true }),
-  aiTTSManager: { checkAvailability() { throw new Error('availability probe failed'); } },
+  aiTTSManager: { checkAvailability() { throw new Error('availability probe failed'); }, stop() {} },
 };
 sandbox.window = sandbox;
 const executableSource = source
@@ -286,8 +325,8 @@ const executableSource = source
   )
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
-    "const voiceOrbMedia = { getState: () => ({ cameraOpen: false }), captureFrame: () => ({}), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, setActive: value => { isActive = value; } };';
+    "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; } };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 assert.equal(placement.findWorkerSummary('task-rail', 'summary-1', 'PC Codex verified the same result.'), summary);
@@ -317,11 +356,217 @@ placement.positionActivityGroup(group);
 placement.setActive(false);
 placement.restoreActivityGroupsToChat();
 assert.deepEqual(chatOrder, [acknowledgement, group, summary, unrelated, result]);
-placement.prewarmVoiceStack().then(results => {
+[
+  ['open your eyes', 'camera_open'],
+  ['open eyes', 'camera_open'],
+  ['open the camera', 'camera_open'],
+  ['what do you see', 'camera_describe'],
+  ['describe what you see', 'camera_describe'],
+  ['describe the camera', 'camera_describe'],
+  ['close your eyes', 'camera_close'],
+  ['close eyes', 'camera_close'],
+  ['close the camera', 'camera_close'],
+  ['i need something motivational', 'media_motivation'],
+  ['need something motivational', 'media_motivation'],
+  ['i want something motivational', 'media_motivation'],
+  ['want something motivational', 'media_motivation'],
+  ['show me something motivational', 'media_motivation'],
+  ['play something motivational', 'media_motivation'],
+].forEach(([phrase, intent]) => assert.equal(placement.mediaVoiceCommand(phrase), intent, phrase));
+[
+  ['Hey Jarvis, open your eyes.', 'camera_open'],
+  ['okay please Jarvis open eyes', 'camera_open'],
+  ['can you please open the camera', 'camera_open'],
+  ['could you describe the camera', 'camera_describe'],
+  ['would you close eyes', 'camera_close'],
+  ['will you play something motivational', 'media_motivation'],
+  ['I want you to open your eyes', 'camera_open'],
+  ['I need to close the camera', 'camera_close'],
+  ['I would like you to describe what you see', 'camera_describe'],
+  ['actually do me a favor and please open your eyes', 'camera_open'],
+  ['do me favor show me something motivational', 'media_motivation'],
+  ['actually close your eyes', 'camera_close'],
+  ['go ahead and show me something motivational', 'media_motivation'],
+  ['please play something motivational please', 'media_motivation'],
+].forEach(([phrase, intent]) => assert.equal(placement.mediaVoiceCommand(phrase), intent, phrase));
+[
+  "don't open your eyes",
+  'do not open your eyes',
+  'never open your eyes',
+  'not open your eyes',
+  'open your eyes and describe what you see',
+  'open your eyes then close your eyes',
+  'open your eyes also close your eyes',
+  'tell me what you see',
+  'what can you see',
+  'open the camera or close the camera',
+].forEach(phrase => assert.equal(placement.mediaVoiceCommand(phrase), null, phrase));
+placement.setCameraOpen(true);
+assert.equal(placement.voiceRequestPayload('describe the camera').frame.captured, true);
+assert.equal(placement.voiceRequestPayload('tell me what you see').frame, undefined);
+placement.setCameraOpen(false);
+assert.equal(placement.workerSpeech({ type: 'approval_required', worker: 'hermes', text: 'Restart the service with these long arguments.' }), 'Hermes is requesting approval. Please take a look.');
+assert.equal(placement.workerSpeech({ type: 'question', worker: 'pc-codex', text: 'Which branch and why?' }), 'PC Codex has a question. Please take a look.');
+assert.equal(placement.workerSpeech({ type: 'error', worker: 'vps-codex', text: 'Long stack trace.' }), 'VPS Codex hit a problem. Please take a look.');
+placement.rememberTask({ task_id: 'read-only', permission_mode: 'read_only', approved: false });
+placement.rememberTask({ task_id: 'private-write', permission_mode: 'workspace_write', approved: true });
+assert.equal(placement.workerApprovalAllowsOnce({ task_id: 'read-only' }), false);
+assert.equal(placement.workerApprovalAllowsOnce({ task_id: 'private-write' }), true);
+assert.equal(placement.workerApprovalAllowsOnce({ task_id: 'unknown' }), false);
+assert.equal(placement.workerApprovalAllowsOnce({ task_id: 'read-only', metadata: { permission_mode: 'workspace_write', approved: true } }), false);
+
+let transitionListener = null;
+const transitionPanel = {
+  hidden: false,
+  addEventListener(type, listener) { if (type === 'transitionend') transitionListener = listener; },
+  removeEventListener(type, listener) {
+    if (type === 'transitionend' && transitionListener === listener) transitionListener = null;
+  },
+};
+sandbox.matchMedia = () => ({ matches: false });
+exposeFakeOrb = true;
+const unmountsBeforeTransition = orbUnmounts;
+placement.deferCallPanelClose(transitionPanel, placement.getVoiceState().voiceCallGeneration);
+assert.equal(transitionPanel.hidden, false, 'the panel and orb must remain mounted while the close transition runs');
+assert.equal(orbUnmounts, unmountsBeforeTransition);
+transitionListener({ target: transitionPanel, propertyName: 'opacity' });
+assert.equal(transitionPanel.hidden, false);
+assert.equal(orbUnmounts, unmountsBeforeTransition);
+transitionListener({ target: transitionPanel, propertyName: 'transform' });
+assert.equal(transitionPanel.hidden, true, 'transform transition completion hides the panel');
+assert.equal(orbUnmounts, unmountsBeforeTransition + 1, 'sphere teardown waits for the slide transition');
+const reducedMotionPanel = { hidden: false, addEventListener() {}, removeEventListener() {} };
+sandbox.matchMedia = () => ({ matches: true });
+placement.deferCallPanelClose(reducedMotionPanel, placement.getVoiceState().voiceCallGeneration);
+assert.equal(reducedMotionPanel.hidden, true, 'reduced motion closes immediately');
+exposeFakeOrb = false;
+delete sandbox.matchMedia;
+
+(async () => {
+  const results = await placement.prewarmVoiceStack();
   assert.equal(results.length, 2);
   assert.equal(results[0].status, 'fulfilled');
   assert.equal(results[1].status, 'rejected');
-}).catch(error => {
+
+  let resolveMicrophone;
+  let stopped = false;
+  sandbox.navigator.mediaDevices = {
+    getUserMedia: () => new Promise(resolve => { resolveMicrophone = resolve; }),
+  };
+  placement.setActive(true);
+  const staleRequest = placement.requestMicrophone(0);
+  placement.setActive(false);
+  resolveMicrophone({ getTracks: () => [{ stop: () => { stopped = true; } }] });
+  assert.equal(await staleRequest, null);
+  assert.equal(stopped, true, 'a microphone stream resolving after call close must be stopped');
+
+  const jsonResponse = body => ({ ok: true, status: 200, json: async () => body });
+  let resolveLateSession;
+  let resolveSessionFirstInterrupt;
+  let sessionRequests = 0;
+  const interruptRequests = [];
+  sandbox.isSecureContext = true;
+  sandbox.fetch = (url, options = {}) => {
+    if (url === '/api/voice/sessions') {
+      sessionRequests += 1;
+      if (sessionRequests === 1) {
+        return new Promise(resolve => { resolveLateSession = () => resolve(jsonResponse({ id: 'late-session' })); });
+      }
+      if (sessionRequests === 2) {
+        return Promise.resolve(jsonResponse({
+          id: 'session-first',
+          chat_session_id: null,
+          target: 'jarvis',
+          workspace: 'home-lab',
+        }));
+      }
+      return Promise.resolve(jsonResponse({
+        id: 'retry-session',
+        chat_session_id: null,
+        target: 'jarvis',
+        workspace: 'home-lab',
+      }));
+    }
+    if (String(url).endsWith('/interrupt')) {
+      interruptRequests.push({
+        url,
+        method: options.method,
+        body: options.body,
+        credentials: options.credentials,
+        sessionIdAtRequest: placement.getVoiceState().sessionId,
+      });
+      if (String(url).includes('/session-first/')) {
+        return new Promise(resolve => { resolveSessionFirstInterrupt = () => resolve(jsonResponse({})); });
+      }
+    }
+    return Promise.resolve(jsonResponse({}));
+  };
+  sandbox.navigator.mediaDevices = {
+    getUserMedia: () => Promise.reject(new Error('microphone rejected')),
+  };
+  const generationBeforeFailure = placement.getVoiceState().voiceCallGeneration;
+  await placement.startCall();
+  const failedState = placement.getVoiceState();
+  assert.equal(failedState.status, 'failed');
+  assert.equal(failedState.sessionId, null);
+  assert.ok(failedState.voiceCallGeneration >= generationBeforeFailure + 2, 'failed initialization invalidates its generation');
+  resolveLateSession();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(placement.getVoiceState().sessionId, null, 'a late session must not mutate failed initialization state');
+  assert.deepEqual(interruptRequests[0], {
+    url: '/api/voice/sessions/late-session/interrupt',
+    method: 'POST',
+    body: '{}',
+    credentials: 'same-origin',
+    sessionIdAtRequest: null,
+  });
+
+  let rejectSessionFirstMicrophone;
+  sandbox.navigator.mediaDevices = {
+    getUserMedia: () => new Promise((_, reject) => { rejectSessionFirstMicrophone = reject; }),
+  };
+  const sessionFirstCall = placement.startCall();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(placement.getVoiceState().sessionId, 'session-first');
+  rejectSessionFirstMicrophone(new Error('microphone rejected after session'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(interruptRequests[1], {
+    url: '/api/voice/sessions/session-first/interrupt',
+    method: 'POST',
+    body: '{}',
+    credentials: 'same-origin',
+    sessionIdAtRequest: 'session-first',
+  });
+
+  let retryStreamStopped = false;
+  const retryStream = {
+    getTracks: () => [{ stop: () => { retryStreamStopped = true; } }],
+  };
+  sandbox.navigator.mediaDevices = { getUserMedia: () => Promise.resolve(retryStream) };
+  sandbox.MediaRecorder = class FakeMediaRecorder {
+    constructor() { this.state = 'inactive'; }
+    start() { this.state = 'recording'; }
+    stop() {
+      this.state = 'inactive';
+      Promise.resolve().then(() => this.onstop?.());
+    }
+  };
+  await placement.startCall();
+  const retryState = placement.getVoiceState();
+  assert.equal(retryState.sessionId, 'retry-session');
+  assert.equal(retryState.status, 'listening');
+  assert.equal(retryState.isActive, true);
+  assert.ok(retryState.voiceCallGeneration > failedState.voiceCallGeneration);
+  assert.equal(interruptRequests.length, 2, 'the old failure must never interrupt the retry session');
+  resolveSessionFirstInterrupt();
+  await sessionFirstCall;
+  assert.equal(placement.getVoiceState().sessionId, 'retry-session');
+  assert.equal(placement.getVoiceState().status, 'listening');
+  placement.endCall();
+  await Promise.resolve();
+  assert.equal(retryStreamStopped, true);
+  assert.equal(placement.getVoiceState().sessionId, null);
+})().catch(error => {
   console.error(error);
   process.exitCode = 1;
 });

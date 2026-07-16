@@ -64,6 +64,8 @@ const SPHERE_AUDIO_SMOOTHING = 0.75;
 const VOICE_RMS_THRESHOLD = 0.018;
 const VOICE_SAMPLE_INTERVAL_MS = 140;
 const MIN_VOICED_MS = 280;
+const VOICE_PREWARM_TIMEOUT_MS = 2500;
+const CALL_PANEL_TRANSITION_MS = 280;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
@@ -202,10 +204,21 @@ function playVoiceCue(name, delay = 0) {
       oscillator.stop(end + 0.01);
     });
     const cueSeconds = tones.reduce((longest, [, offset, duration]) => Math.max(longest, offset + duration), 0);
-    return new Promise(resolve => window.setTimeout(resolve, (Math.max(0, delay) + cueSeconds) * 1000));
+    return new Promise(resolve => window.setTimeout(resolve, ((Math.max(0, delay) + cueSeconds) * 1000) + 20));
   } catch (error) {
     console.warn('Jarvis voice cue unavailable:', error);
     return Promise.resolve();
+  }
+}
+
+function unlockVoiceCueAudio() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  try {
+    if (!cueAudioContext || cueAudioContext.state === 'closed') cueAudioContext = new AudioContext();
+    cueAudioContext.resume?.().catch(() => {});
+  } catch (error) {
+    console.warn('Jarvis voice cue unavailable:', error);
   }
 }
 
@@ -329,6 +342,26 @@ function unmountOrganicSphere() {
   if (orb) orb.classList.remove('has-frame');
 }
 
+function deferCallPanelClose(panel, closingGeneration) {
+  let timeoutId = null;
+  const finish = () => {
+    if (timeoutId) window.clearTimeout(timeoutId);
+    panel?.removeEventListener('transitionend', onTransitionEnd);
+    if (isActive || voiceCallGeneration !== closingGeneration) return;
+    if (panel) panel.hidden = true;
+    unmountOrganicSphere();
+  };
+  const onTransitionEnd = event => {
+    if (event.target === panel && event.propertyName === 'transform') finish();
+  };
+  if (!panel || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+    finish();
+    return;
+  }
+  panel.addEventListener('transitionend', onTransitionEnd);
+  timeoutId = window.setTimeout(finish, CALL_PANEL_TRANSITION_MS);
+}
+
 function setStatus(next, detail = '') {
   status = next;
   const root = $('jarvis-call-panel');
@@ -343,13 +376,20 @@ function setStatus(next, detail = '') {
 
   if (root) {
     root.dataset.state = next;
-    root.hidden = !isActive;
+    if (isActive && !root.classList.contains('is-open')) {
+      if (root.hidden) root.hidden = false;
+      window.requestAnimationFrame(() => {
+        if (isActive) root.classList.add('is-open');
+      });
+    } else if (!isActive) {
+      root.classList.remove('is-open');
+    }
   }
   if (pill) pill.textContent = statusLabel(next);
   if (detailEl) detailEl.textContent = detail || detailLabel(next);
   if (talkBtn) {
     talkBtn.dataset.state = next;
-    talkBtn.disabled = next === 'thinking' || next === 'transcribing';
+    talkBtn.disabled = next === 'connecting' || next === 'thinking' || next === 'transcribing';
     talkBtn.innerHTML = next === 'listening' ? ICON_STOP : ICON_MIC;
     talkBtn.title = talkTitle(next);
   }
@@ -376,8 +416,6 @@ function setStatus(next, detail = '') {
     } else {
       postSphereLevels(next);
     }
-  } else if (!isActive) {
-    unmountOrganicSphere();
   }
   window._updateSendBtnIcon?.();
 }
@@ -385,6 +423,7 @@ function setStatus(next, detail = '') {
 function statusLabel(value) {
   return {
     idle: 'Ready',
+    connecting: 'Connecting',
     listening: 'Listening',
     transcribing: 'Transcribing',
     thinking: 'Thinking',
@@ -401,6 +440,7 @@ function statusLabel(value) {
 function detailLabel(value) {
   return {
     idle: 'Jarvis is standing by.',
+    connecting: 'Opening the microphone and voice session.',
     listening: 'Listening for your turn.',
     transcribing: 'Reading your speech.',
     thinking: 'Jarvis is thinking.',
@@ -415,6 +455,7 @@ function detailLabel(value) {
 }
 
 function talkTitle(value) {
+  if (value === 'connecting') return 'Connecting microphone';
   if (value === 'listening') return 'Stop listening';
   if (value === 'speaking' || value === 'buffering') return 'Interrupt';
   return 'Speak to Jarvis';
@@ -436,16 +477,40 @@ function browserTimezoneHeaders() {
 }
 
 function mediaVoiceCommand(text) {
-  let value = String(text || '').toLowerCase().replaceAll('’', "'");
+  if (!text || String(text).length > 280) return null;
+  let value = String(text).toLowerCase().replaceAll('’', "'");
   value = value.replace(/[^a-z0-9' ]/g, ' ').replace(/\s+/g, ' ').trim();
-  value = value.replace(/^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?/, '');
+  const prefixes = [
+    /^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?/,
+    /^(?:can|could|would|will) you (?:please )?/,
+    /^i (?:want|need|would like)(?: you)? to (?:please )?/,
+    /^(?:actually )?do me (?:a )?favor(?: and)? (?:please )?/,
+    /^actually /,
+    /^(?:go ahead and|please) /,
+  ];
+  for (let pass = 0; pass < 3; pass += 1) {
+    const previous = value;
+    prefixes.forEach(pattern => { value = value.replace(pattern, ''); });
+    if (value === previous) break;
+  }
   value = value.replace(/\s+please$/, '');
+  if (!value || /\b(?:don't|do not|never|not)\b/.test(value) || /\b(?:and|then|also)\b/.test(value)) return null;
   return {
     'open your eyes': 'camera_open',
+    'open eyes': 'camera_open',
+    'open the camera': 'camera_open',
     'what do you see': 'camera_describe',
     'describe what you see': 'camera_describe',
+    'describe the camera': 'camera_describe',
     'close your eyes': 'camera_close',
+    'close eyes': 'camera_close',
+    'close the camera': 'camera_close',
     'i need something motivational': 'media_motivation',
+    'need something motivational': 'media_motivation',
+    'i want something motivational': 'media_motivation',
+    'want something motivational': 'media_motivation',
+    'show me something motivational': 'media_motivation',
+    'play something motivational': 'media_motivation',
   }[value] || null;
 }
 
@@ -849,18 +914,26 @@ function ensureTaskDeepLink(group, event) {
   controls.prepend(open);
 }
 
+function workerApprovalAllowsOnce(event) {
+  const task = taskSnapshots.get(String(event?.task_id || '')) || {};
+  return task.permission_mode === 'workspace_write' && task.approved === true;
+}
+
 function appendApprovalControls(row, event) {
   const actions = document.createElement('div');
   actions.className = 'jarvis-task-approval-actions';
-  const approve = document.createElement('button');
-  approve.type = 'button';
-  approve.textContent = 'Approve once';
   const deny = document.createElement('button');
   deny.type = 'button';
   deny.textContent = 'Deny';
-  approve.addEventListener('click', () => submitWorkerApproval(event, 'once', row).catch(handleError));
   deny.addEventListener('click', () => submitWorkerApproval(event, 'deny', row).catch(handleError));
-  actions.append(approve, deny);
+  if (workerApprovalAllowsOnce(event)) {
+    const approve = document.createElement('button');
+    approve.type = 'button';
+    approve.textContent = 'Approve once';
+    approve.addEventListener('click', () => submitWorkerApproval(event, 'once', row).catch(handleError));
+    actions.appendChild(approve);
+  }
+  actions.appendChild(deny);
   row.appendChild(actions);
 }
 
@@ -1027,11 +1100,14 @@ function enqueueSpeech(text, type = 'speech', source = 'jarvis', timings = {}) {
 
 function workerSpeech(event) {
   const label = WORKER_LABELS[event.worker] || event.worker || 'Worker';
+  if (event.type === 'approval_required') return `${label} is requesting approval. Please take a look.`;
+  if (event.type === 'question') return `${label} has a question. Please take a look.`;
+  if (event.type === 'error') return `${label} hit a problem. Please take a look.`;
   const source = event.type === 'result'
     ? (event.spoken_text || `${label} finished. The full result is in chat.`)
     : event.type === 'progress'
       ? (event.spoken_text || '')
-      : (event.text || '');
+      : '';
   const clean = (window.aiTTSManager?.extractPlainText?.(source) || source).trim();
   if (clean.length <= WORKER_SPEECH_MAX_CHARS) return clean;
   const clipped = clean.slice(0, WORKER_SPEECH_MAX_CHARS - 1);
@@ -1075,7 +1151,14 @@ async function handleWorkerEvent(event) {
   if (eventId && handledWorkerEventIds.has(eventId)) return;
   if (eventId) handledWorkerEventIds.add(eventId);
   const taskId = String(event.task_id || '');
-  const prior = taskSnapshots.get(taskId) || {};
+  let prior = taskSnapshots.get(taskId) || {};
+  if (event.type === 'approval_required' && !prior.permission_mode) {
+    try {
+      prior = rememberTask(await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}`)) || prior;
+    } catch (error) {
+      console.warn('Could not verify worker approval policy:', error);
+    }
+  }
   const events = Array.isArray(prior.events) ? [...prior.events] : [];
   if (!events.some(item => activityEventKey(item) === activityEventKey(event))) events.push(event);
   const task = rememberTask({
@@ -1381,7 +1464,10 @@ async function createSession(callGeneration = voiceCallGeneration) {
     headers: browserTimezoneHeaders(),
     body: JSON.stringify({ mode: 'jarvis_call', chat_session_id: activeChatSessionId }),
   });
-  if (!isCurrentVoiceCall(callGeneration)) return null;
+  if (!isCurrentVoiceCall(callGeneration)) {
+    await interruptVoiceSession(session.id);
+    return null;
+  }
   sessionId = session.id;
   chatSessionId = session.chat_session_id || null;
   const savedTarget = session.target || 'jarvis';
@@ -1393,6 +1479,14 @@ async function createSession(callGeneration = voiceCallGeneration) {
   if (!isCurrentVoiceCall(callGeneration)) return null;
   setVoiceTarget(savedTarget, false);
   return session;
+}
+
+function interruptVoiceSession(voiceSessionId) {
+  if (!voiceSessionId) return Promise.resolve();
+  return fetchJson(`/api/voice/sessions/${encodeURIComponent(voiceSessionId)}/interrupt`, {
+    method: 'POST',
+    body: '{}',
+  }).catch(() => {});
 }
 
 async function transcribe(blob) {
@@ -1428,14 +1522,38 @@ async function postTurnDiagnostics(timings, voiceSessionId = sessionId) {
   }).catch(error => console.warn('Jarvis voice timing diagnostic failed:', error));
 }
 
+function boundedPrewarm(label, job, onTimeout = null) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`${label}_timeout`));
+    }, VOICE_PREWARM_TIMEOUT_MS);
+  });
+  return Promise.race([Promise.resolve().then(job), timeout])
+    .finally(() => window.clearTimeout(timeoutId));
+}
+
 function prewarmVoiceStack() {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const jobs = [
-    fetch('/api/voice/prewarm', { method: 'POST', credentials: 'same-origin' }),
+    boundedPrewarm('server_prewarm', async () => {
+      const response = await fetch('/api/voice/prewarm', {
+        method: 'POST',
+        credentials: 'same-origin',
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (!response.ok) throw new Error(`server_prewarm_${response.status}`);
+      return response;
+    }, () => controller?.abort()),
   ];
   if (window.aiTTSManager?.checkAvailability) {
-    jobs.push(Promise.resolve().then(() => window.aiTTSManager.checkAvailability()));
+    jobs.push(boundedPrewarm('client_tts_probe', () => window.aiTTSManager.checkAvailability()));
   }
-  return Promise.allSettled(jobs);
+  return Promise.allSettled(jobs).then(results => {
+    console.info('[Jarvis voice] prewarm', results.map(result => result.status));
+    return results;
+  });
 }
 
 async function interrupt() {
@@ -1549,7 +1667,29 @@ function startSilenceWatch(stream, callGeneration) {
   }, 30000);
 }
 
-async function startListening() {
+async function requestMicrophone(callGeneration = voiceCallGeneration) {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+    });
+  } catch (error) {
+    if (!isCurrentVoiceCall(callGeneration)) return null;
+    throw error;
+  }
+  if (!isCurrentVoiceCall(callGeneration)) {
+    stream.getTracks().forEach(track => track.stop());
+    return null;
+  }
+  return stream;
+}
+
+async function startListening(requestedStream = null, callGeneration = voiceCallGeneration) {
   if (!window.isSecureContext) {
     setStatus('failed', INSECURE_MIC_MESSAGE);
     showToast(INSECURE_MIC_MESSAGE);
@@ -1561,25 +1701,17 @@ async function startListening() {
   }
   if (!isActive || brainTurnInProgress || activeTurnAudioPromise || speechQueueRunning || currentSpeech) return;
   if (mediaRecorder?.state === 'recording') return;
-  const callGeneration = voiceCallGeneration;
 
   const recordingChunks = [];
   isStopping = false;
-  let requestedStream;
-  try {
-    requestedStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    });
-  } catch (error) {
-    if (!isCurrentVoiceCall(callGeneration)) return;
-    throw error;
-  }
-  if (!isCurrentVoiceCall(callGeneration)) {
+  if (!requestedStream) requestedStream = await requestMicrophone(callGeneration);
+  if (!requestedStream) return;
+  if (!isCurrentVoiceCall(callGeneration)
+      || brainTurnInProgress
+      || activeTurnAudioPromise
+      || speechQueueRunning
+      || currentSpeech
+      || mediaRecorder?.state === 'recording') {
     requestedStream.getTracks().forEach(track => track.stop());
     return;
   }
@@ -1965,6 +2097,7 @@ async function startCall() {
     return;
   }
 
+  unlockVoiceCueAudio();
   const callGeneration = ++voiceCallGeneration;
   voiceOrbMedia.stopMedia();
   isActive = true;
@@ -1979,21 +2112,32 @@ async function startCall() {
   activeAudioTurnId = null;
   setAgentWorkspaceActive(activeTaskCount() > 0);
   positionVisibleActivityGroups();
-  setStatus('idle', 'Connecting…');
+  setStatus('connecting');
+  const microphoneReady = requestMicrophone(callGeneration);
+  const sessionReady = createSession(callGeneration);
+  prewarmVoiceStack().catch(error => console.warn('Jarvis voice prewarm failed:', error));
   try {
-    const voiceWarmup = prewarmVoiceStack();
-    const callCue = playVoiceCue('call');
-    await createSession(callGeneration);
-    if (!isCurrentVoiceCall(callGeneration)) return;
-    await callCue;
-    if (!isCurrentVoiceCall(callGeneration)) return;
-    setStatus('idle', 'Warming voice…');
-    await voiceWarmup;
-    if (!isCurrentVoiceCall(callGeneration)) return;
-    setStatus('idle');
-    await startListening();
+    const [requestedStream, session] = await Promise.all([microphoneReady, sessionReady]);
+    if (!requestedStream || !session || !isCurrentVoiceCall(callGeneration)) {
+      requestedStream?.getTracks().forEach(track => track.stop());
+      return;
+    }
+    setStatus('connecting', 'Microphone ready. Starting call…');
+    await playVoiceCue('call');
+    if (!isCurrentVoiceCall(callGeneration)) {
+      requestedStream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    await startListening(requestedStream, callGeneration);
   } catch (error) {
-    if (isCurrentVoiceCall(callGeneration)) handleError(error);
+    if (!isCurrentVoiceCall(callGeneration)) return;
+    const failedSessionId = sessionId;
+    const invalidatedGeneration = ++voiceCallGeneration;
+    microphoneReady.then(stream => stream?.getTracks().forEach(track => track.stop())).catch(() => {});
+    await interruptVoiceSession(failedSessionId);
+    if (sessionId === failedSessionId) sessionId = null;
+    if (voiceCallGeneration !== invalidatedGeneration) return;
+    handleError(error);
   }
 }
 
@@ -2021,9 +2165,9 @@ function endCall() {
   stopTracks();
   voiceOrbMedia.stopMedia();
   setStatus('idle');
-  unmountOrganicSphere();
   const panel = $('jarvis-call-panel');
-  if (panel) panel.hidden = true;
+  const closingGeneration = voiceCallGeneration;
+  deferCallPanelClose(panel, closingGeneration);
   if (endingSessionId) {
     fetchJson(`/api/voice/sessions/${encodeURIComponent(endingSessionId)}/interrupt`, {
       method: 'POST',

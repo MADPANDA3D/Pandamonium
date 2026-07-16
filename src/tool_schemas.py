@@ -1250,7 +1250,7 @@ FUNCTION_TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "worker": {"type": "string", "enum": ["pc-codex", "hermes", "vps-codex"]},
-                    "workspace": {"type": "string", "enum": ["madpanda3d", "business", "home-lab", "project-linux"]},
+                    "workspace": {"type": "string", "enum": ["madpanda3d", "business", "home-lab", "project-linux", "vps-ops"]},
                     "prompt": {"type": "string", "description": "A self-contained task request with the desired output."},
                 },
                 "required": ["worker", "workspace", "prompt"],

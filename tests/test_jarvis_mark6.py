@@ -646,6 +646,7 @@ async def test_old_worker_question_does_not_capture_new_target_turn(monkeypatch)
         "owner": "leo",
     })
     monkeypatch.setattr(jarvis_agent, "find_active_task", lambda *_args: None)
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [])
 
     async def dispatch(_session, worker, workspace, prompt, _owner, _voice):
         assert (worker, workspace, prompt) == ("hermes", "home-lab", "Handle this with Hermes.")
@@ -704,10 +705,11 @@ async def test_selected_codex_followup_steers_without_duplicate_persistence(monk
 
     assert task == active
     assert result == "steered"
-    assert calls == [
-        ("find", "chat-1", "pc-codex", "business", "leo"),
-        ("action", "task-1", "steer", {"prompt": "Add the CRM check."}, False, "leo"),
-    ]
+    assert calls[0] == ("find", "chat-1", "pc-codex", "business", "leo")
+    assert calls[1][:3] == ("action", "task-1", "steer")
+    assert calls[1][3]["prompt"].startswith("[JARVIS_CONTEXT v1]")
+    assert "exact_request(<=4000):\nAdd the CRM check." in calls[1][3]["prompt"]
+    assert calls[1][4:] == (False, "leo")
 
 
 @pytest.mark.asyncio
@@ -896,3 +898,444 @@ async def test_codex_thread_binding_is_scoped_to_session_and_workspace(tmp_path,
     await asyncio.sleep(0)
     await jarvis_agent.start_task("pc-codex", "session-a", "home-lab", "second", owner="leo")
     assert adapter.started_with == [None, "019f5022-a520-7de0-9208-018cd2d4d222"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("opens calendar", ("open_view", "calendar")),
+        ("what view is open right now", ("report_view_state", None)),
+        ("do me a favor and minimize the document", ("minimize_view", "document")),
+        (
+            "I need you to close the document that is showing you know this is right now so that it goes away please",
+            ("close_view", "document"),
+        ),
+    ],
+)
+def test_whisper_foreground_variants_are_bounded_and_deterministic(text, expected):
+    assert voice_routes._foreground_command(text) == expected
+
+
+def test_near_voice_controls_never_execute_or_fall_through():
+    for text in (
+        "Do not open Calendar",
+        "Open your eyes and describe what you see",
+        "Open https://example.test",
+        "Run this script in the page",
+    ):
+        assert voice_routes._foreground_command(text) is None
+        assert voice_routes._media_command(text) is None
+        assert voice_routes._unsupported_voice_control(text)
+    assert voice_routes._media_command("I want you to open your eyes") == "camera_open"
+    assert voice_routes._media_command("need something motivational") == "media_motivation"
+    assert not voice_routes._unsupported_voice_control("Tell me about the Calendar design")
+    assert voice_routes._task_control_intent("Hermes mentioned that approve means yes") is None
+    assert voice_routes._task_control_intent("Don't cancel the Hermes task")[0] == "rejected"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I do not want you to cancel the Hermes task",
+        "Cancel none of the tasks",
+        "Cancel zero Hermes tasks",
+        "Approve zero Hermes requests",
+        "Do nothing to the Hermes task",
+        "Cancel neither Hermes nor PC Codex",
+        "I want nothing cancelled for Hermes",
+    ],
+)
+async def test_negative_task_controls_fail_closed_without_broker_action(text, monkeypatch):
+    monkeypatch.setattr(
+        jarvis_agent,
+        "list_active_tasks",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("negative control reached broker lookup")),
+    )
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_control_rejected"
+    assert events[-1]["task_ids"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Always approve Hermes",
+        "Approve Hermes for this session",
+        "Approve every Hermes request",
+        "Approve all requests for Hermes",
+        "Approve all future Hermes requests",
+        "Approve Hermes until further notice",
+        "Approve them all for Hermes",
+        "For this session approve the Hermes request",
+        "From now on approve the Hermes request",
+        "Until further notice approve the Hermes request",
+    ],
+)
+async def test_persistent_voice_approval_is_deterministically_refused(text, monkeypatch):
+    monkeypatch.setattr(
+        jarvis_agent,
+        "list_active_tasks",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("persistent approval reached broker lookup")),
+    )
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", {"target": "jarvis"},
+        )
+    ]
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_approval_persistent_refused"
+    assert "did not grant persistent approval" in events[-1]["assistant_text"]
+
+
+@pytest.mark.asyncio
+async def test_oversized_and_compound_task_controls_are_rejected_before_lookup(monkeypatch):
+    monkeypatch.setattr(
+        jarvis_agent,
+        "list_active_tasks",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unsafe control reached broker lookup")),
+    )
+    oversized = "Cancel the Hermes task " + ("x" * voice_routes.VOICE_CONTROL_MAX_CHARS)
+    assert _approval_choice("Approve " + ("x" * voice_routes.VOICE_CONTROL_MAX_CHARS)) is None
+    for text, reason in (
+        (oversized, "worker_control_rejected"),
+        ("Cancel Hermes or PC Codex task", "worker_control_compound"),
+        ("Cancel Hermes, PC Codex task", "worker_control_compound"),
+        ("Cancel the Hermes task; open Calendar", "worker_control_compound"),
+        ("Cancel the Hermes task. Open Calendar", "worker_control_compound"),
+        ("Cancel the Hermes task plus open Calendar", "worker_control_compound"),
+    ):
+        events = [
+            event async for event in _server_routed_events(
+                "chat-1", text, "leo", {"target": "jarvis"},
+            )
+        ]
+        assert events[-1]["diagnostics"]["guard_reason"] == reason
+        assert events[-1]["task_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_unsafe_task_control_bypasses_llm_fallback(monkeypatch):
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(get_context_messages=lambda: [])),
+    )
+
+    async def must_not_call_model(*_args, **_kwargs):
+        raise AssertionError("unsafe task control reached the LLM")
+        yield ""  # pragma: no cover
+
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", must_not_call_model)
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1",
+            "I do not want you to cancel the Hermes task",
+            "leo",
+            {"target": "jarvis"},
+        )
+    ]
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_control_rejected"
+
+
+def test_question_reply_grammar_does_not_capture_ordinary_delegation():
+    assert voice_routes._task_control_intent("Tell Hermes that the service is healthy") is None
+    assert voice_routes._background_delegation("Tell Hermes that the service is healthy") == (
+        "hermes",
+        "home-lab",
+    )
+    assert voice_routes._task_control_intent("Tell Hermes the answer is yes")[0] == "reply"
+    assert voice_routes._task_control_intent("Tell Hermes use the Acme account")[0] == "reply"
+    assert voice_routes._task_control_intent("Reply to PC Codex: use Acme")[0] == "reply"
+    assert voice_routes._task_control_intent("Reply later") is None
+
+
+def test_task_control_allows_polite_comma_but_rejects_multi_worker_compound():
+    assert voice_routes._task_control_intent("Cancel the Hermes task, please.") == (
+        "cancel",
+        "hermes",
+        None,
+    )
+    assert voice_routes._task_control_intent("Cancel the Hermes task.") == (
+        "cancel",
+        "hermes",
+        None,
+    )
+    assert voice_routes._task_control_intent("Cancel Hermes, PC Codex task")[0] == "invalid"
+
+
+def test_descriptive_worker_prose_stays_outside_task_control_routing():
+    assert voice_routes._task_control_intent("Hermes found nothing wrong with the task") is None
+    assert voice_routes._task_control_intent("Why does Hermes always ask me to approve requests?") is None
+
+
+def test_worker_context_envelope_is_bounded_and_logical_only():
+    envelope = voice_routes._worker_context_envelope(
+        "pc-codex",
+        "home-lab",
+        "read_only",
+        "x" * 5000,
+        {
+            "turns": [
+                {"role": "user", "text": "u" * 1500},
+                {"role": "assistant", "text": "a" * 1500},
+            ],
+            "_client_state": {
+                "active_view": "document",
+                "document": {"open": True, "minimized": False, "id": "doc-1", "selector": "body"},
+            },
+            "_frame": {"bytes": b"private-frame"},
+            "tasks": [{"events": [{"text": "private-event"}]}],
+        },
+    )
+
+    request = envelope.split("exact_request(<=4000):\n", 1)[1].split("\nprior_exchange", 1)[0]
+    prior = envelope.split("prior_exchange(<=2000):\n", 1)[1].split("\nclient_state", 1)[0]
+    assert len(request) == 4000
+    assert len(prior) <= 2000
+    assert '"active_view":"document"' in envelope
+    assert "selector" not in envelope
+    assert "private-frame" not in envelope
+    assert "private-event" not in envelope
+
+
+@pytest.mark.asyncio
+async def test_voice_cancel_uses_named_broker_task_not_browser_task_id(monkeypatch):
+    hermes = {
+        "task_id": "hermes-live",
+        "worker": "hermes",
+        "workspace": "home-lab",
+        "status": "running",
+        "permission_mode": "read_only",
+        "owner": "leo",
+    }
+    calls = []
+
+    def active(_session, _owner, worker=None, workspace=None, statuses=None):
+        return [hermes] if worker == "hermes" and hermes["status"] in statuses else []
+
+    async def action(task_id, name, payload=None, *, persist_user_message=True, owner=None):
+        calls.append((task_id, name, payload, persist_user_message, owner))
+        return hermes
+
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", active)
+    monkeypatch.setattr(jarvis_agent, "task_action", action)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Cancel the Hermes task",
+            "leo",
+            {"target": "jarvis", "workspace": "home-lab", "active_task_id": "stale-pc-task"},
+        )
+    ]
+
+    assert calls == [("hermes-live", "cancel", None, False, "leo")]
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_cancel_requested"
+    assert events[-1]["assistant_text"].startswith("Cancellation requested for Hermes")
+
+
+@pytest.mark.asyncio
+async def test_voice_approval_obeys_broker_permission_and_named_task(monkeypatch):
+    task = {
+        "task_id": "hermes-approval",
+        "worker": "hermes",
+        "workspace": "home-lab",
+        "status": "waiting_approval",
+        "permission_mode": "read_only",
+        "approved": False,
+        "owner": "leo",
+    }
+    calls = []
+
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [task])
+
+    async def action(task_id, name, payload=None, *, persist_user_message=True, owner=None):
+        calls.append((task_id, name, payload, persist_user_message, owner))
+        return task
+
+    monkeypatch.setattr(jarvis_agent, "task_action", action)
+    denied_write = [
+        event async for event in _server_routed_events(
+            "chat-1", "Approve the Hermes request once", "leo", {"target": "jarvis"},
+        )
+    ]
+    assert calls == []
+    assert denied_write[-1]["diagnostics"]["guard_reason"] == "worker_approval_not_authorized"
+
+    denied = [
+        event async for event in _server_routed_events(
+            "chat-1", "Deny the Hermes request", "leo", {"target": "jarvis"},
+        )
+    ]
+    assert calls[0][:3] == (
+        "hermes-approval",
+        "approval",
+        {"choice": "deny", "spoken_text": "Deny the Hermes request"},
+    )
+    assert denied[-1]["diagnostics"]["guard_reason"] == "worker_approval_deny"
+
+
+@pytest.mark.asyncio
+async def test_named_worker_question_routes_through_broker(monkeypatch):
+    task = {
+        "task_id": "pc-question",
+        "worker": "pc-codex",
+        "workspace": "business",
+        "status": "waiting",
+        "owner": "leo",
+        "events": [{"type": "question", "metadata": {"questions": [{"id": "account"}]}}],
+    }
+    calls = []
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [task])
+
+    async def action(task_id, name, payload=None, *, persist_user_message=True, owner=None):
+        calls.append((task_id, name, payload, persist_user_message, owner))
+        return task
+
+    monkeypatch.setattr(jarvis_agent, "task_action", action)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", "Reply to PC Codex: use the Acme account", "leo", {"target": "jarvis"},
+        )
+    ]
+
+    assert calls[0][0:2] == ("pc-question", "reply")
+    assert calls[0][2]["answers"] == {"account": "use the Acme account"}
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_question_reply"
+
+
+@pytest.mark.asyncio
+async def test_unnamed_task_control_reports_ambiguity(monkeypatch):
+    tasks = [
+        {"task_id": "a", "worker": "hermes", "workspace": "home-lab", "status": "waiting_approval"},
+        {"task_id": "b", "worker": "pc-codex", "workspace": "business", "status": "waiting_approval"},
+    ]
+
+    def active(_session, _owner, worker=None, workspace=None, statuses=None):
+        return [
+            task for task in tasks
+            if (worker is None or task["worker"] == worker)
+            and (workspace is None or task["workspace"] == workspace)
+            and task["status"] in statuses
+        ]
+
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", active)
+
+    async def action(task_id, *_args, **_kwargs):
+        return next(task for task in tasks if task["task_id"] == task_id)
+
+    monkeypatch.setattr(jarvis_agent, "task_action", action)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", "Deny that request", "leo", {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_approval_ambiguous"
+    assert events[-1]["task_ids"] == []
+
+    explicit = [
+        event async for event in _server_routed_events(
+            "chat-1", "Deny the Home Lab request", "leo", {"target": "jarvis", "workspace": "business"},
+        )
+    ]
+    assert explicit[-1]["diagnostics"]["guard_reason"] == "worker_approval_deny"
+    assert explicit[-1]["task_ids"] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_named_worker_with_multiple_tasks_requires_spoken_workspace(monkeypatch):
+    tasks = [
+        {"task_id": "home", "worker": "pc-codex", "workspace": "home-lab", "status": "running"},
+        {"task_id": "business", "worker": "pc-codex", "workspace": "business", "status": "running"},
+    ]
+    calls = []
+
+    def active(_session, _owner, worker=None, workspace=None, statuses=None):
+        return [
+            task for task in tasks
+            if (worker is None or task["worker"] == worker)
+            and (workspace is None or task["workspace"] == workspace)
+            and task["status"] in statuses
+        ]
+
+    async def action(task_id, name, *_args, **_kwargs):
+        calls.append((task_id, name))
+        return next(task for task in tasks if task["task_id"] == task_id)
+
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", active)
+    monkeypatch.setattr(jarvis_agent, "task_action", action)
+    ambiguous = [
+        event async for event in _server_routed_events(
+            "chat-1", "Cancel the PC Codex task", "leo", {"target": "jarvis", "workspace": "business"},
+        )
+    ]
+    assert ambiguous[-1]["diagnostics"]["guard_reason"] == "worker_cancel_ambiguous"
+    assert calls == []
+
+    explicit = [
+        event async for event in _server_routed_events(
+            "chat-1", "Cancel the PC Codex task in Business", "leo", {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+    assert explicit[-1]["task_ids"] == ["business"]
+    assert calls == [("business", "cancel")]
+
+    natural_order = [
+        event async for event in _server_routed_events(
+            "chat-1", "Cancel the PC Codex business task", "leo", {"target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+    assert natural_order[-1]["task_ids"] == ["business"]
+    assert calls == [("business", "cancel"), ("business", "cancel")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["Close this document", "Minimize the active document"])
+async def test_document_control_without_client_state_emits_no_ui_event(text):
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", text, "leo", {"target": "jarvis"},
+        )
+    ]
+    assert [event["type"] for event in events] == ["assistant_delta", "final"]
+    assert "cannot confirm an active document" in events[-1]["assistant_text"]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_failure_warns_task_may_still_run(monkeypatch):
+    task = {
+        "task_id": "hermes-live",
+        "worker": "hermes",
+        "workspace": "home-lab",
+        "status": "running",
+    }
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [task])
+
+    async def fail(*_args, **_kwargs):
+        raise RuntimeError("remote stop failed")
+
+    monkeypatch.setattr(jarvis_agent, "task_action", fail)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1", "Cancel the Hermes task", "leo", {"target": "jarvis"},
+        )
+    ]
+    assert events[-1]["diagnostics"]["guard_reason"] == "worker_cancel_failed"
+    assert "may still be running" in events[-1]["assistant_text"]
+
+
+def test_voice_system_prompt_assigns_workers_without_inference():
+    assert "PC Codex owns local project, code, and document inspection" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "VPS Codex is only for work that explicitly names the VPS" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "Hermes is explicit-only" in voice_routes.VOICE_SYSTEM_PROMPT
+
+
+def test_vps_worker_schema_exposes_its_only_valid_workspace():
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    start = next(row for row in FUNCTION_TOOL_SCHEMAS if row["function"]["name"] == "start_agent_task")
+    assert "vps-ops" in start["function"]["parameters"]["properties"]["workspace"]["enum"]
