@@ -283,6 +283,7 @@ if AUTH_ENABLED:
         "/api/auth/features",
         "/api/auth/settings",
         "/api/auth/integrations/presets",
+        "/api/brand",
         "/api/health",
         "/api/version",
         "/api/knowledge/sync",
@@ -653,6 +654,9 @@ webhook_manager = WebhookManager(api_key_manager=api_key_manager)
 # Auth
 auth_router = setup_auth_routes(auth_manager)
 app.include_router(auth_router)
+
+from routes.brand_routes import setup_brand_routes
+app.include_router(setup_brand_routes())
 
 
 @app.post("/api/activity/heartbeat")

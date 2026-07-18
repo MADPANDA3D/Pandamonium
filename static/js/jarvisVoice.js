@@ -4,6 +4,7 @@
 import markdownModule from './markdown.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
+import { getBrandName } from './brand.js';
 
 let sessionId = null;
 let mediaRecorder = null;
@@ -102,6 +103,10 @@ let workerCatalog = {
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function voiceTargetLabel(target = voiceTarget) {
+  return target === 'jarvis' ? getBrandName() : (VOICE_TARGET_LABELS[target] || target);
 }
 
 function isCurrentVoiceCall(callGeneration) {
@@ -290,7 +295,7 @@ function mountOrganicSphere() {
 
   const frame = document.createElement('iframe');
   frame.className = 'jarvis-organic-frame';
-  frame.title = `${VOICE_TARGET_LABELS[voiceTarget] || voiceTarget} organic voice sphere`;
+  frame.title = `${voiceTargetLabel()} organic voice sphere`;
   frame.src = ORGANIC_SPHERE_URL;
   frame.loading = 'eager';
   frame.referrerPolicy = 'no-referrer';
@@ -446,7 +451,7 @@ function statusLabel(value) {
 }
 
 function detailLabel(value) {
-  const voiceName = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+  const voiceName = voiceTargetLabel();
   return {
     idle: `${voiceName} is standing by.`,
     connecting: 'Opening the microphone and voice session.',
@@ -467,11 +472,11 @@ function talkTitle(value) {
   if (value === 'connecting') return 'Connecting microphone';
   if (value === 'listening') return 'Stop listening';
   if (value === 'speaking' || value === 'buffering') return 'Interrupt';
-  return `Speak to ${VOICE_TARGET_LABELS[voiceTarget] || voiceTarget}`;
+  return `Speak to ${voiceTargetLabel()}`;
 }
 
 function sphereTitle(value) {
-  const voiceName = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+  const voiceName = voiceTargetLabel();
   if (!isActive) return `${voiceName} live call`;
   if (value === 'speaking' || value === 'buffering') return `Interrupt ${voiceName}`;
   return END_VOICE_LABEL;
@@ -613,7 +618,7 @@ function refreshAgentControl() {
   const meta = $('jarvis-agent-meta');
   const state = $('jarvis-agent-state');
   const cancel = $('jarvis-agent-cancel');
-  if (name) name.textContent = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+  if (name) name.textContent = voiceTargetLabel();
   if (meta) {
     const taskText = tasks ? `${tasks} active task${tasks === 1 ? '' : 's'}` : (connection === 'connected' ? 'ready' : connection.replace(/_/g, ' '));
     meta.textContent = `${details.machine || 'worker'} · ${activeWorkspace || 'workspace unbound'} · ${taskText}`;
@@ -631,7 +636,7 @@ function refreshAgentControl() {
     button.setAttribute('aria-checked', active ? 'true' : 'false');
     button.disabled = worker !== 'jarvis' && !item.enabled;
     const label = button.querySelector('span');
-    if (label) label.textContent = VOICE_TARGET_LABELS[worker] || worker;
+    if (label) label.textContent = voiceTargetLabel(worker);
     const detail = button.querySelector('small');
     if (detail) {
       const itemState = item.connection?.state || (item.enabled ? 'connected' : 'gated');
@@ -641,12 +646,17 @@ function refreshAgentControl() {
 }
 
 function refreshVoiceIdentity(refreshDetail = false) {
-  const voiceName = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+  const voiceName = voiceTargetLabel();
   document.querySelectorAll('.jarvis-call-name').forEach(element => {
     element.textContent = voiceName;
   });
   const panel = $('jarvis-call-panel');
   if (panel) panel.setAttribute('aria-label', `${voiceName} live voice`);
+  const rail = $('rail-jarvis-call');
+  if (rail) {
+    rail.title = `${voiceName} call`;
+    rail.setAttribute('aria-label', `${voiceName} call`);
+  }
   const detail = $('jarvis-call-detail');
   if (refreshDetail && detail) detail.textContent = detailLabel(status);
   const talk = $('jarvis-call-talk');
@@ -675,7 +685,7 @@ async function loadWorkerCatalog() {
 function setVoiceTarget(worker, persist = true) {
   const details = workerCatalog[worker];
   if (worker !== 'jarvis' && details && !details.enabled) {
-    showToast(`${VOICE_TARGET_LABELS[worker] || worker} is not connected yet.`);
+    showToast(`${voiceTargetLabel(worker)} is not connected yet.`);
     return false;
   }
   voiceTarget = worker;
@@ -786,7 +796,7 @@ async function awaitVoiceTargetReady() {
       || confirmedVoiceTargetState?.target !== voiceTarget
       || confirmedVoiceTargetState?.workspace !== activeWorkspace
     ) {
-      const label = VOICE_TARGET_LABELS[voiceTarget] || voiceTarget;
+      const label = voiceTargetLabel();
       throw new Error(`Could not confirm ${label} as the voice target. Your message was not sent.`);
     }
     return confirmedVoiceTargetState;
@@ -2469,6 +2479,10 @@ function bind() {
     restoreSessionTasks(event.detail?.sessionId).catch(error => {
       console.warn('Could not restore Jarvis task activity:', error);
     });
+  });
+  window.addEventListener('instance-brand-changed', () => {
+    refreshAgentControl();
+    refreshVoiceIdentity(true);
   });
 
   window.addEventListener('message', handleSphereMessage);

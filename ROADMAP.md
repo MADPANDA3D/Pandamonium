@@ -1,6 +1,6 @@
 # Roadmap / Help Wanted
 
-Odysseus is on a voyage, but not home yet. It works great for me (lol), but this ship is moving fast and feedback/help would be appreciated! (I don't know what I'm doing, help).
+WhoAmI is an independent MADPANDA3D fork of Odysseus. The harness is moving fast, and focused feedback, testing, and contributions are welcome.
 
 If you see weird CSS, strange layout behavior, or a suspiciously murky corner of
 the codebase, you are probably right to stay away.

@@ -608,6 +608,18 @@ body.bg-pattern-sparkles {
       top: 0;
       left: -10px;
     }
+    .sidebar-brand-logo {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      margin-left: -10px;
+      margin-right: 6px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .has-instance-logo .sidebar-brand-title {
+      left: 0;
+    }
     .sidebar-sep {
       display: none;
     }
@@ -1938,6 +1950,14 @@ body.bg-pattern-sparkles {
       margin-right: 0.4rem;
       vertical-align: -0.15em;
       color: var(--brand-color, var(--red));
+    }
+    .welcome-brand-logo {
+      width: 1.8rem;
+      height: 1.8rem;
+      margin-right: 0.4rem;
+      vertical-align: -0.15em;
+      object-fit: contain;
+      border-radius: 0.25rem;
     }
     #welcome-screen .welcome-sub {
       font-size:0.85rem;

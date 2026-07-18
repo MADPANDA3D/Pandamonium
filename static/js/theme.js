@@ -184,7 +184,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: 'Harness Logo',     group: 'Sidebar' },
   { key: 'brandMixTo',         css: '--brand-mix-to',      label: 'Logo Gradient End', group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
@@ -330,6 +330,25 @@ const _ROUTE_FAVICON_SHAPES = {
 };
 
 function _updateFavicon(fg) {
+  const instanceBrand = window._instanceBrand;
+  if (instanceBrand?.logo) {
+    let icon = document.querySelector("link[rel='icon']");
+    if (!icon) {
+      icon = document.createElement('link');
+      icon.rel = 'icon';
+      document.head.appendChild(icon);
+    }
+    icon.href = instanceBrand.logo;
+    let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
+    if (!appleIcon) {
+      appleIcon = document.createElement('link');
+      appleIcon.rel = 'apple-touch-icon';
+      document.head.appendChild(appleIcon);
+    }
+    appleIcon.href = instanceBrand.logo;
+    return;
+  }
+  fg = instanceBrand?.accent || fg;
   const path = (window.location.pathname || '').toLowerCase();
   const routeShape = _ROUTE_FAVICON_SHAPES[path];
   let svg;
@@ -355,6 +374,13 @@ function _updateFavicon(fg) {
   }
   apple.href = href;
 }
+
+// Brand saves can remove a custom logo while the app is on a route-specific
+// page. Rebuild that route's normal icon immediately so the removed logo does
+// not linger until a reload or theme change.
+window.addEventListener('instance-brand-changed', event => {
+  _updateFavicon(event.detail?.accent || '#e06c75');
+});
 
 // Cache of discovered custom fonts: { "Family Name": [ {file, url, format} ] }
 let _customFonts = {};
