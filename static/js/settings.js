@@ -9,6 +9,7 @@ import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
 import { bindMenuDismiss } from './escMenuStack.js';
+import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 
 let initialized = false;
 let modalEl = null;
@@ -19,6 +20,81 @@ function esc(s) { return uiModule.esc(s); }
 function safeRasterDataUrl(raw) {
   const value = String(raw || '').trim();
   return /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value) ? value : '';
+}
+
+async function initBrandSettings() {
+  const nameInput = el('settings-brand-name');
+  const logoInput = el('settings-brand-logo');
+  const accentInput = el('settings-brand-accent');
+  const preview = el('settings-brand-preview');
+  const removeButton = el('settings-brand-remove-logo');
+  const saveButton = el('settings-brand-save');
+  const message = el('settings-brand-msg');
+  if (!nameInput || !logoInput || !accentInput || !preview || !removeButton || !saveButton) return;
+
+  let brand = await loadBrand();
+  let logo = brand.logo;
+  const render = () => {
+    nameInput.value = brand.name;
+    accentInput.value = brand.accent;
+    preview.hidden = !logo;
+    if (logo) preview.src = logo;
+    else preview.removeAttribute('src');
+    removeButton.disabled = !logo;
+  };
+  render();
+
+  logoInput.addEventListener('change', async () => {
+    const file = logoInput.files?.[0];
+    if (!file) return;
+    try {
+      logo = await readLogoFile(file);
+      preview.src = logo;
+      preview.hidden = false;
+      removeButton.disabled = false;
+      if (message) message.textContent = '';
+    } catch (error) {
+      logoInput.value = '';
+      if (message) {
+        message.textContent = error.message;
+        message.style.color = 'var(--red)';
+      }
+    }
+  });
+
+  removeButton.addEventListener('click', () => {
+    logo = '';
+    logoInput.value = '';
+    preview.hidden = true;
+    preview.removeAttribute('src');
+    removeButton.disabled = true;
+    if (message) {
+      message.textContent = 'Logo will be removed when saved.';
+      message.style.color = '';
+    }
+  });
+
+  saveButton.addEventListener('click', async () => {
+    saveButton.disabled = true;
+    if (message) message.textContent = '';
+    try {
+      brand = await saveBrand({ name: nameInput.value, logo, accent: accentInput.value });
+      logo = brand.logo;
+      logoInput.value = '';
+      render();
+      if (message) {
+        message.textContent = 'Identity saved.';
+        message.style.color = 'var(--green, #50fa7b)';
+      }
+    } catch (error) {
+      if (message) {
+        message.textContent = error.message;
+        message.style.color = 'var(--red)';
+      }
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
 }
 
 /* ── Tab switching ── */
@@ -542,6 +618,9 @@ async function initDefaultChat() {
     renderFallbacks();
   } catch (e) { console.warn('Failed to load default chat settings', e); }
 
+  epSel.addEventListener('change', function() { refreshModels(''); saveDefault(); });
+  modelSel.addEventListener('change', saveDefault);
+
   async function saveDefault() {
     try {
       var clean = _fallbacks.filter(function(f) { return f.endpoint_id && f.model; });
@@ -558,8 +637,6 @@ async function initDefaultChat() {
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
 
-  epSel.addEventListener('change', function() { refreshModels(''); saveDefault(); });
-  modelSel.addEventListener('change', saveDefault);
   if (addFbBtn) addFbBtn.addEventListener('click', function() {
     var first = enabledEndpoints()[0];
     _fallbacks.push({ endpoint_id: first ? first.id : '', model: '' });
@@ -895,10 +972,25 @@ async function initTtsSettings() {
   var ttsMsg = el('set-ttsSettingsMsg');
   var ttsEnabledToggle = el('set-ttsEnabledToggle');
   var ttsConfigWrap = provSel ? provSel.closest('div[style*="flex-direction"]') : null;
+  var ttsVoiceCatalog = [];
+  var endpointLabels = {};
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
+  function ensureOption(select, value, label) {
+    if (!select || !value) return;
+    var existing = Array.from(select.options).find(function(opt) { return opt.value === value; });
+    if (existing) { existing.textContent = label || existing.textContent || value; return; }
+    var opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label || value;
+    select.appendChild(opt);
+  }
+  function voiceInSelect(value) {
+    return Array.from(voiceSelect.options).some(function(opt) { return opt.value === value; });
+  }
+  function isCustomVoice() { return isEndpoint() && voiceSelect.value === '__custom__'; }
   function getModel() { return isEndpoint() ? modelSelect.value : modelInput.value; }
-  function getVoice() { return isEndpoint() ? voiceSelect.value : voiceInput.value; }
+  function getVoice() { return isCustomVoice() ? voiceInput.value : (isEndpoint() ? voiceSelect.value : voiceInput.value); }
 
   function updateVisibility() {
     var prov = provSel.value;
@@ -907,19 +999,20 @@ async function initTtsSettings() {
     speedRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     if (isEndpoint()) {
       modelSelect.style.display = ''; modelInput.style.display = 'none';
-      voiceSelect.style.display = ''; voiceInput.style.display = 'none';
+      voiceSelect.style.display = ''; voiceInput.style.display = isCustomVoice() ? '' : 'none';
     } else {
       modelSelect.style.display = 'none'; modelInput.style.display = '';
       voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
     }
   }
 
-  var ttsKeywords = ['tts', 'audio'];
+  var ttsKeywords = ['tts', 'audio', 'kokoro'];
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
     var endpoints = await epRes.json();
     endpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
+      endpointLabels['endpoint:' + ep.id] = ep.name || ep.id;
       var hasTTS = (ep.models || []).some(m => ttsKeywords.some(kw => m.toLowerCase().includes(kw)));
       if (!hasTTS) return;
       var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
@@ -927,11 +1020,43 @@ async function initTtsSettings() {
   } catch (e) { console.warn('Failed to load endpoints for TTS', e); }
 
   try {
+    var voiceRes = await fetch('/api/tts/voices', { credentials: 'same-origin' });
+    var voicePayload = await voiceRes.json();
+    ttsVoiceCatalog = Array.isArray(voicePayload.voices) ? voicePayload.voices : [];
+    if (ttsVoiceCatalog.length) {
+      voiceSelect.innerHTML = '';
+      ttsVoiceCatalog.forEach(function(voice) {
+        ensureOption(voiceSelect, voice.id, voice.id + ' — ' + (voice.label || voice.id));
+      });
+      ensureOption(voiceSelect, '__custom__', 'Custom voice code...');
+    }
+    if (voicePayload.settings?.tts_model) ensureOption(modelSelect, voicePayload.settings.tts_model, voicePayload.settings.tts_model);
+  } catch (e) { console.warn('Failed to load TTS voices', e); }
+
+  try {
     var settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     var settings = await settingsRes.json();
-    if (settings.tts_provider) provSel.value = settings.tts_provider;
-    if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
-    if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
+    if (settings.tts_provider) {
+      if (settings.tts_provider.startsWith('endpoint:')) {
+        var endpointLabel = endpointLabels[settings.tts_provider] || settings.tts_provider.replace(/^endpoint:/, '');
+        ensureOption(provSel, settings.tts_provider, endpointLabel + ' (API)');
+      }
+      provSel.value = settings.tts_provider;
+    }
+    if (settings.tts_model) {
+      ensureOption(modelSelect, settings.tts_model, settings.tts_model);
+      modelSelect.value = settings.tts_model;
+      modelInput.value = settings.tts_model;
+    }
+    if (settings.tts_voice) {
+      if (voiceInSelect(settings.tts_voice)) {
+        voiceSelect.value = settings.tts_voice;
+      } else {
+        ensureOption(voiceSelect, '__custom__', 'Custom voice code...');
+        voiceSelect.value = '__custom__';
+      }
+      voiceInput.value = settings.tts_voice;
+    }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (ttsEnabledToggle) ttsEnabledToggle.checked = settings.tts_enabled !== false;
   } catch (e) { console.warn('Failed to load TTS settings', e); }
@@ -962,14 +1087,18 @@ async function initTtsSettings() {
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
     if (prov === 'local') voiceInput.value = 'af_heart';
-    else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
+    else if (isEndpoint()) {
+      ensureOption(modelSelect, 'kokoro-onnx', 'kokoro-onnx');
+      modelSelect.value = modelSelect.value || 'kokoro-onnx';
+      if (ttsVoiceCatalog.length && voiceSelect.value !== '__custom__') voiceSelect.value = ttsVoiceCatalog[0].id;
+    }
     else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
     updateVisibility();
     saveTTS();
   });
   modelSelect.addEventListener('change', saveAndClearCache);
   modelInput.addEventListener('change', saveTTS);
-  voiceSelect.addEventListener('change', saveAndClearCache);
+  voiceSelect.addEventListener('change', function() { updateVisibility(); saveAndClearCache(); });
   voiceInput.addEventListener('change', saveTTS);
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
@@ -992,7 +1121,7 @@ async function initTtsSettings() {
         ttsMsg.textContent = 'Select a provider first'; ttsMsg.style.color = 'var(--red, #e55)';
         setTimeout(function() { ttsMsg.textContent = ''; }, 2000); return;
       }
-      var testText = 'Hello, this is a test of text to speech.';
+      var testText = 'Sir, Jarvis voice sample online.';
       previewPlaying = true; previewBtn.textContent = 'Loading...';
       try {
         if (prov === 'browser') {
@@ -1017,7 +1146,7 @@ async function initTtsSettings() {
           var res = await fetch('/api/tts/synthesize', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: testText, format: 'audio' })
+            body: JSON.stringify({ text: testText, format: 'audio', model: getModel(), voice: getVoice(), speed: speedSelect.value || '1', use_cache: false })
           });
           if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.detail?.message || 'Synthesis failed'); }
           var blob = await res.blob();
@@ -1722,24 +1851,6 @@ async function initAgentSettings() {
     (curR != null ? ' · ' + curR + ' steps/message' : '') +
     (supInput && supInput.checked ? ' · supervisor on' : '');
 
-  // Standalone Email Safety toggle (separate card on the AI Defaults tab).
-  // Default to ON if the setting isn't present so a fresh install is safe.
-  var emailConfirm = el('set-agentEmailConfirm');
-  if (emailConfirm) {
-    try {
-      var s = await fetch('/api/auth/settings', { credentials: 'same-origin' }).then(r => r.json());
-      emailConfirm.checked = s.agent_email_confirm !== false;
-    } catch (_) {}
-    emailConfirm.addEventListener('change', async () => {
-      try {
-        await fetch('/api/auth/settings', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent_email_confirm: !!emailConfirm.checked }),
-        });
-      } catch (_) {}
-    });
-  }
 }
 
 /* ═══════════════════════════════════════════
@@ -2354,6 +2465,7 @@ function initAll() {
   initAppearance();
   initShortcuts();
   initAccount();
+  initBrandSettings();
   initIntegrations();
   initEmailSettings();
   initEmailAccountsSettings();
@@ -2591,7 +2703,7 @@ async function initReminderSettings() {
   // regardless of channel). The hint should make that clear so
   // users don't think they have to choose between channels.
   const CHANNEL_HINTS = {
-    browser: 'Reminders appear as browser notifications inside Odysseus.',
+    browser: `Reminders appear as browser notifications inside ${getBrandName()}.`,
     email: 'Reminders are emailed and shown as a browser notification.',
     ntfy: 'Reminders are pushed via ntfy AND shown as a browser notification.',
     webhook: 'Reminders are POSTed to the selected integration AND shown as a browser notification. Use {{title}} and {{message}} in the payload template.',
@@ -2991,7 +3103,7 @@ async function initEmailAccountsSettings() {
     const eafProviderNotes = {
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
-        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
+        body: `Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. ${getBrandName()} does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.`,
       },
     };
     const eafNoteEl = el('eaf-provider-note');
@@ -3123,6 +3235,28 @@ async function initEmailSettings() {
   const root = el('settings-modal');
   if (!root || !root.querySelector('[data-settings-panel="email"]')) return;
 
+  const styleKey = 'odysseus-email-writing-style';
+  const styleEl = el('set-email-style');
+
+  // The account/CardDAV config endpoints can be slow when remote mail servers
+  // are cold. Populate the Writing Style box independently so saved prose does
+  // not appear seconds after the panel opens.
+  try {
+    const cachedStyle = localStorage.getItem(styleKey);
+    if (styleEl && cachedStyle !== null && !styleEl.value) styleEl.value = cachedStyle;
+  } catch (_) {}
+
+  const loadWritingStyle = async () => {
+    try {
+      const res = await fetch('/api/email/style');
+      const data = await res.json();
+      const style = data.style || '';
+      if (styleEl) styleEl.value = style;
+      try { localStorage.setItem(styleKey, style); } catch (_) {}
+    } catch (_) {}
+  };
+  loadWritingStyle();
+
   // Load current email config
   try {
     const res = await fetch('/api/email/config');
@@ -3145,13 +3279,6 @@ async function initEmailSettings() {
     if (el('set-carddav-url')) el('set-carddav-url').value = cfg.url || '';
     if (el('set-carddav-user')) el('set-carddav-user').value = cfg.username || '';
     if (el('set-carddav-pass')) el('set-carddav-pass').value = '';
-  } catch (_) {}
-
-  // Load writing style
-  try {
-    const res = await fetch('/api/email/style');
-    const data = await res.json();
-    if (el('set-email-style')) el('set-email-style').value = data.style || '';
   } catch (_) {}
 
   // Save email config
@@ -3244,7 +3371,8 @@ async function initEmailSettings() {
       });
       const data = await res.json();
       if (data.success && data.style) {
-        if (el('set-email-style')) el('set-email-style').value = data.style;
+        if (styleEl) styleEl.value = data.style;
+        try { localStorage.setItem(styleKey, data.style); } catch (_) {}
         if (msg) msg.textContent = '✓ Style extracted';
       } else {
         if (msg) msg.textContent = data.error || 'Failed';
@@ -3263,12 +3391,16 @@ async function initEmailSettings() {
     const msg = el('set-email-style-msg');
     if (msg) msg.textContent = 'Saving...';
     try {
+      const style = styleEl ? styleEl.value : '';
       const res = await fetch('/api/email/style', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ style: el('set-email-style').value }),
+        body: JSON.stringify({ style }),
       });
       const result = await res.json();
+      if (result.success) {
+        try { localStorage.setItem(styleKey, style); } catch (_) {}
+      }
       if (msg) msg.textContent = result.success ? '✓ Saved' : 'Failed';
       setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
     } catch (e) {
@@ -3889,7 +4021,7 @@ async function initUnifiedIntegrations() {
       if (ntfyHint) {
         ntfyHint.style.display = isNtfy ? 'block' : 'none';
         if (isNtfy) {
-          ntfyHint.innerHTML = 'Enter the ntfy server URL Odysseus can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
+          ntfyHint.innerHTML = `Enter the ntfy server URL ${esc(getBrandName())} can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.`;
         }
       }
       if (url) {
@@ -4489,7 +4621,7 @@ async function initUnifiedIntegrations() {
       },
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
-        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
+        body: `Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. ${getBrandName()} does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.`,
         url: 'https://learn.microsoft.com/exchange/clients-and-mobile-in-exchange-online/disable-basic-authentication-in-exchange-online',
         linkLabel: 'Read Microsoft note',
       },
@@ -5309,7 +5441,7 @@ async function initUnifiedIntegrations() {
               </button>
             </div>
             <div id="uf-codex-config-body" style="display:none;">
-              <div style="font-size:11px;opacity:0.62;margin:4px 0 6px;">Toggle which Odysseus tools this agent can use. New agents start with chat only.</div>
+              <div style="font-size:11px;opacity:0.62;margin:4px 0 6px;">Toggle which ${esc(getBrandName())} tools this agent can use. New agents start with chat only.</div>
               <div id="uf-codex-inline-scopes"></div>
             </div>
           </div>

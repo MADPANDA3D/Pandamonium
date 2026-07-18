@@ -11,6 +11,13 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 
+def _normalize_transcript(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    text = text.strip()
+    return text if any(char.isalnum() for char in text) else ""
+
+
 class STTService:
     """Multi-provider STT service.
 
@@ -165,13 +172,14 @@ class STTService:
             return None
 
         if provider == "local":
-            return self._transcribe_local(audio_bytes, language)
+            transcript = self._transcribe_local(audio_bytes, language)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
-            return self._transcribe_api(audio_bytes, endpoint_id, model, language)
+            transcript = self._transcribe_api(audio_bytes, endpoint_id, model, language)
         else:
             logger.error(f"Unknown STT provider: {provider}")
             return None
+        return _normalize_transcript(transcript)
 
     def get_stats(self) -> Dict[str, Any]:
         settings = self._load_settings()

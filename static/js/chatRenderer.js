@@ -10,6 +10,7 @@ import settingsModule from './settings.js';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
+import { getBrandName } from './brand.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 const REPORT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
@@ -81,7 +82,7 @@ function _formatSize(bytes) {
 // Build the `.attach-cards` element for a message's attachment list. Shared by
 // addMessage and updateMessageAttachments so a live (optimistic) user bubble
 // can be re-rendered with real upload ids once the upload resolves.
-function buildAttachCards(attachments) {
+export function buildAttachCards(attachments) {
   const attachWrap = document.createElement('div');
   attachWrap.className = 'attach-cards';
   for (const att of attachments) {
@@ -425,6 +426,23 @@ const TOOL_CALL_RE = /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/gi;
 let EXEC_FENCE_RE = null;
 const EXEC_FENCE_NON_TOOL = new Set(['bash', 'python']);
 
+function escapeRegex(source) {
+  return String(source).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripExecutedFence(match, tag, inline, body) {
+  const inlineArgs = (inline || '').trim();
+  if (!inlineArgs) return '';
+  const bodyText = (body || '').trim();
+  const content = bodyText ? `${inlineArgs}\n${bodyText}` : inlineArgs;
+  try {
+    JSON.parse(content);
+  } catch {
+    return match;
+  }
+  return '';
+}
+
 async function loadExecFenceRegex() {
   try {
     const res = await fetch('/api/tools', { credentials: 'same-origin' });
@@ -434,7 +452,10 @@ async function loadExecFenceRegex() {
       .filter((id) => id && !EXEC_FENCE_NON_TOOL.has(id));
     if (tags.length) {
       EXEC_FENCE_RE = new RegExp(
-        '```(?:' + tags.join('|') + ')\\s*\\n[\\s\\S]*?```', 'gi'
+        '```(' + tags.map(escapeRegex).join('|') + ')(?![\\w-])' +
+        '[ \\t]*([\\[{][^\\n]*?)?[ \\t]*(?=\\r?\\n|```)' +
+        '\\r?\\n?([\\s\\S]*?)```',
+        'gi'
       );
     }
   } catch (err) {
@@ -454,6 +475,10 @@ const XML_INVOKE_RE = /<invoke\s+name=['"][^'"]*['"]>[\s\S]*?<\/invoke>/gi;
 // (e.g. mid-stream before the closing tag arrives).
 const DSML_TOOL_RE = /<\s*[｜|]+\s*DSML\s*[｜|]+\s*tool_calls\s*>[\s\S]*?(?:<\s*\/\s*[｜|]+\s*DSML\s*[｜|]+\s*tool_calls\s*>|$)/gi;
 const DSML_STRAY_RE = /<\s*\/?\s*[｜|]+\s*DSML\s*[｜|]+[^>]*>/gi;
+const DSML_INVOKE_RE = /<\s*[｜|]+\s*DSML\s*[｜|]+\s*invoke\b[^>]*>[\s\S]*?(?:<\s*\/\s*[｜|]+\s*DSML\s*[｜|]+\s*invoke\s*>|$)/gi;
+const RAW_OPENAI_TOOL_JSON_RE = /(?:\[\s*)?\{\s*"function"\s*:\s*\{[\s\S]*?\}\s*,\s*"id"\s*:\s*"[^"]*"\s*,\s*"type"\s*:\s*"function"\s*\}\s*\]?/gi;
+const QWEN_ROLE_MARKER_RE = /<\/?\|(?:assistant|assistan|user|system|tool)\|>?|<\/\|end\|>?/gi;
+const QWEN_BARE_MARKER_RE = /(?:^|[\t\r\n ])(?:\|?end\|?|\/?\|end\|)(?=[\t\r\n ]|$)|(?:^|[\t\r\n ])assistan(?:t)?(?=[\t\r\n ]|$)/gi;
 // Self-narration about tool results (model echoing stdout/exit_code)
 const TOOL_NARRATION_RE = /(?:The (?:result|output) shows?:?\s*)?-?\s*(?:stdout|stderr|exit_code):\s*.+/gi;
 
@@ -889,11 +914,15 @@ export function roleTimestamp(when) {
  */
 export function stripToolBlocks(text) {
   let cleaned = text.replace(TOOL_CALL_RE, '');
-  if (EXEC_FENCE_RE) cleaned = cleaned.replace(EXEC_FENCE_RE, '');
+  if (EXEC_FENCE_RE) cleaned = cleaned.replace(EXEC_FENCE_RE, stripExecutedFence);
   cleaned = cleaned.replace(DSML_TOOL_RE, '');
+  cleaned = cleaned.replace(DSML_INVOKE_RE, '');
   cleaned = cleaned.replace(DSML_STRAY_RE, '');
   cleaned = cleaned.replace(XML_TOOL_CALL_RE, '');
   cleaned = cleaned.replace(XML_INVOKE_RE, '');
+  cleaned = cleaned.replace(RAW_OPENAI_TOOL_JSON_RE, '');
+  cleaned = cleaned.replace(QWEN_ROLE_MARKER_RE, '');
+  cleaned = cleaned.replace(QWEN_BARE_MARKER_RE, ' ');
   cleaned = cleaned.replace(TOOL_NARRATION_RE, '');
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
   return cleaned.trim();
@@ -1105,6 +1134,17 @@ document.addEventListener('click', function(e) {
   }
 }, true);
 
+function resolveDocumentPlaceholderLinks(text, metadata) {
+  if (!text || !metadata || !Array.isArray(metadata.tool_events)) return text;
+  const docEvents = metadata.tool_events.filter(ev => ev && ev.doc_id);
+  if (!docEvents.length) return text;
+  return String(text).replace(/#document-(\d+)\b/g, (match, num) => {
+    const idx = Number(num) - 1;
+    const ev = Number.isInteger(idx) && idx >= 0 ? docEvents[idx] : null;
+    return ev && ev.doc_id ? `#document-${ev.doc_id}` : match;
+  });
+}
+
 // Jump-to-entity anchors — the agent emits links like
 //   [New Chat](#session-89effa28)
 //   [Notes](#document-abc123)
@@ -1121,17 +1161,41 @@ document.addEventListener('click', function(e) {
   while (_t && _t.nodeType === Node.TEXT_NODE) _t = _t.parentElement;
   const a = _t && _t.closest && _t.closest('a[href]');
   if (!a) return;
-  const href = a.getAttribute('href') || '';
+  const rawHref = a.getAttribute('href') || '';
+  let href = rawHref;
+  try {
+    const parsed = new URL(rawHref, window.location.origin);
+    if (parsed.origin === window.location.origin && parsed.pathname === window.location.pathname) {
+      href = parsed.hash || rawHref;
+    }
+  } catch (_) {}
   if (!href.startsWith('#')) return;
-  const m = href.match(/^#(session|document|note|image|email|event|task|skill|research)-(.+)$/);
+  let m = href.match(/^#(session|document|note|image|email|event|task|skill|research)-(.+)$/);
+  if (!m) {
+    const noteOpen = href.match(/^#open=notes&note=([^&]+)/);
+    if (noteOpen) m = ['note', 'note', decodeURIComponent(noteOpen[1])];
+  }
+  if (!m) {
+    const bareSession = href.match(/^#([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+    if (bareSession) m = ['session', 'session', bareSession[1]];
+  }
   if (!m) return;
   e.preventDefault();
   e.stopPropagation();
   const [, kind, id] = m;
   if (kind === 'session') {
+    try {
+      a.classList.add('is-loading');
+      a.setAttribute('aria-busy', 'true');
+    } catch {}
     import('./sessions.js').then(mod => {
       const fn = mod.selectSession || (mod.default && mod.default.selectSession);
-      if (fn) fn(id);
+      if (fn) return fn(id, { showLoading: true, immediateLoading: true });
+    }).finally(() => {
+      try {
+        a.classList.remove('is-loading');
+        a.removeAttribute('aria-busy');
+      } catch {}
     });
   } else if (kind === 'document') {
     import('./document.js').then(mod => {
@@ -1144,6 +1208,11 @@ document.addEventListener('click', function(e) {
     import('./notes.js').then(mod => {
       const open = mod.openNote || (mod.default && mod.default.openNote);
       if (open) open(id);
+      try {
+        if (/^#(?:note-|open=notes&note=)/.test(window.location.hash || '')) {
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+      } catch (_) {}
     }).catch(() => {});
   } else if (kind === 'image') {
     import('./gallery.js').then(mod => {
@@ -1177,7 +1246,7 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   }
-});
+}, true);
 
 /**
  * Build a generated-image bubble element.
@@ -1294,6 +1363,25 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     }
   });
   actions.appendChild(editBtn);
+
+  if (imageId) {
+    const galleryBtn = document.createElement('button');
+    galleryBtn.className = 'footer-copy-btn footer-open-gallery-btn';
+    galleryBtn.type = 'button';
+    galleryBtn.title = 'Open in gallery';
+    galleryBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span>Open in gallery</span>';
+    galleryBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const mod = await import('./gallery.js');
+        const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
+        if (open) open(imageId);
+      } catch (err) {
+        console.error('[chat] open in gallery failed', err);
+      }
+    });
+    actions.appendChild(galleryBtn);
+  }
 
   const delBtn = document.createElement('button');
   delBtn.className = 'footer-copy-btn footer-delete-btn';
@@ -1726,8 +1814,9 @@ export function createUserMsgFooter(msgElement) {
  * Display performance metrics for a message.
  */
 export function displayMetrics(messageElement, metrics) {
-  const existingMetrics = messageElement.querySelector('.response-metrics');
-  if (existingMetrics) existingMetrics.remove();
+  messageElement
+    .querySelectorAll('.response-metrics, .metrics-divider, .ctx-divider, .ctx-ring')
+    .forEach((el) => el.remove());
 
   const metricsContainer = document.createElement('span');
   metricsContainer.className = 'response-metrics';
@@ -1742,7 +1831,7 @@ export function displayMetrics(messageElement, metrics) {
   const cost = _billableCost(model, inputTokens, outputTokens);
 
   // Nothing useful to show — bail out (only if ALL metrics are missing)
-  if (!responseTime && !outputTokens && tps == null && !ctxPct) return;
+  if (!responseTime && !inputTokens && !outputTokens && tps == null && !ctxPct) return;
 
   // Accumulate session cost (only on fresh metrics, not history reload)
   if (!metrics._fromHistory) {
@@ -1757,22 +1846,22 @@ export function displayMetrics(messageElement, metrics) {
     }
   }
 
-  // Default: show tok/s if available, else fall back to other stats
+  // Keep token counts in the Message Stats popup; the footer should stay slim.
   const costStr0 = cost !== null ? `$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}` : null;
-  const metricsLabel = tps != null && tps !== 'undefined'
+  const hasTps = tps != null && tps !== 'undefined';
+  const metricsLabel = hasTps
     ? `${tps} tok/s`
     : costStr0
-      ? `${outputTokens} tok · ${costStr0}`
-      : outputTokens
-        ? `${outputTokens} tok · ${responseTime != null ? responseTime + 's' : ''}`
-        : responseTime != null
-          ? `${responseTime}s`
-          : '';
+      ? costStr0
+      : responseTime != null
+        ? `${responseTime}s`
+        : '';
   if (!metricsLabel) return;
   metricsContainer.textContent = metricsLabel;
   metricsContainer.style.cursor = 'pointer';
   metricsContainer.title = 'Click for details';
   const metricsDivider = document.createElement('span');
+  metricsDivider.className = 'metrics-divider';
   metricsDivider.textContent = ' | ';
   metricsDivider.style.color = 'var(--color-muted-alt)';
   metricsDivider.style.pointerEvents = 'none';
@@ -1911,7 +2000,7 @@ export function displayMetrics(messageElement, metrics) {
           compactMsg.className = 'msg msg-ai';
           const compactRole = document.createElement('div');
           compactRole.className = 'role';
-          compactRole.textContent = 'Odysseus';
+          compactRole.textContent = getBrandName();
           const compactBody = document.createElement('div');
           compactBody.className = 'body';
           compactBody.innerHTML = 'Compacting context <span class="compact-wave">▁▂▃▅▂▁</span>';
@@ -1985,6 +2074,13 @@ export function displayMetrics(messageElement, metrics) {
   }
 
   let footer = messageElement.querySelector('.msg-footer');
+  if (!footer) {
+    footer = createMsgFooter(messageElement);
+    if (messageElement.classList?.contains('agent-thread')) {
+      footer.classList.add('agent-thread-footer');
+    }
+    messageElement.appendChild(footer);
+  }
   if (footer) {
     const actions = footer.querySelector('.msg-actions');
     if (actions) {
@@ -2150,6 +2246,14 @@ export function renderAskUserCard(payload, options) {
 /**
  * Add a message to the chat history.
  */
+function applyTaskMessageMetadata(wrap, metadata) {
+  if (!wrap || !metadata) return;
+  if (metadata.source) wrap.dataset.source = String(metadata.source);
+  if (metadata.task_id) wrap.dataset.taskId = String(metadata.task_id);
+  if (metadata.worker) wrap.dataset.worker = String(metadata.worker);
+  if (metadata.worker_event_id) wrap.dataset.workerEventId = String(metadata.worker_event_id);
+}
+
 export function addMessage(role, content, modelName, metadata) {
   try {
     hideWelcomeScreen();
@@ -2184,11 +2288,12 @@ export function addMessage(role, content, modelName, metadata) {
 
       for (let r = 0; r < maxRound; r++) {
         const roundNum = r + 1;
-        const txt = (roundTexts[r] || '').trim();
+        const txt = resolveDocumentPlaceholderLinks((roundTexts[r] || '').trim(), metadata);
 
         if (txt) {
           const wrap = document.createElement('div');
           wrap.className = 'msg msg-ai' + (r > 0 ? ' msg-continuation' : '');
+          applyTaskMessageMetadata(wrap, metadata);
           const roleEl = document.createElement('div');
           roleEl.className = 'role';
           const pair = replyModelPair(modelName, metadata);
@@ -2343,6 +2448,7 @@ export function addMessage(role, content, modelName, metadata) {
     // --- Standard single-bubble message ---
     const wrap = document.createElement('div');
     wrap.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-ai');
+    applyTaskMessageMetadata(wrap, metadata);
 
     const r = document.createElement('div');
     r.className = 'role';
@@ -2350,7 +2456,7 @@ export function addMessage(role, content, modelName, metadata) {
     const isCompacted = metadata?.compacted;
     const replyModels = replyModelPair(modelName, metadata);
     const resolvedModel = replyModels.actualModel || replyModels.requestedModel;
-    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Odysseus' : modelRouteLabel(replyModels.requestedModel, resolvedModel);
+    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? getBrandName() : modelRouteLabel(replyModels.requestedModel, resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';
     }
@@ -2372,6 +2478,9 @@ export function addMessage(role, content, modelName, metadata) {
     b.className = 'body';
 
     let text = markdownModule.squashOutsideCode(stripToolBlocks(textRaw || ''));
+    if (role === 'assistant') {
+      text = resolveDocumentPlaceholderLinks(text, metadata);
+    }
 
     // For user messages, pull out vision-model image descriptions ([Image: name]\n
     // <multi-line desc>) into a collapsible "image description" section. Done for
@@ -2397,8 +2506,8 @@ export function addMessage(role, content, modelName, metadata) {
         .trim();
     }
 
-    wrap.dataset.raw = text;
-    if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
+	    wrap.dataset.raw = text;
+	    if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
     // Prepend sources box if saved in metadata
     var sourcesPrefix = '';
     var findingsSuffix = '';
@@ -2421,9 +2530,10 @@ export function addMessage(role, content, modelName, metadata) {
         '<think' + (thinkTime ? ` time="${thinkTime}"` : '') + '>' + metadata.thinking + '</think>\n\n' + text
       );
       b.innerHTML = sourcesPrefix + thinkHtml + findingsSuffix;
-    } else {
-      b.innerHTML = sourcesPrefix + markdownModule.processWithThinking(text) + findingsSuffix;
-    }
+	    } else {
+	      b.innerHTML = sourcesPrefix + markdownModule.processWithThinking(text) + findingsSuffix;
+	    }
+	    b.dataset.raw = text;
 
     // The vision/OCR caption is stripped from the displayed text above (so the
     // bubble doesn't show the raw model output) but no longer rendered as an
@@ -2658,6 +2768,7 @@ const chatRenderer = {
   createMsgFooter,
   displayMetrics,
   addMessage,
+  buildAttachCards,
   updateMessageAttachments,
 };
 

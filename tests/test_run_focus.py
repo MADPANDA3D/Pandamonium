@@ -7,6 +7,7 @@ injected fake executor so no pytest subprocess is ever spawned.
 from __future__ import annotations
 
 import argparse
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -41,8 +42,22 @@ def test_sub_area_only_marker_expression():
     assert build_marker_expression(None, "cookbook") == "sub_cookbook"
 
 
+def test_embedding_sub_area_marker_expression_includes_memory_split():
+    assert (
+        build_marker_expression(None, "embedding")
+        == "(sub_embedding or sub_embedding_memory)"
+    )
+
+
 def test_area_and_sub_area_marker_expression():
     assert build_marker_expression("services", "cookbook") == "area_services and sub_cookbook"
+
+
+def test_area_and_embedding_sub_area_marker_expression_includes_memory_split():
+    assert (
+        build_marker_expression("services", "embedding")
+        == "area_services and (sub_embedding or sub_embedding_memory)"
+    )
 
 
 def test_no_selection_marker_expression_is_none():
@@ -73,6 +88,12 @@ def test_area_only_command():
 
 def test_sub_area_only_command():
     assert _cmd(sub_area="cookbook") == [PY, "-m", "pytest", "-m", "sub_cookbook"]
+
+
+def test_embedding_sub_area_command_includes_memory_split():
+    assert _cmd(sub_area="embedding") == [
+        PY, "-m", "pytest", "-m", "(sub_embedding or sub_embedding_memory)",
+    ]
 
 
 def test_area_and_sub_area_command():
@@ -127,6 +148,13 @@ def test_fast_with_area_command():
 def test_fast_with_area_and_sub_area_command():
     assert _cmd(area="services", sub_area="cookbook", fast=True) == [
         PY, "-m", "pytest", "-m", "area_services and sub_cookbook and not slow",
+    ]
+
+
+def test_fast_with_embedding_sub_area_command_includes_memory_split():
+    assert _cmd(sub_area="embedding", fast=True) == [
+        PY, "-m", "pytest", "-m",
+        "(sub_embedding or sub_embedding_memory) and not slow",
     ]
 
 
@@ -203,7 +231,7 @@ def test_dry_run_prints_command_and_does_not_execute(capsys):
     assert code == 0
     assert executor.calls == []
     assert out == (
-        f"{sys.executable} -m pytest "
+        f"{shlex.quote(sys.executable)} -m pytest "
         "-m 'area_services and sub_cookbook'\n"
     )
 
@@ -215,7 +243,7 @@ def test_dry_run_last_failed_prints_safe_flags(capsys):
     assert code == 0
     assert executor.calls == []
     assert out == (
-        f"{sys.executable} -m pytest "
+        f"{shlex.quote(sys.executable)} -m pytest "
         "--last-failed --last-failed-no-failures=none\n"
     )
 
@@ -249,6 +277,30 @@ def test_run_accepts_both_sub_area_forms(value):
         "pytest",
         "-m",
         "sub_cookbook",
+    ]]
+
+
+def test_run_keeps_embedding_memory_selector_specific():
+    executor = _FakeExecutor()
+    run(["--sub-area", "embedding_memory"], executor=executor)
+    assert executor.calls == [[
+        sys.executable,
+        "-m",
+        "pytest",
+        "-m",
+        "sub_embedding_memory",
+    ]]
+
+
+def test_run_expands_embedding_selector_to_memory_split():
+    executor = _FakeExecutor()
+    run(["--sub-area", "embedding"], executor=executor)
+    assert executor.calls == [[
+        sys.executable,
+        "-m",
+        "pytest",
+        "-m",
+        "(sub_embedding or sub_embedding_memory)",
     ]]
 
 
@@ -301,7 +353,7 @@ def test_fast_durations_dry_run_prints_command(capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert executor.calls == []
-    assert out == f"{sys.executable} -m pytest -m 'not slow' --durations=25\n"
+    assert out == f"{shlex.quote(sys.executable)} -m pytest -m 'not slow' --durations=25\n"
 
 
 def test_durations_alone_is_rejected_before_executor():
@@ -397,3 +449,45 @@ def test_fast_lane_collects_only_unmarked_auth_concurrency_test():
     assert _FAST_AUTH_CONCURRENCY_TEST in collected
     for slow_test in _SLOW_AUTH_CONCURRENCY_TESTS:
         assert slow_test not in collected, f"slow test was not deselected: {slow_test}"
+
+def test_service_health_sub_area_command_includes_split_files():
+    assert _cmd(sub_area="service_health") == [
+        PY,
+        "-m",
+        "pytest",
+        "-m",
+        (
+            "(sub_service_health_chromadb or "
+            "sub_service_health_search or "
+            "sub_service_health_ntfy or "
+            "sub_service_health_email or "
+            "sub_service_health_providers or "
+            "sub_service_health_collect)"
+        ),
+    ]
+
+
+def test_service_health_alias_is_accepted_by_run():
+    seen = []
+
+    def executor(cmd):
+        seen.append(cmd)
+        return 0
+
+    result = run(["--sub-area", "service_health"], executor=executor)
+
+    assert result == 0
+    assert len(seen) == 1
+    assert seen[0][1:] == [
+        "-m",
+        "pytest",
+        "-m",
+        (
+            "(sub_service_health_chromadb or "
+            "sub_service_health_search or "
+            "sub_service_health_ntfy or "
+            "sub_service_health_email or "
+            "sub_service_health_providers or "
+            "sub_service_health_collect)"
+        ),
+    ]

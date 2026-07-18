@@ -1,18 +1,25 @@
 # routes/tts_routes.py
-"""
-TTS API routes — multi-provider (local Kokoro, API endpoint, browser).
-"""
+"""TTS API routes."""
+
+import asyncio
+import json
+import logging
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
-import logging
+
+from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment
 
 logger = logging.getLogger(__name__)
 
 class TTSRequest(BaseModel):
     text: str
     format: str = "audio"  # "audio" or "base64"
+    model: str | None = None
+    voice: str | None = None
+    speed: str | float | None = None
+    use_cache: bool = True
 
 def setup_tts_routes(tts_service):
     """Setup TTS routes with the provided TTS service"""
@@ -27,6 +34,20 @@ def setup_tts_routes(tts_service):
             logger.error(f"Failed to get TTS stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.get("/voices")
+    async def get_tts_voices():
+        """List selectable TTS voices and current voice settings."""
+        try:
+            return {
+                "settings": tts_service._load_settings(),
+                "stats": tts_service.get_stats(),
+                "voices": tts_service.list_voices(),
+                "custom_voice_allowed": True,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get TTS voices: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.post("/synthesize")
     async def synthesize_speech(request: TTSRequest):
         """Synthesize speech from text"""
@@ -38,7 +59,15 @@ def setup_tts_routes(tts_service):
                 )
             
             if request.format == "base64":
-                audio_b64 = tts_service.synthesize_to_base64(request.text)
+                async with TTS_INFERENCE_LOCK:
+                    audio_b64 = await asyncio.to_thread(
+                        tts_service.synthesize_to_base64,
+                        request.text,
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                        use_cache=request.use_cache,
+                    )
                 if not audio_b64:
                     raise HTTPException(
                         status_code=500,
@@ -47,7 +76,15 @@ def setup_tts_routes(tts_service):
                 return {"audio": audio_b64}
             
             else:  # audio format
-                audio_data = tts_service.synthesize(request.text)
+                async with TTS_INFERENCE_LOCK:
+                    audio_data = await asyncio.to_thread(
+                        tts_service.synthesize,
+                        request.text,
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                        use_cache=request.use_cache,
+                    )
                 if not audio_data:
                     raise HTTPException(
                         status_code=500,
@@ -73,6 +110,32 @@ def setup_tts_routes(tts_service):
                 status_code=500,
                 detail={"message": f"Synthesis failed: {str(e)}"}
             )
+
+    @router.post("/stream")
+    async def stream_speech(request: TTSRequest):
+        """Relay one native PCM inference for the complete utterance."""
+        text = request.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail={"message": "Speech text is required"})
+        if not tts_service.available:
+            raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
+
+        async def generate():
+            try:
+                async with TTS_INFERENCE_LOCK:
+                    async for event in stream_tts_pcm_segment(
+                        tts_service,
+                        text,
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                    ):
+                        yield json.dumps(event, separators=(",", ":")) + "\n"
+            except Exception as exc:
+                logger.exception("TTS stream failed")
+                yield json.dumps({"type": "error", "error": str(exc)[:240]}) + "\n"
+
+        return StreamingResponse(generate(), media_type="application/x-ndjson")
 
     @router.post("/clear-cache")
     async def clear_tts_cache():

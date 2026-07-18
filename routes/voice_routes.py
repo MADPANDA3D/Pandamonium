@@ -1,0 +1,2627 @@
+"""Jarvis live voice session and safe action bridge routes."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import logging
+import os
+import re
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Literal
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
+
+from core.constants import DATA_DIR
+from core.atomic_io import atomic_write_json
+from core.models import ChatMessage
+from src.agent_loop import stream_agent_loop
+from src.agent_tools import TOOL_TAGS
+from src.agent_worker_adapters import worker_catalog
+from src.auth_helpers import require_user
+from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
+from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_pcm16
+
+VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
+ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
+JARVIS_OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+JARVIS_GENERATE_URL = f"{JARVIS_OLLAMA_URL}/api/generate"
+JARVIS_CHAT_URL = f"{JARVIS_OLLAMA_URL}/v1/chat/completions"
+JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
+VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
+VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))
+VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
+VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
+VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
+VOICE_FRAME_MAX_BYTES = 1024 * 1024
+VOICE_FRAME_MAX_WIDTH = 1024
+VOICE_FRAME_MAX_HEIGHT = 576
+VOICE_CONTROL_MAX_CHARS = 280
+PERSISTENT_APPROVAL_PATTERN = (
+    r"\b(?:always|all|session|permanent(?:ly)?|indefinitely|forever|blanket|ongoing|default|everything|"
+    r"every(?:\s+(?:time|request))?|each\s+request|all(?:\s+future)?\s+requests?|all\s+time|"
+    r"future\s+requests?)\b|\ball\b.{0,120}\brequests?\b|from now on|until further notice"
+)
+logger = logging.getLogger(__name__)
+_SESSION_MANAGER = None
+_SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
+
+DESKTOP_ACTIONS = {"open_grafana_big_screen", "open_odysseus"}
+DEFERRED_ACTIONS = {"start_local_codex_task", "start_hermes_task", "read_task_status"}
+SAFE_ACTIONS = DESKTOP_ACTIONS | DEFERRED_ACTIONS
+JARVIS_TOOLS = {
+    "get_runtime_status",
+    "start_agent_task",
+    "read_agent_task",
+    "search_jarvis_knowledge",
+    "read_calendar",
+}
+VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private Mark 7/8 voice orchestrator.
+Be terse and conversational: normally one or two spoken sentences unless Leo asks for depth. Never describe pacing or offer a capability menu.
+Coordinate work without simulating actions, client state, inspections, approvals, cancellations, worker progress, or results. Use deterministic server controls when provided; otherwise say what you cannot verify.
+Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
+PC Codex owns local project, code, and document inspection. VPS Codex is only for work that explicitly names the VPS. Hermes is explicit-only; never infer or auto-dispatch Hermes.
+Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
+
+WORKER_LABELS = {
+    "pc-codex": "PC Codex",
+    "hermes": "Hermes",
+    "vps-codex": "VPS Codex",
+}
+VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon"}
+ACTIVE_VOICE_TARGETS = {"jarvis"} | {
+    worker for worker, details in worker_catalog().items() if details.get("enabled")
+}
+VOICE_WORKSPACES = {"madpanda3d", "business", "home-lab", "project-linux", "vps-ops"}
+
+
+class VoiceSessionCreate(BaseModel):
+    mode: str = "jarvis_call"
+    chat_session_id: str | None = None
+
+
+class VoiceTurnCreate(BaseModel):
+    role: Literal["user", "assistant", "system"] = "user"
+    text: str
+    status: str | None = None
+    task_id: str | None = None
+
+
+class VoiceActionRequest(BaseModel):
+    action: str
+    session_id: str | None = None
+    prompt: str | None = None
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoiceCalendarClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    open: bool = False
+    minimized: bool = False
+    view: Literal["month", "week", "year", "agenda"] | None = None
+    date: str | None = Field(default=None, max_length=40)
+
+
+class VoiceDocumentClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    open: bool = False
+    minimized: bool = False
+    id: str | None = Field(default=None, max_length=200)
+
+
+class VoiceClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    active_view: Literal["calendar", "document", "chat"] | None = None
+    calendar: VoiceCalendarClientState = Field(default_factory=VoiceCalendarClientState)
+    document: VoiceDocumentClientState = Field(default_factory=VoiceDocumentClientState)
+
+
+class VoiceFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mime: Literal["image/jpeg", "image/png"]
+    data_base64: str = Field(min_length=4, max_length=1_500_000)
+    width: int = Field(gt=0, le=VOICE_FRAME_MAX_WIDTH)
+    height: int = Field(gt=0, le=VOICE_FRAME_MAX_HEIGHT)
+
+
+class VoiceRespondRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    client_state: VoiceClientState | None = None
+    frame: VoiceFrame | None = None
+
+
+class VoiceTargetUpdate(BaseModel):
+    target: str
+    workspace: str = "home-lab"
+    task_id: str | None = None
+    codex_thread_id: str | None = None
+
+
+class VoiceDiagnosticCreate(BaseModel):
+    label: str = "client_turn"
+    timings: dict[str, Any] = Field(default_factory=dict)
+
+
+class VoicePlaybackUpdate(BaseModel):
+    state: Literal["started", "completed", "interrupted", "failed"]
+    timings: dict[str, Any] = Field(default_factory=dict)
+
+
+class _SpeechTurn:
+    """One completed spoken payload consumed by one TTS inference."""
+
+    def __init__(self, session_id: str, turn_id: str):
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self.text = ""
+        self.finished = False
+        self.cancelled = False
+        self.error: str | None = None
+        self.created_at = time.monotonic()
+        self.done = asyncio.Event()
+
+    async def complete(self, text: str) -> None:
+        self.text = text.strip()
+        self.finished = True
+        self.done.set()
+
+    async def fail(self, error: str) -> None:
+        self.error = error
+        self.finished = True
+        self.done.set()
+
+    async def cancel(self) -> None:
+        self.cancelled = True
+        self.finished = True
+        self.done.set()
+
+    async def wait(self) -> str:
+        await self.done.wait()
+        if self.cancelled:
+            raise RuntimeError("Voice playback was interrupted")
+        if self.error:
+            raise RuntimeError(self.error)
+        if not self.text:
+            raise RuntimeError("Jarvis produced no spoken response")
+        return self.text
+
+
+def _now() -> int:
+    return int(time.time())
+
+
+def _load_state() -> dict:
+    try:
+        state = json.loads(VOICE_STATE_FILE.read_text(encoding="utf-8"))
+        return state if isinstance(state, dict) else {"sessions": {}, "actions": {}}
+    except Exception:
+        return {"sessions": {}, "actions": {}}
+
+
+def _save_state(state: dict) -> None:
+    atomic_write_json(str(VOICE_STATE_FILE), state, indent=2)
+
+
+def _set_voice_status(session_id: str, status: str, **fields: Any) -> dict:
+    state = _load_state()
+    session = _session(state, session_id)
+    session["status"] = status
+    session["updated_at"] = _now()
+    session.update(fields)
+    _save_state(state)
+    return session
+
+
+def _register_speech_turn(session_id: str) -> _SpeechTurn:
+    now = time.monotonic()
+    for key, stale in list(_SPEECH_TURNS.items()):
+        if stale.finished and now - stale.created_at > 600:
+            _SPEECH_TURNS.pop(key, None)
+    turn_id = str(uuid.uuid4())
+    turn = _SpeechTurn(session_id, turn_id)
+    _SPEECH_TURNS[(session_id, turn_id)] = turn
+    return turn
+
+
+def _session(state: dict, session_id: str) -> dict:
+    session = state.get("sessions", {}).get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={"message": "Voice session not found"})
+    return session
+
+
+def _owned_session(state: dict, session_id: str, owner: str) -> dict:
+    session = _session(state, session_id)
+    stored_owner = session.get("owner")
+    if stored_owner is None:
+        chat_owner = None
+        chat_session_id = str(session.get("chat_session_id") or "")
+        if chat_session_id and _SESSION_MANAGER:
+            try:
+                chat_owner = getattr(_SESSION_MANAGER.get_session(chat_session_id), "owner", None)
+            except Exception:
+                chat_owner = None
+        if chat_owner == owner:
+            session["owner"] = owner
+            _save_state(state)
+            stored_owner = owner
+        else:
+            raise HTTPException(status_code=403, detail={"message": "Voice session has no verified owner"})
+    if stored_owner != owner:
+        raise HTTPException(status_code=403, detail={"message": "Voice session does not belong to this user"})
+    return session
+
+
+def _append_turn(session: dict, role: str, text: str, status: str, task_id: str | None = None) -> dict:
+    turn = {
+        "id": str(uuid.uuid4()),
+        "role": role,
+        "text": text,
+        "status": status,
+        "task_id": task_id,
+        "created_at": _now(),
+    }
+    session.setdefault("turns", []).append(turn)
+    session["status"] = status
+    session["updated_at"] = _now()
+    return turn
+
+
+def _detect_safe_action(text: str) -> str | None:
+    lowered = text.lower()
+    if "grafana" in lowered and ("open" in lowered or "pull up" in lowered or "show" in lowered):
+        if "big screen" in lowered or "screen" in lowered or "dashboard" in lowered or "dash" in lowered:
+            return "open_grafana_big_screen"
+    if "open odysseus" in lowered or "pull up odysseus" in lowered:
+        return "open_odysseus"
+    return None
+
+
+async def _execute_action(payload: VoiceActionRequest, owner: str) -> dict:
+    action = payload.action.strip()
+    if action not in SAFE_ACTIONS:
+        raise HTTPException(status_code=403, detail={"message": "action_not_allowed", "action": action})
+
+    task = {
+        "task_id": str(uuid.uuid4()),
+        "action": action,
+        "session_id": payload.session_id,
+        "owner": owner,
+        "status": "queued",
+        "prompt": payload.prompt,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+
+    if action in DESKTOP_ACTIONS:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.post(ACTION_BRIDGE_URL, json={"action": action, "args": payload.args})
+            if response.status_code >= 400:
+                task.update({"status": "failed", "bridge_status": response.status_code, "bridge_response": response.text[:500]})
+            else:
+                bridge_payload = response.json()
+                task.update({"status": bridge_payload.get("status", "started"), "bridge_task_id": bridge_payload.get("task_id")})
+        except Exception as exc:
+            task.update({"status": "failed", "error": str(exc)})
+    else:
+        from src.jarvis_agent import refresh_task, start_task
+
+        if action == "read_task_status":
+            requested_task_id = str(payload.args.get("task_id") or "")
+            if not requested_task_id:
+                task.update({"status": "blocked", "reason": "task_id_required"})
+            else:
+                try:
+                    return await refresh_task(requested_task_id, owner=owner)
+                except KeyError:
+                    task.update({"status": "failed", "reason": "task_not_found"})
+        else:
+            worker = "pc-codex" if action == "start_local_codex_task" else "hermes"
+            workspace = str(payload.args.get("workspace") or "home-lab")
+            voice_state = _load_state()
+            voice_session = (voice_state.get("sessions") or {}).get(payload.session_id or "") or {}
+            chat_session_id = str(voice_session.get("chat_session_id") or payload.session_id or "")
+            try:
+                return await start_task(
+                    worker,
+                    chat_session_id,
+                    workspace,
+                    payload.prompt or "Inspect the requested work and report back.",
+                    "read_only",
+                    False,
+                    owner,
+                )
+            except Exception as exc:
+                task.update({"status": "failed", "reason": str(exc)[:240]})
+
+    return task
+
+
+def _strip_think_blocks(text: str) -> str:
+    return re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", text, flags=re.IGNORECASE).strip()
+
+
+def _set_user_time_from_request(request: Request) -> None:
+    clear_user_time_context()
+    set_user_tz_offset(request.headers.get("x-tz-offset"))
+    set_user_tz_name(request.headers.get("x-tz-name"))
+
+
+def _asks_read_all(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:read|speak|say)\s+(?:it\s+all|all\s+of\s+it|everything|the\s+(?:whole|full)\s+(?:thing|response|answer))\b",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _bounded_spoken_text(text: str, limit: int = 1200) -> str:
+    paragraphs = [re.sub(r"\s*\n\s*", " ", part).strip() for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
+    bounded = "\n\n".join(paragraphs[:3])
+    if len(bounded) <= limit:
+        return bounded
+    cut = bounded.rfind(" ", 0, limit + 1)
+    bounded = bounded[:cut if cut > limit // 2 else limit].rstrip(" ,;:-")
+    if bounded.endswith((".", "!", "?")) or len(bounded) >= limit:
+        return bounded
+    return bounded + "."
+
+
+async def _select_spoken_text(prompt: str, response_text: str) -> str:
+    response_text = response_text.strip()
+    if _asks_read_all(prompt) and len(response_text) <= 4000:
+        return response_text
+    paragraphs = [part for part in re.split(r"\n\s*\n", response_text) if part.strip()]
+    if len(response_text) <= 1200 and len(paragraphs) <= 3:
+        return response_text
+
+    summary_prompt = (
+        "Summarize the response below for spoken playback. Return only two or three short conversational "
+        "paragraphs, no markdown tables, code, paths, citations, headings, or preamble. Keep the important "
+        "outcome, blocker, and next action. Maximum 1200 characters.\n\nRESPONSE:\n"
+        + response_text[:12000]
+    )
+    payload = {
+        "model": JARVIS_MODEL,
+        "prompt": summary_prompt,
+        "options": {"temperature": 0.1, "num_predict": 320, "num_ctx": 8192},
+        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            result = await client.post(JARVIS_GENERATE_URL, json=payload)
+        result.raise_for_status()
+        summary = _strip_think_blocks(str(result.json().get("response") or ""))
+        if summary:
+            return _bounded_spoken_text(summary)
+    except Exception as exc:
+        logger.warning("Jarvis spoken-summary fallback used: %s", str(exc)[:200])
+    return _bounded_spoken_text(response_text)
+
+
+async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
+    response_text = str(final["assistant_text"])
+    if (final.get("diagnostics") or {}).get("direct_target"):
+        if _asks_read_all(prompt) and len(response_text) <= 4000:
+            return response_text
+        return _bounded_spoken_text(response_text)
+    return await _select_spoken_text(prompt, response_text)
+
+
+def _num_predict_for_text(text: str) -> int:
+    if re.search(r"\b(detail|detailed|explain|deep dive|walk me through|long answer)\b", text, flags=re.IGNORECASE):
+        return VOICE_LONG_NUM_PREDICT
+    return VOICE_NORMAL_NUM_PREDICT
+
+
+def _asks_runtime_status(text: str) -> bool:
+    return bool(re.search(r"\b(what|which|identify|runtime|model|architecture|quantization)\b.*\b(model|running|runtime|architecture|quantization)\b", text, re.IGNORECASE))
+
+
+def _asks_current_business(text: str) -> bool:
+    normalized = " ".join(text.replace("’", "'").split())
+    subject = r"(?:(?:the|my|our)\s+business|business|mad\s+panda(?:\s*3d)?|(?:my|our|the|all)\s+clients|clients)"
+    second_subject = rf"(?:\s*,?\s*(?:with|across|for)\s+{subject})?"
+    request_end = (
+        second_subject
+        + r"(?:\s+(?:right\s+now|today|currently|lately|please))*\s*(?:[?.!]|$)"
+        + r"(?:\s*(?:just\s+)?(?:a\s+)?(?:quick|brief|short)\s+"
+        + r"(?:update|rundown|check(?:-?in)?)(?:\s*,\s*nothing\s+(?:too\s+)?"
+        + r"(?:deep|detailed|extensive))?\s*(?:[?.!]|$))?"
+    )
+    patterns = (
+        rf"\bwhat(?:'s|s|\s+is)\s+up\s+with\s+{subject}\b{request_end}",
+        rf"\bhow(?:'s|\s+is|\s+are)\s+{subject}\s+(?:doing|going|running|looking)\b{request_end}",
+        rf"\bhow(?:'s|\s+is|\s+are)\s+{subject}\b{request_end}",
+        rf"\bhow(?:'s|\s+is|\s+are)\s+(?:things|everything)(?:\s+(?:doing|going|running|looking))?\s+(?:with|across|for)\s+{subject}\b{request_end}",
+        rf"\bwhat(?:'s|\s+is)\s+(?:happening|going\s+on)\s+(?:with|across|for)\s+{subject}\b{request_end}",
+        rf"\bwhere\s+(?:do|does)\s+.*?\bstand\s+(?:with|on|across)\s+{subject}\b{request_end}",
+        rf"\banything\s+new\s+(?:with|on|across)\s+{subject}\b{request_end}",
+        rf"\b(?:check(?:ing)?\s+in|rundown)\s+(?:with|on|of|for)\s+{subject}\b{request_end}",
+        rf"\b(?:current|latest|recent)\s+{subject}\s+(?:updates?|status|rundown)\b{request_end}",
+        rf"\b{subject}\s+(?:updates?|status|rundown)\b{request_end}",
+        rf"\b(?:updates?|status|rundown)\s+(?:with|on|of|for)\s+{subject}\b{request_end}",
+        rf"\bwhat(?:'s|\s+is)\s+the\s+(?:latest|status)\s+(?:with|on|for)\s+{subject}\b{request_end}",
+    )
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in patterns)
+
+
+def _workspace_for_text(text: str) -> str:
+    if re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
+        return "business"
+    if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
+        return "project-linux"
+    if re.search(
+        r"\b(home\s*lab|jarvis|odysseus|proxmox|truenas|project\s+nimbus|nimbus|mark\s*\d+(?:\.\d+)?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "home-lab"
+    return "madpanda3d"
+
+
+def _selected_workspace(text: str, current: str) -> str:
+    if re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
+        return "business"
+    if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
+        return "project-linux"
+    if re.search(
+        r"\b(home\s*lab|jarvis|odysseus|proxmox|truenas|project\s+nimbus|nimbus|mark\s*\d+(?:\.\d+)?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "home-lab"
+    if re.search(r"\b(madpanda3d|all\s+projects|across\s+(?:all\s+)?projects|company[-\s]wide|cross[-\s]domain)\b", text, re.IGNORECASE):
+        return "madpanda3d"
+    return current
+
+
+def _delegation_route(text: str) -> tuple[str, str] | None:
+    """Map Leo's stable names to fixed workers and server-controlled workspaces."""
+    if re.search(r"\b(vps|online server|public server|hosting server|mad\s*panda hosting)\b", text, re.IGNORECASE):
+        return "vps-codex", "vps-ops"
+    if re.search(r"\b(?:hermes|gordon)\b", text, re.IGNORECASE):
+        return "hermes", "home-lab"
+    if re.search(
+        r"\b(pc code(?:x|cs)|my codex|desktop codex|computer codex)\b|"
+        r"\bcodex\s+(?:on|from)\s+my\s+(?:pc|computer)\b|"
+        r"\b(?:ask|talk to|speak to|check with)\s+my computer\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "pc-codex", _workspace_for_text(text)
+    if re.search(r"\b(project\s+nimbus|nimbus|home cloud|my cloud|the cloud)\b", text, re.IGNORECASE):
+        return "pc-codex", "home-lab"
+    return None
+
+
+_NAMED_WORKER_ALIASES = (
+    ("vps-codex", r"(?:vps(?:\s+codex)?|online\s+server|public\s+server|hosting\s+server|mad\s*panda\s+hosting)"),
+    ("hermes", r"(?:hermes|gordon)"),
+    (
+        "pc-codex",
+        r"(?:pc\s+code(?:x|cs)|my\s+(?:pc(?:\s+codex)?|codex|computer)|desktop\s+codex|computer\s+codex|"
+        r"codex\s+(?:on|from)\s+my\s+(?:pc|computer)|my\s+computer|project\s+nimbus|nimbus|"
+        r"home\s+cloud|my\s+cloud|the\s+cloud)",
+    ),
+    ("jarvis", r"jarvis"),
+)
+
+
+def _named_worker_route_after(text: str, offset: int) -> tuple[str, str] | None:
+    tail = text[offset:]
+    for worker, alias in _NAMED_WORKER_ALIASES:
+        if not re.match(rf"\s*(?:the\s+)?{alias}\b", tail, re.IGNORECASE):
+            continue
+        workspace = (
+            "vps-ops"
+            if worker == "vps-codex"
+            else "home-lab"
+            if worker in {"hermes", "jarvis"}
+            else _workspace_for_text(text)
+        )
+        return worker, workspace
+    return None
+
+
+def _target_switch(text: str) -> str | None:
+    direct_command = re.search(
+        r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis)\b[\s,.:;-]*)*"
+        r"(?:(?:(?:can|could|would|will)\s+you|(?:can|could|may)\s+i|let\s+me)\s+)?(?:please\s+)?"
+        r"(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+",
+        text,
+        re.IGNORECASE,
+    )
+    first_person_request = re.search(
+        r"\b(?:i\s+(?:want|need|would\s+like)|i['’]d\s+like)\s+to\s+(?:now\s+)?"
+        r"(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+",
+        text,
+        re.IGNORECASE,
+    )
+    jarvis_return = re.search(
+        r"^\s*(?:(?:okay|ok|please)\b[\s,.:;-]*)*(?:return|go|come)\s+(?:back\s+)?to\s+jarvis\b",
+        text,
+        re.IGNORECASE,
+    )
+    switch_request = direct_command or first_person_request
+    if not (switch_request or jarvis_return):
+        return None
+    if jarvis_return:
+        return "jarvis"
+    route = _named_worker_route_after(text, switch_request.end())
+    return route[0] if route else None
+
+
+def _jarvis_vocative(text: str) -> bool:
+    """Recognize direct address to Jarvis without matching quoted references."""
+    return bool(re.search(
+        r"^\s*(?:(?:hey|hi|hello|okay|ok|thanks|thank\s+you|beautiful|great|good\s+(?:morning|afternoon|evening))"
+        r"[\s,.:;!-]+)?jarvis\b",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _background_delegations(text: str) -> list[tuple[str, str]]:
+    matches: list[tuple[int, tuple[str, str]]] = []
+    for request in re.finditer(
+        r"\b(?:(?:ask|have|get|tell|let|check(?:\s+with)?)\s+|"
+        r"send\s+(?:(?:a|the)\s+message(?:\s+over)?\s+to\s+)?|"
+        r"shoot(?:\s+(?:a|the))?\s+message(?:\s+over)?\s+to\s+|"
+        r"reach\s+out\s+to\s+)",
+        text,
+        re.IGNORECASE,
+    ):
+        route = _named_worker_route_after(text, request.end())
+        if route and route[0] != "jarvis":
+            matches.append((request.start(), route))
+    if _is_document_open_request(text) and not any(route[0] == "pc-codex" for _, route in matches):
+        document_request = re.search(r"\b(?:open(?:\s+up)?|show|pull\s+up|load)\b", text, re.IGNORECASE)
+        document_position = document_request.start() if document_request else -1
+        if not matches or document_position < min(position for position, _ in matches):
+            matches.append((document_position, ("pc-codex", _workspace_for_text(text))))
+
+    routes: list[tuple[str, str]] = []
+    seen_workers: set[str] = set()
+    for _, route in sorted(matches, key=lambda match: match[0]):
+        if route[0] in seen_workers:
+            continue
+        seen_workers.add(route[0])
+        routes.append(route)
+    return routes
+
+
+def _background_delegation(text: str) -> tuple[str, str] | None:
+    routes = _background_delegations(text)
+    return routes[0] if routes else None
+
+
+def _is_document_open_request(text: str) -> bool:
+    return bool(
+        re.search(r"\b(?:open(?:\s+up)?|show|pull\s+up|load)\b", text, re.IGNORECASE)
+        and re.search(
+            r"\b(?:documents?|documentation|files?|notes?|mark\s+\d+(?:\.\d+)?)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _voice_words(text: str) -> str:
+    value = text.lower().replace("’", "'")
+    return " ".join(re.sub(r"[^a-z0-9' ]", " ", value).split())
+
+
+def _voice_command_words(text: str) -> str:
+    value = _voice_words(text)
+    prefixes = (
+        r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?",
+        r"^(?:can|could|would|will) you (?:please )?",
+        r"^i (?:want|need|would like)(?: you)? to (?:please )?",
+        r"^(?:actually )?do me (?:a )?favor(?: and)? (?:please )?",
+        r"^actually ",
+        r"^(?:go ahead and|please) ",
+    )
+    for _ in range(3):
+        previous = value
+        for pattern in prefixes:
+            value = re.sub(pattern, "", value)
+        if value == previous:
+            break
+    return re.sub(r"\s+please$", "", value).strip()
+
+
+def _normalized_voice_control(text: str) -> str:
+    """Normalize bounded Whisper filler without widening the browser control surface."""
+    if not text or len(text) > VOICE_CONTROL_MAX_CHARS:
+        return ""
+    return _voice_command_words(text)
+
+
+def _voice_control_intent(text: str) -> tuple[str, str, str | None] | None:
+    value = _normalized_voice_control(text)
+    if not value or re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return None
+    # Leading filler containing "and" is stripped above; any remaining connector
+    # would make this more than one browser-owned action.
+    if re.search(r"\b(?:and|then|also)\b", value):
+        return None
+
+    document_suffix = (
+        r"(?: (?:that|which) is (?:showing|open)(?: you know)?(?: this is)?(?: right now)?"
+        r"| (?:showing|open)(?: right now)?)?"
+        r"(?: so (?:that )?it (?:goes away|is gone))?"
+    )
+    if re.fullmatch(r"(?:open|opens|show|shows|pull up)(?: the| my)? calendar", value):
+        return "foreground", "open_view", "calendar"
+    if re.fullmatch(
+        rf"(?:close|dismiss)(?: the)?(?: this| my| current| active)? document{document_suffix}",
+        value,
+    ):
+        return "foreground", "close_view", "document"
+    if re.fullmatch(
+        rf"(?:minimize|hide|put away)(?: the)?(?: this| my| current| active)? document{document_suffix}",
+        value,
+    ):
+        return "foreground", "minimize_view", "document"
+    if re.fullmatch(
+        r"(?:what|which)(?: view| window| panel)(?: is|'s)(?: currently)? (?:open|active)(?: right now)?|"
+        r"(?:what|which)(?: view| window| panel) do i have open(?: right now)?|"
+        r"what am i (?:looking at|viewing)|report(?: the)? current view",
+        value,
+    ):
+        return "foreground", "report_view_state", None
+    media = {
+        "open your eyes": "camera_open",
+        "open eyes": "camera_open",
+        "open the camera": "camera_open",
+        "what do you see": "camera_describe",
+        "describe what you see": "camera_describe",
+        "describe the camera": "camera_describe",
+        "close your eyes": "camera_close",
+        "close eyes": "camera_close",
+        "close the camera": "camera_close",
+        "i need something motivational": "media_motivation",
+        "need something motivational": "media_motivation",
+        "i want something motivational": "media_motivation",
+        "want something motivational": "media_motivation",
+        "show me something motivational": "media_motivation",
+        "play something motivational": "media_motivation",
+    }.get(value)
+    return ("media", media, None) if media else None
+
+
+def _foreground_command(text: str) -> tuple[str, str | None] | None:
+    """Return one narrow, browser-owned foreground action."""
+    intent = _voice_control_intent(text)
+    if intent and intent[0] == "foreground":
+        return intent[1], intent[2]
+    return None
+
+
+def _media_command(text: str) -> str | None:
+    """Return one narrow, single-purpose camera/media action."""
+    intent = _voice_control_intent(text)
+    return intent[1] if intent and intent[0] == "media" else None
+
+
+def _unsupported_voice_control(text: str) -> bool:
+    """Keep near-known, unsafe, or compound browser controls out of the LLM."""
+    if _voice_control_intent(text) or _is_document_open_request(text):
+        return False
+    value = _normalized_voice_control(text)
+    detection_value = value or _voice_words(text)
+    raw = text.lower().replace("’", "'")
+    known_target = bool(re.search(
+        r"\b(?:calendar|documents?|eyes|camera|motivational|current view|window|panel)\b",
+        raw,
+    ))
+    arbitrary_browser_target = bool(re.search(
+        r"(?:https?://|\b(?:browser|page|settings|menu|button|tab|script|selector)\b)",
+        raw,
+    ))
+    command_like = bool(re.match(
+        r"(?:open|opens|show|shows|pull up|close|dismiss|minimize|hide|put away|report|run|execute|click|navigate)\b",
+        detection_value,
+    ))
+    control_word = bool(re.search(
+        r"\b(?:open|opens|show|shows|close|dismiss|minimize|hide|describe|play|need|want|report|active)\b",
+        detection_value,
+    ))
+    return (known_target and control_word) or (arbitrary_browser_target and command_like)
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    index = 2
+    sof_markers = {
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+        0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+    }
+    while index + 4 <= len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        while index < len(data) and data[index] == 0xFF:
+            index += 1
+        if index >= len(data):
+            break
+        marker = data[index]
+        index += 1
+        if marker in {0x01, *range(0xD0, 0xDA)}:
+            continue
+        if index + 2 > len(data):
+            break
+        segment_length = int.from_bytes(data[index:index + 2], "big")
+        if segment_length < 2 or index + segment_length > len(data):
+            break
+        if marker in sof_markers and segment_length >= 7:
+            height = int.from_bytes(data[index + 3:index + 5], "big")
+            width = int.from_bytes(data[index + 5:index + 7], "big")
+            return width, height
+        index += segment_length
+    return None
+
+
+def _decode_voice_frame(frame: VoiceFrame) -> dict[str, Any]:
+    try:
+        data = base64.b64decode(frame.data_base64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail={"message": "Invalid voice frame encoding"}) from exc
+    if not data or len(data) > VOICE_FRAME_MAX_BYTES:
+        raise HTTPException(status_code=422, detail={"message": "Voice frame exceeds the 1 MiB limit"})
+
+    if frame.mime == "image/png":
+        if len(data) < 24 or not data.startswith(b"\x89PNG\r\n\x1a\n") or data[12:16] != b"IHDR":
+            dimensions = None
+        else:
+            dimensions = (
+                int.from_bytes(data[16:20], "big"),
+                int.from_bytes(data[20:24], "big"),
+            )
+    else:
+        dimensions = _jpeg_dimensions(data)
+
+    if not dimensions:
+        raise HTTPException(status_code=422, detail={"message": "Voice frame type does not match its image bytes"})
+    width, height = dimensions
+    if width > VOICE_FRAME_MAX_WIDTH or height > VOICE_FRAME_MAX_HEIGHT:
+        raise HTTPException(status_code=422, detail={"message": "Voice frame dimensions exceed 1024 by 576"})
+    if (width, height) != (frame.width, frame.height):
+        raise HTTPException(status_code=422, detail={"message": "Voice frame dimensions do not match its image bytes"})
+    return {"bytes": data, "mime": frame.mime, "width": width, "height": height}
+
+
+def _describe_client_view(client_state: dict[str, Any] | None) -> str:
+    state = client_state or {}
+    active = state.get("active_view")
+    calendar = state.get("calendar") if isinstance(state.get("calendar"), dict) else {}
+    document = state.get("document") if isinstance(state.get("document"), dict) else {}
+
+    if active == "calendar" and calendar.get("open"):
+        view = str(calendar.get("view") or "month")
+        date = str(calendar.get("date") or "").strip()
+        suffix = f", centered on {date}" if date else ""
+        return f"Calendar is the active view in {view} view{suffix}."
+    if active == "document" and (document.get("open") or document.get("minimized")):
+        doc_id = str(document.get("id") or "").strip()
+        suffix = f" The active document ID is {doc_id}." if doc_id else ""
+        return f"The document workspace is the active view.{suffix}"
+    if calendar.get("minimized"):
+        return "The main chat is active, and Calendar is minimized."
+    if document.get("minimized"):
+        return "The main chat is active, and a document is minimized."
+    if active == "chat":
+        return "The main chat is the active view."
+    return "I cannot confirm the current Odysseus view from this turn."
+
+
+def _is_worker_retry_request(text: str) -> bool:
+    value = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
+    return bool(re.fullmatch(
+        r"(?:(?:okay|ok|well|all right|so)\s+)*(?:please\s+)?"
+        r"(?:(?:ask|tell|have|get)\s+(?:him|her|it|them)\s+to\s+)?"
+        r"(?:do|try|run|open)\s+(?:it|that)\s+again(?:\s+please)?",
+        value,
+    ))
+
+
+def _is_casual_greeting(text: str) -> bool:
+    value = text.lower().replace("’", "'")
+    value = re.sub(r"\bjarvis\b|\by'?alls?\b", " ", value)
+    value = " ".join(re.sub(r"[^a-z' ]", " ", value).split())
+    return bool(re.fullmatch(
+        r"(?:hi|hello|hey|good (?:morning|afternoon|evening))(?: there)?"
+        r"(?: how (?:are )?you(?: doing)?| how(?:'s| is) it going)?|"
+        r"how (?:are )?you(?: doing)?|how(?:'s| is) it going|what(?:'s| is) up",
+        value,
+    ))
+
+
+def _casual_greeting_reply(text: str, voice_session: dict) -> str:
+    explicit_band = re.search(r"\bgood\s+(morning|afternoon|evening)\b", text, re.IGNORECASE)
+    if explicit_band:
+        band = explicit_band.group(1).lower()
+        return f"Good {band}, Leo. What are we working on?"
+    replies = (
+        "I’m doing well, Leo. What are we working on?",
+        "Good to hear from you, Leo. What would you like to tackle?",
+    )
+    recent = {str(turn.get("text") or "") for turn in voice_session.get("turns", [])[-6:]}
+    return next((reply for reply in replies if reply not in recent), replies[0])
+
+
+def _approval_choice(text: str) -> str | None:
+    if not text or len(text) > VOICE_CONTROL_MAX_CHARS:
+        return None
+    value = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
+    if re.search(PERSISTENT_APPROVAL_PATTERN, value):
+        return None
+    if re.search(r"\byes\b", value) and re.search(r"\bno\b", value):
+        return None
+    deny = bool(re.search(r"\b(?:deny|decline|reject|don't|do not|no)\b", value))
+    approve = bool(re.search(r"\b(?:approve|approved)\b", value))
+    if deny == approve:
+        return None
+    if deny:
+        return "deny"
+    if approve:
+        return "once"
+    return None
+
+
+def _explicit_reply_target(text: str) -> str | None:
+    if not text or len(text) > VOICE_CONTROL_MAX_CHARS:
+        return None
+    request = re.search(r"\b(?:answer|reply|respond)(?:\s+to)?\s+", text, re.IGNORECASE)
+    if not request:
+        return None
+    route = _named_worker_route_after(text, request.end())
+    return route[0] if route else None
+
+
+def _named_task_workers(text: str) -> list[str]:
+    workers = []
+    for worker, alias in _NAMED_WORKER_ALIASES:
+        if worker != "jarvis" and re.search(rf"\b(?:the\s+)?{alias}\b", text, re.IGNORECASE):
+            workers.append(worker)
+    return workers
+
+
+_TASK_WORKSPACE_PATTERNS = (
+    ("vps-ops", r"\bvps[\s-]+ops\b"),
+    ("project-linux", r"\bproject[\s-]+linux\b"),
+    ("home-lab", r"\bhome[\s-]+lab\b"),
+    ("madpanda3d", r"\b(?:madpanda3d|mad\s+panda\s+3d)\b"),
+    ("business", r"\bbusiness\b"),
+)
+
+
+def _spoken_task_workspaces(text: str) -> list[str]:
+    return [workspace for workspace, pattern in _TASK_WORKSPACE_PATTERNS if re.search(pattern, text, re.IGNORECASE)]
+
+
+def _task_control_intent(text: str) -> tuple[str, str | None, str | None] | None:
+    """Parse one complete task command; descriptive or partial prose stays conversational."""
+    command = _voice_command_words(text)
+    workers = _named_task_workers(text)
+    worker = workers[0] if len(workers) == 1 else None
+    workspaces = _spoken_task_workspaces(text)
+    worker_pattern = "(?:" + "|".join(
+        alias for candidate, alias in _NAMED_WORKER_ALIASES if candidate != "jarvis"
+    ) + ")"
+    workspace_pattern = r"(?:business|home[\s-]+lab|project[\s-]+linux|madpanda3d|mad\s+panda\s+3d|vps[\s-]+ops)"
+    persistent_prefix = bool(re.match(
+        r"^(?:(?:for (?:this|the) session|from now on|until further notice)|"
+        r"(?:always|permanently|forever|indefinitely)) approve\b",
+        command,
+    ))
+    negative_wrapper = bool(
+        re.match(
+            r"^(?:i (?:do not|don't|never) (?:want|need)(?: you)? to|(?:do not|don't|never)) "
+            r"(?:cancel|stop|approve|deny|decline|reject)\b",
+            command,
+        )
+        or re.match(r"^do nothing\b.*\b(?:tasks?|requests?|runs?|jobs?)\b", command)
+        or re.match(
+            r"^i (?:want|need) (?:none|nothing)\b.*\b(?:cancell?(?:ed|ing)?|stopp?ed|approve(?:d)?)\b",
+            command,
+        )
+    )
+    cancel_prefix = bool(re.match(r"^(?:cancel|stop)\b", command))
+    approval_prefix = bool(re.match(
+        r"^(?:(?:yes|no) )?(?:approve|deny|decline|reject)\b",
+        command,
+    ))
+    named_reply = bool(worker and any(
+        re.match(rf"^(?:answer|reply|respond)(?: to)? (?:the )?{alias}\b", command)
+        for candidate, alias in _NAMED_WORKER_ALIASES
+        if candidate == worker
+    ))
+    unnamed_reply = bool(re.match(
+        r"^(?:answer|reply|respond)(?: to)? (?:that|the) (?:worker )?question\b",
+        command,
+    ))
+    stand_down = bool(worker and any(
+        re.fullmatch(
+            rf"(?:tell|ask) (?:the )?{alias} (?:to )?stand down"
+            rf"(?: (?:in|from) (?:the )?{workspace_pattern}(?: workspace)?)?"
+            r"(?: for me| right now| now)?",
+            command,
+        )
+        for candidate, alias in _NAMED_WORKER_ALIASES
+        if candidate == worker
+    ))
+    tell_reply = bool(worker and any(
+        re.match(rf"^tell (?:the )?{alias} (?:the answer is|use|choose|select)\b", command)
+        for candidate, alias in _NAMED_WORKER_ALIASES
+        if candidate == worker
+    ))
+    command_like = (
+        negative_wrapper
+        or persistent_prefix
+        or cancel_prefix
+        or approval_prefix
+        or named_reply
+        or unnamed_reply
+        or stand_down
+        or tell_reply
+    )
+    if len(text) > VOICE_CONTROL_MAX_CHARS:
+        return ("rejected", worker, None) if command_like else None
+    if negative_wrapper:
+        return "rejected", worker, None
+    if not command_like:
+        return None
+
+    negative = bool(re.search(r"\b(?:don't|do not|never|not|none|nothing|neither|nor|zero)\b", command))
+    if re.search(r"\bno\b", command) and not re.match(r"^no (?:deny|decline|reject)\b", command):
+        negative = True
+    if (cancel_prefix or approval_prefix) and negative:
+        return "rejected", worker, None
+    persistent_approval = bool(
+        re.search(r"\bapprove(?:d)?\b", command)
+        and re.search(PERSISTENT_APPROVAL_PATTERN, command)
+    )
+    if persistent_prefix or (approval_prefix and persistent_approval):
+        return "persistent_approval", worker, None
+    if len(workers) > 1 or len(workspaces) > 1:
+        return "invalid", worker, None
+
+    workspace_suffix = rf"(?: (?:in|from) (?:the )?{workspace_pattern}(?: workspace)?)?"
+    polite_suffix = r"(?: for me| right now| now)?"
+    cancel_target = (
+        rf"(?:"
+        rf"(?:the )?{worker_pattern} (?:the )?{workspace_pattern} (?:task|request|run|job)"
+        rf"|"
+        rf"(?:the )?{worker_pattern}(?: (?:task|request|run|job))?"
+        rf"|(?:the )?(?:task|request|run|job)(?: (?:for|from|on) (?:the )?{worker_pattern})?"
+        rf"|(?:the )?{workspace_pattern} (?:task|request|run|job)"
+        rf"|(?:it|that|this)(?: (?:task|request|run|job))?"
+        rf")"
+    )
+    if cancel_prefix:
+        if re.fullmatch(rf"(?:cancel|stop) {cancel_target}{workspace_suffix}{polite_suffix}", command):
+            return "cancel", worker, None
+        return "invalid", worker, None
+    if stand_down:
+        return "cancel", worker, None
+
+    if approval_prefix:
+        approval_command = re.sub(r"^(?:yes|no) ", "", command)
+        approval_target = (
+            rf"(?:"
+            rf"(?:the )?{worker_pattern}(?: (?:request|approval))?"
+            rf"|(?:the )?{workspace_pattern} (?:request|approval)"
+            rf"|(?:the|that|this) (?:request|approval)"
+            rf"|(?:it|that|this)"
+            rf")?"
+        )
+        if not re.fullmatch(
+            rf"(?:approve|deny|decline|reject)(?: {approval_target})?(?: once)?{workspace_suffix}{polite_suffix}",
+            approval_command,
+        ):
+            return "invalid", worker, None
+        return "approval", worker, _approval_choice(text)
+
+    if named_reply or unnamed_reply:
+        controls = re.findall(r"\b(?:cancel|stop|approve|deny|decline|reject|answer|reply|respond)\b", command)
+        if len(workers) > 1 or len(set(controls)) > 1:
+            return "invalid", worker, None
+        return "reply", worker, text
+    if tell_reply:
+        if len(workers) > 1 or re.search(r"\b(?:cancel|stop|approve|deny|decline|reject)\b", command):
+            return "invalid", worker, None
+        return "reply", worker, text
+    return "invalid", worker, None
+
+
+def _select_broker_task(
+    chat_session_id: str,
+    owner: str,
+    action: str,
+    named_worker: str | None,
+    spoken_workspace: str | None,
+) -> tuple[dict | None, str]:
+    from src.jarvis_agent import list_active_tasks
+
+    statuses = {
+        "approval": {"waiting_approval"},
+        "reply": {"waiting"},
+        "cancel": {"queued", "running", "waiting", "waiting_approval"},
+    }[action]
+    tasks = list_active_tasks(
+        chat_session_id,
+        owner,
+        worker=named_worker,
+        workspace=spoken_workspace,
+        statuses=statuses,
+    )
+    if not tasks:
+        return None, "missing"
+    if len(tasks) > 1:
+        return None, "ambiguous"
+    return tasks[0], "found"
+
+
+async def _run_task_control(
+    chat_session_id: str,
+    text: str,
+    owner: str,
+    voice_session: dict,
+    *,
+    selected_reply: bool = False,
+) -> tuple[str, str, list[str]] | None:
+    intent = _task_control_intent(text)
+    workspaces = _spoken_task_workspaces(text)
+    spoken_workspace = workspaces[0] if len(workspaces) == 1 else None
+    selected_task = None
+    if not intent:
+        selected_target = str(voice_session.get("target") or "jarvis")
+        if not selected_reply or selected_target not in WORKER_LABELS:
+            return None
+        try:
+            selected_task, selection = _select_broker_task(
+                chat_session_id, owner, "reply", selected_target, spoken_workspace,
+            )
+        except RuntimeError:
+            return None
+        if selection == "missing":
+            return None
+        if selection == "ambiguous":
+            return (
+                "More than one worker question matches. Use the matching task card.",
+                "worker_reply_ambiguous",
+                [],
+            )
+        intent = ("reply", selected_target, text)
+    action, named_worker, value = intent
+    if action == "rejected":
+        return "I did not run that task control.", "worker_control_rejected", []
+    if action == "persistent_approval":
+        return (
+            "Voice can only approve one broker-authorized request once, or deny it. I did not grant persistent approval.",
+            "worker_approval_persistent_refused",
+            [],
+        )
+    if action == "invalid":
+        return "Please give me one task control at a time.", "worker_control_compound", []
+
+    if selected_task is None:
+        task, selection = _select_broker_task(
+            chat_session_id,
+            owner,
+            action,
+            named_worker,
+            spoken_workspace,
+        )
+    else:
+        task, selection = selected_task, "found"
+    label = WORKER_LABELS.get(named_worker or "", "worker")
+    if selection == "missing":
+        return (
+            f"I could not find an eligible active {label} task in this chat.",
+            f"worker_{action}_missing",
+            [],
+        )
+    if selection == "ambiguous":
+        return (
+            "More than one task matches. Name the worker and workspace, or use the matching task card.",
+            f"worker_{action}_ambiguous",
+            [],
+        )
+
+    assert task is not None
+    task_id = str(task["task_id"])
+    label = WORKER_LABELS.get(str(task.get("worker") or ""), "the worker")
+    from src.jarvis_agent import task_action
+
+    if action == "approval":
+        if value not in {"once", "deny"}:
+            return (
+                "Say approve once or deny. Voice cannot grant session or permanent approval.",
+                "worker_approval_unclear",
+                [task_id],
+            )
+        if value == "once" and not (
+            task.get("permission_mode") == "workspace_write" and task.get("approved") is True
+        ):
+            return (
+                f"That {label} task is not broker-authorized for writes, so voice can only deny the request.",
+                "worker_approval_not_authorized",
+                [task_id],
+            )
+        try:
+            await task_action(
+                task_id,
+                "approval",
+                {"choice": value, "spoken_text": text},
+                persist_user_message=False,
+                owner=owner,
+            )
+        except Exception as exc:
+            logger.warning("Voice worker approval failed: %s", str(exc)[:200])
+            return "I could not submit that approval; the task remains paused.", "worker_approval_failed", [task_id]
+        verb = "denied" if value == "deny" else "approved once"
+        return f"I {verb} the {label} request.", f"worker_approval_{value}", [task_id]
+
+    if action == "cancel":
+        try:
+            updated = await task_action(
+                task_id,
+                "cancel",
+                persist_user_message=False,
+                owner=owner,
+            )
+        except Exception as exc:
+            logger.warning("Voice worker cancellation failed: %s", str(exc)[:200])
+            return (
+                f"I could not request cancellation for {label}; it may still be running.",
+                "worker_cancel_failed",
+                [task_id],
+            )
+        if updated.get("status") == "cancelled":
+            return f"The {label} task is cancelled.", "worker_cancelled", [task_id]
+        return (
+            f"Cancellation requested for {label}. I’ll report the terminal state when the broker receives it.",
+            "worker_cancel_requested",
+            [task_id],
+        )
+
+    answer = str(value or text)
+    if ":" in answer and answer.split(":", 1)[1].strip():
+        answer = answer.split(":", 1)[1].strip()
+    try:
+        await task_action(
+            task_id,
+            "reply",
+            {"answers": _question_answers(task, answer)},
+            persist_user_message=False,
+            owner=owner,
+        )
+    except Exception as exc:
+        logger.warning("Voice worker reply failed: %s", str(exc)[:200])
+        return "I could not submit that answer; the task is still waiting.", "worker_question_reply_failed", [task_id]
+    return f"I passed your answer to {label}.", "worker_question_reply", [task_id]
+
+
+def _pending_task_accepts_turn(task: dict | None, text: str, selected_target: str) -> bool:
+    if not task or task.get("status") not in {"waiting", "waiting_approval"}:
+        return False
+    worker = str(task.get("worker") or "")
+    if selected_target == worker:
+        return True
+    if selected_target != "jarvis":
+        return False
+    if task.get("status") == "waiting_approval":
+        return _approval_choice(text) is not None
+    return _explicit_reply_target(text) == worker
+
+
+def _question_answers(task: dict, text: str) -> dict[str, str]:
+    question_event = next(
+        (event for event in reversed(task.get("events", [])) if event.get("type") == "question"),
+        {},
+    )
+    questions = (question_event.get("metadata") or {}).get("questions") or []
+    ids = [str(question.get("id") or "") for question in questions if question.get("id")]
+    return {question_id: text for question_id in ids} or {"voice": text}
+
+
+def _validated_thread_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(value))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"message": "Invalid Codex thread ID"}) from exc
+
+
+def _server_final_event(text: str, reply: str, guard_reason: str, task_ids: list[str] | None = None, **extra) -> dict:
+    task_ids = task_ids or []
+    return {
+        "type": "final",
+        "assistant_text": reply,
+        "diagnostics": {
+            "model": JARVIS_MODEL,
+            "transcript_chars": len(text),
+            "assistant_chars": len(reply),
+            "brain_ms": 0,
+            "brain_first_token_ms": 0,
+            "num_ctx": VOICE_CONTEXT_LENGTH,
+            "num_predict": 0,
+            "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+            "guard_reason": guard_reason,
+            "task_ids": task_ids,
+            **extra,
+        },
+        "task_ids": task_ids,
+    }
+
+
+def _business_status_prompt(text: str) -> str:
+    return (
+        "Give Leo a bounded, read-only Business status check that preserves the exact depth he requested. "
+        "Start with the central Business command center and only the newest dated client handovers needed to answer. "
+        "Unless Leo explicitly asks for every client or a deep/full report, return at most three verified priorities in 250 words or fewer. "
+        "Do not inventory every client, run capability or service discovery, or use external connectors unless Leo explicitly named that source. "
+        "Mark stale or unknown facts clearly. Never infer meetings, schedules, workflows, deliverables, or client status. Make no changes.\n\n"
+        f"Leo's exact request:\n{text}"
+    )
+
+
+def _prior_voice_exchange(voice_session: dict) -> str:
+    turns = [
+        turn for turn in voice_session.get("turns", [])
+        if isinstance(turn, dict)
+        and turn.get("role") in {"user", "assistant"}
+        and isinstance(turn.get("text"), str)
+    ]
+    assistant_index = next(
+        (index for index in range(len(turns) - 1, -1, -1) if turns[index]["role"] == "assistant"),
+        None,
+    )
+    if assistant_index is None:
+        return "none"
+    user = next(
+        (turns[index]["text"].strip() for index in range(assistant_index - 1, -1, -1) if turns[index]["role"] == "user"),
+        "",
+    )
+    assistant = turns[assistant_index]["text"].strip()
+    return f"Leo: {user[:950]}\nJarvis: {assistant[:950]}"[:2000]
+
+
+def _logical_client_state(voice_session: dict) -> dict[str, Any]:
+    source = voice_session.get("_client_state")
+    if not isinstance(source, dict):
+        return {}
+    state: dict[str, Any] = {}
+    if source.get("active_view") in {"calendar", "document", "chat"}:
+        state["active_view"] = source["active_view"]
+    for name in ("calendar", "document"):
+        raw = source.get(name)
+        if not isinstance(raw, dict):
+            continue
+        allowed = {key: raw[key] for key in ("open", "minimized") if isinstance(raw.get(key), bool)}
+        if name == "calendar":
+            if raw.get("view") in {"month", "week", "year", "agenda"}:
+                allowed["view"] = raw["view"]
+            if isinstance(raw.get("date"), str):
+                allowed["date"] = raw["date"][:40]
+        elif isinstance(raw.get("id"), str):
+            allowed["id"] = raw["id"][:200]
+        state[name] = allowed
+    return state
+
+
+def _worker_context_envelope(
+    worker: str,
+    workspace: str,
+    permission_mode: str,
+    exact_request: str,
+    voice_session: dict,
+    task_instructions: str | None = None,
+) -> str:
+    request = str(exact_request or "").strip()[:4000]
+    instructions = str(task_instructions or "").strip()[:4000]
+    prior = _prior_voice_exchange(voice_session)
+    client_state = json.dumps(_logical_client_state(voice_session), separators=(",", ":"), sort_keys=True)
+    instruction_block = f"task_instructions(<=4000):\n{instructions}\n" if instructions and instructions != request else ""
+    return (
+        "[JARVIS_CONTEXT v1]\n"
+        f"worker={worker}; workspace={workspace}; permission={permission_mode}\n"
+        f"exact_request(<=4000):\n{request}\n"
+        f"{instruction_block}"
+        f"prior_exchange(<=2000):\n{prior}\n"
+        f"client_state={client_state}\n"
+        "rules: branch=assigned worker/workspace only; evidence=verify facts and mark unknowns; "
+        "output=concise factual progress/final; never simulate actions or other workers."
+    )
+
+
+async def _dispatch_worker_request(
+    chat_session_id: str,
+    worker: str,
+    workspace: str,
+    prompt: str,
+    owner: str,
+    voice_session: dict,
+) -> tuple[dict, str]:
+    from src.jarvis_agent import find_active_task, start_task, task_action
+
+    permission_mode = "read_only"
+    exact_request = str(voice_session.get("_exact_request") or prompt)
+    prompt = _worker_context_envelope(
+        worker,
+        workspace,
+        permission_mode,
+        exact_request,
+        voice_session,
+        task_instructions=prompt,
+    )
+    active = find_active_task(chat_session_id, worker, workspace, owner)
+    if active:
+        if worker in {"pc-codex", "vps-codex"} and active.get("status") not in {"waiting", "waiting_approval"}:
+            try:
+                await task_action(
+                    active["task_id"],
+                    "steer",
+                    {"prompt": prompt},
+                    persist_user_message=False,
+                    owner=owner,
+                )
+                return active, "steered"
+            except Exception as exc:
+                logger.info("%s active task rejected steering: %s", worker, str(exc)[:160])
+        return active, "busy"
+
+    task = await start_task(
+        worker,
+        chat_session_id,
+        workspace,
+        prompt,
+        permission_mode,
+        False,
+        owner,
+    )
+    return task, "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
+
+
+async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
+    voice_session["_exact_request"] = text
+    media = _media_command(text)
+    if media:
+        vision_model = ""
+        if media == "camera_describe":
+            frame = voice_session.get("_frame")
+            if not isinstance(frame, dict) or not isinstance(frame.get("bytes"), bytes):
+                reply = "My camera is not open, so I cannot see anything yet."
+            else:
+                from src.chat_helpers import model_supports_vision
+                from src.document_processor import analyze_image_bytes_with_vl_result
+
+                preferred_model = (
+                    JARVIS_MODEL
+                    if model_supports_vision(JARVIS_MODEL, JARVIS_CHAT_URL)
+                    else None
+                )
+                result = await asyncio.to_thread(
+                    analyze_image_bytes_with_vl_result,
+                    frame["bytes"],
+                    frame["mime"],
+                    owner,
+                    preferred_model,
+                )
+                description = str(result.get("text") or "").strip()
+                vision_model = str(result.get("model") or "")
+                if not description or description.startswith("["):
+                    reply = "I could not analyze the camera frame with a vision-capable model."
+                else:
+                    reply = description
+        else:
+            event = {
+                "camera_open": {"type": "ui_control", "ui_event": "camera_open"},
+                "camera_close": {"type": "ui_control", "ui_event": "camera_close"},
+                "media_motivation": {
+                    "type": "ui_control",
+                    "ui_event": "media_play",
+                    "media_id": "motivational-abstract",
+                },
+            }[media]
+            yield event
+            reply = {
+                "camera_open": "Opening my eyes.",
+                "camera_close": "Closing my eyes.",
+                "media_motivation": "Playing the built-in motivational visual.",
+            }[media]
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(
+            text,
+            reply,
+            media,
+            vision_model=vision_model,
+        )
+        return
+
+    foreground = _foreground_command(text)
+    if foreground:
+        action, view = foreground
+        client_state = voice_session.get("_client_state")
+        if action == "report_view_state":
+            reply = _describe_client_view(client_state)
+        else:
+            document_state = (
+                client_state.get("document")
+                if isinstance(client_state, dict) and isinstance(client_state.get("document"), dict)
+                else {}
+            )
+            if action in {"close_view", "minimize_view"} and not isinstance(client_state, dict):
+                reply = "I cannot confirm an active document from this turn, so I did not change the view."
+            elif action == "minimize_view" and document_state.get("minimized"):
+                reply = "The document is already minimized."
+            elif action in {"close_view", "minimize_view"} and not (
+                document_state.get("open") or document_state.get("minimized")
+            ):
+                reply = "There is no active document to close." if action == "close_view" else "There is no active document to minimize."
+            else:
+                yield {"type": "ui_control", "ui_event": action, "view": view}
+                reply = {
+                    "open_view": "Opening Calendar.",
+                    "close_view": "Closing the active document.",
+                    "minimize_view": "Minimizing the active document.",
+                }[action]
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, f"foreground_{action}")
+        return
+
+    task_control = await _run_task_control(chat_session_id, text, owner, voice_session)
+    if task_control:
+        reply, guard, task_ids = task_control
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard, task_ids)
+        return
+
+    if _unsupported_voice_control(text):
+        reply = (
+            "I did not run that control. I can handle one allowlisted Calendar, document, camera, "
+            "or built-in motivational action at a time."
+        )
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "unsupported_voice_control")
+        return
+
+    selected_target = str(voice_session.get("target") or "jarvis")
+    requested_target_switch = _target_switch(text)
+    direct_jarvis_return = (
+        selected_target != "jarvis"
+        and not requested_target_switch
+        and _jarvis_vocative(text)
+    )
+    direct_jarvis_delegations = _background_delegations(text) if direct_jarvis_return else []
+    target_switch = requested_target_switch or ("jarvis" if direct_jarvis_return and not direct_jarvis_delegations else None)
+    if direct_jarvis_return and direct_jarvis_delegations:
+        selected_target = "jarvis"
+        yield {"type": "target_changed", "target": "jarvis", "workspace": _workspace_for_text(text)}
+    if target_switch:
+        workspace = {
+            "vps-codex": "vps-ops",
+            "hermes": "home-lab",
+        }.get(target_switch, _workspace_for_text(text))
+        label = VOICE_TARGET_LABELS.get(target_switch, "Jarvis")
+        if target_switch != "jarvis":
+            from src.jarvis_agent import worker_statuses
+
+            target_status = (await worker_statuses()).get(target_switch) or {}
+            if not target_status.get("enabled"):
+                reply = f"{label} is not connected, so I have not switched you or claimed a task is running."
+                yield {"type": "assistant_delta", "text": reply}
+                yield {
+                    "type": "final",
+                    "assistant_text": reply,
+                    "diagnostics": {
+                        "model": JARVIS_MODEL,
+                        "transcript_chars": len(text),
+                        "assistant_chars": len(reply),
+                        "brain_ms": 0,
+                        "brain_first_token_ms": 0,
+                        "num_ctx": VOICE_CONTEXT_LENGTH,
+                        "num_predict": 0,
+                        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+                        "guard_reason": f"{target_switch}_not_connected",
+                        "task_ids": [],
+                    },
+                    "task_ids": [],
+                }
+                return
+        reply = (
+            _casual_greeting_reply(text, voice_session)
+            if target_switch == "jarvis" and _is_casual_greeting(text)
+            else "You’re back with Jarvis."
+            if target_switch == "jarvis"
+            else f"You’re connected to {label}. What would you like me to handle?"
+        )
+        yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, f"target_switch_{target_switch}")
+        return
+
+    if selected_target == "hermes":
+        try:
+            from src.jarvis_agent import direct_hermes_turn
+
+            reply = await direct_hermes_turn(
+                chat_session_id,
+                text,
+                owner=owner,
+                workspace="home-lab",
+            )
+        except Exception as exc:
+            logger.warning("Direct Gordon turn failed: %s", str(exc)[:200])
+            reply = "Gordon is unavailable, so I did not send that through Jarvis."
+            yield {"type": "assistant_delta", "text": reply, "model": "Odysseus"}
+            yield _server_final_event(
+                text,
+                reply,
+                "direct_gordon_unavailable",
+                direct_target="hermes",
+                character_name="Odysseus",
+                model="odysseus-router",
+            )
+            return
+        yield {"type": "assistant_delta", "text": reply, "model": "Gordon"}
+        yield _server_final_event(
+            text,
+            reply,
+            "direct_gordon",
+            direct_target="hermes",
+            character_name="Gordon",
+            model="hermes-agent",
+        )
+        return
+
+    if selected_target == "jarvis" and _is_casual_greeting(text):
+        reply = _casual_greeting_reply(text, voice_session)
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "casual_greeting")
+        return
+
+    delegations = direct_jarvis_delegations or _background_delegations(text)
+    retry_task = None
+    retry_requested = not delegations and _is_worker_retry_request(text)
+    if retry_requested:
+        from src.jarvis_agent import require_task_owner
+
+        for snapshot in reversed(voice_session.get("tasks") or []):
+            try:
+                candidate = require_task_owner(str(snapshot.get("task_id") or ""), owner)
+            except (KeyError, PermissionError):
+                continue
+            if (
+                candidate
+                and candidate.get("session_id") == chat_session_id
+                and candidate.get("status") in {"completed", "failed", "cancelled", "blocked"}
+                and candidate.get("worker") in WORKER_LABELS
+                and candidate.get("prompt")
+            ):
+                retry_task = candidate
+                delegations = [(candidate["worker"], candidate.get("workspace") or "home-lab")]
+                break
+        if not retry_task:
+            reply = "I don’t have a completed worker request in this voice session to retry. Tell me which worker and request you mean."
+            yield {"type": "assistant_delta", "text": reply}
+            yield _server_final_event(text, reply, "retry_task_missing")
+            return
+    document_open = _is_document_open_request(text) or bool(
+        retry_task and "ODYSSEUS_ARTIFACT" in str(retry_task.get("prompt") or "")
+    )
+    if delegations:
+        compound = len(delegations) > 1
+        dispatches = []
+        for worker, workspace in delegations:
+            label = WORKER_LABELS[worker]
+            scope = (
+                f"This is the {label} branch of a compound Jarvis request. Handle only the work explicitly "
+                f"assigned to {label}; ignore instructions for other named workers and do not claim you contacted them.\n\n"
+                if compound
+                else ""
+            )
+            if retry_task:
+                prompt = str(retry_task["prompt"])
+            elif worker == "pc-codex" and _asks_current_business(text):
+                prompt = scope + _business_status_prompt(text)
+            else:
+                prompt = (
+                    f"{scope}Leo asked through Jarvis voice. Handle this read-only request and report factual "
+                    f"progress and the final result:\n\n{text}"
+                )
+            if document_open and worker == "pc-codex" and "ODYSSEUS_ARTIFACT" not in prompt:
+                prompt += (
+                    "\n\nOdysseus is the default destination. Verify the exact text document, then open it "
+                    "with the required ODYSSEUS_ARTIFACT marker. Do not use a desktop opener."
+                )
+            dispatches.append((worker, workspace, prompt))
+
+        outcomes = await asyncio.gather(*(
+            _dispatch_worker_request(chat_session_id, worker, workspace, prompt, owner, voice_session)
+            for worker, workspace, prompt in dispatches
+        ), return_exceptions=True)
+        results = []
+        for (worker, workspace, _prompt), outcome in zip(dispatches, outcomes):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+            if isinstance(outcome, Exception):
+                logger.warning("Jarvis could not dispatch %s task: %s", worker, str(outcome)[:240])
+                task, action = {}, "blocked"
+            else:
+                task, action = outcome
+            results.append((worker, workspace, task, action))
+
+        task_ids = [
+            task["task_id"] for _, _, task, action in results
+            if task.get("task_id") and action != "blocked"
+        ]
+        for worker, workspace, task, action in results:
+            if action in {"started", "steered"}:
+                yield {
+                    "type": "agent_task",
+                    "task_id": task["task_id"],
+                    "worker": worker,
+                    "workspace": workspace,
+                    "foreground": False,
+                }
+
+        if not compound:
+            worker, workspace, task, action = results[0]
+            label = WORKER_LABELS[worker]
+            if worker == "pc-codex" and _asks_current_business(text):
+                if action == "blocked":
+                    reply = "PC Codex is not connected, so I could not start the live business inspection. I have not claimed that it is running."
+                    guard_reason = "pc-codex_not_connected"
+                elif action == "busy":
+                    reply = "PC Codex is still working and could not accept another instruction yet. You can wait or cancel that task."
+                    guard_reason = "current_business_busy"
+                else:
+                    reply = (
+                        "I’m not current enough to answer that reliably, so I’m asking PC Codex to check the live Business sources now."
+                        if action == "started"
+                        else "I’m not current enough to answer that reliably, so I passed the request to the active PC Codex task."
+                    )
+                    guard_reason = f"current_business_{action}"
+            elif action == "started":
+                reply = (
+                    f"I’m asking {label} to retry that request. I’ll keep you updated here."
+                    if retry_task
+                    else f"I’m asking {label} to open that in Odysseus. I’ll keep you updated here."
+                    if document_open and worker == "pc-codex"
+                    else f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
+                )
+            elif action == "steered":
+                reply = f"I’ve passed that follow-up to the active {label} task."
+            elif action == "busy":
+                reply = f"{label} is still working and could not accept another instruction yet. You can wait, cancel it, or switch agents."
+            else:
+                reply = f"{label} is not connected, so I could not start the request."
+            if not (worker == "pc-codex" and _asks_current_business(text)):
+                guard_reason = f"delegation_{action}_{worker}"
+        else:
+            replies = []
+            for worker, _workspace, _task, action in results:
+                label = WORKER_LABELS[worker]
+                if action == "started":
+                    replies.append(
+                        f"{label} is opening the document in Odysseus."
+                        if worker == "pc-codex" and document_open
+                        else f"{label} is handling its part in the background."
+                    )
+                elif action == "steered":
+                    replies.append(f"I passed {label}'s part to its active task.")
+                elif action == "busy":
+                    replies.append(f"{label} is busy and could not accept its part yet.")
+                else:
+                    replies.append(f"{label} is not connected, so its part did not start.")
+            if any(action in {"started", "steered"} for _, _, _, action in results):
+                replies.append("I’ll keep you updated here.")
+            reply = " ".join(replies)
+            guard_reason = "delegation_multi_" + "_".join(
+                f"{worker}_{action}" for worker, _, _, action in results
+            )
+
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard_reason, task_ids)
+        return
+
+    selected_workspace = _selected_workspace(text, str(voice_session.get("workspace") or "home-lab"))
+
+    selected_reply = await _run_task_control(
+        chat_session_id,
+        text,
+        owner,
+        voice_session,
+        selected_reply=True,
+    )
+    if selected_reply:
+        reply, guard, task_ids = selected_reply
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard, task_ids)
+        return
+
+    if _asks_runtime_status(text):
+        from src.jarvis_agent import runtime_status
+
+        runtime = await runtime_status()
+        reply = (
+            f"I am Jarvis, running on {runtime.get('brain_model')}. "
+            f"The server reports a {runtime.get('architecture')} architecture with {runtime.get('parameter_size')} parameters, "
+            f"{runtime.get('quantization')} quantization, and a {runtime.get('context')}-token context allocation. "
+            f"My voice is {runtime.get('tts_model')} through {runtime.get('tts_provider')}, using {runtime.get('tts_voice')}."
+        )
+        yield {"type": "assistant_delta", "text": reply}
+        yield {
+            "type": "final",
+            "assistant_text": reply,
+            "diagnostics": {
+                "model": JARVIS_MODEL,
+                "transcript_chars": len(text),
+                "assistant_chars": len(reply),
+                "brain_ms": 0,
+                "num_ctx": runtime.get("context"),
+                "num_predict": 0,
+                "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+                "guard_reason": "server_runtime_status",
+                "runtime": runtime,
+                "task_ids": [],
+            },
+            "task_ids": [],
+        }
+        return
+
+    if selected_target != "jarvis":
+        worker = selected_target
+        workspace = "vps-ops" if worker == "vps-codex" else ("home-lab" if worker == "hermes" else selected_workspace)
+        label = WORKER_LABELS.get(worker, "Worker")
+        try:
+            task, action = await _dispatch_worker_request(
+                chat_session_id, worker, workspace, text, owner, voice_session,
+            )
+        except Exception as exc:
+            logger.warning("Jarvis could not dispatch selected %s task: %s", worker, str(exc)[:240])
+            task, action = {}, "blocked"
+        if action == "started":
+            reply = f"{label} is working on that now."
+        elif action == "steered":
+            reply = f"I passed that follow-up to {label}'s active task."
+        elif action == "busy":
+            reply = f"{label} is still working and cannot accept another instruction yet. You can wait, cancel it, or switch agents."
+        else:
+            reply = f"{label} is not connected, so I could not start the request."
+        task_ids = [task["task_id"]] if task.get("task_id") and action != "blocked" else []
+        if action in {"started", "steered"}:
+            yield {
+                "type": "agent_task",
+                "task_id": task["task_id"],
+                "worker": worker,
+                "workspace": workspace,
+                "foreground": True,
+            }
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, f"selected_{action}_{worker}", task_ids)
+        return
+
+    if _asks_current_business(text):
+        prompt = _business_status_prompt(text)
+        try:
+            task, action = await _dispatch_worker_request(
+                chat_session_id, "pc-codex", "business", prompt, owner, voice_session,
+            )
+        except Exception as exc:
+            logger.warning("Jarvis could not start current-business task: %s", str(exc)[:240])
+            task, action = {}, "blocked"
+        if action == "blocked":
+            reply = "PC Codex is not connected, so I could not start the live business inspection. I have not claimed that it is running."
+            task_ids = []
+            guard_reason = "pc-codex_not_connected"
+        elif action == "busy":
+            reply = "PC Codex is still working and could not accept another instruction yet. You can wait or cancel that task."
+            task_ids = [task["task_id"]]
+            guard_reason = "current_business_busy"
+        else:
+            reply = (
+                "I’m not current enough to answer that reliably, so I’m asking PC Codex to check the live Business sources now."
+                if action == "started"
+                else "I’m not current enough to answer that reliably, so I passed the request to the active PC Codex task."
+            )
+            task_ids = [task["task_id"]]
+            guard_reason = f"current_business_{action}"
+            yield {
+                "type": "agent_task",
+                "task_id": task["task_id"],
+                "worker": "pc-codex",
+                "workspace": "business",
+                "foreground": False,
+            }
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(
+            text,
+            reply,
+            guard_reason,
+            task_ids,
+        )
+        return
+
+
+async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
+    if not chat_session_id:
+        raise RuntimeError("voice_chat_session_missing")
+    chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
+    if not chat_session:
+        raise RuntimeError("voice_chat_session_not_found")
+    if (
+        _media_command(text)
+        or _foreground_command(text)
+        or _unsupported_voice_control(text)
+        or _task_control_intent(text)
+        or _target_switch(text)
+        or _is_casual_greeting(text)
+        or _background_delegation(text)
+        or _asks_runtime_status(text)
+        or _asks_current_business(text)
+        or str(voice_session.get("target") or "jarvis") != "jarvis"
+    ):
+        async for event in _server_routed_events(chat_session_id, text, owner, voice_session):
+            yield event
+        return
+    messages = [{"role": "system", "content": VOICE_SYSTEM_PROMPT}, *chat_session.get_context_messages()]
+    full_response = ""
+    task_ids: list[str] = []
+    started = time.perf_counter()
+    first_token_ms: int | None = None
+    metrics: dict[str, Any] = {}
+    async for chunk in stream_agent_loop(
+        JARVIS_CHAT_URL,
+        JARVIS_MODEL,
+        messages,
+        temperature=0.35,
+        max_tokens=_num_predict_for_text(text),
+        max_rounds=8,
+        max_tool_calls=6,
+        context_length=VOICE_CONTEXT_LENGTH,
+        session_id=chat_session_id,
+        disabled_tools=set(TOOL_TAGS) - JARVIS_TOOLS,
+        owner=owner,
+        relevant_tools=JARVIS_TOOLS,
+    ):
+        if not chunk.startswith("data: "):
+            continue
+        payload = chunk[6:].strip()
+        if payload == "[DONE]":
+            continue
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if "delta" in data and not data.get("thinking"):
+            delta = str(data.get("delta") or "")
+            if delta and first_token_ms is None:
+                first_token_ms = int((time.perf_counter() - started) * 1000)
+            full_response += delta
+            if delta:
+                yield {"type": "assistant_delta", "text": delta}
+        elif data.get("type") == "tool_output" and data.get("tool") == "start_agent_task":
+            try:
+                tool_data = json.loads(str(data.get("output") or "{}"))
+                task_id = str(tool_data.get("task_id") or "")
+                if task_id and task_id not in task_ids:
+                    task_ids.append(task_id)
+                    yield {"type": "agent_task", "task_id": task_id, "worker": tool_data.get("worker")}
+            except json.JSONDecodeError:
+                pass
+        elif data.get("type") == "metrics":
+            metrics = data.get("data") or {}
+    reply = _strip_think_blocks(full_response).strip()
+    if not reply:
+        raise RuntimeError("Jarvis voice model returned empty content")
+    diagnostics = {
+        "model": JARVIS_MODEL,
+        "transcript_chars": len(text),
+        "assistant_chars": len(reply),
+        "brain_ms": int((time.perf_counter() - started) * 1000),
+        "brain_first_token_ms": first_token_ms,
+        "num_ctx": VOICE_CONTEXT_LENGTH,
+        "num_predict": _num_predict_for_text(text),
+        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+        "guard_reason": None,
+        "agent_metrics": metrics,
+        "task_ids": task_ids,
+    }
+    yield {"type": "final", "assistant_text": reply, "diagnostics": diagnostics, "task_ids": task_ids}
+
+
+async def _jarvis_reply(
+    chat_session_id: str,
+    text: str,
+    owner: str,
+    voice_session: dict | None = None,
+) -> tuple[str, dict[str, Any], list[str]]:
+    final: dict[str, Any] | None = None
+    async for event in _jarvis_events(chat_session_id, text, owner, voice_session or {}):
+        if event.get("type") == "final":
+            final = event
+    if not final:
+        raise RuntimeError("Jarvis voice model returned no final event")
+    return final["assistant_text"], final["diagnostics"], final.get("task_ids") or []
+
+
+def _append_diagnostic(session: dict, diagnostic: dict[str, Any]) -> None:
+    diagnostic = {**diagnostic, "created_at": _now()}
+    diagnostics = session.setdefault("diagnostics", [])
+    diagnostics.append(diagnostic)
+    del diagnostics[:-50]
+
+
+def _clean_client_timings(timings: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in timings.items():
+        if not isinstance(key, str) or len(key) > 80:
+            continue
+        if isinstance(value, bool):
+            cleaned[key] = value
+        elif isinstance(value, (int, float)):
+            cleaned[key] = round(float(value), 2)
+        elif isinstance(value, str):
+            cleaned[key] = value[:120]
+    return cleaned
+
+
+def _chat_session_name() -> str:
+    return f"Jarvis Voice {now_user_local().strftime('%I:%M %p').lstrip('0')}"
+
+
+def _append_chat_message(session_manager, session: dict, role: str, text: str, **metadata) -> None:
+    chat_session_id = session.get("chat_session_id")
+    if not session_manager or not chat_session_id or not text:
+        return
+    safe_metadata = {
+        "source": "jarvis_voice",
+        "voice_session_id": session.get("id"),
+        **{k: v for k, v in metadata.items() if v is not None},
+    }
+    try:
+        session_manager.add_message(chat_session_id, ChatMessage(role, text, metadata=safe_metadata))
+    except Exception as exc:
+        logger.warning("Failed to append Jarvis voice turn to chat session %s: %s", chat_session_id, exc)
+
+
+def _assistant_identity_metadata(diagnostics: dict[str, Any]) -> dict[str, str]:
+    character_name = str(diagnostics.get("character_name") or "").strip()
+    direct_target = str(diagnostics.get("direct_target") or "").strip()
+    if not character_name or not direct_target:
+        return {}
+    return {
+        "source": "direct_worker_voice",
+        "character_name": character_name,
+        "target": direct_target,
+    }
+
+
+def setup_voice_routes(session_manager=None, tts_service=None):
+    global _SESSION_MANAGER
+    _SESSION_MANAGER = session_manager
+    router = APIRouter(prefix="/api/voice", tags=["voice"])
+
+    @router.get("/status")
+    async def voice_status(_owner: str = Depends(require_user)):
+        try:
+            from src.settings import load_settings
+
+            settings = load_settings()
+            tts_provider = settings.get("tts_provider", "browser")
+        except Exception:
+            tts_provider = "browser"
+        return {
+            "mode": "jarvis_call",
+            "activation": "call_button",
+            "interruption": "stop_and_redirect",
+            "stores_raw_audio": False,
+            "stt_endpoint": "pc-whisper-stt",
+            "brain_endpoint": "jarvis-ollama-local",
+            "voice_model": JARVIS_MODEL,
+            "tts_provider": tts_provider,
+            "fast_rtc_mounted": False,
+            "action_bridge": ACTION_BRIDGE_URL,
+            "safe_actions": sorted(SAFE_ACTIONS),
+        }
+
+    @router.post("/prewarm")
+    async def prewarm_voice_brain(_owner: str = Depends(require_user)):
+        async def prewarm_tts() -> tuple[str, bool | None, int | None, str | None]:
+            if not tts_service:
+                return "unavailable", None, None, None
+            try:
+                if not tts_service.available:
+                    return "unavailable", None, None, None
+            except Exception as exc:
+                return "failed", False, None, str(exc)[:200]
+            if TTS_INFERENCE_LOCK.locked():
+                return "busy", None, None, None
+
+            await TTS_INFERENCE_LOCK.acquire()
+            started = time.perf_counter()
+            job = asyncio.create_task(asyncio.to_thread(tts_service.synthesize, "Ready.", False))
+
+            def release_when_done(done: asyncio.Task) -> None:
+                try:
+                    done.exception()
+                except (asyncio.CancelledError, Exception):
+                    pass
+                if TTS_INFERENCE_LOCK.locked():
+                    TTS_INFERENCE_LOCK.release()
+
+            try:
+                try:
+                    audio = await asyncio.wait_for(
+                        asyncio.shield(job),
+                        timeout=VOICE_TTS_PREWARM_TIMEOUT_SECONDS,
+                    )
+                    return (
+                        "warmed" if audio else "failed",
+                        bool(audio),
+                        int((time.perf_counter() - started) * 1000),
+                        None if audio else "TTS prewarm returned no audio",
+                    )
+                except asyncio.TimeoutError:
+                    timeout_ms = int(VOICE_TTS_PREWARM_TIMEOUT_SECONDS * 1000)
+                    return "failed", False, timeout_ms, f"TTS prewarm exceeded {timeout_ms // 1000} seconds"
+                except Exception as exc:
+                    logger.warning("Jarvis TTS prewarm failed: %s", exc)
+                    return "failed", False, int((time.perf_counter() - started) * 1000), str(exc)[:200]
+            finally:
+                if job.done():
+                    release_when_done(job)
+                else:
+                    job.add_done_callback(release_when_done)
+
+        payload = {
+            "model": JARVIS_MODEL,
+            "prompt": "Reply exactly: ready",
+            "options": {"temperature": 0, "num_predict": 1},
+            "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
+            "stream": False,
+        }
+        brain_started = time.perf_counter()
+        tts_task = asyncio.create_task(prewarm_tts())
+        brain_ok = False
+        brain_error = None
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(JARVIS_GENERATE_URL, json=payload)
+            response.raise_for_status()
+            brain_ok = True
+        except Exception as exc:
+            logger.warning("Jarvis voice prewarm failed: %s", exc)
+            brain_error = str(exc)[:200]
+        brain_ms = int((time.perf_counter() - brain_started) * 1000)
+
+        tts_state, tts_ok, tts_ms, tts_error = await tts_task
+
+        return {
+            "ok": brain_ok and tts_state != "failed",
+            "model": JARVIS_MODEL,
+            "brain_ms": brain_ms,
+            "brain_error": brain_error,
+            "tts_state": tts_state,
+            "tts_ok": tts_ok,
+            "tts_ms": tts_ms,
+            "tts_error": tts_error,
+        }
+
+    @router.post("/sessions")
+    async def create_voice_session(
+        request: Request,
+        payload: VoiceSessionCreate,
+        owner: str = Depends(require_user),
+    ):
+        _set_user_time_from_request(request)
+        state = _load_state()
+        session_id = str(uuid.uuid4())
+        chat_session_id = payload.chat_session_id.strip() if payload.chat_session_id else None
+        if session_manager:
+            if chat_session_id:
+                try:
+                    linked = session_manager.get_session(chat_session_id)
+                    linked_owner = getattr(linked, "owner", None)
+                    if linked_owner != owner and not (not owner and linked_owner is None):
+                        raise HTTPException(status_code=403, detail={"message": "Chat session does not belong to this user"})
+                except HTTPException:
+                    raise
+                except Exception:
+                    chat_session_id = None
+            if not chat_session_id:
+                chat_session_id = str(uuid.uuid4())
+                session_manager.create_session(
+                    session_id=chat_session_id,
+                    name=_chat_session_name(),
+                    endpoint_url=JARVIS_CHAT_URL,
+                    model=JARVIS_MODEL,
+                    owner=owner,
+                )
+        session = {
+            "id": session_id,
+            "owner": owner,
+            "chat_session_id": chat_session_id,
+            "mode": payload.mode,
+            "status": "listening",
+            "created_at": _now(),
+            "updated_at": _now(),
+            "turns": [],
+            "tasks": [],
+            "target": "jarvis",
+            "workspace": "home-lab",
+            "active_task_id": None,
+            "codex_thread_id": None,
+            "stores_raw_audio": False,
+        }
+        state.setdefault("sessions", {})[session_id] = session
+        _save_state(state)
+        return session
+
+    @router.get("/sessions/{session_id}")
+    async def get_voice_session(session_id: str, owner: str = Depends(require_user)):
+        return _owned_session(_load_state(), session_id, owner)
+
+    @router.post("/sessions/{session_id}/target")
+    async def update_voice_target(
+        session_id: str,
+        payload: VoiceTargetUpdate,
+        owner: str = Depends(require_user),
+    ):
+        if payload.target not in ACTIVE_VOICE_TARGETS:
+            raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
+        if payload.target != "jarvis":
+            from src.jarvis_agent import worker_statuses
+
+            target_status = (await worker_statuses()).get(payload.target) or {}
+            if not target_status.get("enabled"):
+                raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
+        if payload.workspace not in VOICE_WORKSPACES:
+            raise HTTPException(status_code=400, detail={"message": "Unknown voice workspace"})
+        state = _load_state()
+        session = _owned_session(state, session_id, owner)
+        session["target"] = payload.target
+        session["workspace"] = payload.workspace
+        if payload.task_id is not None:
+            session["active_task_id"] = payload.task_id or None
+        if payload.codex_thread_id is not None:
+            session["codex_thread_id"] = _validated_thread_id(payload.codex_thread_id)
+        session["updated_at"] = _now()
+        _save_state(state)
+        return {
+            "target": session["target"],
+            "workspace": session["workspace"],
+            "active_task_id": session.get("active_task_id"),
+            "codex_thread_id": session.get("codex_thread_id"),
+        }
+
+    @router.post("/sessions/{session_id}/turns")
+    async def add_voice_turn(
+        session_id: str,
+        payload: VoiceTurnCreate,
+        owner: str = Depends(require_user),
+    ):
+        state = _load_state()
+        session = _owned_session(state, session_id, owner)
+        turn = _append_turn(session, payload.role, payload.text, payload.status or "recorded", payload.task_id)
+        _save_state(state)
+        return turn
+
+    @router.post("/sessions/{session_id}/respond")
+    async def respond_to_voice_turn(
+        session_id: str,
+        payload: VoiceRespondRequest,
+        request: Request,
+        owner: str = Depends(require_user),
+    ):
+        _set_user_time_from_request(request)
+        text = payload.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail={"message": "Voice turn text is required"})
+
+        state = _load_state()
+        session = _owned_session(state, session_id, owner)
+        turn_session = dict(session)
+        if payload.client_state:
+            turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
+        if payload.frame:
+            turn_session["_frame"] = _decode_voice_frame(payload.frame)
+        user_turn = _append_turn(session, "user", text, "thinking")
+        _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
+        _save_state(state)
+
+        task = None
+        diagnostics: dict[str, Any]
+        action = _detect_safe_action(text)
+        if action:
+            task = await _execute_action(
+                VoiceActionRequest(action=action, session_id=session_id, prompt=text),
+                owner,
+            )
+            reply = "Running that in the background, sir."
+            diagnostics = {
+                "model": JARVIS_MODEL,
+                "transcript_chars": len(text),
+                "assistant_chars": len(reply),
+                "guard_reason": "safe_action",
+                "action": action,
+            }
+        else:
+            try:
+                reply, diagnostics, agent_task_ids = await _jarvis_reply(
+                    str(session.get("chat_session_id") or ""),
+                    text,
+                    owner,
+                    turn_session,
+                )
+            except Exception as exc:
+                session["status"] = "failed"
+                session["updated_at"] = _now()
+                _append_diagnostic(session, {
+                    "model": JARVIS_MODEL,
+                    "transcript_chars": len(text),
+                    "assistant_chars": 0,
+                    "guard_reason": "brain_failure",
+                    "error": str(exc)[:240],
+                })
+                _save_state(state)
+                raise HTTPException(status_code=502, detail={"message": "Jarvis brain request failed", "error": str(exc)})
+
+        state = _load_state()
+        session = _session(state, session_id)
+        if not action:
+            from src.jarvis_agent import get_task
+
+            for task_id in agent_task_ids:
+                agent_task = get_task(task_id)
+                if agent_task and not any(row.get("task_id") == task_id for row in session.setdefault("tasks", [])):
+                    session["tasks"].append(agent_task)
+        if task:
+            state.setdefault("actions", {})[task["task_id"]] = task
+            session.setdefault("tasks", []).append(task)
+        linked_task_id = task["task_id"] if task else (agent_task_ids[0] if not action and agent_task_ids else None)
+        assistant_turn = _append_turn(session, "assistant", reply, "speaking", linked_task_id)
+        _append_chat_message(
+            session_manager,
+            session,
+            "assistant",
+            reply,
+            voice_turn_id=assistant_turn["id"],
+            voice_status="speaking",
+            task_id=linked_task_id,
+            diagnostics=diagnostics,
+            **_assistant_identity_metadata(diagnostics),
+        )
+        _append_diagnostic(session, diagnostics)
+        session["status"] = "speaking"
+        _save_state(state)
+        return {
+            "session_id": session_id,
+            "status": "speaking",
+            "assistant_text": reply,
+            "assistant_turn": assistant_turn,
+            "diagnostics": diagnostics,
+            "task": task,
+            "agent_task_ids": [] if action else agent_task_ids,
+        }
+
+    @router.post("/sessions/{session_id}/respond/stream")
+    async def stream_voice_response(
+        session_id: str,
+        payload: VoiceRespondRequest,
+        request: Request,
+        owner: str = Depends(require_user),
+    ):
+        _set_user_time_from_request(request)
+        text = payload.text.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail={"message": "Voice turn text is required"})
+        state = _load_state()
+        session = _owned_session(state, session_id, owner)
+        turn_session = dict(session)
+        if payload.client_state:
+            turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
+        if payload.frame:
+            turn_session["_frame"] = _decode_voice_frame(payload.frame)
+        user_turn = _append_turn(session, "user", text, "thinking")
+        _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
+        speech_turn = _register_speech_turn(session_id)
+        session["active_audio_turn_id"] = speech_turn.turn_id
+        _save_state(state)
+        chat_session_id = str(session.get("chat_session_id") or "")
+
+        async def generate():
+            try:
+                final: dict[str, Any] | None = None
+                yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
+                yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
+                async for event in _jarvis_events(chat_session_id, text, owner, turn_session):
+                    if event.get("type") in {"target_changed", "agent_task"}:
+                        event_state = _load_state()
+                        event_session = _session(event_state, session_id)
+                        if event.get("type") == "target_changed":
+                            event_session["target"] = event.get("target", "jarvis")
+                            event_session["workspace"] = event.get("workspace", "home-lab")
+                        else:
+                            event_session["active_task_id"] = event.get("task_id")
+                        event_session["updated_at"] = _now()
+                        _save_state(event_state)
+                    if event.get("type") == "final":
+                        final = event
+                    yield f"data: {json.dumps(event)}\n\n"
+                if not final:
+                    raise RuntimeError("Jarvis voice model returned no final event")
+                spoken_text = await _spoken_text_for_final(text, final)
+                final["diagnostics"]["spoken_chars"] = len(spoken_text)
+                await speech_turn.complete(spoken_text)
+                current_state = _load_state()
+                current = _session(current_state, session_id)
+                task_ids = final.get("task_ids") or []
+                from src.jarvis_agent import get_task
+
+                for task_id in task_ids:
+                    agent_task = get_task(task_id)
+                    if agent_task and not any(row.get("task_id") == task_id for row in current.setdefault("tasks", [])):
+                        current["tasks"].append(agent_task)
+                assistant_turn = _append_turn(
+                    current,
+                    "assistant",
+                    final["assistant_text"],
+                    "speaking",
+                    task_ids[0] if task_ids else None,
+                )
+                _append_chat_message(
+                    session_manager,
+                    current,
+                    "assistant",
+                    final["assistant_text"],
+                    voice_turn_id=assistant_turn["id"],
+                    voice_status="speaking",
+                    task_id=task_ids[0] if task_ids else None,
+                    diagnostics=final["diagnostics"],
+                    **_assistant_identity_metadata(final["diagnostics"]),
+                )
+                _append_diagnostic(current, final["diagnostics"])
+                _save_state(current_state)
+            except Exception as exc:
+                await speech_turn.fail(str(exc)[:240])
+                current_state = _load_state()
+                current = _session(current_state, session_id)
+                current["status"] = "failed"
+                _append_diagnostic(current, {
+                    "model": JARVIS_MODEL,
+                    "transcript_chars": len(text),
+                    "assistant_chars": 0,
+                    "guard_reason": "brain_failure",
+                    "error": str(exc)[:240],
+                })
+                _save_state(current_state)
+                yield f"data: {json.dumps({'type': 'error', 'text': str(exc)[:240]})}\n\n"
+            finally:
+                if not speech_turn.finished:
+                    await speech_turn.fail("Jarvis voice response ended before speech was ready")
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+
+    @router.get("/sessions/{session_id}/turns/{turn_id}/audio")
+    async def stream_voice_turn_audio(
+        session_id: str,
+        turn_id: str,
+        owner: str = Depends(require_user),
+    ):
+        _owned_session(_load_state(), session_id, owner)
+        speech_turn = _SPEECH_TURNS.get((session_id, turn_id))
+        if not speech_turn:
+            raise HTTPException(status_code=404, detail={"message": "Voice audio turn not found"})
+        if not tts_service or not tts_service.available:
+            raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
+
+        _set_voice_status(session_id, "buffering", active_audio_turn_id=turn_id)
+
+        async def generate_audio():
+            started = time.perf_counter()
+            generation_ms = 0
+            audio_ms = 0
+            block_count = 0
+            spoken_text = ""
+            try:
+                spoken_text = await speech_turn.wait()
+                blocks = speech_blocks(spoken_text)
+                if not blocks:
+                    raise RuntimeError("Jarvis produced no spoken response")
+
+                sample_rate: int | None = None
+                async with TTS_INFERENCE_LOCK:
+                    for index, block in enumerate(blocks):
+                        if speech_turn.cancelled:
+                            raise RuntimeError("Voice playback was interrupted")
+                        block_started = time.perf_counter()
+                        audio = await asyncio.to_thread(tts_service.synthesize, block, False)
+                        block_generation_ms = int((time.perf_counter() - block_started) * 1000)
+                        if speech_turn.cancelled:
+                            raise RuntimeError("Voice playback was interrupted")
+                        if not audio:
+                            raise RuntimeError("TTS synthesis failed")
+                        block_rate, pcm = wav_to_pcm16(audio)
+                        if sample_rate is None:
+                            sample_rate = block_rate
+                            yield json.dumps({"type": "start", "sample_rate": sample_rate}) + "\n"
+                        elif block_rate != sample_rate:
+                            raise RuntimeError("TTS sample rate changed during a voice turn")
+
+                        block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
+                        yield json.dumps({
+                            "type": "block",
+                            "index": index,
+                            "text_chars": len(block),
+                            "generation_ms": block_generation_ms,
+                            "audio_ms": block_audio_ms,
+                        }, separators=(",", ":")) + "\n"
+                        for frame in pcm_frames(pcm):
+                            yield json.dumps({
+                                "type": "audio",
+                                "pcm_base64": base64.b64encode(frame).decode("ascii"),
+                            }, separators=(",", ":")) + "\n"
+
+                        generation_ms += block_generation_ms
+                        audio_ms += block_audio_ms
+                        block_count += 1
+                        if speech_turn.cancelled:
+                            raise RuntimeError("Voice playback was interrupted")
+                        _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
+
+                yield json.dumps({
+                    "type": "done",
+                    "blocks": block_count,
+                    "generation_ms": generation_ms,
+                    "audio_ms": audio_ms,
+                }, separators=(",", ":")) + "\n"
+
+                state = _load_state()
+                current = _session(state, session_id)
+                _append_diagnostic(current, {
+                    "label": "tts",
+                    "turn_id": turn_id,
+                    "spoken_chars": len(spoken_text),
+                    "tts_ms": int((time.perf_counter() - started) * 1000),
+                    "tts_inferences": block_count,
+                })
+                _save_state(state)
+            except Exception as exc:
+                if speech_turn.cancelled:
+                    logger.info("Jarvis speech turn %s was interrupted", turn_id)
+                    _set_voice_status(session_id, "interrupted", active_audio_turn_id=None)
+                else:
+                    logger.exception("Jarvis speech turn %s failed", turn_id)
+                    _set_voice_status(session_id, "failed", active_audio_turn_id=None)
+                yield json.dumps({"type": "error", "error": str(exc)[:240]}) + "\n"
+            finally:
+                _SPEECH_TURNS.pop((session_id, turn_id), None)
+
+        return StreamingResponse(
+            generate_audio(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @router.post("/sessions/{session_id}/turns/{turn_id}/playback")
+    async def update_voice_playback(
+        session_id: str,
+        turn_id: str,
+        payload: VoicePlaybackUpdate,
+        owner: str = Depends(require_user),
+    ):
+        _owned_session(_load_state(), session_id, owner)
+        status_for_state = {
+            "started": "speaking",
+            "completed": "ready",
+            "interrupted": "interrupted",
+            "failed": "failed",
+        }
+        session = _set_voice_status(
+            session_id,
+            status_for_state[payload.state],
+            active_audio_turn_id=None if payload.state != "started" else turn_id,
+        )
+        if payload.timings:
+            _append_diagnostic(session, {
+                "label": "playback",
+                "turn_id": turn_id,
+                "playback_state": payload.state,
+                "client": True,
+                **_clean_client_timings(payload.timings),
+            })
+            state = _load_state()
+            state["sessions"][session_id] = session
+            _save_state(state)
+        return {"session_id": session_id, "turn_id": turn_id, "status": session["status"]}
+
+    @router.post("/sessions/{session_id}/diagnostics")
+    async def add_voice_diagnostic(
+        session_id: str,
+        payload: VoiceDiagnosticCreate,
+        owner: str = Depends(require_user),
+    ):
+        state = _load_state()
+        session = _owned_session(state, session_id, owner)
+        _append_diagnostic(session, {
+            "label": payload.label[:80],
+            "client": True,
+            **_clean_client_timings(payload.timings),
+        })
+        session["updated_at"] = _now()
+        _save_state(state)
+        return {"ok": True}
+
+    @router.post("/sessions/{session_id}/interrupt")
+    async def interrupt_voice_session(session_id: str, owner: str = Depends(require_user)):
+        _owned_session(_load_state(), session_id, owner)
+        for (voice_session_id, _turn_id), speech_turn in list(_SPEECH_TURNS.items()):
+            if voice_session_id == session_id:
+                await speech_turn.cancel()
+        state = _load_state()
+        session = _session(state, session_id)
+        session["status"] = "interrupted"
+        session["updated_at"] = _now()
+        session.setdefault("turns", []).append(
+            {
+                "id": str(uuid.uuid4()),
+                "role": "system",
+                "text": "Playback interrupted; next speech becomes the next turn.",
+                "status": "interrupted",
+                "created_at": _now(),
+            }
+        )
+        _save_state(state)
+        return {"session_id": session_id, "status": "interrupted"}
+
+    @router.post("/actions")
+    async def run_voice_action(payload: VoiceActionRequest, owner: str = Depends(require_user)):
+        state = _load_state()
+        if payload.session_id:
+            _owned_session(state, payload.session_id, owner)
+        task = await _execute_action(payload, owner)
+        state = _load_state()
+        state.setdefault("actions", {})[task["task_id"]] = task
+        if payload.session_id and payload.session_id in state.get("sessions", {}):
+            session = _owned_session(state, payload.session_id, owner)
+            session.setdefault("tasks", []).append(task)
+            session["updated_at"] = _now()
+        _save_state(state)
+        return task
+
+    @router.get("/actions/{task_id}")
+    async def get_voice_action(task_id: str, owner: str = Depends(require_user)):
+        action = _load_state().get("actions", {}).get(task_id)
+        if not action:
+            raise HTTPException(status_code=404, detail={"message": "Voice action not found"})
+        if action.get("owner") != owner:
+            raise HTTPException(status_code=403, detail={"message": "Voice action does not belong to this user"})
+        return action
+
+    return router

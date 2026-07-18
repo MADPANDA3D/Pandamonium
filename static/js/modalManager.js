@@ -31,6 +31,10 @@ import { dismissOrRemove } from './escMenuStack.js';
 import { nextToolWindowZ } from './toolWindowZOrder.js';
 
 const _state = new Map(); // id -> { restoreFn, closeFn, railBtnId, isMinimized, restoreMinHeight }
+const _REPORTABLE_VIEWS = {
+  'calendar-modal': 'calendar',
+  'doc-panel': 'document',
+};
 
 const _rememberedDockKey = (id) => `odysseus-modal-remembered-dock-${id}`;
 function _rememberDock(id, side) {
@@ -1222,6 +1226,30 @@ export function unregister(id) {
 export function isRegistered(id)  { return _state.has(id); }
 export function isMinimized(id)   { return _state.get(id)?.isMinimized === true; }
 
+export function getForegroundState() {
+  let activeView = null;
+  let activeZ = -Infinity;
+  const minimizedViews = [];
+  for (const [id, view] of Object.entries(_REPORTABLE_VIEWS)) {
+    const state = _state.get(id);
+    if (!state) continue;
+    if (state.isMinimized) {
+      minimizedViews.push(view);
+      continue;
+    }
+    const modal = document.getElementById(id);
+    if (!modal || modal.classList.contains('hidden')) continue;
+    const style = getComputedStyle(modal);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    const z = Number.parseInt(style.zIndex, 10);
+    if (activeView === null || !Number.isFinite(z) || z >= activeZ) {
+      activeView = view;
+      if (Number.isFinite(z)) activeZ = z;
+    }
+  }
+  return { active_view: activeView, minimized_views: minimizedViews };
+}
+
 export function minimize(id) {
   // Lazy-register if a known modal isn't yet registered (e.g. user clicked `_`
   // on a tool that doesn't pre-register itself).
@@ -1557,4 +1585,4 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-export default { register, unregister, isRegistered, isMinimized, minimize, restore, toggle, close, injectMinimizeButton };
+export default { register, unregister, isRegistered, isMinimized, getForegroundState, minimize, restore, toggle, close, injectMinimizeButton };

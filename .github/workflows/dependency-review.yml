@@ -29,8 +29,8 @@ concurrency:
 jobs:
   dependency-review:
     name: dependency-review (PR gate)
-    # Only meaningful on a pull request -- it needs a base..head diff to review.
-    if: github.event_name == 'pull_request'
+    # GitHub's dependency-review API rejects forks; pip-audit still runs below.
+    if: github.event_name == 'pull_request' && github.event.repository.fork == false
     runs-on: ubuntu-latest
     permissions:
       contents: read

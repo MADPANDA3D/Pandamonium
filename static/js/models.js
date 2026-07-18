@@ -17,6 +17,7 @@ let API_BASE = '';
 let _cachedItems = []; // cached /api/models items for model-switch dropdown
 let _lastFetchTime = 0;
 let _fetchInflight = null;
+let _fetchSeq = 0;
 const _FETCH_CACHE_TTL = 30000; // 30s client-side cache for /api/models
 const COLLAPSE_KEY = 'odysseus-models-collapsed';
 const FAVORITES_KEY = 'odysseus-model-favorites';
@@ -165,18 +166,21 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
 
 export async function refreshModels(force = false) {
   const box = document.getElementById('models');
-  if (!box) return;
 
   // Skip network fetch if cache is fresh and not forced — still re-render UI
   const now = Date.now();
   const needsFetch = force || _cachedItems.length === 0 || (now - _lastFetchTime) >= _FETCH_CACHE_TTL;
 
-  box.innerHTML = '';
+  if (box) box.innerHTML = '';
   if (needsFetch) {
-    const _loadingSpinner = spinnerModule.create('', 'right', 'wave');
-    box.appendChild(_loadingSpinner.createElement());
-    _loadingSpinner.start();
+    let _loadingSpinner = null;
+    if (box) {
+      _loadingSpinner = spinnerModule.create('', 'right', 'wave');
+      box.appendChild(_loadingSpinner.createElement());
+      _loadingSpinner.start();
+    }
     try {
+      if (force) _fetchInflight = null;
       if (!_fetchInflight) {
         // Pass ?refresh=true on forced refreshes so the BACKEND's 30s
         // per-user cache also gets bypassed. Without this, `force=true`
@@ -184,26 +188,36 @@ export async function refreshModels(force = false) {
         // back — newly-served endpoints don't appear until the cache
         // ages out. (Bug repro: serve a model, picker is empty for ~30s
         // even though the endpoint is in the DB and online.)
-        const _url = `${API_BASE}/api/models` + (force ? '?refresh=true' : '');
+        const _seq = ++_fetchSeq;
+        const _url = `${API_BASE}/api/models` + (force ? '?refresh=true' : '?background=false');
         _fetchInflight = fetch(_url, { credentials: 'same-origin' })
           .then(async (res) => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
+            const data = await res.json();
+            return { data, seq: _seq };
           })
           .finally(() => { _fetchInflight = null; });
       }
-      const data = await _fetchInflight;
+      const { data, seq } = await _fetchInflight;
+      if (seq < _fetchSeq) return;
       _lastFetchTime = Date.now();
       _cachedItems = data.items || [];
     } catch (e) {
       console.error(e);
-      box.textContent = '(scan failed)';
+      if (box) box.textContent = '(scan failed)';
       return;
     } finally {
-      box.innerHTML = '';
+      try { _loadingSpinner && _loadingSpinner.stop && _loadingSpinner.stop(); } catch (_) {}
+      if (box) box.innerHTML = '';
     }
   }
+  if (!box) return;
   try {
+    // The main model picker starts chats. Speech endpoints remain available to
+    // STT/TTS settings, but they are not selectable conversation models.
+    const chatItems = (_cachedItems || []).filter(
+      item => (item.model_type || 'llm') === 'llm'
+    );
 
     const collapseState = _loadCollapsed();
     let groupIdx = 0; // unique ID counter for drag-sort containers
@@ -212,8 +226,8 @@ export async function refreshModels(force = false) {
     const groups = { local: {}, api: {} };
     // Also track extra (non-curated) models per endpoint
     const extraGroups = { local: {}, api: {} };
-    if (_cachedItems && _cachedItems.length > 0) {
-      _cachedItems.forEach(item => {
+    if (chatItems.length > 0) {
+      chatItems.forEach(item => {
         const cat = item.category === 'local' ? 'local' : 'api';
         const epName = item.endpoint_name || 'Unknown';
         const isOffline = !!item.offline;
@@ -498,7 +512,7 @@ export async function refreshModels(force = false) {
     }
 
     // ── Search box (shown when >= 5 total models, including hidden overflow) ──
-    const totalModelCount = (_cachedItems || []).reduce((n, item) => {
+    const totalModelCount = chatItems.reduce((n, item) => {
       if (item.offline) return n;
       return n + (item.models || []).length + (item.models_extra || []).length;
     }, 0);
@@ -533,7 +547,7 @@ export async function refreshModels(force = false) {
         searchResults.innerHTML = '';
         searchResults.style.display = '';
         // Build flat results from all cached models
-        (_cachedItems || []).forEach(item => {
+        chatItems.forEach(item => {
           if (item.offline) return;
           const allModels = (item.models || []).concat(item.models_extra || []);
           const allDisplay = (item.models_display || []).concat(item.models_extra_display || item.models_extra || []);
@@ -555,7 +569,7 @@ export async function refreshModels(force = false) {
       box.insertBefore(searchBox, box.firstChild);
     }
 
-    if (!_cachedItems || _cachedItems.length === 0) {
+    if (chatItems.length === 0) {
       const noModels = document.createElement('div');
       noModels.className = 'models-empty-state';
       if (window._isAdmin) {
