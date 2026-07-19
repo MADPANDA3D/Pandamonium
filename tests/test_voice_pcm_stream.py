@@ -70,8 +70,8 @@ def test_voice_turn_audio_streams_semantic_chatterbox_blocks(monkeypatch, tmp_pa
         def __init__(self):
             self.calls = []
 
-        def synthesize(self, text, use_cache=True):
-            self.calls.append((text, use_cache, voice_routes.TTS_INFERENCE_LOCK.locked()))
+        def synthesize(self, text, use_cache=True, voice=None):
+            self.calls.append((text, use_cache, voice, voice_routes.TTS_INFERENCE_LOCK.locked()))
             return _wav_payload()
 
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
@@ -82,6 +82,7 @@ def test_voice_turn_audio_streams_semantic_chatterbox_blocks(monkeypatch, tmp_pa
     client = TestClient(app)
     session = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
     speech_turn = voice_routes._register_speech_turn(session["id"])
+    speech_turn.voice = voice_routes.CHARACTER_TTS_VOICES["Gordon"]
     spoken = "\n\n".join((
         " ".join(["The first paragraph reports verified progress without losing context."] * 7),
         " ".join(["The second paragraph remains clear because Chatterbox starts a fresh block."] * 7),
@@ -100,7 +101,7 @@ def test_voice_turn_audio_streams_semantic_chatterbox_blocks(monkeypatch, tmp_pa
     assert events[-1]["blocks"] == len(blocks)
     assert [event["index"] for event in events if event["type"] == "block"] == list(range(len(blocks)))
     assert any(event["type"] == "audio" and event["pcm_base64"] for event in events)
-    assert tts.calls == [(block, False, True) for block in blocks]
+    assert tts.calls == [(block, False, "gordon_chatterbox", True) for block in blocks]
     assert " ".join(call[0] for call in tts.calls) == " ".join(spoken.split())
 
     completed = client.post(
@@ -115,7 +116,7 @@ def test_voice_turn_audio_does_not_emit_stale_audio_after_interrupt(monkeypatch,
     class InterruptingTTS:
         available = True
 
-        def synthesize(self, _text, _use_cache=True):
+        def synthesize(self, _text, _use_cache=True, voice=None):
             speech_turn.cancelled = True
             return _wav_payload()
 

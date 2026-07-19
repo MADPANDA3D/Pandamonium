@@ -75,6 +75,7 @@ WORKER_LABELS = {
     "vps-codex": "VPS Codex",
 }
 VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon"}
+CHARACTER_TTS_VOICES = {"Gordon": "gordon_chatterbox"}
 ACTIVE_VOICE_TARGETS = {"jarvis"} | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
@@ -165,6 +166,7 @@ class _SpeechTurn:
     def __init__(self, session_id: str, turn_id: str):
         self.session_id = session_id
         self.turn_id = turn_id
+        self.voice: str | None = None
         self.text = ""
         self.finished = False
         self.cancelled = False
@@ -418,6 +420,11 @@ async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
     if (final.get("diagnostics") or {}).get("direct_target"):
         return response_text
     return await _select_spoken_text(prompt, response_text)
+
+
+def _tts_voice_for_final(final: dict[str, Any]) -> str | None:
+    character = str((final.get("diagnostics") or {}).get("character_name") or "")
+    return CHARACTER_TTS_VOICES.get(character)
 
 
 def _num_predict_for_text(text: str) -> int:
@@ -2371,6 +2378,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
                 spoken_text = await _spoken_text_for_final(text, final)
+                speech_turn.voice = _tts_voice_for_final(final)
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 await speech_turn.complete(spoken_text)
                 current_state = _load_state()
@@ -2456,7 +2464,12 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                         if speech_turn.cancelled:
                             raise RuntimeError("Voice playback was interrupted")
                         block_started = time.perf_counter()
-                        audio = await asyncio.to_thread(tts_service.synthesize, block, False)
+                        audio = await asyncio.to_thread(
+                            tts_service.synthesize,
+                            block,
+                            False,
+                            voice=speech_turn.voice,
+                        )
                         block_generation_ms = int((time.perf_counter() - block_started) * 1000)
                         if speech_turn.cancelled:
                             raise RuntimeError("Voice playback was interrupted")

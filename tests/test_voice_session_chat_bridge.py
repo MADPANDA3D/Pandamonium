@@ -132,6 +132,15 @@ def test_direct_gordon_speech_keeps_the_complete_answer_without_jarvis_summarize
     assert spoken.endswith("Gordon keeps every word in this direct answer.")
 
 
+def test_direct_gordon_uses_his_voice_and_router_failures_keep_the_default():
+    assert voice_routes._tts_voice_for_final({
+        "diagnostics": {"character_name": "Gordon", "direct_target": "hermes"},
+    }) == "gordon_chatterbox"
+    assert voice_routes._tts_voice_for_final({
+        "diagnostics": {"character_name": "Odysseus", "direct_target": "hermes"},
+    }) is None
+
+
 def test_voice_session_title_uses_browser_timezone_context(monkeypatch, tmp_path):
     seen = []
 
