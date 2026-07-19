@@ -100,6 +100,11 @@ let workerCatalog = {
   'vps-codex': { enabled: false, machine: 'Remote server', connection: { state: 'gated' } },
 };
 
+function voiceTargetForModel(modelId) {
+  const model = String(modelId || '').trim().toLowerCase().split('/').pop();
+  return model === 'hermes-agent' ? 'hermes' : 'jarvis';
+}
+
 function $(id) {
   return document.getElementById(id);
 }
@@ -2259,6 +2264,14 @@ async function startCall() {
   }
 
   unlockVoiceCueAudio();
+  if (!pendingVoiceTargetState) {
+    const selectedTarget = voiceTargetForModel(window.sessionModule?.getCurrentModel?.());
+    if (selectedTarget === 'hermes') {
+      if (!setVoiceTarget(selectedTarget)) return;
+    } else {
+      setVoiceTarget('jarvis', false);
+    }
+  }
   const callGeneration = ++voiceCallGeneration;
   voiceOrbMedia.stopMedia();
   isActive = true;

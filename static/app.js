@@ -17,7 +17,7 @@ import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
-import sessionModule from './js/sessions.js?v=20260711-model-cleanup2';
+import sessionModule from './js/sessions.js?v=20260719T024058Z';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';

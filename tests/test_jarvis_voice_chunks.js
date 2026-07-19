@@ -4,6 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../static/js/jarvisVoice.js'), 'utf8');
+const appSource = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
 const documentSource = fs.readFileSync(path.join(__dirname, '../static/js/document.js'), 'utf8');
 const rendererSource = fs.readFileSync(path.join(__dirname, '../static/js/chatRenderer.js'), 'utf8');
 const sessionsSource = fs.readFileSync(path.join(__dirname, '../static/js/sessions.js'), 'utf8');
@@ -168,8 +169,11 @@ assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
 assert.match(index, /<button[^>]*data-worker="hermes"[^>]*>\s*<span>Gordon<\/span><small>Hermes laptop · gated<\/small>\s*<\/button>/);
 assert.match(index, /style\.css\?v=20260715T235844Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260716T043017Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v360'/);
+assert.match(index, /sessions\.js\?v=20260719T024058Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260719T024058Z/);
+assert.match(index, /app\.js\?v=20260719T024058Z/);
+assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v361'/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
 assert.doesNotMatch(serviceWorker, /motivational-abstract\.webm/);
@@ -180,6 +184,8 @@ assert.match(source, /boundedPrewarm\('client_tts_probe', \(\) => window\.aiTTSM
 const startCallSource = source.match(/async function startCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 const streamTurnSource = source.match(/async function streamTurn\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.match(source, /const VOICE_TARGET_LABELS = \{ \.\.\.WORKER_LABELS, hermes: 'Gordon' \}/);
+assert.match(source, /return model === 'hermes-agent' \? 'hermes' : 'jarvis'/);
+assert.match(sessionsSource, /if \(_pendingChat && _pendingChat\.modelId\) return _pendingChat\.modelId/);
 assert.match(source, /document\.querySelectorAll\('\.jarvis-call-name'\)/);
 assert.match(source, /label\.textContent = VOICE_TARGET_LABELS\[worker\] \|\| worker/);
 assert.match(source, /const queuedUpdate = targetUpdatePromise\s*\.catch\(\(\) => \{\}\)/);
@@ -193,11 +199,13 @@ assert.ok(
 );
 const microphoneStart = startCallSource.indexOf('const microphoneReady = requestMicrophone(callGeneration)');
 const sessionStart = startCallSource.indexOf('const sessionReady = createSession(callGeneration)');
+const selectedModelTarget = startCallSource.indexOf('voiceTargetForModel(window.sessionModule?.getCurrentModel?.())');
 const readinessWait = startCallSource.indexOf('await Promise.all([microphoneReady, sessionReady])');
 const readinessCue = startCallSource.indexOf("await playVoiceCue('call')");
 const recorderStart = startCallSource.indexOf('await startListening(requestedStream, callGeneration)');
 assert.ok(microphoneStart >= 0 && microphoneStart < readinessWait);
 assert.ok(sessionStart >= 0 && sessionStart < readinessWait);
+assert.ok(selectedModelTarget >= 0 && selectedModelTarget < sessionStart);
 assert.ok(startCallSource.indexOf('prewarmVoiceStack().catch') < readinessWait);
 assert.ok(readinessWait < readinessCue && readinessCue < recorderStart);
 assert.doesNotMatch(startCallSource, /await prewarmVoiceStack/);
@@ -340,6 +348,7 @@ const sandboxConsole = {
     console.error(...args);
   },
 };
+let selectedModel = null;
 const sandbox = {
   console: sandboxConsole,
   document: fakeDocument,
@@ -350,6 +359,7 @@ const sandbox = {
   setInterval,
   clearInterval,
   fetch: () => Promise.resolve({ ok: true }),
+  sessionModule: { getCurrentModel: () => selectedModel },
   aiTTSManager: { checkAvailability() { throw new Error('availability probe failed'); }, stop() {} },
 };
 sandbox.window = sandbox;
@@ -365,10 +375,15 @@ const executableSource = source
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
     "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; } };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, voiceTargetForModel, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; } };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 placement.enableWorker('hermes');
+assert.equal(placement.voiceTargetForModel('hermes-agent'), 'hermes');
+assert.equal(placement.voiceTargetForModel('provider/hermes-agent'), 'hermes');
+assert.equal(placement.voiceTargetForModel('qwen3.5-jarvis-v5:latest'), 'jarvis');
+assert.equal(placement.voiceTargetForModel('qwen3.5:9b'), 'jarvis');
+assert.equal(placement.voiceTargetForModel('unknown-model'), 'jarvis');
 exposeVoiceIdentity = true;
 assert.equal(placement.setVoiceTarget('hermes', false), true);
 assert.equal(callName.textContent, 'Gordon');
@@ -658,7 +673,11 @@ delete sandbox.matchMedia;
       selectionPersistedTarget = 'jarvis';
       return new Promise(resolve => {
         resolveSelectedSession = () => resolve(jsonResponse({
-          id: selectionSessionRequests === 1 ? 'selection-before-call' : 'selection-during-create',
+          id: [
+            'selection-from-model',
+            'selection-explicit-override',
+            'selection-during-create',
+          ][selectionSessionRequests - 1] || `selection-${selectionSessionRequests}`,
           chat_session_id: null,
           target: 'jarvis',
           workspace: 'home-lab',
@@ -683,15 +702,14 @@ delete sandbox.matchMedia;
     }),
   };
 
-  assert.equal(placement.setVoiceTarget('hermes'), true);
-  assert.equal(placement.getTargetSyncState().pendingVoiceTargetState.target, 'hermes');
+  selectedModel = 'hermes-agent';
   const selectedBeforeCall = placement.startCall();
   assert.equal(typeof resolveSelectedSession, 'function');
   resolveSelectedSession();
   await selectedBeforeCall;
-  assert.equal(placement.getVoiceTarget(), 'hermes', 'call startup must preserve an explicit pre-call selection');
+  assert.equal(placement.getVoiceTarget(), 'hermes', 'the selected Hermes model must make Gordon the live voice target');
   await placement.sendTurn('Is this Gordon?');
-  assert.deepEqual(selectionRespondTargets, ['hermes'], 'the first response request must use the confirmed Gordon target');
+  assert.deepEqual(selectionRespondTargets, ['hermes'], 'the first response request must use the model-derived Gordon target');
   assert.deepEqual(selectionTargetRequests.map(payload => payload.target), ['hermes']);
   assert.equal(selectionTargetRequests[0].workspace, 'home-lab', 'the pre-call workspace must persist with its target');
   placement.endCall();
@@ -702,6 +720,22 @@ delete sandbox.matchMedia;
 
   selectionStreamStopped = false;
   resolveSelectedSession = null;
+  assert.equal(placement.setVoiceTarget('jarvis'), true);
+  const explicitOverrideCall = placement.startCall();
+  assert.equal(typeof resolveSelectedSession, 'function');
+  resolveSelectedSession();
+  await explicitOverrideCall;
+  assert.equal(placement.getVoiceTarget(), 'jarvis', 'an explicit pre-call Jarvis choice must override the Hermes model');
+  await placement.sendTurn('Stay with Jarvis.');
+  assert.deepEqual(selectionRespondTargets, ['hermes', 'jarvis']);
+  assert.deepEqual(selectionTargetRequests.map(payload => payload.target), ['hermes', 'jarvis']);
+  placement.endCall();
+  await Promise.resolve();
+  assert.equal(selectionStreamStopped, true);
+
+  selectionStreamStopped = false;
+  resolveSelectedSession = null;
+  selectedModel = 'qwen3.5-jarvis-v5:latest';
   const selectedDuringCreateCall = placement.startCall();
   assert.equal(typeof resolveSelectedSession, 'function');
   assert.equal(placement.setVoiceTarget('hermes'), true);
@@ -710,7 +744,7 @@ delete sandbox.matchMedia;
   assert.equal(placement.getVoiceTarget(), 'hermes', 'session creation must not reset a user selection');
   assert.deepEqual(
     selectionTargetRequests.map(payload => payload.target),
-    ['hermes', 'hermes'],
+    ['hermes', 'jarvis', 'hermes'],
     'the selection made during session creation must persist once the session is ready',
   );
   assert.equal(placement.getTargetSyncState().confirmedVoiceTargetState.target, 'hermes');

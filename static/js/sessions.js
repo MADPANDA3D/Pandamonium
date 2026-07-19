@@ -2248,7 +2248,8 @@ export function getSessions() {
 export function getCurrentModel() {
   const sess = sessions.find(x => x.id === currentSessionId);
   if (sess && sess.model) return sess.model;
-  // Pending session not yet materialized — read from model picker label
+  if (_pendingChat && _pendingChat.modelId) return _pendingChat.modelId;
+  // Legacy fallback for callers that run before session state is initialized.
   const label = document.getElementById('model-picker-label');
   return label ? label.textContent.trim() : null;
 }
