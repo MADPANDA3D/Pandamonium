@@ -414,11 +414,9 @@ async def _select_spoken_text(prompt: str, response_text: str) -> str:
 
 
 async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
-    response_text = str(final["assistant_text"])
+    response_text = str(final["assistant_text"]).strip()
     if (final.get("diagnostics") or {}).get("direct_target"):
-        if _asks_read_all(prompt) and len(response_text) <= 4000:
-            return response_text
-        return _bounded_spoken_text(response_text)
+        return response_text
     return await _select_spoken_text(prompt, response_text)
 
 

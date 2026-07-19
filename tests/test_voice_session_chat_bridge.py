@@ -111,17 +111,25 @@ def test_direct_gordon_turn_persists_foreground_identity(monkeypatch, tmp_path):
     assert assistant.metadata.get("task_id") is None
 
 
-def test_direct_gordon_speech_never_uses_jarvis_summarizer(monkeypatch):
+def test_direct_gordon_speech_keeps_the_complete_answer_without_jarvis_summarizer(monkeypatch):
     async def must_not_summarize(*_args, **_kwargs):
         raise AssertionError("direct Gordon speech must not pass through Jarvis")
 
     monkeypatch.setattr(voice_routes, "_select_spoken_text", must_not_summarize)
+    full_answer = "\n\n".join(
+        (f"Section {index}. " + "Gordon keeps every word in this direct answer. " * 10).strip()
+        for index in range(1, 6)
+    )
+    assert len(full_answer) > 1200
     final = {
-        "assistant_text": "Gordon's direct answer.",
+        "assistant_text": full_answer,
         "diagnostics": {"direct_target": "hermes"},
     }
 
-    assert asyncio.run(voice_routes._spoken_text_for_final("Tell me", final)) == "Gordon's direct answer."
+    spoken = asyncio.run(voice_routes._spoken_text_for_final("Tell me", final))
+
+    assert spoken == full_answer
+    assert spoken.endswith("Gordon keeps every word in this direct answer.")
 
 
 def test_voice_session_title_uses_browser_timezone_context(monkeypatch, tmp_path):
