@@ -111,6 +111,49 @@ def test_direct_gordon_turn_persists_foreground_identity(monkeypatch, tmp_path):
     assert assistant.metadata.get("task_id") is None
 
 
+def test_stream_keeps_slow_agent_alive_and_opens_audio_after_final(monkeypatch, tmp_path):
+    completed = False
+
+    async def slow_events(*_args, **_kwargs):
+        nonlocal completed
+        await asyncio.sleep(0.03)
+        completed = True
+        yield {"type": "assistant_delta", "text": "Verified.", "model": "Gordon"}
+        yield voice_routes._server_final_event(
+            "Check it",
+            "Verified.",
+            "direct_gordon",
+            direct_target="hermes",
+            character_name="Gordon",
+            model="hermes-agent",
+        )
+
+    manager = FakeSessionManager()
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    monkeypatch.setattr(voice_routes, "VOICE_EVENT_HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(voice_routes, "_jarvis_events", slow_events)
+    voice_routes._SPEECH_TURNS.clear()
+    app = FastAPI()
+    app.include_router(voice_routes.setup_voice_routes(manager))
+    client = TestClient(app)
+    created = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
+
+    response = client.post(
+        f"/api/voice/sessions/{created['id']}/respond/stream",
+        json={"text": "Check it"},
+    )
+
+    event_types = [
+        json.loads(line[6:]).get("type")
+        for line in response.text.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    assert response.status_code == 200
+    assert ": heartbeat" in response.text
+    assert event_types.index("final") < event_types.index("audio_ready")
+    assert completed is True
+
+
 def test_direct_gordon_speech_keeps_the_complete_answer_without_jarvis_summarizer(monkeypatch):
     async def must_not_summarize(*_args, **_kwargs):
         raise AssertionError("direct Gordon speech must not pass through Jarvis")

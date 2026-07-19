@@ -11,7 +11,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, AsyncGenerator, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -39,6 +39,7 @@ VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
 VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
 VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
+VOICE_EVENT_HEARTBEAT_SECONDS = 5.0
 VOICE_FRAME_MAX_BYTES = 1024 * 1024
 VOICE_FRAME_MAX_WIDTH = 1024
 VOICE_FRAME_MAX_HEIGHT = 576
@@ -198,6 +199,31 @@ class _SpeechTurn:
         if not self.text:
             raise RuntimeError("Jarvis produced no spoken response")
         return self.text
+
+
+async def _voice_events_with_heartbeats(
+    events: AsyncGenerator[dict[str, Any], None],
+) -> AsyncGenerator[dict[str, Any] | None, None]:
+    """Keep the browser stream alive while a remote agent is using tools."""
+    iterator = events.__aiter__()
+    pending = asyncio.create_task(anext(iterator))
+    try:
+        while True:
+            ready, _ = await asyncio.wait((pending,), timeout=VOICE_EVENT_HEARTBEAT_SECONDS)
+            if not ready:
+                yield None
+                continue
+            try:
+                event = pending.result()
+            except StopAsyncIteration:
+                return
+            yield event
+            pending = asyncio.create_task(anext(iterator))
+    finally:
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await iterator.aclose()
 
 
 def _now() -> int:
@@ -547,13 +573,15 @@ def _target_switch(text: str) -> str | None:
     direct_command = re.search(
         r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis)\b[\s,.:;-]*)*"
         r"(?:(?:(?:can|could|would|will)\s+you|(?:can|could|may)\s+i|let\s+me)\s+)?(?:please\s+)?"
-        r"(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+",
+        r"(?:(?:talk|speak|connect|switch|transfer)(?:\s+me)?(?:\s+back)?\s+(?:to|with)|"
+        r"put\s+me\s+(?:through\s+to|on\s+the\s+phone\s+with))\s+",
         text,
         re.IGNORECASE,
     )
     first_person_request = re.search(
         r"\b(?:i\s+(?:want|need|would\s+like)|i['’]d\s+like)\s+to\s+(?:now\s+)?"
-        r"(?:talk|speak|connect|switch)(?:\s+me)?(?:\s+back)?\s+(?:to|with)\s+",
+        r"(?:(?:talk|speak|connect|switch|transfer)(?:\s+me)?(?:\s+back)?\s+(?:to|with)|"
+        r"be\s+transferred(?:\s+back)?\s+to|be\s+put\s+(?:through\s+to|on\s+the\s+phone\s+with))\s+",
         text,
         re.IGNORECASE,
     )
@@ -1558,10 +1586,14 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             if target_switch == "jarvis" and _is_casual_greeting(text)
             else "You’re back with Jarvis."
             if target_switch == "jarvis"
-            else f"You’re connected to {label}. What would you like me to handle?"
+            else f"Transferring you to {label} now—one moment, please."
         )
-        yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
-        yield {"type": "assistant_delta", "text": reply}
+        if target_switch == "jarvis":
+            yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
+            yield {"type": "assistant_delta", "text": reply}
+        else:
+            yield {"type": "assistant_delta", "text": reply}
+            yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
         yield _server_final_event(text, reply, f"target_switch_{target_switch}")
         return
 
@@ -2360,8 +2392,12 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             try:
                 final: dict[str, Any] | None = None
                 yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
-                yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
-                async for event in _jarvis_events(chat_session_id, text, owner, turn_session):
+                async for event in _voice_events_with_heartbeats(
+                    _jarvis_events(chat_session_id, text, owner, turn_session)
+                ):
+                    if event is None:
+                        yield ": heartbeat\n\n"
+                        continue
                     if event.get("type") in {"target_changed", "agent_task"}:
                         event_state = _load_state()
                         event_session = _session(event_state, session_id)
@@ -2381,6 +2417,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 speech_turn.voice = _tts_voice_for_final(final)
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 await speech_turn.complete(spoken_text)
+                yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
                 current_state = _load_state()
                 current = _session(current_state, session_id)
                 task_ids = final.get("task_ids") or []

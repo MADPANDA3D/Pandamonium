@@ -337,7 +337,7 @@ async def test_hermes_stream_uses_sse_cursor_and_keeps_idless_repeats(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_hermes_direct_chat_uses_scoped_foreground_session_and_read_only_gordon_contract(
+async def test_hermes_direct_chat_uses_scoped_session_and_native_gordon_agent(
     tmp_path, monkeypatch
 ):
     captured = {}
@@ -384,16 +384,12 @@ async def test_hermes_direct_chat_uses_scoped_foreground_session_and_read_only_g
     }
     assert captured["payload"]["model"] == "hermes-agent"
     assert captured["payload"]["stream"] is False
-    assert captured["payload"]["tools"] == []
-    assert captured["payload"]["tool_choice"] == "none"
-    assert captured["payload"]["messages"][1] == {
+    assert "tools" not in captured["payload"]
+    assert "tool_choice" not in captured["payload"]
+    assert captured["payload"]["messages"] == [{
         "role": "user",
         "content": "Good evening. Is this Gordon?",
-    }
-    system_prompt = captured["payload"]["messages"][0]["content"]
-    assert "directly with Leo as Gordon" in system_prompt
-    assert "conversational and read-only" in system_prompt
-    assert "Operational work" in system_prompt
+    }]
 
 
 @pytest.mark.asyncio

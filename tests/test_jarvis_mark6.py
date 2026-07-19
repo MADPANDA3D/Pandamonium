@@ -37,6 +37,10 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("I would like to now talk to Hermes") == "hermes"
     assert _target_switch("I'd like to talk to Hermes") == "hermes"
     assert _target_switch("Can you please talk to Hermes?") == "hermes"
+    assert _target_switch("Transfer me to Gordon") == "hermes"
+    assert _target_switch("Put me on the phone with Gordon") == "hermes"
+    assert _target_switch("Put me through to Gordon") == "hermes"
+    assert _target_switch("I would like to be transferred to Gordon") == "hermes"
     assert _target_switch("Talk to my PC") == "pc-codex"
     assert _target_switch("Talk to PC Codex about Hermes") == "pc-codex"
     assert _target_switch("Talk to Hermes about the VPS") == "hermes"
@@ -731,8 +735,9 @@ async def test_target_switch_precedes_active_worker_dispatch(monkeypatch):
         )
     ]
 
-    assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
-    assert events[0]["target"] == "hermes"
+    assert [event["type"] for event in events] == ["assistant_delta", "target_changed", "final"]
+    assert events[0]["text"] == "Transferring you to Gordon now—one moment, please."
+    assert events[1]["target"] == "hermes"
     assert events[-1]["task_ids"] == []
 
 
@@ -755,8 +760,8 @@ async def test_explicit_switch_wins_over_jarvis_vocative(monkeypatch):
         )
     ]
 
-    assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
-    assert events[0]["target"] == "pc-codex"
+    assert [event["type"] for event in events] == ["assistant_delta", "target_changed", "final"]
+    assert events[1]["target"] == "pc-codex"
     assert events[-1]["diagnostics"]["guard_reason"] == "target_switch_pc-codex"
 
 

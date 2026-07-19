@@ -262,7 +262,7 @@ class HermesRunsAdapter:
         session_key: str,
         message: str,
     ) -> str:
-        """Run one persistent, read-only foreground conversation turn."""
+        """Run one persistent foreground turn through Gordon's native agent."""
         if not self.enabled:
             raise RuntimeError("hermes_not_connected")
         headers = self._headers()
@@ -270,24 +270,8 @@ class HermesRunsAdapter:
         headers["X-Hermes-Session-Key"] = session_key[:256]
         payload = {
             "model": "hermes-agent",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are speaking directly with Leo as Gordon, your installed operator identity on this "
-                        "Hermes runtime. Do not call yourself Hermes and do not say you are "
-                        "assisting through Jarvis. Preserve your installed identity and security instructions. "
-                        "This foreground voice channel is conversational and read-only: do not change files, "
-                        "deploy, install, delete, send messages, approve requests, or perform any other external "
-                        "side effect. Operational work must use the separate approval-capable background task "
-                        "path. Be concise, direct, and truthful for spoken conversation."
-                    ),
-                },
-                {"role": "user", "content": message},
-            ],
+            "messages": [{"role": "user", "content": message}],
             "stream": False,
-            "tools": [],
-            "tool_choice": "none",
         }
         async with httpx.AsyncClient(timeout=300) as client:
             response = await client.post(
