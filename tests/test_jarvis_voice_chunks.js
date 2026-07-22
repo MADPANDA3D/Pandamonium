@@ -44,13 +44,14 @@ assert.match(source, /WORKER_SPEECH_MAX_CHARS = 700/);
 assert.match(source, /VOICE_RMS_THRESHOLD = 0\.018/);
 assert.match(source, /VOICE_SAMPLE_INTERVAL_MS = 140/);
 assert.match(source, /MIN_VOICED_MS = 280/);
-assert.match(source, /let cueAudioContext = null/);
+assert.doesNotMatch(source, /cueAudioContext|unlockVoiceCueAudio|closeVoiceCueAudio/);
 assert.match(source, /let playbackAudioContext = null/);
+assert.match(source, /const VOICE_CUE_GAIN = 0\.12/);
 assert.match(source, /source\.connect\(playbackAnalyser\)/);
 assert.match(source, /playVoiceCue\('call'\)/);
 assert.match(source, /playVoiceCue\('heard'\)/);
-assert.match(source, /playVoiceCue\('thinking', 0\.1\)/);
-assert.match(source, /closeVoiceCueAudio\(\)/);
+assert.match(source, /await playVoiceCue\('thinking'\)/);
+assert.match(source, /gain\.connect\(playbackAnalyser\)/);
 assert.match(source, /captureVoicedMs \+= VOICE_SAMPLE_INTERVAL_MS/);
 assert.match(source, /captureVoicedMs < MIN_VOICED_MS/);
 assert.match(source, /echoCancellation: true/);
@@ -135,13 +136,25 @@ assert.match(source, /agent-tasks\/\$\{encodeURIComponent\(taskId\)\}\/cancel/);
 assert.match(source, /Voice ended\./);
 const endCallBody = source.match(/function endCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 const stopPlaybackBody = source.match(/function stopPlaybackAudio\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+const stopTracksBody = source.match(/function stopTracks\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+const requestMicrophoneBody = source.match(/async function requestMicrophone\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
+const recorderStopBody = source.match(/mediaRecorder\.onstop = async \(\) => \{([\s\S]*?)\n  \};/)?.[1] || '';
 const setStatusBody = source.match(/function setStatus\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.doesNotMatch(endCallBody, /workerStreams\.forEach|workerStreams\.clear|handledWorkerEventIds = new Set/);
 assert.doesNotMatch(endCallBody, /unmountOrganicSphere/);
 assert.doesNotMatch(setStatusBody, /unmountOrganicSphere/);
 assert.match(endCallBody, /deferCallPanelClose\(panel, closingGeneration\)/);
 assert.match(endCallBody, /closePlaybackAudio\(\)/);
+assert.match(endCallBody, /setAudioSessionType\('auto'\)/);
+assert.match(stopTracksBody, /setAudioSessionType\(isActive \? 'playback' : 'auto'\)/);
+assert.match(requestMicrophoneBody, /setAudioSessionType\('play-and-record'\)/);
 assert.doesNotMatch(stopPlaybackBody, /closePlaybackAudio|playbackAudioContext\.close/);
+assert.ok(
+  recorderStopBody.indexOf("await playVoiceCue('heard')") >= 0
+    && recorderStopBody.indexOf("await playVoiceCue('heard')") < recorderStopBody.indexOf('await transcribe(blob)')
+    && recorderStopBody.indexOf('await transcribe(blob)') < recorderStopBody.indexOf("await playVoiceCue('thinking')"),
+  'capture and thinking cues must announce their actual turn boundaries',
+);
 assert.match(source, /isActive = false;\s*restoreActivityGroupsToChat\(\)/);
 assert.match(source, /if \(!continuedTasks\) chatSessionId = null/);
 assert.match(source, /loadDocument\(documentId, \{ side: 'left' \}\)/);
@@ -160,6 +173,10 @@ assert.match(mobileStyle, /\.jarvis-organic-frame \{[\s\S]*?mask-image: radial-g
 assert.match(mobileStyle, /\.jarvis-call-talk,\s*\.jarvis-call-close \{[\s\S]*?min-width: 44px/);
 assert.match(mobileStyle, /\.jarvis-call-panel\.is-minimized \{\s*transform: translateX\(100%\)/);
 assert.match(mobileStyle, /\.jarvis-call-view-chat \{[\s\S]*?display: inline-flex/);
+assert.match(style, /padding: calc\(env\(safe-area-inset-top, 0px\) \+ 44px\)/);
+assert.match(style, /#pinned-tools-bar:empty \{ display: none; \}/);
+assert.match(style, /\.chat-input-bar \{\s*padding: 8px 10px;\s*gap: 4px;/);
+assert.match(style, /\.jarvis-input-sphere \{\s*width: 44px;\s*height: 44px;\s*flex-basis: 44px;/);
 assert.match(style, /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.jarvis-call-panel \{\s*transition: none;/);
 assert.match(style, /\.jarvis-activity-rail \{[\s\S]*?top: min\(34vw, 52dvh\)/);
 assert.match(style, /\.jarvis-task-activity > summary/);
@@ -181,12 +198,13 @@ assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
 assert.match(index, /id="jarvis-call-view-chat"[^>]*>View chat<\/button>/);
 assert.match(index, /<button[^>]*data-worker="hermes"[^>]*>\s*<span>Gordon<\/span><small>Hermes laptop · gated<\/small>\s*<\/button>/);
-assert.match(index, /style\.css\?v=20260722T022928Z/);
+assert.match(index, /style\.css\?v=20260722T162202Z/);
 assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260722T022928Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260722T162202Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v362'/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v363'/);
+assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
 assert.doesNotMatch(serviceWorker, /motivational-abstract\.webm/);
@@ -417,9 +435,18 @@ const executableSource = source
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
     "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, voiceTargetForModel, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
+assert.equal(placement.setAudioSessionType('playback'), false);
+sandbox.navigator.audioSession = { type: 'auto' };
+assert.equal(placement.setAudioSessionType('play-and-record'), true);
+assert.equal(sandbox.navigator.audioSession.type, 'play-and-record');
+assert.equal(placement.setAudioSessionType('playback'), true);
+assert.equal(sandbox.navigator.audioSession.type, 'playback');
+assert.equal(placement.setAudioSessionType('auto'), true);
+assert.equal(sandbox.navigator.audioSession.type, 'auto');
+delete sandbox.navigator.audioSession;
 placement.enableWorker('hermes');
 exposeCallPanel = true;
 exposeVoiceIdentity = true;

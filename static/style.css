@@ -4285,9 +4285,17 @@ body.bg-pattern-sparkles {
     }
     @media (max-width:768px){
       .box { max-height:none; }
-      .chat-container { padding:10px; flex:1; margin-top:0; padding-top:42px; min-height:0; }
+      .chat-container {
+        padding: calc(env(safe-area-inset-top, 0px) + 44px)
+          max(10px, env(safe-area-inset-right, 0px))
+          max(10px, env(safe-area-inset-bottom, 0px))
+          max(10px, env(safe-area-inset-left, 0px));
+        flex: 1;
+        margin-top: 0;
+        min-height: 0;
+      }
       .scroll-nav-btn { width:44px; height:44px; font-size:14px; margin-bottom:0; }
-      .send-btn { width:48px; height:48px !important; border-radius:12px; }
+      .send-btn { width:44px; height:44px !important; border-radius:12px; }
       .send-btn svg { width:22px; height:22px; }
       #compare-toggle-btn { display:none !important; }
       .section[draggable] { -webkit-user-drag:none; }
@@ -4346,8 +4354,8 @@ body.bg-pattern-sparkles {
       }
       /* Sidebar header — room for hamburger */
       .sidebar-header {
-        padding: 18px 12px 8px 12px;
-        min-height: 44px;
+        padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+        min-height: calc(env(safe-area-inset-top, 0px) + 44px);
       }
       .sidebar-brand-title {
         font-size: 1.2rem;
@@ -4411,10 +4419,10 @@ body.bg-pattern-sparkles {
       }
       /* Compact top bar on mobile — align with sidebar header */
       .chat-top-bar {
-        padding: 1px 8px;
-        min-height: 14px;
-        margin-top: -31px;
-        padding-top: 31px;
+        height: 44px;
+        min-height: 44px;
+        margin-top: -44px;
+        padding: 0 52px;
       }
       .chat-top-bar .chat-new-btn { display: none; }
       .chat-meta-overlay { font-size: 0.65em; max-width: 55%; overflow: visible; left: 50%; top: 50%; transform: translate(-50%, -50%); position: absolute; }
@@ -4427,9 +4435,9 @@ body.bg-pattern-sparkles {
       /* Incognito indicator — right side next to hamburger on mobile */
       .incognito-indicator {
         position: fixed;
-        top: 12px;
+        top: calc(env(safe-area-inset-top, 0px) + 6px);
         left: auto !important;
-        right: 48px !important;
+        right: calc(env(safe-area-inset-right, 0px) + 52px) !important;
         transform: none;
         width: 32px;
         height: 32px;
@@ -4489,9 +4497,9 @@ body.bg-pattern-sparkles {
       .hamburger-btn {
         width: 44px;
         height: 44px;
-        top: 6px;
+        top: env(safe-area-inset-top, 0px);
         left: auto !important;
-        right: 4px !important;
+        right: max(4px, env(safe-area-inset-right, 0px)) !important;
         -webkit-tap-highlight-color: transparent;
       }
       .hamburger-btn:hover,
@@ -4504,8 +4512,8 @@ body.bg-pattern-sparkles {
       .mobile-new-chat-btn {
         display: flex;
         position: fixed;
-        top: 12px;
-        left: 8px;
+        top: calc(env(safe-area-inset-top, 0px) + 6px);
+        left: max(8px, env(safe-area-inset-left, 0px));
         z-index: 210;
         width: 32px;
         height: 32px;
@@ -4574,10 +4582,13 @@ body.bg-pattern-sparkles {
         padding: 6px !important;
         border-radius: 12px !important;
       }
-      /* Safe area padding for notched devices */
+      /* Compact composer; the chat shell owns the device safe-area gutter. */
       .chat-input-bar {
-        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        padding: 8px 10px;
+        gap: 4px;
       }
+      #pinned-tools-bar:empty { display: none; }
+      .chat-input-bottom { margin-top: 0; }
       /* Mode toggle — larger touch targets */
       .mode-toggle {
         height: 34px;
@@ -41206,11 +41217,13 @@ body.theme-frosted .modal {
   html.jarvis-voice-active:not(.jarvis-voice-minimized),
   body.jarvis-voice-active:not(.jarvis-voice-minimized) {
     overflow: hidden;
+    background-color: #000;
+    background-image: none;
   }
   .jarvis-input-sphere {
-    width: 34px;
-    height: 34px;
-    flex-basis: 34px;
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
   }
   .jarvis-sphere-core {
     width: 27px;
@@ -41218,9 +41231,9 @@ body.theme-frosted .modal {
   }
   .jarvis-call-panel {
     inset: 0;
-    width: 100vw;
-    height: 100dvh;
-    min-height: 100dvh;
+    width: auto;
+    height: auto;
+    min-height: 0;
     padding: 0;
     background: #000;
     pointer-events: auto;

@@ -20,7 +20,6 @@ let sphereAnalyser = null;
 let sphereSource = null;
 let sphereAudioTimer = null;
 let sphereFreqData = null;
-let cueAudioContext = null;
 let playbackAudioContext = null;
 let playbackAnalyser = null;
 let chatSessionId = null;
@@ -73,6 +72,7 @@ const SPHERE_AUDIO_SMOOTHING = 0.75;
 const VOICE_RMS_THRESHOLD = 0.018;
 const VOICE_SAMPLE_INTERVAL_MS = 140;
 const MIN_VOICED_MS = 280;
+const VOICE_CUE_GAIN = 0.12;
 const VOICE_PREWARM_TIMEOUT_MS = 2500;
 const CALL_PANEL_TRANSITION_MS = 280;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
@@ -191,30 +191,38 @@ function stopSphereAudio() {
   }
 }
 
-function playVoiceCue(name, delay = 0) {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return Promise.resolve();
+function setAudioSessionType(type) {
+  if (!navigator.audioSession) return false;
   try {
-    if (!cueAudioContext || cueAudioContext.state === 'closed') cueAudioContext = new AudioContext();
-    cueAudioContext.resume?.().catch(() => {});
+    navigator.audioSession.type = type;
+    return navigator.audioSession.type === type;
+  } catch (error) {
+    console.warn('Jarvis audio session unavailable:', error);
+    return false;
+  }
+}
+
+async function playVoiceCue(name, delay = 0) {
+  try {
+    const context = await ensurePlaybackContext();
     const tones = {
       call: [[392, 0, 0.09], [523, 0.1, 0.14]],
       heard: [[784, 0, 0.07]],
       thinking: [[440, 0, 0.055], [554, 0.075, 0.075]],
     }[name] || [];
-    const base = cueAudioContext.currentTime + Math.max(0, delay) + 0.005;
+    const base = context.currentTime + Math.max(0, delay) + 0.005;
     tones.forEach(([frequency, offset, duration]) => {
-      const oscillator = cueAudioContext.createOscillator();
-      const gain = cueAudioContext.createGain();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
       const start = base + offset;
       const end = start + duration;
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(frequency, start);
       gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.linearRampToValueAtTime(0.055, start + 0.012);
+      gain.gain.linearRampToValueAtTime(VOICE_CUE_GAIN, start + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, end);
       oscillator.connect(gain);
-      gain.connect(cueAudioContext.destination);
+      gain.connect(playbackAnalyser);
       oscillator.start(start);
       oscillator.stop(end + 0.01);
     });
@@ -224,23 +232,6 @@ function playVoiceCue(name, delay = 0) {
     console.warn('Jarvis voice cue unavailable:', error);
     return Promise.resolve();
   }
-}
-
-function unlockVoiceCueAudio() {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
-  try {
-    if (!cueAudioContext || cueAudioContext.state === 'closed') cueAudioContext = new AudioContext();
-    cueAudioContext.resume?.().catch(() => {});
-  } catch (error) {
-    console.warn('Jarvis voice cue unavailable:', error);
-  }
-}
-
-function closeVoiceCueAudio() {
-  if (!cueAudioContext) return;
-  cueAudioContext.close().catch(() => {});
-  cueAudioContext = null;
 }
 
 function createPlaybackContext() {
@@ -259,6 +250,7 @@ function createPlaybackContext() {
 
 function unlockPlaybackAudio() {
   try {
+    setAudioSessionType('playback');
     const context = createPlaybackContext();
     if (!context) return;
     context.resume?.().catch(() => {});
@@ -1845,6 +1837,7 @@ function stopTracks() {
     mediaStream = null;
   }
   stopSphereAudio();
+  setAudioSessionType(isActive ? 'playback' : 'auto');
 }
 
 function clearTurnTimers() {
@@ -1915,6 +1908,7 @@ function startSilenceWatch(stream, callGeneration) {
 async function requestMicrophone(callGeneration = voiceCallGeneration) {
   let stream;
   try {
+    setAudioSessionType('play-and-record');
     stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -1924,6 +1918,7 @@ async function requestMicrophone(callGeneration = voiceCallGeneration) {
       },
     });
   } catch (error) {
+    setAudioSessionType(isActive ? 'playback' : 'auto');
     if (!isCurrentVoiceCall(callGeneration)) return null;
     throw error;
   }
@@ -1960,6 +1955,7 @@ async function startListening(requestedStream = null, callGeneration = voiceCall
     requestedStream.getTracks().forEach(track => track.stop());
     return;
   }
+  setAudioSessionType('play-and-record');
   mediaStream = requestedStream;
   startSphereStream(mediaStream);
   mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
@@ -2000,6 +1996,8 @@ async function startListening(requestedStream = null, callGeneration = voiceCall
 
     try {
       const turnStarted = performance.now();
+      await playVoiceCue('heard');
+      if (!isCurrentVoiceCall(callGeneration)) return;
       setStatus('transcribing');
       const timings = { turn_started_at: turnStarted };
       const sttStarted = performance.now();
@@ -2017,11 +2015,11 @@ async function startListening(requestedStream = null, callGeneration = voiceCall
         return;
       }
       renderLiveUser(text, timings, turnStarted);
-      playVoiceCue('heard');
 
       speechPaused = false;
-      playVoiceCue('thinking', 0.1);
       setStatus('thinking');
+      await playVoiceCue('thinking');
+      if (!isCurrentVoiceCall(callGeneration)) return;
       brainTurnInProgress = true;
       const brainStarted = performance.now();
       const response = await streamTurn(text, timings, turnStarted, callGeneration);
@@ -2066,9 +2064,11 @@ async function startListening(requestedStream = null, callGeneration = voiceCall
 }
 
 async function ensurePlaybackContext() {
+  setAudioSessionType('playback');
   const context = createPlaybackContext();
   if (!context) throw new Error('Audio playback is not supported by this browser.');
   await context.resume?.();
+  if (context.state !== 'running') throw new Error('Tap the microphone again to enable sound.');
   return context;
 }
 
@@ -2312,7 +2312,6 @@ async function startCall() {
     return;
   }
 
-  unlockVoiceCueAudio();
   unlockPlaybackAudio();
   if (!pendingVoiceTargetState) {
     const selectedTarget = voiceTargetForModel(window.sessionModule?.getCurrentModel?.());
@@ -2394,10 +2393,10 @@ function endCall() {
   stopPlaybackAudio();
   closePlaybackAudio();
   if (window.aiTTSManager) window.aiTTSManager.stop();
-  closeVoiceCueAudio();
   stopSphereAudio();
   stopListening();
   stopTracks();
+  setAudioSessionType('auto');
   voiceOrbMedia.stopMedia();
   setStatus('idle');
   const panel = $('jarvis-call-panel');
