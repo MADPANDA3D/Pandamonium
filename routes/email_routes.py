@@ -43,6 +43,7 @@ from src.upload_limits import read_upload_limited, EMAIL_COMPOSE_UPLOAD_MAX_BYTE
 
 from routes.email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, require_owner, require_user, _assert_owns_account,
+    _account_visible_to_owner,
     _q, _attach_compose_uploads, _cleanup_compose_uploads,
     _load_settings, _save_settings, _get_email_config,
     _send_smtp_message, _smtp_security_mode,
@@ -5148,6 +5149,21 @@ def setup_email_routes():
             return _RR("/?section=integrations&email_oauth_error=invalid_state")
         account_id = state_data.get("a", "")
         owner = state_data.get("o", "")
+        if not account_id or account_id.startswith("calendar:"):
+            return _RR("/?section=integrations&email_oauth_error=invalid_state")
+        from core.database import SessionLocal, EmailAccount
+        preflight_db = SessionLocal()
+        try:
+            target = preflight_db.query(EmailAccount).filter(EmailAccount.id == account_id).first()
+            if not target:
+                return _RR("/?section=integrations&email_oauth_error=account_not_found")
+            if owner and not _account_visible_to_owner(target, owner):
+                logger.warning("OAuth callback owner mismatch — rejecting token write")
+                return _RR("/?section=integrations&email_oauth_error=ownership_error")
+        finally:
+            preflight_db.close()
+        if not verify_oauth_state(state, consume=True):
+            return _RR("/?section=integrations&email_oauth_error=invalid_state")
         client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
         client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
         redirect_uri = (
@@ -5183,7 +5199,6 @@ def setup_email_routes():
                 display_name = ui_data.get("name", "")
         except Exception:
             pass
-        from core.database import SessionLocal, EmailAccount
         from src.secret_storage import encrypt as _enc
         db = SessionLocal()
         try:
@@ -5191,7 +5206,7 @@ def setup_email_routes():
             if not row:
                 return _RR("/?section=integrations&email_oauth_error=account_not_found")
             # SECURITY: verify the account belongs to the initiating user.
-            if owner and row.owner and row.owner != owner:
+            if owner and not _account_visible_to_owner(row, owner):
                 logger.warning("OAuth callback owner mismatch — rejecting token write")
                 return _RR("/?section=integrations&email_oauth_error=ownership_error")
             row.oauth_provider = "google"

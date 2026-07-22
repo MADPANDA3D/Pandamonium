@@ -24,6 +24,7 @@ import json
 import re
 import html
 import logging
+import threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
@@ -38,6 +39,11 @@ from src.auth_helpers import _auth_disabled, get_current_user
 from src.secret_storage import decrypt as _decrypt
 
 logger = logging.getLogger(__name__)
+
+_OAUTH_STATE_TTL_SECONDS = 600
+_OAUTH_STATE_CLOCK_SKEW_SECONDS = 30
+_consumed_oauth_states: dict[str, float] = {}
+_oauth_state_lock = threading.Lock()
 
 
 class EmailNotConfiguredError(RuntimeError):
@@ -75,26 +81,59 @@ def make_oauth_state(account_id: str, owner: str) -> str:
     import hmac as _hmac, hashlib as _hl, secrets as _sec
     from src.secret_storage import _load_or_create_key
     nonce = _sec.token_hex(16)
-    payload = json.dumps({"a": account_id, "o": owner, "n": nonce}, separators=(",", ":"))
+    payload = json.dumps(
+        {"a": account_id, "o": owner, "n": nonce, "iat": int(time.time())},
+        separators=(",", ":"),
+    )
     sig = _hmac.new(_load_or_create_key(), payload.encode(), _hl.sha256).hexdigest()
     return base64.urlsafe_b64encode(f"{payload}|{sig}".encode()).decode()
 
 
-def verify_oauth_state(state: str) -> dict | None:
-    """Verify an OAuth state token's HMAC signature.
+def verify_oauth_state(state: str, *, consume: bool = False) -> dict | None:
+    """Verify a fresh OAuth state token and optionally consume it once.
 
-    Returns the decoded payload dict ({"a", "o", "n"}) on success, or None if
-    the token is malformed, tampered, or signed with a different key.
+    Returns the decoded payload dict on success, or None if the token is
+    malformed, tampered, expired, future-dated, or already consumed.
     """
     import hmac as _hmac, hashlib as _hl
     from src.secret_storage import _load_or_create_key
     try:
+        if not isinstance(state, str) or not state or len(state) > 4096:
+            return None
         decoded = base64.urlsafe_b64decode(state.encode()).decode()
         payload, sig = decoded.rsplit("|", 1)
         expected = _hmac.new(_load_or_create_key(), payload.encode(), _hl.sha256).hexdigest()
         if not _hmac.compare_digest(sig, expected):
             return None
-        return json.loads(payload)
+        data = json.loads(payload)
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("a"), str)
+            or not data["a"]
+            or not isinstance(data.get("o"), str)
+            or not isinstance(data.get("n"), str)
+            or not data["n"]
+            or type(data.get("iat")) is not int
+        ):
+            return None
+        now = time.time()
+        issued_at = data["iat"]
+        if (
+            issued_at > now + _OAUTH_STATE_CLOCK_SKEW_SECONDS
+            or now - issued_at > _OAUTH_STATE_TTL_SECONDS
+        ):
+            return None
+        if consume:
+            # ponytail: process-local replay cache fits the documented
+            # single-worker deployment; use a shared TTL store before scaling.
+            with _oauth_state_lock:
+                for used_sig, expires_at in list(_consumed_oauth_states.items()):
+                    if expires_at < now:
+                        _consumed_oauth_states.pop(used_sig, None)
+                if sig in _consumed_oauth_states:
+                    return None
+                _consumed_oauth_states[sig] = issued_at + _OAUTH_STATE_TTL_SECONDS
+        return data
     except Exception:
         return None
 

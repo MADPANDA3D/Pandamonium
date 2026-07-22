@@ -18,7 +18,7 @@ network.
 
 import asyncio
 import logging
-from datetime import timezone
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,34 @@ def build_event_ical(ev: dict) -> str:
 
     cal.add_component(ve)
     return cal.to_ical().decode("utf-8")
+
+
+def _merge_event_ical(existing_ical: str | bytes, ev: dict) -> str:
+    """Replace Odysseus-owned fields on one remote master VEVENT."""
+    from icalendar import Calendar
+
+    if not isinstance(existing_ical, (str, bytes)):
+        raise ValueError("remote event data is not iCalendar text")
+    calendar = Calendar.from_ical(existing_ical)
+    if calendar.name != "VCALENDAR":
+        raise ValueError("remote event data is not a VCALENDAR")
+
+    uid = str(ev.get("uid") or "")
+    masters = [
+        component
+        for component in calendar.walk("VEVENT")
+        if str(component.get("UID") or "") == uid and "RECURRENCE-ID" not in component
+    ]
+    if len(masters) != 1:
+        raise ValueError("remote master VEVENT is missing or ambiguous")
+
+    replacement = Calendar.from_ical(build_event_ical(ev)).walk("VEVENT")[0]
+    master = masters[0]
+    for name in ("SUMMARY", "DESCRIPTION", "LOCATION", "DTSTART", "DTEND", "RRULE", "EXDATE"):
+        master.pop(name, None)
+        if name in replacement:
+            master[name] = replacement[name]
+    return calendar.to_ical().decode("utf-8")
 
 
 def find_remote_calendar(calendars, local_cal_id: str, owner: str = "", account_id: str = ""):
@@ -150,8 +178,19 @@ def push_event(calendars, local_cal_id: str, ev: dict, *, delete: bool = False,
             "remote_etag": _resource_etag(existing),
         }
 
-    ical = build_event_ical(ev)
     if existing is not None:
+        try:
+            ical = _merge_event_ical(existing.data, ev)
+        except Exception as exc:
+            logger.warning(
+                "CalDAV write-back refused unsafe remote event update (%s)",
+                type(exc).__name__,
+            )
+            return {
+                "ok": False,
+                "error": "remote event could not be parsed safely; update was not applied",
+                "calendar_url": remote_url,
+            }
         existing.data = ical
         existing.save()
         return {
@@ -161,6 +200,7 @@ def push_event(calendars, local_cal_id: str, ev: dict, *, delete: bool = False,
             "remote_href": _resource_href(existing),
             "remote_etag": _resource_etag(existing),
         }
+    ical = build_event_ical(ev)
     created = remote.save_event(ical)
     return {
         "ok": True,
@@ -175,6 +215,9 @@ def _discover_calendars(client):
     """Discover the principal's calendars, falling back to the URL itself —
     same strategy as the pull path."""
     from caldav.lib.error import AuthorizationError, NotFoundError
+    from src.caldav_sync import _is_google_caldav_events_url
+    if _is_google_caldav_events_url(str(client.url)):
+        return [client.calendar(url=str(client.url))]
     try:
         return client.principal().calendars()
     except (AuthorizationError, NotFoundError):
@@ -187,11 +230,11 @@ def _discover_calendars(client):
 
 
 def _writeback_blocking(local_cal_id, ev, delete, url, username, password,
-                        owner="", account_id="") -> dict:
+                        owner="", account_id="", auth_type=None) -> dict:
     from src.caldav_sync import _build_dav_client
     # Redirects disabled here too: the write-back path opens its own DAVClient,
     # so it needs the same SSRF-via-redirect protection as the pull path.
-    client = _build_dav_client(url, username, password)
+    client = _build_dav_client(url, username, password, auth_type)
     try:
         calendars = _discover_calendars(client)
         if not calendars:
@@ -261,8 +304,7 @@ async def writeback_event(owner: str, calendar_source: str, calendar_id: str,
     if calendar_source != "caldav":
         return {"skipped": "not a caldav calendar"}
     try:
-        from src.caldav_sync import _load_caldav_accounts
-        from src.secret_storage import decrypt
+        from src.caldav_sync import _load_caldav_accounts, _resolve_caldav_auth
         from core.database import CalendarCal, SessionLocal
 
         accounts = _load_caldav_accounts(owner)
@@ -285,9 +327,11 @@ async def writeback_event(owner: str, calendar_source: str, calendar_id: str,
         if acc is None:
             acc = accounts[0]
 
+        if acc.get("read_only"):
+            return {"ok": True, "skipped": "calendar account is read-only"}
+
         url = (acc.get("url") or "").strip()
-        user = (acc.get("username") or "").strip()
-        pw = decrypt(acc.get("password") or "")
+        user, pw, auth_type = await asyncio.to_thread(_resolve_caldav_auth, owner, acc)
         if not (url and user and pw):
             return {"skipped": "caldav account credentials incomplete"}
         from src.caldav_sync import validate_caldav_url
@@ -297,9 +341,10 @@ async def writeback_event(owner: str, calendar_source: str, calendar_id: str,
             logger.warning("CalDAV write-back URL rejected: %s", e)
             return {"ok": False, "error": str(e)[:200]}
         acc_id = acc.get("id") or ""
-        result = await asyncio.to_thread(
-            _writeback_blocking, calendar_id, ev, delete, url, user, pw, owner, acc_id
-        )
+        args = (calendar_id, ev, delete, url, user, pw, owner, acc_id)
+        if auth_type:
+            args += (auth_type,)
+        result = await asyncio.to_thread(_writeback_blocking, *args)
         _persist_writeback_result(owner, calendar_id, (ev or {}).get("uid", ""), result, delete=delete)
         if not result.get("ok"):
             logger.warning("CalDAV write-back did not apply: %s", result.get("error") or result)

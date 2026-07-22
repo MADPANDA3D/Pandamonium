@@ -5,8 +5,22 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+import pytest
 
 from routes import voice_routes
+
+
+@pytest.fixture(autouse=True)
+def _server_tts_settings(monkeypatch):
+    monkeypatch.setattr(
+        voice_routes,
+        "load_settings",
+        lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+    )
+
+
+class FakeServerTTS:
+    available = True
 
 
 class FakeSessionManager:
@@ -39,7 +53,7 @@ def _client(manager: FakeSessionManager, *, api_token: bool = False) -> TestClie
             request.state.api_token_owner = request.headers.get("X-Test-Owner")
         return await call_next(request)
 
-    app.include_router(voice_routes.setup_voice_routes(manager))
+    app.include_router(voice_routes.setup_voice_routes(manager, FakeServerTTS()))
     return TestClient(app)
 
 

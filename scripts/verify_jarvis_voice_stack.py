@@ -63,6 +63,7 @@ def main() -> None:
 
     checks = {
         "raw_audio_disabled": voice.get("stores_raw_audio") is False,
+        "server_tts_ready": voice.get("server_tts_ready") is True,
         "stt_ready": bool(stt.get("available")),
         "tts_ready": bool(tts.get("ready") or tts.get("available")),
         "brain_identified": bool(runtime.get("brain_model")),
@@ -71,7 +72,13 @@ def main() -> None:
             for row in workers.values()
         ),
     }
-    required = ["raw_audio_disabled", "stt_ready", "tts_ready", "brain_identified"]
+    required = [
+        "raw_audio_disabled",
+        "server_tts_ready",
+        "stt_ready",
+        "tts_ready",
+        "brain_identified",
+    ]
     if args.require_workers:
         required.append("workers_connected")
     failed = [name for name in required if not checks[name]]

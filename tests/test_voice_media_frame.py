@@ -130,6 +130,11 @@ def test_voice_response_never_persists_frame(monkeypatch, tmp_path):
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    monkeypatch.setattr(
+        voice_routes,
+        "load_settings",
+        lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+    )
     monkeypatch.setattr(chat_helpers, "model_supports_vision", lambda *_args: False)
     monkeypatch.setattr(
         document_processor,
@@ -138,7 +143,9 @@ def test_voice_response_never_persists_frame(monkeypatch, tmp_path):
     )
 
     app = FastAPI()
-    app.include_router(voice_routes.setup_voice_routes(Manager()))
+    app.include_router(
+        voice_routes.setup_voice_routes(Manager(), SimpleNamespace(available=True))
+    )
     client = TestClient(app)
     session_id = client.post("/api/voice/sessions", json={}).json()["id"]
     encoded = base64.b64encode(ONE_PIXEL_PNG).decode("ascii")

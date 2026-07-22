@@ -2,11 +2,13 @@
 import json
 import os
 from typing import Optional
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from src.auth_helpers import get_current_user
 from src.constants import USER_PREFS_FILE
 
 PREFS_FILE = USER_PREFS_FILE
+PROTECTED_PREF_KEYS = frozenset({"caldav", "caldav_accounts"})
+FALLBACK_OWNER = os.environ.get("ODYSSEUS_FALLBACK_OWNER", "owner@localhost")
 
 
 def _load():
@@ -66,23 +68,56 @@ def _save_for_user(user: Optional[str], prefs: dict):
     _save(all_prefs)
 
 
+def _public_for_user(user: Optional[str] = None) -> dict:
+    """Return browser-safe prefs, migrating and stripping CalDAV secrets."""
+    prefs = _load_for_user(user)
+    try:
+        from src.caldav_sync import _load_caldav_accounts
+
+        # Calendar routes assign auth-disabled requests to the stable fallback
+        # owner. Use that same owner during legacy secret migration, otherwise
+        # a prefs read would strand credentials under owner=NULL.
+        credential_owner = user or FALLBACK_OWNER
+        accounts = _load_caldav_accounts(credential_owner, prefs_owner=user)
+    except Exception:
+        # Fail closed if the server-only credential store is unavailable.
+        accounts = prefs.get("caldav_accounts", [])
+    safe = dict(prefs)
+    safe.pop("caldav", None)
+    if isinstance(accounts, list) and (accounts or "caldav_accounts" in safe):
+        safe["caldav_accounts"] = [
+            {
+                key: value
+                for key, value in account.items()
+                if key not in {"password", "oauth_access_token", "oauth_refresh_token"}
+            }
+            for account in accounts
+            if isinstance(account, dict)
+        ]
+    else:
+        safe.pop("caldav_accounts", None)
+    return safe
+
+
 def setup_prefs_routes():
     router = APIRouter(prefix="/api/prefs", tags=["preferences"])
 
     @router.get("")
     async def get_all_prefs(request: Request):
         user = get_current_user(request)
-        return _load_for_user(user)
+        return _public_for_user(user)
 
     @router.get("/{key}")
     async def get_pref(request: Request, key: str):
         user = get_current_user(request)
-        prefs = _load_for_user(user)
+        prefs = _public_for_user(user)
         return {"key": key, "value": prefs.get(key)}
 
     @router.put("/{key}")
     async def set_pref(request: Request, key: str, body: dict):
         user = get_current_user(request)
+        if key in PROTECTED_PREF_KEYS:
+            raise HTTPException(403, "CalDAV connections must be changed through Calendar Integrations")
         prefs = _load_for_user(user)
         prefs[key] = body.get("value")
         _save_for_user(user, prefs)

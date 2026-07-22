@@ -45,6 +45,8 @@ assert.match(source, /VOICE_RMS_THRESHOLD = 0\.018/);
 assert.match(source, /VOICE_SAMPLE_INTERVAL_MS = 140/);
 assert.match(source, /MIN_VOICED_MS = 280/);
 assert.match(source, /let cueAudioContext = null/);
+assert.match(source, /let playbackAudioContext = null/);
+assert.match(source, /source\.connect\(playbackAnalyser\)/);
 assert.match(source, /playVoiceCue\('call'\)/);
 assert.match(source, /playVoiceCue\('heard'\)/);
 assert.match(source, /playVoiceCue\('thinking', 0\.1\)/);
@@ -132,11 +134,14 @@ assert.match(source, /window\.confirm\('Cancel the active task\?'\)/);
 assert.match(source, /agent-tasks\/\$\{encodeURIComponent\(taskId\)\}\/cancel/);
 assert.match(source, /Voice ended\./);
 const endCallBody = source.match(/function endCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+const stopPlaybackBody = source.match(/function stopPlaybackAudio\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 const setStatusBody = source.match(/function setStatus\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.doesNotMatch(endCallBody, /workerStreams\.forEach|workerStreams\.clear|handledWorkerEventIds = new Set/);
 assert.doesNotMatch(endCallBody, /unmountOrganicSphere/);
 assert.doesNotMatch(setStatusBody, /unmountOrganicSphere/);
 assert.match(endCallBody, /deferCallPanelClose\(panel, closingGeneration\)/);
+assert.match(endCallBody, /closePlaybackAudio\(\)/);
+assert.doesNotMatch(stopPlaybackBody, /closePlaybackAudio|playbackAudioContext\.close/);
 assert.match(source, /isActive = false;\s*restoreActivityGroupsToChat\(\)/);
 assert.match(source, /if \(!continuedTasks\) chatSessionId = null/);
 assert.match(source, /loadDocument\(documentId, \{ side: 'left' \}\)/);
@@ -148,6 +153,13 @@ assert.match(style, /body\.jarvis-voice-active \.msg table \{\s*max-width: none/
 assert.match(style, /\.jarvis-call-panel \{[\s\S]*?right: 0;[\s\S]*?width: 34vw;[\s\S]*?background: transparent/);
 assert.match(style, /\.jarvis-call-panel \{[\s\S]*?transform: translateX\(100%\);[\s\S]*?transition: transform 280ms/);
 assert.match(style, /\.jarvis-call-panel\.is-open \{\s*transform: translateX\(0\)/);
+const mobileStyle = style.match(/@media \(max-width: 720px\) \{([\s\S]*?)\n\}\n@media \(prefers-reduced-motion: reduce\)/)?.[1] || '';
+assert.match(mobileStyle, /\.jarvis-agent-workspace,\s*\.jarvis-activity-rail \{\s*display: none/);
+assert.match(mobileStyle, /width: min\(64vw, 42dvh, 280px\)/);
+assert.match(mobileStyle, /\.jarvis-organic-frame \{[\s\S]*?mask-image: radial-gradient/);
+assert.match(mobileStyle, /\.jarvis-call-talk,\s*\.jarvis-call-close \{[\s\S]*?min-width: 44px/);
+assert.match(mobileStyle, /\.jarvis-call-panel\.is-minimized \{\s*transform: translateX\(100%\)/);
+assert.match(mobileStyle, /\.jarvis-call-view-chat \{[\s\S]*?display: inline-flex/);
 assert.match(style, /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.jarvis-call-panel \{\s*transition: none;/);
 assert.match(style, /\.jarvis-activity-rail \{[\s\S]*?top: min\(34vw, 52dvh\)/);
 assert.match(style, /\.jarvis-task-activity > summary/);
@@ -167,20 +179,24 @@ assert.doesNotMatch(index, /jarvis-task-timeline/);
 assert.match(index, /id="jarvis-activity-rail"[^>]*role="region"[^>]*aria-label="Live worker activity"/);
 assert.match(index, /id="jarvis-agent-cancel"[^>]*hidden disabled/);
 assert.match(index, /title="End voice — task continues" aria-label="End voice — task continues"/);
+assert.match(index, /id="jarvis-call-view-chat"[^>]*>View chat<\/button>/);
 assert.match(index, /<button[^>]*data-worker="hermes"[^>]*>\s*<span>Gordon<\/span><small>Hermes laptop · gated<\/small>\s*<\/button>/);
-assert.match(index, /style\.css\?v=20260715T235844Z/);
+assert.match(index, /style\.css\?v=20260722T022928Z/);
 assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260719T024058Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260722T022928Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v361'/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v362'/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
 assert.doesNotMatch(serviceWorker, /motivational-abstract\.webm/);
 assert.doesNotMatch(documentSource, /_ensureAgentMode/);
 assert.match(source, /VOICE_PREWARM_TIMEOUT_MS = 2500/);
 assert.match(source, /return Promise\.allSettled\(jobs\)\.then/);
-assert.match(source, /boundedPrewarm\('client_tts_probe', \(\) => window\.aiTTSManager\.checkAvailability\(\)\)/);
+assert.doesNotMatch(source, /client_tts_probe|manager\.play\(text\)|speechSynthesis\.speak/);
+const queuedSpeechBody = source.match(/async function speak\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
+assert.match(queuedSpeechBody, /playBufferedAudio\('\/api\/tts\/synthesize'/);
+assert.doesNotMatch(queuedSpeechBody, /aiTTSManager|useBrowserTTS|\.play\(/);
 const startCallSource = source.match(/async function startCall\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 const streamTurnSource = source.match(/async function streamTurn\([^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
 assert.match(source, /const VOICE_TARGET_LABELS = \{ \.\.\.WORKER_LABELS, hermes: 'Gordon' \}/);
@@ -198,12 +214,14 @@ assert.ok(
   'the selected voice target must persist before the response request starts',
 );
 const microphoneStart = startCallSource.indexOf('const microphoneReady = requestMicrophone(callGeneration)');
+const playbackUnlock = startCallSource.indexOf('unlockPlaybackAudio()');
 const sessionStart = startCallSource.indexOf('const sessionReady = createSession(callGeneration)');
 const selectedModelTarget = startCallSource.indexOf('voiceTargetForModel(window.sessionModule?.getCurrentModel?.())');
 const readinessWait = startCallSource.indexOf('await Promise.all([microphoneReady, sessionReady])');
 const readinessCue = startCallSource.indexOf("await playVoiceCue('call')");
 const recorderStart = startCallSource.indexOf('await startListening(requestedStream, callGeneration)');
 assert.ok(microphoneStart >= 0 && microphoneStart < readinessWait);
+assert.ok(playbackUnlock >= 0 && playbackUnlock < microphoneStart, 'playback must unlock during the initiating tap');
 assert.ok(sessionStart >= 0 && sessionStart < readinessWait);
 assert.ok(selectedModelTarget >= 0 && selectedModelTarget < sessionStart);
 assert.ok(startCallSource.indexOf('prewarmVoiceStack().catch') < readinessWait);
@@ -235,6 +253,20 @@ const chat = {
 const rail = {
   appendChild(node) { moveNode(node, rail, railOrder); },
   querySelectorAll() { return [...railOrder]; },
+};
+const makeClassList = () => {
+  const values = new Set();
+  return {
+    add(value) { values.add(value); },
+    remove(value) { values.delete(value); },
+    contains(value) { return values.has(value); },
+    toggle(value, force) {
+      const next = force === undefined ? !values.has(value) : Boolean(force);
+      if (next) values.add(value);
+      else values.delete(value);
+      return next;
+    },
+  };
 };
 const acknowledgement = {
   classList: { contains: value => value === 'msg-ai' },
@@ -303,6 +335,13 @@ let orbUnmounts = 0;
 let exposeFakeOrb = false;
 const fakeOrb = { classList: { remove(value) { if (value === 'has-frame') orbUnmounts += 1; } } };
 let exposeVoiceIdentity = false;
+let exposeCallPanel = false;
+const callPanel = {
+  classList: makeClassList(),
+  attributes: {},
+  setAttribute(name, value) { this.attributes[name] = value; },
+  removeAttribute(name) { delete this.attributes[name]; },
+};
 const callName = { textContent: '' };
 const callDetail = { textContent: '' };
 const callTalk = {
@@ -313,17 +352,20 @@ const callTalk = {
 const inputSphere = {
   title: '',
   attributes: {},
+  focusOptions: null,
+  focus(options) { this.focusOptions = options; },
   setAttribute(name, value) { this.attributes[name] = value; },
 };
 const fakeDocument = {
   readyState: 'loading',
-  documentElement: { dataset: {}, classList: { toggle() {} } },
-  body: { classList: { toggle() {} } },
+  documentElement: { dataset: {}, classList: makeClassList() },
+  body: { classList: makeClassList() },
   addEventListener() {},
   getElementById(id) {
     if (id === 'chat-history') return chat;
     if (id === 'jarvis-activity-rail') return rail;
     if (id === 'jarvis-call-orb' && exposeFakeOrb) return fakeOrb;
+    if (id === 'jarvis-call-panel' && exposeCallPanel) return callPanel;
     if (exposeVoiceIdentity && id === 'jarvis-call-detail') return callDetail;
     if (exposeVoiceIdentity && id === 'jarvis-call-talk') return callTalk;
     if (exposeVoiceIdentity && id === 'jarvis-input-sphere') return inputSphere;
@@ -375,10 +417,59 @@ const executableSource = source
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
     "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, voiceTargetForModel, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; } };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, voiceTargetForModel, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 placement.enableWorker('hermes');
+exposeCallPanel = true;
+exposeVoiceIdentity = true;
+placement.setActive(true);
+placement.setCallPanelMinimized(true);
+assert.equal(placement.isCallPanelMinimized(), true);
+assert.equal(placement.getVoiceState().isActive, true, 'viewing chat must preserve the voice session');
+assert.equal(fakeDocument.body.classList.contains('jarvis-voice-minimized'), true);
+assert.equal(callPanel.inert, true);
+assert.equal(callPanel.attributes['aria-hidden'], 'true');
+assert.equal(inputSphere.focusOptions?.preventScroll, true, 'View chat moves focus outside the inert panel');
+placement.setCallPanelMinimized(false);
+assert.equal(placement.isCallPanelMinimized(), false);
+assert.equal(callPanel.inert, false);
+placement.setActive(false);
+exposeCallPanel = false;
+exposeVoiceIdentity = false;
+
+let playbackCloses = 0;
+sandbox.AudioContext = class FakePlaybackAudioContext {
+  constructor() {
+    this.state = 'suspended';
+    this.sampleRate = 48000;
+    this.destination = {};
+  }
+  createAnalyser() {
+    return { fftSize: 0, frequencyBinCount: 8, connect() {}, disconnect() {}, getByteFrequencyData() {} };
+  }
+  createBuffer() { return {}; }
+  createBufferSource() {
+    return { connect() {}, disconnect() {}, start() { this.onended?.(); } };
+  }
+  resume() {
+    this.state = 'running';
+    return Promise.resolve();
+  }
+  close() {
+    this.state = 'closed';
+    playbackCloses += 1;
+    return Promise.resolve();
+  }
+};
+placement.unlockPlaybackAudio();
+const unlockedPlaybackContext = placement.getPlaybackContext();
+assert.equal(unlockedPlaybackContext.state, 'running');
+placement.stopPlaybackAudio();
+assert.equal(playbackCloses, 0, 'turn and orb cleanup must keep mobile playback unlocked');
+placement.closePlaybackAudio();
+assert.equal(playbackCloses, 1, 'ending voice closes the dedicated playback context');
+delete sandbox.AudioContext;
 assert.equal(placement.voiceTargetForModel('hermes-agent'), 'hermes');
 assert.equal(placement.voiceTargetForModel('provider/hermes-agent'), 'hermes');
 assert.equal(placement.voiceTargetForModel('qwen3.5-jarvis-v5:latest'), 'jarvis');
@@ -509,9 +600,8 @@ delete sandbox.matchMedia;
 
 (async () => {
   const results = await placement.prewarmVoiceStack();
-  assert.equal(results.length, 2);
+  assert.equal(results.length, 1);
   assert.equal(results[0].status, 'fulfilled');
-  assert.equal(results[1].status, 'rejected');
 
   let resolveMicrophone;
   let stopped = false;

@@ -1,13 +1,15 @@
 """Calendar routes — local SQLite-backed calendar CRUD."""
 
+import asyncio
 import logging
 import json
 import re
+import time
 import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import or_, and_
 from dateutil.rrule import rrulestr
@@ -18,6 +20,8 @@ from src.upload_limits import read_upload_limited, ICS_MAX_BYTES
 from src.upload_handler import reserve_upload_references
 
 logger = logging.getLogger(__name__)
+
+GOOGLE_CALENDAR_SCOPE = "openid email https://www.googleapis.com/auth/calendar.events"
 
 
 def _ics_naive_dtstart(dt):
@@ -717,11 +721,189 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
         return _load_caldav_accounts(owner)
 
     def _save_caldav_accounts(owner: str, accounts: list) -> None:
-        from routes.prefs_routes import _load_for_user, _save_for_user
-        prefs = _load_for_user(owner) or {}
-        prefs["caldav_accounts"] = accounts
-        prefs.pop("caldav", None)
-        _save_for_user(owner, prefs)
+        from src.caldav_sync import _save_caldav_accounts as _save
+        _save(owner, accounts)
+
+    def _client_password(body: dict) -> str:
+        password = body.get("password") or ""
+        if not isinstance(password, str):
+            raise HTTPException(400, "Password must be a string")
+        from src.secret_storage import is_encrypted
+
+        if is_encrypted(password):
+            raise HTTPException(400, "Encrypted credential values are not accepted")
+        return password
+
+    def _google_calendar_redirect_uri(request: Request) -> str:
+        configured = (_os.environ.get("GOOGLE_CALENDAR_OAUTH_REDIRECT_URI") or "").strip()
+        if configured:
+            return configured
+        public_url = (_os.environ.get("APP_PUBLIC_URL") or "").strip().rstrip("/")
+        if public_url:
+            return f"{public_url}/api/calendar/oauth/google/callback"
+        return str(request.base_url).rstrip("/") + "/api/calendar/oauth/google/callback"
+
+    # ── Google Calendar OAuth ─────────────────────────────────────────────────
+
+    @router.get("/oauth/google/authorize")
+    async def google_calendar_oauth_authorize(
+        request: Request,
+        account_id: str = Query(""),
+    ):
+        import urllib.parse
+        from fastapi.responses import RedirectResponse
+        from routes.email_helpers import make_oauth_state
+
+        owner = _require_user(request)
+        if account_id:
+            account = next(
+                (item for item in _get_caldav_accounts(owner)
+                 if item.get("id") == account_id and item.get("provider") == "google"),
+                None,
+            )
+            if account is None:
+                raise HTTPException(404, "Google Calendar account not found")
+        client_id = _os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+        client_secret = _os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        if not client_id or not client_secret:
+            raise HTTPException(400, "Google OAuth client credentials are not configured")
+        params = urllib.parse.urlencode({
+            "client_id": client_id,
+            "redirect_uri": _google_calendar_redirect_uri(request),
+            "response_type": "code",
+            "scope": GOOGLE_CALENDAR_SCOPE,
+            "access_type": "offline",
+            "prompt": "consent",
+            "state": make_oauth_state(f"calendar:{account_id or 'new'}", owner),
+        })
+        return RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+    @router.get("/oauth/google/callback")
+    async def google_calendar_oauth_callback(
+        request: Request,
+        code: str = Query(None),
+        state: str = Query(None),
+        error: str = Query(None),
+    ):
+        import urllib.parse
+        import httpx
+        from fastapi.responses import RedirectResponse
+        from routes.email_helpers import verify_oauth_state
+        from src.caldav_credentials import (
+            GOOGLE_REFRESH_TOKEN,
+            has_secret,
+            set_credentials,
+        )
+
+        def failed(reason: str):
+            return RedirectResponse(f"/?section=integrations&calendar_oauth_error={reason}")
+
+        if error:
+            return failed("google_error")
+        if not code or not state:
+            return failed("missing_code")
+        state_data = verify_oauth_state(state)
+        state_account = (state_data or {}).get("a", "")
+        owner = (state_data or {}).get("o", "")
+        if not state_data or not state_account.startswith("calendar:") or not owner:
+            return failed("invalid_state")
+        try:
+            if _require_user(request) != owner:
+                return failed("ownership_error")
+        except HTTPException:
+            return failed("ownership_error")
+
+        target_id = state_account.removeprefix("calendar:")
+        accounts = _get_caldav_accounts(owner)
+        account = None
+        if target_id != "new":
+            account = next(
+                (item for item in accounts
+                 if item.get("id") == target_id and item.get("provider") == "google"),
+                None,
+            )
+            if account is None:
+                return failed("account_not_found")
+
+        client_id = _os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+        client_secret = _os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        if not client_id or not client_secret:
+            return failed("server_not_configured")
+        if not verify_oauth_state(state, consume=True):
+            return failed("invalid_state")
+        try:
+            response = await asyncio.to_thread(
+                httpx.post,
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": _google_calendar_redirect_uri(request),
+                    "grant_type": "authorization_code",
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            token_data = response.json()
+            access_token = token_data.get("access_token") or ""
+            if not access_token:
+                return failed("token_exchange_failed")
+            userinfo = await asyncio.to_thread(
+                httpx.get,
+                "https://www.googleapis.com/oauth2/v1/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            userinfo.raise_for_status()
+            email_address = (userinfo.json().get("email") or "").strip()
+            if not email_address:
+                return failed("account_lookup_failed")
+        except Exception:
+            logger.warning("Google Calendar OAuth exchange failed")
+            return failed("token_exchange_failed")
+
+        if target_id == "new":
+            account = next(
+                (item for item in accounts
+                 if item.get("provider") == "google" and item.get("username") == email_address),
+                None,
+            )
+        refresh_token = token_data.get("refresh_token") or ""
+        if account is None:
+            if not refresh_token:
+                return failed("missing_refresh_token")
+            account = {"id": str(uuid.uuid4())}
+            accounts.append(account)
+        elif not refresh_token:
+            same_identity = (
+                (account.get("username") or "").strip().casefold()
+                == email_address.casefold()
+            )
+            if not same_identity or not has_secret(
+                owner, account.get("id") or "", GOOGLE_REFRESH_TOKEN
+            ):
+                return failed("missing_refresh_token")
+
+        account.update({
+            "provider": "google",
+            "label": "Google Calendar",
+            "url": "https://apidata.googleusercontent.com/caldav/v2/"
+                   + urllib.parse.quote(email_address, safe="") + "/events",
+            "username": email_address,
+            "oauth_token_expiry": str(int(time.time()) + int(token_data.get("expires_in", 3600))),
+            "oauth_scope": token_data.get("scope") or GOOGLE_CALENDAR_SCOPE,
+            "read_only": False,
+        })
+        credentials = {
+            "basic_password": "",
+            "google_access_token": access_token,
+        }
+        if refresh_token:
+            credentials["google_refresh_token"] = refresh_token
+        set_credentials(owner, account["id"], **credentials)
+        _save_caldav_accounts(owner, accounts)
+        return RedirectResponse("/?section=integrations&calendar_oauth_success=1")
 
     # ── CalDAV config routes (backward-compat single-account API) ────────────
 
@@ -733,14 +915,8 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
         if not accounts:
             return {"url": "", "username": "", "password": "", "has_password": False, "local": True}
         first = accounts[0]
-        pw = first.get("password") or ""
-        has_pw = False
-        if pw:
-            try:
-                from src.secret_storage import decrypt
-                has_pw = bool(decrypt(pw))
-            except Exception:
-                has_pw = bool(pw)
+        from src.caldav_credentials import BASIC_PASSWORD, has_secret
+        has_pw = has_secret(owner, first.get("id") or "", BASIC_PASSWORD)
         return {
             "url": first.get("url", "") or "",
             "username": first.get("username", "") or "",
@@ -757,6 +933,7 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             body = await request.json()
         except Exception:
             body = {}
+        password = _client_password(body)
         accounts = _get_caldav_accounts(owner)
         if not (body.get("url") or "").strip():
             _save_caldav_accounts(owner, [])
@@ -768,14 +945,22 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             raise HTTPException(400, str(e))
         if accounts:
             acc = dict(accounts[0])
+            if acc.get("provider") == "google":
+                raise HTTPException(400, "Reconnect Google Calendar through OAuth")
         else:
             import uuid as _uuid
             acc = {"id": str(_uuid.uuid4()), "label": "CalDAV"}
+        username = (body.get("username") or "").strip()
+        identity_changed = bool(accounts) and (
+            validated_url.rstrip("/") != str(acc.get("url") or "").strip().rstrip("/")
+            or username != str(acc.get("username") or "").strip()
+        )
+        if identity_changed and not password:
+            raise HTTPException(400, "Password is required when changing the CalDAV server or username")
         acc["url"] = validated_url
-        acc["username"] = (body.get("username") or "").strip()
-        if body.get("password"):
-            from src.secret_storage import encrypt
-            acc["password"] = encrypt(body["password"])
+        acc["username"] = username
+        if password:
+            acc["password"] = password
         new_accounts = [acc] + (accounts[1:] if len(accounts) > 1 else [])
         _save_caldav_accounts(owner, new_accounts)
         return {"ok": True}
@@ -788,21 +973,17 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
         owner = _require_user(request)
         accounts = _get_caldav_accounts(owner)
         safe = []
+        from src.caldav_credentials import BASIC_PASSWORD, has_secret
         for acc in accounts:
-            pw = acc.get("password") or ""
-            has_pw = False
-            if pw:
-                try:
-                    from src.secret_storage import decrypt
-                    has_pw = bool(decrypt(pw))
-                except Exception:
-                    has_pw = bool(pw)
+            has_pw = has_secret(owner, acc.get("id") or "", BASIC_PASSWORD)
             safe.append({
                 "id": acc.get("id", ""),
                 "label": acc.get("label", "") or acc.get("url", ""),
                 "url": acc.get("url", "") or "",
                 "username": acc.get("username", "") or "",
                 "has_password": has_pw,
+                "provider": acc.get("provider", "") or "",
+                "read_only": bool(acc.get("read_only")),
             })
         return {"accounts": safe}
 
@@ -815,20 +996,20 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             body = await request.json()
         except Exception:
             body = {}
+        password = _client_password(body)
         from src.caldav_sync import validate_caldav_url
         try:
             url = validate_caldav_url(body.get("url", ""))
         except ValueError as e:
             raise HTTPException(400, str(e))
-        if not body.get("password"):
+        if not password:
             raise HTTPException(400, "Password is required")
-        from src.secret_storage import encrypt
         new_acc = {
             "id": str(_uuid.uuid4()),
             "label": (body.get("label") or "").strip() or "CalDAV",
             "url": url,
             "username": (body.get("username") or "").strip(),
-            "password": encrypt(body["password"]),
+            "password": password,
         }
         accounts = _get_caldav_accounts(owner)
         accounts.append(new_acc)
@@ -843,11 +1024,16 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             body = await request.json()
         except Exception:
             body = {}
+        password = _client_password(body)
         accounts = _get_caldav_accounts(owner)
         idx = next((i for i, a in enumerate(accounts) if a.get("id") == account_id), None)
         if idx is None:
             raise HTTPException(404, "Account not found")
         acc = dict(accounts[idx])
+        if acc.get("provider") == "google":
+            raise HTTPException(400, "Reconnect Google Calendar through OAuth")
+        original_url = str(acc.get("url") or "").strip().rstrip("/")
+        original_username = str(acc.get("username") or "").strip()
         if body.get("url"):
             from src.caldav_sync import validate_caldav_url
             try:
@@ -858,9 +1044,14 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             acc["label"] = (body.get("label") or "").strip() or "CalDAV"
         if body.get("username") is not None:
             acc["username"] = (body.get("username") or "").strip()
-        if body.get("password"):
-            from src.secret_storage import encrypt
-            acc["password"] = encrypt(body["password"])
+        identity_changed = (
+            str(acc.get("url") or "").strip().rstrip("/") != original_url
+            or str(acc.get("username") or "").strip() != original_username
+        )
+        if identity_changed and not password:
+            raise HTTPException(400, "Password is required when changing the CalDAV server or username")
+        if password:
+            acc["password"] = password
         accounts[idx] = acc
         _save_caldav_accounts(owner, accounts)
         return {"ok": True}
@@ -889,7 +1080,7 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             body = {}
         url = (body.get("url") or "").strip()
         user = (body.get("username") or "").strip()
-        pw = body.get("password") or ""
+        pw = _client_password(body)
         if not (url and user and pw):
             # Look up a saved account: by id if supplied, else first account.
             accounts = _get_caldav_accounts(owner)
@@ -899,16 +1090,21 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
             if acc is None and accounts:
                 acc = accounts[0]
             if acc:
-                url = url or (acc.get("url") or "")
-                user = user or (acc.get("username") or "")
+                saved_url = (acc.get("url") or "").strip()
+                saved_user = (acc.get("username") or "").strip()
+                if not pw and (
+                    (url and url.rstrip("/") != saved_url.rstrip("/"))
+                    or (user and user != saved_user)
+                ):
+                    return {
+                        "ok": False,
+                        "error": "Password is required to test a different CalDAV server or username",
+                    }
+                url = url or saved_url
+                user = user or saved_user
                 if not pw:
-                    pw = acc.get("password") or ""
-                    if pw:
-                        try:
-                            from src.secret_storage import decrypt
-                            pw = decrypt(pw)
-                        except Exception:
-                            pass
+                    from src.caldav_credentials import BASIC_PASSWORD, get_secret
+                    pw = get_secret(owner, acc.get("id") or "", BASIC_PASSWORD)
         if not (url and user and pw):
             return {"ok": False, "error": "Missing URL, username, or password"}
         from src.caldav_sync import validate_caldav_url

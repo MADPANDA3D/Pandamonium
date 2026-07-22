@@ -13,6 +13,15 @@ from src.user_time import get_user_tz_name, get_user_tz_offset
 @pytest.fixture(autouse=True)
 def _single_user_voice_mode(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setattr(
+        voice_routes,
+        "load_settings",
+        lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+    )
+
+
+class FakeServerTTS:
+    available = True
 
 
 class FakeSessionManager:
@@ -47,7 +56,7 @@ def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch,
     monkeypatch.setattr(voice_routes, "_jarvis_reply", fake_jarvis_reply)
 
     app = FastAPI()
-    app.include_router(voice_routes.setup_voice_routes(manager))
+    app.include_router(voice_routes.setup_voice_routes(manager, FakeServerTTS()))
     client = TestClient(app)
 
     created = client.post("/api/voice/sessions", json={"mode": "jarvis_call"})
@@ -89,7 +98,7 @@ def test_direct_gordon_turn_persists_foreground_identity(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
     monkeypatch.setattr(voice_routes, "_jarvis_reply", fake_gordon_reply)
     app = FastAPI()
-    app.include_router(voice_routes.setup_voice_routes(manager))
+    app.include_router(voice_routes.setup_voice_routes(manager, FakeServerTTS()))
     client = TestClient(app)
 
     created = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
@@ -134,7 +143,7 @@ def test_stream_keeps_slow_agent_alive_and_opens_audio_after_final(monkeypatch, 
     monkeypatch.setattr(voice_routes, "_jarvis_events", slow_events)
     voice_routes._SPEECH_TURNS.clear()
     app = FastAPI()
-    app.include_router(voice_routes.setup_voice_routes(manager))
+    app.include_router(voice_routes.setup_voice_routes(manager, FakeServerTTS()))
     client = TestClient(app)
     created = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
 
@@ -195,7 +204,7 @@ def test_voice_session_title_uses_browser_timezone_context(monkeypatch, tmp_path
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
     monkeypatch.setattr(voice_routes, "now_user_local", fake_now_user_local)
     app = FastAPI()
-    app.include_router(voice_routes.setup_voice_routes(manager))
+    app.include_router(voice_routes.setup_voice_routes(manager, FakeServerTTS()))
 
     response = TestClient(app).post(
         "/api/voice/sessions",
@@ -213,7 +222,7 @@ def test_voice_session_accepts_client_timing_diagnostics(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
 
     app = FastAPI()
-    app.include_router(voice_routes.setup_voice_routes(manager))
+    app.include_router(voice_routes.setup_voice_routes(manager, FakeServerTTS()))
     client = TestClient(app)
 
     created = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
@@ -228,6 +237,43 @@ def test_voice_session_accepts_client_timing_diagnostics(monkeypatch, tmp_path):
     assert diagnostic["client"] is True
     assert diagnostic["stt_ms"] == 12.35
     assert "raw_audio" not in diagnostic
+
+
+def test_voice_session_requires_server_tts_at_start_and_use(monkeypatch, tmp_path):
+    settings = {"tts_enabled": True, "tts_provider": "endpoint:test-tts"}
+    tts = FakeServerTTS()
+    manager = FakeSessionManager()
+    monkeypatch.setattr(voice_routes, "load_settings", lambda: settings)
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    app = FastAPI()
+    app.include_router(voice_routes.setup_voice_routes(manager, tts))
+    client = TestClient(app)
+
+    created = client.post("/api/voice/sessions", json={})
+    assert created.status_code == 200
+    assert client.get("/api/voice/status").json()["server_tts_ready"] is True
+
+    settings["tts_provider"] = "browser"
+    for response in (
+        client.post("/api/voice/sessions", json={}),
+        client.post("/api/voice/prewarm"),
+        client.post(
+            f"/api/voice/sessions/{created.json()['id']}/respond",
+            json={"text": "This must not run without server speech."},
+        ),
+    ):
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "server_tts_required",
+            "message": voice_routes.VOICE_SERVER_TTS_ERROR,
+        }
+    assert client.get("/api/voice/status").json()["server_tts_ready"] is False
+
+    settings["tts_provider"] = "endpoint:test-tts"
+    tts.available = False
+    assert client.post("/api/voice/sessions", json={}).status_code == 503
+    state = json.loads((tmp_path / "voice_sessions.json").read_text())
+    assert state["sessions"][created.json()["id"]]["turns"] == []
 
 
 def test_voice_num_predict_stays_short_unless_detail_requested():

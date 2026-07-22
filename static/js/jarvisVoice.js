@@ -21,6 +21,8 @@ let sphereSource = null;
 let sphereAudioTimer = null;
 let sphereFreqData = null;
 let cueAudioContext = null;
+let playbackAudioContext = null;
+let playbackAnalyser = null;
 let chatSessionId = null;
 let sphereSmoothedVolume = 0;
 let sphereSmoothedLevels = Array(8).fill(0);
@@ -63,6 +65,7 @@ const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" st
 const ICON_STOP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
 const ICON_CLOSE = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
 const END_VOICE_LABEL = 'End voice — task continues';
+const VIEW_CHAT_LABEL = 'View chat — voice stays active';
 const ORGANIC_SPHERE_URL = '/static/vendor/organic-sphere/index.html?v=20260710T195450Z';
 const INSECURE_MIC_MESSAGE = 'Microphone needs localhost or HTTPS.';
 const SPHERE_AUDIO_GAIN = 0.35;
@@ -240,6 +243,46 @@ function closeVoiceCueAudio() {
   cueAudioContext = null;
 }
 
+function createPlaybackContext() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  if (playbackAudioContext && playbackAudioContext.state !== 'closed' && playbackAnalyser) {
+    return playbackAudioContext;
+  }
+  playbackAudioContext = new AudioContext();
+  playbackAnalyser = playbackAudioContext.createAnalyser();
+  playbackAnalyser.fftSize = 256;
+  playbackAnalyser.connect(playbackAudioContext.destination);
+  playbackScheduledUntil = 0;
+  return playbackAudioContext;
+}
+
+function unlockPlaybackAudio() {
+  try {
+    const context = createPlaybackContext();
+    if (!context) return;
+    context.resume?.().catch(() => {});
+    const source = context.createBufferSource();
+    source.buffer = context.createBuffer(1, 1, context.sampleRate || 22050);
+    source.connect(playbackAnalyser);
+    source.onended = () => {
+      try { source.disconnect(); } catch {}
+    };
+    source.start(0);
+  } catch (error) {
+    console.warn('Jarvis playback audio unavailable:', error);
+  }
+}
+
+function closePlaybackAudio() {
+  if (!playbackAudioContext) return;
+  try { playbackAnalyser?.disconnect(); } catch {}
+  playbackAudioContext.close().catch(() => {});
+  playbackAudioContext = null;
+  playbackAnalyser = null;
+  playbackScheduledUntil = 0;
+}
+
 function startSpherePulse(next = status) {
   stopSphereAudio();
   sphereAudioTimer = setInterval(() => {
@@ -287,6 +330,22 @@ function startSphereAnalyser(sourceFactory, next = status) {
 
 function startSphereStream(stream) {
   startSphereAnalyser(ctx => ctx.createMediaStreamSource(stream), 'listening');
+}
+
+function startPlaybackSphereAnalyser() {
+  stopSphereAudio();
+  if (!playbackAnalyser) return;
+  sphereFreqData = new Uint8Array(playbackAnalyser.frequencyBinCount);
+  sphereAudioTimer = setInterval(() => {
+    playbackAnalyser.getByteFrequencyData(sphereFreqData);
+    const binSize = Math.floor(sphereFreqData.length / 8) || 1;
+    const levels = Array.from({ length: 8 }, (_, index) => {
+      let sum = 0;
+      for (let offset = 0; offset < binSize; offset += 1) sum += sphereFreqData[(index * binSize) + offset] || 0;
+      return clamp01(sum / binSize / 255);
+    });
+    postSphereLevels('speaking', Math.max(...levels), levels);
+  }, 80);
 }
 
 function mountOrganicSphere() {
@@ -374,6 +433,30 @@ function deferCallPanelClose(panel, closingGeneration) {
   timeoutId = window.setTimeout(finish, CALL_PANEL_TRANSITION_MS);
 }
 
+function isCallPanelMinimized() {
+  return Boolean($('jarvis-call-panel')?.classList.contains('is-minimized'));
+}
+
+function setCallPanelMinimized(minimized) {
+  const next = Boolean(minimized && isActive);
+  const panel = $('jarvis-call-panel');
+  panel?.classList.toggle('is-minimized', next);
+  if (panel) {
+    panel.inert = next;
+    if (next) panel.setAttribute('aria-hidden', 'true');
+    else panel.removeAttribute('aria-hidden');
+  }
+  document.body?.classList.toggle('jarvis-voice-minimized', next);
+  document.documentElement?.classList.toggle('jarvis-voice-minimized', next);
+  const inputBtn = $('jarvis-input-sphere');
+  if (inputBtn && isActive) {
+    const label = next ? 'Return to voice' : sphereTitle(status);
+    inputBtn.title = label;
+    inputBtn.setAttribute('aria-label', label);
+    if (next) inputBtn.focus({ preventScroll: true });
+  }
+}
+
 function setStatus(next, detail = '') {
   status = next;
   const root = $('jarvis-call-panel');
@@ -413,8 +496,9 @@ function setStatus(next, detail = '') {
   if (inputBtn) {
     inputBtn.classList.toggle('active', isActive);
     inputBtn.dataset.state = next;
-    inputBtn.title = sphereTitle(next);
-    inputBtn.setAttribute('aria-label', sphereTitle(next));
+    const label = isCallPanelMinimized() ? 'Return to voice' : sphereTitle(next);
+    inputBtn.title = label;
+    inputBtn.setAttribute('aria-label', label);
   }
   if (inputBar) {
     inputBar.classList.toggle('jarvis-call-active', isActive);
@@ -1702,20 +1786,15 @@ function boundedPrewarm(label, job, onTimeout = null) {
 
 function prewarmVoiceStack() {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
-  const jobs = [
-    boundedPrewarm('server_prewarm', async () => {
-      const response = await fetch('/api/voice/prewarm', {
-        method: 'POST',
-        credentials: 'same-origin',
-        ...(controller ? { signal: controller.signal } : {}),
-      });
-      if (!response.ok) throw new Error(`server_prewarm_${response.status}`);
-      return response;
-    }, () => controller?.abort()),
-  ];
-  if (window.aiTTSManager?.checkAvailability) {
-    jobs.push(boundedPrewarm('client_tts_probe', () => window.aiTTSManager.checkAvailability()));
-  }
+  const jobs = [boundedPrewarm('server_prewarm', async () => {
+    const response = await fetch('/api/voice/prewarm', {
+      method: 'POST',
+      credentials: 'same-origin',
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!response.ok) throw new Error(`server_prewarm_${response.status}`);
+    return response;
+  }, () => controller?.abort())];
   return Promise.allSettled(jobs).then(results => {
     console.info('[Jarvis voice] prewarm', results.map(result => result.status));
     return results;
@@ -1987,30 +2066,9 @@ async function startListening(requestedStream = null, callGeneration = voiceCall
 }
 
 async function ensurePlaybackContext() {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) throw new Error('Audio playback is not supported by this browser.');
-  const freshContext = !sphereAudioContext || sphereAudioContext.state === 'closed' || !sphereAnalyser;
-  if (freshContext) {
-    stopSphereAudio();
-    sphereAudioContext = new AudioContext();
-    sphereAnalyser = sphereAudioContext.createAnalyser();
-    sphereAnalyser.fftSize = 256;
-    sphereAnalyser.connect(sphereAudioContext.destination);
-    sphereFreqData = new Uint8Array(sphereAnalyser.frequencyBinCount);
-    sphereAudioTimer = setInterval(() => {
-      sphereAnalyser.getByteFrequencyData(sphereFreqData);
-      const binSize = Math.floor(sphereFreqData.length / 8) || 1;
-      const levels = Array.from({ length: 8 }, (_, index) => {
-        let sum = 0;
-        for (let offset = 0; offset < binSize; offset += 1) sum += sphereFreqData[(index * binSize) + offset] || 0;
-        return clamp01(sum / binSize / 255);
-      });
-      postSphereLevels('speaking', Math.max(...levels), levels);
-    }, 80);
-    playbackScheduledUntil = 0;
-  }
-  const context = sphereAudioContext;
-  await context.resume();
+  const context = createPlaybackContext();
+  if (!context) throw new Error('Audio playback is not supported by this browser.');
+  await context.resume?.();
   return context;
 }
 
@@ -2078,7 +2136,7 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
       audioBuffer.copyToChannel(samples, 0);
       const source = context.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(sphereAnalyser);
+      source.connect(playbackAnalyser);
       playbackAudioSources.add(source);
       lastSourceEnded = new Promise(resolve => {
         let settled = false;
@@ -2103,6 +2161,7 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
 
       if (!playbackStarted) {
         playbackStarted = true;
+        startPlaybackSphereAnalyser();
         timings.tts_first_audio_ms = performance.now() - started;
         if (timings.turn_started_at != null) timings.end_to_first_audio_ms = performance.now() - timings.turn_started_at;
         setStatus('speaking');
@@ -2176,8 +2235,9 @@ async function playBufferedAudio(url, options, timings, token, turnId = null, vo
 
     const source = context.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(sphereAnalyser);
+    source.connect(playbackAnalyser);
     playbackAudioSources.add(source);
+    startPlaybackSphereAnalyser();
     setStatus('speaking');
     if (turnId) postPlaybackState(turnId, 'started', timings, voiceSessionId);
 
@@ -2213,17 +2273,6 @@ async function playBufferedAudio(url, options, timings, token, turnId = null, vo
 }
 
 async function speak(text, timings = {}) {
-  const manager = window.aiTTSManager;
-  if (!manager) return;
-  await manager.checkAvailability?.();
-  if (!manager.available) return;
-  if (manager.useBrowserTTS) {
-    const started = performance.now();
-    await manager.play(text);
-    timings.tts_total_ms = performance.now() - started;
-    return;
-  }
-
   const token = ++playbackToken;
   await playBufferedAudio('/api/tts/synthesize', {
     method: 'POST',
@@ -2264,6 +2313,7 @@ async function startCall() {
   }
 
   unlockVoiceCueAudio();
+  unlockPlaybackAudio();
   if (!pendingVoiceTargetState) {
     const selectedTarget = voiceTargetForModel(window.sessionModule?.getCurrentModel?.());
     if (selectedTarget === 'hermes') {
@@ -2275,6 +2325,7 @@ async function startCall() {
   const callGeneration = ++voiceCallGeneration;
   voiceOrbMedia.stopMedia();
   isActive = true;
+  setCallPanelMinimized(false);
   speechPaused = false;
   speechQueue = [];
   brainTurnInProgress = false;
@@ -2329,6 +2380,7 @@ function endCall() {
   voiceCallGeneration += 1;
   isActive = false;
   restoreActivityGroupsToChat();
+  setCallPanelMinimized(false);
   brainTurnInProgress = false;
   activeTurnAudioPromise = null;
   activeAudioTurnId = null;
@@ -2340,6 +2392,7 @@ function endCall() {
   clearTurnTimers();
   resolvePlaybackWait();
   stopPlaybackAudio();
+  closePlaybackAudio();
   if (window.aiTTSManager) window.aiTTSManager.stop();
   closeVoiceCueAudio();
   stopSphereAudio();
@@ -2391,6 +2444,10 @@ function isCallActive() {
 
 function toggleCall() {
   if (isActive) {
+    if (isCallPanelMinimized()) {
+      setCallPanelMinimized(false);
+      return;
+    }
     endCall();
     return;
   }
@@ -2400,6 +2457,10 @@ function toggleCall() {
 async function handleInputSphereClick() {
   if (!isActive) {
     await startCall();
+    return;
+  }
+  if (isCallPanelMinimized()) {
+    setCallPanelMinimized(false);
     return;
   }
   if (status === 'speaking' || status === 'buffering') {
@@ -2415,6 +2476,7 @@ function bind() {
   document.documentElement.dataset.jarvisVoiceBound = '1';
   const railBtn = $('rail-jarvis-call');
   const closeBtn = $('jarvis-call-close');
+  const viewChatBtn = $('jarvis-call-view-chat');
   const talkBtn = $('jarvis-call-talk');
   const inputBtn = $('jarvis-input-sphere');
   const agentChip = $('jarvis-agent-chip');
@@ -2431,6 +2493,11 @@ function bind() {
     closeBtn.title = END_VOICE_LABEL;
     closeBtn.setAttribute('aria-label', END_VOICE_LABEL);
     closeBtn.addEventListener('click', endCall);
+  }
+  if (viewChatBtn) {
+    viewChatBtn.title = VIEW_CHAT_LABEL;
+    viewChatBtn.setAttribute('aria-label', VIEW_CHAT_LABEL);
+    viewChatBtn.addEventListener('click', () => setCallPanelMinimized(true));
   }
   if (talkBtn) {
     talkBtn.innerHTML = ICON_MIC;

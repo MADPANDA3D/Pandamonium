@@ -81,6 +81,35 @@ def test_oauth_state_rejects_forged_signature():
     assert verify_oauth_state(forged) is None
 
 
+def test_oauth_state_rejects_expired_and_future_dated_tokens():
+    import routes.email_helpers as helpers
+
+    issued_at = 1_700_000_000
+    with mock.patch("routes.email_helpers.time.time", return_value=issued_at):
+        state = helpers.make_oauth_state("acct-123", "alice")
+
+    with mock.patch(
+        "routes.email_helpers.time.time",
+        return_value=issued_at + helpers._OAUTH_STATE_TTL_SECONDS + 1,
+    ):
+        assert helpers.verify_oauth_state(state) is None
+    with mock.patch(
+        "routes.email_helpers.time.time",
+        return_value=issued_at - helpers._OAUTH_STATE_CLOCK_SKEW_SECONDS - 1,
+    ):
+        assert helpers.verify_oauth_state(state) is None
+
+
+def test_oauth_state_can_only_be_consumed_once():
+    import routes.email_helpers as helpers
+
+    helpers._consumed_oauth_states.clear()
+    state = helpers.make_oauth_state("acct-123", "alice")
+
+    assert helpers.verify_oauth_state(state, consume=True) is not None
+    assert helpers.verify_oauth_state(state, consume=True) is None
+
+
 @pytest.mark.parametrize("garbage", ["", "not-base64-at-all", "###", "a|b|c"])
 def test_oauth_state_rejects_garbage(garbage):
     from routes.email_helpers import verify_oauth_state
@@ -347,7 +376,7 @@ async def test_callback_owner_mismatch_does_not_write_tokens():
     # State is genuinely signed, but for owner "bob" — not the row owner "alice".
     state = make_oauth_state("acct-x", "bob")
 
-    with mock.patch("httpx.post", return_value=token_resp), \
+    with mock.patch("httpx.post", return_value=token_resp) as token_post, \
          mock.patch("httpx.get", return_value=userinfo_resp), \
          mock.patch("core.database.SessionLocal", Factory):
         callback = _callback_endpoint()
@@ -355,6 +384,7 @@ async def test_callback_owner_mismatch_does_not_write_tokens():
 
     loc = _location(resp)
     assert "email_oauth_error=ownership_error" in loc
+    token_post.assert_not_called()
 
     verify_db = Factory()
     row = verify_db.query(EmailAccount).filter(EmailAccount.id == "acct-x").first()

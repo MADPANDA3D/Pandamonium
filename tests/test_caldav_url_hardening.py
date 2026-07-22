@@ -9,6 +9,30 @@ import pytest
 from src import caldav_sync
 
 
+def _patch_credentials(monkeypatch):
+    import src.caldav_credentials as credentials
+
+    store = {}
+
+    def set_credentials(owner, account_id, **updates):
+        from src.secret_storage import decrypt
+
+        for purpose, value in updates.items():
+            key = (owner, account_id, purpose)
+            if value:
+                store[key] = decrypt(value)
+            else:
+                store.pop(key, None)
+
+    monkeypatch.setattr(credentials, "set_credentials", set_credentials)
+    monkeypatch.setattr(
+        credentials,
+        "get_secret",
+        lambda owner, account_id, purpose: store.get((owner, account_id, purpose), ""),
+    )
+    monkeypatch.setattr(credentials, "retain_accounts", lambda owner, ids: None)
+
+
 def test_validate_caldav_url_normalizes_safe_url(monkeypatch):
     monkeypatch.setattr(
         caldav_sync,
@@ -116,6 +140,7 @@ def test_validate_caldav_url_blocks_mixed_dns_in_any_order(monkeypatch, addrs):
 
 
 def test_sync_caldav_decrypts_stored_password_and_validates_url(monkeypatch):
+    _patch_credentials(monkeypatch)
     monkeypatch.setattr(
         caldav_sync,
         "_resolve_caldav_host_ips",
@@ -171,7 +196,7 @@ def test_calendar_routes_use_hardened_caldav_client_and_secret_storage():
     text = Path("routes/calendar_routes.py").read_text(encoding="utf-8")
 
     assert "validate_caldav_url(body.get(\"url\", \"\"))" in text
-    assert "encrypt(body[\"password\"])" in text
-    assert "pw = decrypt(pw)" in text
+    assert "Encrypted credential values are not accepted" in text
+    assert "get_secret(owner, acc.get(\"id\") or \"\", BASIC_PASSWORD)" in text
     assert "follow_redirects=False, trust_env=False" in text
     assert "Redirects are not followed for CalDAV safety" in text

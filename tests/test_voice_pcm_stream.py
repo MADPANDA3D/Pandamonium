@@ -14,6 +14,11 @@ from src.voice_pcm import pcm_frames, speech_blocks, wav_to_pcm16
 @pytest.fixture(autouse=True)
 def _single_user_voice_mode(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setattr(
+        voice_routes,
+        "load_settings",
+        lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+    )
 
 
 def _wav_payload(sample_rate=24_000, frames=24_000):

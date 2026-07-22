@@ -29,9 +29,10 @@ import json
 import logging
 import os
 import socket
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,40 @@ def _google_caldav_events_url(url: str) -> str | None:
     return urlunparse(parts._replace(path=new_path))
 
 
+def _is_google_caldav_events_url(url: str, username: str | None = None) -> bool:
+    """Whether ``url`` is Google's documented HTTPS events collection.
+
+    When ``username`` is supplied this is also the bearer-token trust boundary:
+    the collection id must exactly match that percent-encoded account name.
+    """
+    parts = urlparse(url if isinstance(url, str) else "")
+    try:
+        port = parts.port
+    except ValueError:
+        return False
+    if (
+        parts.scheme.lower() != "https"
+        or (parts.hostname or "").lower() != "apidata.googleusercontent.com"
+        or port not in (None, 443)
+        or parts.username
+        or parts.password
+        or parts.params
+        or parts.query
+        or parts.fragment
+    ):
+        return False
+    path = parts.path.rstrip("/")
+    prefix, suffix = "/caldav/v2/", "/events"
+    calendar_id = (
+        path[len(prefix):-len(suffix)]
+        if path.startswith(prefix) and path.endswith(suffix)
+        else ""
+    )
+    if not calendar_id or "/" in calendar_id:
+        return False
+    return username is None or path == f"{prefix}{quote(username, safe='')}{suffix}"
+
+
 def _open_url_as_calendar(client, url: str):
     """Open ``url`` as a single calendar collection.
 
@@ -228,7 +263,7 @@ def _open_url_as_calendar(client, url: str):
     return client.calendar(url=target)
 
 
-def _build_dav_client(url: str, username: str, password: str):
+def _build_dav_client(url: str, username: str, password: str, auth_type: str | None = None):
     """Construct a CalDAV client with automatic redirects disabled.
 
     ``validate_caldav_url`` resolves and vets the *initial* host, but caldav's
@@ -245,7 +280,10 @@ def _build_dav_client(url: str, username: str, password: str):
     """
     import caldav
 
-    client = caldav.DAVClient(url=url, username=username, password=password)
+    kwargs = {"url": url, "username": username, "password": password}
+    if auth_type:
+        kwargs["auth_type"] = auth_type
+    client = caldav.DAVClient(**kwargs)
     # Unconditional: a redirect-disable that only sometimes applies is not a
     # control. The session exists right after __init__ on every real client;
     # test_build_dav_client_disables_redirects asserts it against installed
@@ -268,7 +306,8 @@ def _should_prune_window(seen_uids: set, parse_failed: bool) -> bool:
     return not parse_failed
 
 
-def _sync_blocking(owner: str, url: str, username: str, password: str, account_id: str = "") -> dict:
+def _sync_blocking(owner: str, url: str, username: str, password: str,
+                   account_id: str = "", auth_type: str | None = None) -> dict:
     """The actual sync — synchronous, intended to run in a threadpool.
     Returns counts: {calendars, events, deleted, errors}."""
     # Lazy imports so a missing `caldav` dep doesn't break app startup —
@@ -279,25 +318,28 @@ def _sync_blocking(owner: str, url: str, username: str, password: str, account_i
 
     result = {"calendars": 0, "events": 0, "deleted": 0, "errors": []}
 
-    client = _build_dav_client(url, username, password)
+    client = _build_dav_client(url, username, password, auth_type)
     try:
         # Discovery: try principal → calendars first; if the server doesn't
         # support discovery (or the URL points directly at a calendar), fall
         # back to treating the URL as a single calendar.
         calendars = []
-        try:
-            principal = client.principal()
-            calendars = principal.calendars()
-        except (AuthorizationError, NotFoundError) as e:
-            result["errors"].append(f"Discovery failed: {e}")
-            return result          # outer finally will call client.close()
-        except Exception as e:
-            logger.info(f"CalDAV principal discovery failed, trying URL as calendar: {e}")
+        if _is_google_caldav_events_url(url):
+            calendars = [_open_url_as_calendar(client, url)]
+        else:
             try:
-                calendars = [_open_url_as_calendar(client, url)]
-            except Exception as e2:
-                result["errors"].append(f"Could not open URL as calendar: {e2}")
-                return result      # outer finally will call client.close()
+                principal = client.principal()
+                calendars = principal.calendars()
+            except (AuthorizationError, NotFoundError) as e:
+                result["errors"].append(f"Discovery failed: {e}")
+                return result          # outer finally will call client.close()
+            except Exception as e:
+                logger.info(f"CalDAV principal discovery failed, trying URL as calendar: {e}")
+                try:
+                    calendars = [_open_url_as_calendar(client, url)]
+                except Exception as e2:
+                    result["errors"].append(f"Could not open URL as calendar: {e2}")
+                    return result      # outer finally will call client.close()
 
         if not calendars:
             try:
@@ -579,46 +621,193 @@ def _pending_writeback_uids(owner: str) -> tuple[list[str], list[str]]:
         db.close()
 
 
-def _load_caldav_accounts(owner: str) -> list:
-    """Return the list of CalDAV accounts for *owner*, auto-migrating the legacy
-    single-account ``caldav`` key to the new ``caldav_accounts`` list on first call.
+def _metadata_only_account(owner: str, raw: dict) -> dict:
+    """Move known secret fields to the purpose-bound store and strip them."""
+    from src.caldav_credentials import set_credentials
 
-    The save step is best-effort: if ``_save_for_user`` is unavailable (e.g. in a
-    test with a minimal prefs mock) the migrated accounts are still returned; the
-    next real call will just re-run the cheap migration again.
-    """
-    import uuid as _uuid
+    account = dict(raw)
+    account_id = str(account.get("id") or uuid.uuid4())
+    account["id"] = account_id
+    if account.get("provider") == "google":
+        secrets = {
+            "basic_password": "",
+            **{
+            key: account[source]
+            for key, source in (
+                ("google_access_token", "oauth_access_token"),
+                ("google_refresh_token", "oauth_refresh_token"),
+            )
+            if account.get(source)
+            },
+        }
+    else:
+        secrets = {
+            "google_access_token": "",
+            "google_refresh_token": "",
+        }
+        if account.get("password"):
+            secrets["basic_password"] = account["password"]
+    set_credentials(owner, account_id, **secrets)
+    account.pop("password", None)
+    account.pop("oauth_access_token", None)
+    account.pop("oauth_refresh_token", None)
+    return account
+
+
+_PREFS_OWNER_UNSET = object()
+
+
+def _caldav_prefs_owner(owner: str, requested: object = _PREFS_OWNER_UNSET):
+    """Map the Calendar fallback identity to the single-user prefs slot."""
+    if requested is not _PREFS_OWNER_UNSET:
+        return requested
+    fallback_owner = os.environ.get("ODYSSEUS_FALLBACK_OWNER", "owner@localhost")
+    if owner == fallback_owner:
+        from src.auth_helpers import _auth_disabled
+
+        if _auth_disabled():
+            # Auth-disabled prefs intentionally read/write the first prior-user
+            # slot for backward compatibility. Calendar credentials still use
+            # the stable fallback owner, so keep the two identities separate.
+            return None
+    return owner
+
+
+def _load_caldav_accounts(
+    owner: str,
+    *,
+    prefs_owner: str | None | object = _PREFS_OWNER_UNSET,
+) -> list:
+    """Return metadata-only accounts, migrating preference-stored secrets."""
     from routes.prefs_routes import _load_for_user
 
-    prefs = _load_for_user(owner) or {}
-    if "caldav_accounts" in prefs:
-        return list(prefs["caldav_accounts"] or [])
-    # Migrate legacy single-account config to the list format.
-    legacy = prefs.get("caldav", {}) or {}
-    if legacy.get("url"):
-        accounts = [{
-            "id": str(_uuid.uuid4()),
+    storage_owner = _caldav_prefs_owner(owner, prefs_owner)
+    prefs = _load_for_user(storage_owner) or {}
+    raw_accounts = prefs.get("caldav_accounts")
+    if not isinstance(raw_accounts, list):
+        legacy = prefs.get("caldav", {}) or {}
+        raw_accounts = [{
+            "id": str(uuid.uuid4()),
             "label": "CalDAV",
             "url": legacy["url"],
             "username": legacy.get("username", ""),
             "password": legacy.get("password", ""),
-        }]
+        }] if isinstance(legacy, dict) and legacy.get("url") else []
+
+    accounts = [
+        _metadata_only_account(owner, raw)
+        for raw in raw_accounts
+        if isinstance(raw, dict)
+    ]
+
+    if accounts != raw_accounts or "caldav" in prefs:
         prefs["caldav_accounts"] = accounts
         prefs.pop("caldav", None)
         try:
             from routes.prefs_routes import _save_for_user
-            _save_for_user(owner, prefs)
+            _save_for_user(storage_owner, prefs)
         except (ImportError, AttributeError):
-            pass  # best-effort; next call re-migrates from the still-present legacy key
-        return accounts
-    return []
+            pass  # Minimal test doubles may intentionally omit the save hook.
+    return accounts
+
+
+def _save_caldav_accounts(owner: str, accounts: list) -> None:
+    """Persist metadata in prefs and credentials in the server-only DB store."""
+    from routes.prefs_routes import _load_for_user, _save_for_user
+    from src.caldav_credentials import retain_accounts
+
+    clean_accounts = [
+        _metadata_only_account(owner, raw)
+        for raw in accounts
+        if isinstance(raw, dict)
+    ]
+
+    storage_owner = _caldav_prefs_owner(owner)
+    prefs = _load_for_user(storage_owner) or {}
+    prefs["caldav_accounts"] = clean_accounts
+    prefs.pop("caldav", None)
+    _save_for_user(storage_owner, prefs)
+    retain_accounts(owner, {account["id"] for account in clean_accounts})
+
+
+def _refresh_google_calendar_token(owner: str, account: dict) -> str:
+    """Refresh and persist one owner-scoped Google Calendar access token."""
+    import httpx
+    from src.caldav_credentials import (
+        GOOGLE_REFRESH_TOKEN,
+        get_secret,
+        set_credentials,
+    )
+
+    account_id = account.get("id") or ""
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    refresh_token = get_secret(owner, account_id, GOOGLE_REFRESH_TOKEN)
+    if not (account_id and client_id and client_secret and refresh_token):
+        return ""
+    try:
+        response = httpx.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        access_token = data.get("access_token") or ""
+        if not access_token:
+            return ""
+        accounts = _load_caldav_accounts(owner)
+        stored = next(
+            (item for item in accounts
+             if item.get("id") == account_id and item.get("provider") == "google"),
+            None,
+        )
+        if stored is None:
+            return ""
+        set_credentials(owner, account_id, google_access_token=access_token)
+        stored["oauth_token_expiry"] = str(int(time.time()) + int(data.get("expires_in", 3600)))
+        _save_caldav_accounts(owner, accounts)
+        return access_token
+    except Exception:
+        logger.warning("Google Calendar token refresh failed for account %s", account_id)
+        return ""
+
+
+def _resolve_caldav_auth(owner: str, account: dict) -> tuple[str, str, str | None]:
+    """Return username, secret, and auth type for generic or Google CalDAV."""
+    from src.caldav_credentials import (
+        BASIC_PASSWORD,
+        GOOGLE_ACCESS_TOKEN,
+        get_secret,
+    )
+
+    username = (account.get("username") or "").strip()
+    account_id = str(account.get("id") or "")
+    if account.get("provider") != "google":
+        return username, get_secret(owner, account_id, BASIC_PASSWORD), None
+
+    if not username or not _is_google_caldav_events_url(account.get("url") or "", username):
+        logger.warning("Refusing Google Calendar bearer token for an invalid CalDAV endpoint")
+        return username, "", "bearer"
+
+    access_token = get_secret(owner, account_id, GOOGLE_ACCESS_TOKEN)
+    try:
+        fresh = access_token and int(account.get("oauth_token_expiry") or 0) - 60 > time.time()
+    except (TypeError, ValueError):
+        fresh = False
+    if not fresh:
+        access_token = _refresh_google_calendar_token(owner, account)
+    return username, access_token, "bearer"
 
 
 async def sync_caldav(owner: str) -> dict:
     """Pull CalDAV state into local DB for `owner` across all configured accounts.
     Returns aggregated counts + per-account errors."""
-    from src.secret_storage import decrypt
-
     accounts = _load_caldav_accounts(owner)
     if not accounts:
         return {
@@ -629,20 +818,21 @@ async def sync_caldav(owner: str) -> dict:
     totals: dict = {"calendars": 0, "events": 0, "deleted": 0, "errors": []}
     for acc in accounts:
         url = (acc.get("url") or "").strip()
-        user = (acc.get("username") or "").strip()
-        pw = acc.get("password") or ""
+        user, pw, auth_type = await asyncio.to_thread(_resolve_caldav_auth, owner, acc)
         account_id = acc.get("id") or ""
         label = acc.get("label") or url or account_id
-        try:
-            pw = decrypt(pw)
-        except Exception:
-            pass
         if not (url and user and pw):
-            totals["errors"].append(f"{label}: missing URL, username, or password")
+            suffix = "reconnect Google Calendar" if auth_type == "bearer" else "missing URL, username, or password"
+            totals["errors"].append(f"{label}: {suffix}")
             continue
         try:
             url = validate_caldav_url(url)
-            result = await asyncio.to_thread(_sync_blocking, owner, url, user, pw, account_id)
+            if auth_type:
+                result = await asyncio.to_thread(
+                    _sync_blocking, owner, url, user, pw, account_id, auth_type
+                )
+            else:
+                result = await asyncio.to_thread(_sync_blocking, owner, url, user, pw, account_id)
         except ValueError as e:
             result = {"calendars": 0, "events": 0, "deleted": 0, "errors": [str(e)]}
         except Exception as e:

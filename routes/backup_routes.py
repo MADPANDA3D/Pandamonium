@@ -37,8 +37,8 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
         features = load_features()
 
         # User preferences
-        from routes.prefs_routes import _load_for_user
-        preferences = _load_for_user(user)
+        from routes.prefs_routes import _public_for_user
+        preferences = _public_for_user(user)
 
         export_data = {
             "version": 1,
@@ -198,11 +198,21 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
 
         # ── Preferences ──
         if "preferences" in body and isinstance(body["preferences"], dict):
-            from routes.prefs_routes import _load_for_user, _save_for_user
+            from routes.prefs_routes import (
+                PROTECTED_PREF_KEYS,
+                _load_for_user,
+                _save_for_user,
+            )
+            imported_preferences = {
+                key: value
+                for key, value in body["preferences"].items()
+                if key not in PROTECTED_PREF_KEYS
+            }
             current = _load_for_user(user)
-            current.update(body["preferences"])
-            _save_for_user(user, current)
-            imported.append("preferences")
+            if imported_preferences:
+                current.update(imported_preferences)
+                _save_for_user(user, current)
+                imported.append("preferences")
 
         if not imported:
             return {"ok": False, "message": "No recognized data found in the file"}

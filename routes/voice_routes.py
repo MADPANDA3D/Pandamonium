@@ -25,6 +25,7 @@ from src.agent_loop import stream_agent_loop
 from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
+from src.settings import load_settings
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
 from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_pcm16
 
@@ -39,6 +40,10 @@ VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
 VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
 VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
+VOICE_SERVER_TTS_ERROR = (
+    "Voice Orb requires server-generated TTS. "
+    "Enable an available local or endpoint TTS provider in Settings."
+)
 VOICE_EVENT_HEARTBEAT_SECONDS = 5.0
 VOICE_FRAME_MAX_BYTES = 1024 * 1024
 VOICE_FRAME_MAX_WIDTH = 1024
@@ -228,6 +233,33 @@ async def _voice_events_with_heartbeats(
 
 def _now() -> int:
     return int(time.time())
+
+
+def _server_tts_readiness(tts_service) -> tuple[bool, str]:
+    try:
+        settings = load_settings()
+    except Exception:
+        return False, "disabled"
+    provider = settings.get("tts_provider", "disabled")
+    server_provider = provider == "local" or (
+        isinstance(provider, str)
+        and provider.startswith("endpoint:")
+        and bool(provider.partition(":")[2].strip())
+    )
+    if settings.get("tts_enabled") is False or not server_provider or not tts_service:
+        return False, str(provider)
+    try:
+        return bool(tts_service.available), str(provider)
+    except Exception:
+        return False, str(provider)
+
+
+def _require_server_tts(tts_service) -> None:
+    if not _server_tts_readiness(tts_service)[0]:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "server_tts_required", "message": VOICE_SERVER_TTS_ERROR},
+        )
 
 
 def _load_state() -> dict:
@@ -2062,13 +2094,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
     @router.get("/status")
     async def voice_status(_owner: str = Depends(require_user)):
-        try:
-            from src.settings import load_settings
-
-            settings = load_settings()
-            tts_provider = settings.get("tts_provider", "browser")
-        except Exception:
-            tts_provider = "browser"
+        server_tts_ready, tts_provider = _server_tts_readiness(tts_service)
         return {
             "mode": "jarvis_call",
             "activation": "call_button",
@@ -2078,6 +2104,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             "brain_endpoint": "jarvis-ollama-local",
             "voice_model": JARVIS_MODEL,
             "tts_provider": tts_provider,
+            "server_tts_ready": server_tts_ready,
+            "server_tts_error": None if server_tts_ready else VOICE_SERVER_TTS_ERROR,
             "fast_rtc_mounted": False,
             "action_bridge": ACTION_BRIDGE_URL,
             "safe_actions": sorted(SAFE_ACTIONS),
@@ -2085,14 +2113,9 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
     @router.post("/prewarm")
     async def prewarm_voice_brain(_owner: str = Depends(require_user)):
+        _require_server_tts(tts_service)
+
         async def prewarm_tts() -> tuple[str, bool | None, int | None, str | None]:
-            if not tts_service:
-                return "unavailable", None, None, None
-            try:
-                if not tts_service.available:
-                    return "unavailable", None, None, None
-            except Exception as exc:
-                return "failed", False, None, str(exc)[:200]
             if TTS_INFERENCE_LOCK.locked():
                 return "busy", None, None, None
 
@@ -2172,6 +2195,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         payload: VoiceSessionCreate,
         owner: str = Depends(require_user),
     ):
+        _require_server_tts(tts_service)
         _set_user_time_from_request(request)
         state = _load_state()
         session_id = str(uuid.uuid4())
@@ -2279,6 +2303,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
         state = _load_state()
         session = _owned_session(state, session_id, owner)
+        _require_server_tts(tts_service)
         turn_session = dict(session)
         if payload.client_state:
             turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
@@ -2376,6 +2401,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             raise HTTPException(status_code=400, detail={"message": "Voice turn text is required"})
         state = _load_state()
         session = _owned_session(state, session_id, owner)
+        _require_server_tts(tts_service)
         turn_session = dict(session)
         if payload.client_state:
             turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
@@ -2478,8 +2504,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         speech_turn = _SPEECH_TURNS.get((session_id, turn_id))
         if not speech_turn:
             raise HTTPException(status_code=404, detail={"message": "Voice audio turn not found"})
-        if not tts_service or not tts_service.available:
-            raise HTTPException(status_code=503, detail={"message": "TTS service not available"})
+        _require_server_tts(tts_service)
 
         _set_voice_status(session_id, "buffering", active_audio_turn_id=turn_id)
 

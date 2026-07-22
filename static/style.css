@@ -41143,6 +41143,9 @@ body.theme-frosted .modal {
   left: 50%;
   pointer-events: auto;
 }
+.jarvis-call-view-chat {
+  display: none;
+}
 @media (min-width: 721px) {
   body.jarvis-voice-active .chat-container {
     margin-right: 34vw;
@@ -41200,8 +41203,8 @@ body.theme-frosted .modal {
   70% { transform: scale(1.025); filter: saturate(1.08); }
 }
 @media (max-width: 720px) {
-  html.jarvis-voice-active,
-  body.jarvis-voice-active {
+  html.jarvis-voice-active:not(.jarvis-voice-minimized),
+  body.jarvis-voice-active:not(.jarvis-voice-minimized) {
     overflow: hidden;
   }
   .jarvis-input-sphere {
@@ -41222,42 +41225,55 @@ body.theme-frosted .modal {
     background: #000;
     pointer-events: auto;
   }
-  .jarvis-call-orb {
-    width: 100vw;
-    height: 100dvh;
+  .jarvis-call-panel.is-minimized {
+    transform: translateX(100%);
+    pointer-events: none;
   }
-  .jarvis-agent-selector {
-    top: 12px;
-  }
-  .jarvis-call-panel.has-agent-task .jarvis-agent-workspace {
-    width: 100vw;
-    height: 100dvh;
-    padding: 0;
-    border: 0;
-  }
-  .jarvis-call-panel.has-agent-task .jarvis-agent-selector {
-    left: 50%;
-  }
-  .jarvis-task-activity {
-    width: 100%;
-    max-width: 100%;
-    margin-left: 0;
-  }
-  .jarvis-call-panel.has-agent-task .jarvis-call-orb {
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 48dvh;
-  }
+  .jarvis-agent-workspace,
   .jarvis-activity-rail {
-    top: 48dvh;
-    right: 12px;
-    bottom: 72px;
-    left: 12px;
+    display: none;
   }
+  .jarvis-call-orb,
+  .jarvis-call-panel.has-agent-task .jarvis-call-orb {
+    top: 50%;
+    right: auto;
+    left: 50%;
+    width: min(64vw, 42dvh, 280px);
+    height: min(64vw, 42dvh, 280px);
+    transform: translate(-50%, -56%);
+  }
+  .jarvis-organic-frame {
+    /* The WebGL bloom pass paints its square render target. Fade that edge on
+       phones so the compact voice object remains an orb, not a purple tile. */
+    -webkit-mask-image: radial-gradient(circle at center, #000 0%, #000 42%, rgba(0, 0, 0, 0.86) 46%, transparent 50%);
+    mask-image: radial-gradient(circle at center, #000 0%, #000 42%, rgba(0, 0, 0, 0.86) 46%, transparent 50%);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
+  .jarvis-call-actions,
   .jarvis-call-panel.has-agent-task .jarvis-call-actions {
     left: 50%;
-    bottom: 14px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  }
+  .jarvis-call-talk,
+  .jarvis-call-close {
+    flex: 0 0 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+  .jarvis-call-view-chat {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    border: 1px solid rgba(112, 237, 245, 0.38);
+    border-radius: 999px;
+    background: rgba(4, 7, 12, 0.82);
+    color: #70edf5;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
   }
   .jarvis-call-turns {
     display: none;

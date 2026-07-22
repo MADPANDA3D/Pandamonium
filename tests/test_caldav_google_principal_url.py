@@ -81,13 +81,19 @@ class _FakePrincipal:
 
 
 class _FakeClient:
-    def __init__(self, url=None, username=None, password=None):
+    last = None
+
+    def __init__(self, url=None, username=None, password=None, auth_type=None):
         self.url = url
+        self.auth_type = auth_type
+        self.principal_called = False
+        _FakeClient.last = self
         # Mirror the real DAVClient: _build_dav_client sets
         # session.max_redirects = 0 right after construction.
         self.session = types.SimpleNamespace(max_redirects=30)
 
     def principal(self):
+        self.principal_called = True
         return _FakePrincipal()
 
     def calendar(self, url=None):
@@ -140,6 +146,13 @@ def test_maps_google_principal_url_to_events_collection():
     assert caldav_sync._google_caldav_events_url(_GOOGLE_EVENTS) is None
 
 
+def test_google_events_collection_requires_documented_exact_host():
+    assert caldav_sync._is_google_caldav_events_url(_GOOGLE_EVENTS)
+    assert not caldav_sync._is_google_caldav_events_url(
+        "https://evil.googleusercontent.com/caldav/v2/me@gmail.com/events"
+    )
+
+
 def test_maps_legacy_google_calendar_dav_url():
     # Google's older endpoint (some accounts authenticate only against this one).
     legacy_user = "https://www.google.com/calendar/dav/me@gmail.com/user"
@@ -167,3 +180,16 @@ def test_google_sync_pulls_events_instead_of_empty(monkeypatch):
         assert ev is not None and ev.summary == "Standup"
     finally:
         db.close()
+
+
+def test_google_events_url_uses_bearer_without_broad_principal_discovery(monkeypatch):
+    _install_fake_caldav(monkeypatch)
+    _clear_db()
+
+    result = caldav_sync._sync_blocking(
+        "alice", _GOOGLE_EVENTS, "me@gmail.com", "oauth-token", auth_type="bearer"
+    )
+
+    assert result["events"] == 1, result
+    assert _FakeClient.last.auth_type == "bearer"
+    assert _FakeClient.last.principal_called is False
