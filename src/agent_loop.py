@@ -21,6 +21,7 @@ from src.llm_core import (
     _is_ollama_native_url,
 )
 from src.model_context import estimate_tokens
+from src.agent_identity import JARVIS_SYSTEM_PROMPT, is_jarvis_model
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
@@ -1577,6 +1578,9 @@ def _build_system_prompt(
         if not active_document:
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
+
+    if is_jarvis_model(model):
+        agent_prompt = f"{JARVIS_SYSTEM_PROMPT}\n\n{agent_prompt}"
 
     # Dynamic parts that change per request
     mcp_schemas = []
