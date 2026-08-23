@@ -70,14 +70,14 @@ def _provision_endpoint(tokens: Dict, owner: Optional[str]) -> Dict:
         if ep is None:
             ep = ModelEndpoint(
                 id=str(uuid.uuid4())[:8],
-                name="ChatGPT Subscription",
+                name="Friday",
                 base_url=base,
                 model_type="llm",
                 endpoint_kind="api",
                 owner=owner,
             )
             db.add(ep)
-        ep.name = "ChatGPT Subscription"
+        ep.name = "Friday"
         ep.base_url = base
         ep.api_key = None
         ep.provider_auth_id = auth.id
@@ -87,6 +87,7 @@ def _provision_endpoint(tokens: Dict, owner: Optional[str]) -> Dict:
         ep.endpoint_kind = "api"
         ep.model_refresh_mode = "manual"
         ep.cached_models = json.dumps(models)
+        ep.hidden_models = json.dumps(models[1:]) if len(models) > 1 else None
         db.commit()
         result = {
             "id": ep.id,

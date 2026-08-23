@@ -48,6 +48,7 @@ with preserve_import_state("core.database", "src.database", "core.session_manage
         _ping_endpoint,
         _parse_model_list,
         _normalize_refresh_mode,
+        _model_display_name,
         _truthy,
         _speech_settings_using_endpoint,
         _clear_speech_settings_for_endpoint,
@@ -58,6 +59,15 @@ with preserve_import_state("core.database", "src.database", "core.session_manage
         _PROVIDER_CURATED,
     )
     from src.llm_core import ANTHROPIC_MODELS
+
+
+def test_agent_endpoint_name_hides_backend_model_id():
+    assert _model_display_name("hermes-agent", "Gordon") == "Gordon"
+    assert _model_display_name("hermes-agent", "Hermes API") == "Gordon"
+    assert _model_display_name("gpt-oss-120b-heretic-v2", "Jarvis") == "Jarvis"
+    assert _model_display_name("gpt-5.6-terra", "Friday") == "Friday"
+    assert _model_display_name("gpt-5.6-terra", "ChatGPT Subscription") == "Friday"
+    assert _model_display_name("provider/model", "Other endpoint") == "model"
 
 
 # ── speech endpoint settings ──

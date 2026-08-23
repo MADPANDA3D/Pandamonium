@@ -1176,7 +1176,19 @@ def _filter_mlx_deepseek_v4_repo_when_shimmed(model_ids):
     return [m for m in ids if not _is_mlx_deepseek_v4_repo_id(m)]
 
 
-def _model_display_name(model_id: str) -> str:
+_AGENT_ENDPOINT_DISPLAY_NAMES = {
+    "jarvis": "Jarvis",
+    "gordon": "Gordon",
+    "hermes api": "Gordon",
+    "friday": "Friday",
+    "chatgpt subscription": "Friday",
+}
+
+
+def _model_display_name(model_id: str, endpoint_name: str = "") -> str:
+    agent_name = str(endpoint_name or "").strip()
+    if display_name := _AGENT_ENDPOINT_DISPLAY_NAMES.get(agent_name.lower()):
+        return display_name
     if _is_mlx_deepseek_v4_shim_id(model_id):
         return str(model_id or "").rstrip("/").split("/")[-1] or "DeepSeek-V4-Flash-4bit"
     return str(model_id or "").split("/")[-1]
@@ -1427,9 +1439,9 @@ def setup_model_routes(model_discovery):
                     "port": 0,
                     "url": chat_url,
                     "models": curated,
-                    "models_display": [_model_display_name(mid) for mid in curated],
+                    "models_display": [_model_display_name(mid, ep.name) for mid in curated],
                     "models_extra": extra,
-                    "models_extra_display": [_model_display_name(mid) for mid in extra],
+                    "models_extra_display": [_model_display_name(mid, ep.name) for mid in extra],
                     "endpoint_id": ep.id,
                     "endpoint_name": ep.name,
                     "category": category,

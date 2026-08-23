@@ -24,3 +24,12 @@ def test_header_indicator_has_title_tooltip():
     body = SRC[SRC.index("export function updateModelPicker()"):]
     assert re.search(r"label\.title\s*=\s*modelId\b", body), \
         "header model indicator needs a title tooltip (#1982)"
+
+
+def test_header_indicator_uses_server_display_name():
+    body = SRC[SRC.index("export function updateModelPicker()"):]
+    assert "const displayName = _modelDisplayName(modelId);" in body
+
+
+def test_agent_alias_rows_hide_backend_endpoint_label():
+    assert "const _isAgentAlias = ['jarvis', 'gordon', 'friday'].includes" in SRC

@@ -27,7 +27,7 @@ def test_provision_creates_owner_scoped_auth_session_and_endpoint(monkeypatch):
 
     res = csr._provision_endpoint({"access_token": "AT", "refresh_token": "RT"}, "alice")
 
-    assert res["name"] == "ChatGPT Subscription"
+    assert res["name"] == "Friday"
     assert res["base_url"] == csr.chatgpt_subscription.DEFAULT_CHATGPT_SUBSCRIPTION_BASE_URL
     assert res["models"] == ["gpt-5.5", "o4-mini"]
 
@@ -49,6 +49,7 @@ def test_provision_creates_owner_scoped_auth_session_and_endpoint(monkeypatch):
         assert ep.model_refresh_mode == "manual"
         assert ep.supports_tools is False
         assert json.loads(ep.cached_models) == ["gpt-5.5", "o4-mini"]
+        assert json.loads(ep.hidden_models) == ["o4-mini"]
     finally:
         db.close()
 
@@ -69,7 +70,9 @@ def test_provision_refreshes_existing_auth_session_and_endpoint(monkeypatch):
         assert len(ep_rows) == 1
         assert auth_rows[0].access_token == "NEW"
         assert auth_rows[0].refresh_token == "NEW-RT"
+        assert ep_rows[0].name == "Friday"
         assert ep_rows[0].provider_auth_id == auth_rows[0].id
+        assert ep_rows[0].hidden_models is None
     finally:
         db.close()
 

@@ -96,6 +96,19 @@ function _modelExists(modelId, url) {
   });
 }
 
+function _modelDisplayName(modelId) {
+  if (!modelId || !window.modelsModule || !window.modelsModule.getCachedItems) {
+    return modelId ? modelId.split('/').pop() : 'Select model';
+  }
+  for (const item of window.modelsModule.getCachedItems() || []) {
+    const models = (item.models || []).concat(item.models_extra || []);
+    const displays = (item.models_display || []).concat(item.models_extra_display || []);
+    const index = models.indexOf(modelId);
+    if (index >= 0) return (displays[index] || modelId).split('/').pop();
+  }
+  return modelId.split('/').pop();
+}
+
 function _firstAvailableModel() {
   if (!window.modelsModule || !window.modelsModule.getCachedItems) return null;
   const items = window.modelsModule.getCachedItems() || [];
@@ -411,7 +424,8 @@ function _initModelPickerDropdown() {
       const epSpan = document.createElement('span');
       epSpan.className = 'model-switch-ep';
       // Don't show endpoint name if it matches the model name (local self-hosted)
-      const _epDisplay = m.epName && !m.display.toLowerCase().includes(m.epName.toLowerCase().split('/').pop()) ? m.epName : '';
+      const _isAgentAlias = ['jarvis', 'gordon', 'friday'].includes(m.display.toLowerCase());
+      const _epDisplay = !_isAgentAlias && m.epName && !m.display.toLowerCase().includes(m.epName.toLowerCase().split('/').pop()) ? m.epName : '';
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
 
@@ -790,7 +804,7 @@ export function updateModelPicker() {
     _ensureDefaultPendingChat();
   }
 
-  const displayName = modelId ? modelId.split('/').pop() : 'Select model';
+  const displayName = _modelDisplayName(modelId);
   // The header indicator clips long names with ellipsis; show the full model
   // identifier on hover (#1982). No tooltip on the "Select model" placeholder.
   label.title = modelId || '';
