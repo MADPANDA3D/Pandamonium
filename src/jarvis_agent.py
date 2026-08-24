@@ -405,7 +405,6 @@ async def _jarvis_summary(task: dict, prompt: str, max_tokens: int) -> str:
         max_tokens=max_tokens,
         headers=headers,
         timeout=45,
-        workload="background",
     )
 
 

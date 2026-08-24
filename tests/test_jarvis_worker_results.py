@@ -42,6 +42,33 @@ def test_jarvis_runtime_uses_linked_chat_brain(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_jarvis_summary_uses_compatible_configured_brain_call(monkeypatch):
+    captured = {}
+
+    async def llm_call(endpoint_url, model, messages, **kwargs):
+        captured.update(
+            endpoint_url=endpoint_url,
+            model=model,
+            messages=messages,
+            kwargs=kwargs,
+        )
+        return "ready"
+
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_jarvis_runtime",
+        lambda _task: ("http://freetoken.test/v1/chat/completions", "jarvis", {}),
+    )
+    monkeypatch.setattr("src.llm_core.llm_call_async", llm_call)
+
+    assert await jarvis_agent._jarvis_summary(_task(), "Summarize this.", 384) == "ready"
+    assert captured["endpoint_url"] == "http://freetoken.test/v1/chat/completions"
+    assert captured["model"] == "jarvis"
+    assert captured["kwargs"]["max_tokens"] == 384
+    assert "workload" not in captured["kwargs"]
+
+
+@pytest.mark.asyncio
 async def test_spoken_result_caps_source_and_output(monkeypatch):
     captured = {}
 
