@@ -70,3 +70,71 @@ def test_knowledge_embedder_is_isolated_from_generic_rag(monkeypatch):
     assert store._ensure_embedder() is expected
     assert created == [knowledge.KNOWLEDGE_EMBEDDING_MODEL]
     assert knowledge.KNOWLEDGE_EMBEDDING_MODEL == "BAAI/bge-small-en-v1.5"
+
+
+def test_latest_sync_state_returns_completed_manifest(tmp_path: Path, monkeypatch):
+    sync_dir = tmp_path / "sync"
+    sync_dir.mkdir()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        '{"index_version":"stamp-contenthash","sources":{"a":{},"b":{}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(knowledge, "SYNC_DIR", sync_dir)
+    monkeypatch.setattr(knowledge, "MANIFEST_FILE", manifest)
+
+    assert knowledge.latest_sync_state() == {
+        "sync_id": None,
+        "index_version": "stamp-contenthash",
+        "content_fingerprint": knowledge._manifest_fingerprint({"a": {}, "b": {}}),
+        "source_fingerprints": {
+            source_id: knowledge._source_fingerprint({"source_id": source_id})
+            for source_id in ("a", "b")
+        },
+        "sources": 2,
+        "batches": [],
+        "finalized": True,
+    }
+
+
+def test_delta_sync_preserves_unchanged_sources_and_removes_missing(tmp_path: Path, monkeypatch):
+    sync_dir = tmp_path / "sync"
+    manifest = tmp_path / "manifest.json"
+    sync_dir.mkdir()
+    manifest.write_text(
+        '{"sources":{"a":{"source":"a.md","content_hash":"old"},'
+        '"b":{"source":"b.md","content_hash":"gone"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(knowledge, "SYNC_DIR", sync_dir)
+    monkeypatch.setattr(knowledge, "MANIFEST_FILE", manifest)
+    store = knowledge.KnowledgeStore.__new__(knowledge.KnowledgeStore)
+    monkeypatch.setattr(store, "_all_source_ids", lambda: {"a", "b"})
+    removed = []
+    monkeypatch.setattr(store, "_delete_source", lambda source_id: removed.append(source_id) or 1)
+    monkeypatch.setattr(store, "_source_hash", lambda _source_id: "")
+    monkeypatch.setattr(store, "_upsert_source", lambda _doc, _version: 1)
+
+    result = store.sync_batch(
+        "sync-1",
+        "version-1",
+        0,
+        [{
+            "source_id": "c",
+            "source": "c.md",
+            "content_hash": "new",
+            "mtime": 1,
+            "domain": "home_lab",
+            "client": "",
+            "authority": "primary",
+            "sensitivity": "internal",
+            "text": "new document",
+        }],
+        True,
+        ["a", "c"],
+    )
+
+    saved = knowledge._read_json(manifest, {})
+    assert set(saved["sources"]) == {"a", "c"}
+    assert removed == ["b"]
+    assert result["sources"] == 2

@@ -191,6 +191,7 @@ class KnowledgeStore:
         batch: int,
         documents: list[dict[str, Any]],
         final: bool,
+        source_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         if not sync_id or not index_version or batch < 0:
             raise ValueError("invalid_sync")
@@ -204,7 +205,7 @@ class KnowledgeStore:
                 "sync_id": sync_id,
                 "index_version": index_version,
                 "seen": [],
-                "sources": {},
+                "sources": manifest.get("sources", {}),
                 "batches": [],
                 "chunks_added": 0,
                 "unchanged": 0,
@@ -238,9 +239,16 @@ class KnowledgeStore:
             _write_json(state_file, state)
             removed = 0
             if final:
-                stale = self._all_source_ids() - seen
+                authoritative = set(source_ids) if source_ids is not None else seen
+                if not authoritative or any(not source_id or len(source_id) > 100 for source_id in authoritative):
+                    raise ValueError("invalid_source_manifest")
+                missing = authoritative - set(sources)
+                if missing:
+                    raise ValueError("source_manifest_missing_documents")
+                stale = self._all_source_ids() - authoritative
                 for source_id in stale:
                     removed += self._delete_source(source_id)
+                sources = {source_id: row for source_id, row in sources.items() if source_id in authoritative}
                 _write_json(MANIFEST_FILE, {
                     "index_version": index_version,
                     "updated_at": int(time.time()),
@@ -434,16 +442,49 @@ def sync_in_worker(payload: dict[str, Any]) -> dict[str, Any]:
             Path(path).unlink(missing_ok=True)
 
 
+def _source_fingerprint(row: dict[str, Any]) -> str:
+    fields = ("source_id", "source", "domain", "client", "sensitivity", "authority", "content_hash")
+    indexed = {field: row.get(field) for field in fields}
+    return hashlib.sha256(
+        json.dumps(indexed, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+
+
+def _manifest_fingerprint(sources: dict[str, Any]) -> str:
+    digest = hashlib.sha256()
+    rows = ({"source_id": source_id, **(row or {})} for source_id, row in sources.items())
+    for row in sorted(rows, key=lambda value: str(value.get("source") or "")):
+        digest.update(_source_fingerprint(row).encode())
+        digest.update(b"\n")
+    return digest.hexdigest()[:12]
+
+
 def latest_sync_state() -> dict[str, Any]:
     paths = sorted(SYNC_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
-    if not paths:
+    if paths:
+        state = _read_json(paths[0], {})
+        return {
+            "sync_id": state.get("sync_id"),
+            "index_version": state.get("index_version"),
+            "sources": len(state.get("seen", [])),
+            "batches": list(state.get("batches", [])),
+            "finalized": False,
+        }
+    manifest = _read_json(MANIFEST_FILE, {})
+    sources = manifest.get("sources") or {}
+    if not manifest.get("index_version"):
         return {}
-    state = _read_json(paths[0], {})
     return {
-        "sync_id": state.get("sync_id"),
-        "index_version": state.get("index_version"),
-        "sources": len(state.get("seen", [])),
-        "batches": list(state.get("batches", [])),
+        "sync_id": None,
+        "index_version": manifest.get("index_version"),
+        "content_fingerprint": _manifest_fingerprint(sources),
+        "source_fingerprints": {
+            source_id: _source_fingerprint({"source_id": source_id, **(row or {})})
+            for source_id, row in sources.items()
+        },
+        "sources": len(sources),
+        "batches": [],
+        "finalized": True,
     }
 
 
@@ -497,5 +538,6 @@ if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "sync-worker
         int(payload["batch"]),
         list(payload.get("documents", [])),
         bool(payload.get("final")),
+        list(payload["source_ids"]) if payload.get("source_ids") is not None else None,
     )
     print(json.dumps(result))

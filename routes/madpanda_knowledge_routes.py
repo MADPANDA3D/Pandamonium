@@ -55,6 +55,7 @@ class SyncRequest(BaseModel):
     batch: int = Field(ge=0)
     final: bool = False
     documents: list[SyncDocument] = Field(max_length=100)
+    source_ids: list[str] | None = Field(default=None, max_length=100_000)
 
 
 def _agent(authorization: str | None):
@@ -96,6 +97,7 @@ async def sync_v1(payload: SyncRequest, authorization: str | None = Header(defau
         "index_version": payload.index_version,
         "batch": payload.batch,
         "documents": documents,
+        "source_ids": payload.source_ids,
         "final": payload.final,
     }))
 
