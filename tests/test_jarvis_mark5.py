@@ -7,7 +7,7 @@ from routes.voice_routes import (
     VOICE_NORMAL_NUM_PREDICT,
 )
 from routes.agent_task_routes import TaskCreate
-from src.jarvis_agent import WORKERS, _parameter_value
+from src.jarvis_agent import WORKERS
 from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
 
 
@@ -26,10 +26,9 @@ def test_leos_worker_names_route_without_confusing_nimbus_and_vps():
     assert _workspace_for_text("Inspect Project Linux and Hyprland") == "project-linux"
 
 
-def test_mark5_voice_budgets_and_runtime_parser():
+def test_mark5_voice_budgets():
     assert VOICE_NORMAL_NUM_PREDICT == 600
     assert VOICE_LONG_NUM_PREDICT == 1200
-    assert _parameter_value("num_ctx 32768\ntemperature 0.35", "num_ctx") == 32768
 
 
 def test_agent_tools_and_worker_defaults_are_narrow():

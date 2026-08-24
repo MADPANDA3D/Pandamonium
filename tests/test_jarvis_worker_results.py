@@ -20,56 +20,50 @@ def _task(**updates):
     return task
 
 
+def test_jarvis_runtime_uses_linked_chat_brain(monkeypatch):
+    class Session:
+        endpoint_url = "http://freetoken.test/v1/chat/completions"
+        model = "jarvis"
+        headers = {"Authorization": "Bearer private"}
+        owner = "leo"
+
+    class Manager:
+        def get_session(self, session_id):
+            assert session_id == "session-1"
+            return Session()
+
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", Manager())
+
+    assert jarvis_agent._jarvis_runtime(_task()) == (
+        "http://freetoken.test/v1/chat/completions",
+        "jarvis",
+        {"Authorization": "Bearer private"},
+    )
+
+
 @pytest.mark.asyncio
 async def test_spoken_result_caps_source_and_output(monkeypatch):
     captured = {}
 
-    class Response:
-        def raise_for_status(self):
-            return None
+    async def summary(_task, prompt, max_tokens):
+        captured.update(prompt=prompt, max_tokens=max_tokens)
+        return "Outcome complete. No blocker remains. Next, review the result. " * 20
 
-        def json(self):
-            return {"response": "Outcome complete. No blocker remains. Next, review the result. " * 20}
-
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, url, json):
-            captured.update(url=url, payload=json)
-            return Response()
-
-    monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     spoken = await jarvis_agent._spoken_result(_task(), "x" * 20_000)
 
     assert len(spoken) <= 600
     assert spoken.endswith(".")
-    assert len(captured["payload"]["prompt"].split("Worker result:\n", 1)[1]) == 16_000
-    assert captured["url"].endswith("/api/generate")
+    assert len(captured["prompt"].split("Worker result:\n", 1)[1]) == 16_000
+    assert captured["max_tokens"] == 600
 
 
 @pytest.mark.asyncio
-async def test_spoken_result_falls_back_when_qwen_fails(monkeypatch):
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
+async def test_spoken_result_falls_back_when_configured_brain_fails(monkeypatch):
+    async def summary(_task, _prompt, _max_tokens):
+        raise RuntimeError("offline")
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, _url, json):
-            raise RuntimeError("offline")
-
-    monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     assert await jarvis_agent._spoken_result(_task(), "full raw result") == (
         "PC Codex finished. The full result is in the chat."
     )
@@ -79,54 +73,27 @@ async def test_spoken_result_falls_back_when_qwen_fails(monkeypatch):
 async def test_spoken_milestone_is_one_bounded_sentence(monkeypatch):
     captured = {}
 
-    class Response:
-        def raise_for_status(self):
-            return None
+    async def summary(_task, prompt, max_tokens):
+        captured.update(prompt=prompt, max_tokens=max_tokens)
+        return (
+            "The focused verification now passes cleanly. A second sentence must not be spoken. "
+            + ("Extra detail " * 40)
+        )
 
-        def json(self):
-            return {
-                "response": "The focused verification now passes cleanly. A second sentence must not be spoken. "
-                + ("Extra detail " * 40)
-            }
-
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, url, json):
-            captured.update(url=url, payload=json)
-            return Response()
-
-    monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     spoken = await jarvis_agent._spoken_milestone(_task(), "Tests completed.")
 
     assert spoken == "PC Codex: The focused verification now passes cleanly."
     assert len(spoken) <= 240
-    assert captured["payload"]["options"]["num_predict"] == 80
+    assert captured["max_tokens"] == 384
 
 
 @pytest.mark.asyncio
 async def test_spoken_milestone_failure_uses_non_raw_fallback(monkeypatch):
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
+    async def summary(_task, _prompt, _max_tokens):
+        raise RuntimeError("offline")
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, _url, json):
-            raise RuntimeError("offline")
-
-    monkeypatch.setattr(jarvis_agent.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     spoken = await jarvis_agent._spoken_milestone(_task(), "SECRET RAW TABLE CONTENT")
 
     assert spoken == "PC Codex completed a milestone; details are in the activity history."

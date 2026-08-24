@@ -930,7 +930,7 @@ async def _execute_tool_block_impl(
         from src.jarvis_agent import runtime_status
 
         desc = "get_runtime_status"
-        runtime = await runtime_status()
+        runtime = await runtime_status(owner=owner)
         result = {**runtime, "output": json.dumps(runtime, ensure_ascii=False), "exit_code": 0}
     elif tool == "start_agent_task":
         from src.jarvis_agent import start_task

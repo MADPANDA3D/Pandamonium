@@ -22,8 +22,6 @@ from src.agent_worker_adapters import adapters, require_worker_task_permission, 
 TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
 KNOWLEDGE_MANIFEST_FILE = Path(DATA_DIR) / "jarvis_knowledge_manifest.json"
 BRIDGE_TOKEN_FILE = Path(os.getenv("ODYSSEUS_AGENT_BRIDGE_TOKEN_FILE", "/etc/odysseus-agent-bridge-token"))
-JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
-OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434")
 TERMINAL = {"completed", "failed", "cancelled", "blocked"}
 TERMINAL_EVENTS = {"result", "error", "cancelled"}
 STREAM_RETRY_LIMIT = 2
@@ -375,6 +373,42 @@ def _one_spoken_sentence(text: str, limit: int = 240) -> str:
     return value
 
 
+def _jarvis_runtime(task: dict | None = None) -> tuple[str, str, dict]:
+    """Resolve the Jarvis brain from the linked chat, then the user's default."""
+    owner = str((task or {}).get("owner") or "").strip() or None
+    session_id = str((task or {}).get("session_id") or "").strip()
+    if _SESSION_MANAGER and session_id:
+        try:
+            session = _SESSION_MANAGER.get_session(session_id)
+            if (not owner or getattr(session, "owner", None) == owner) and session.endpoint_url and session.model:
+                return session.endpoint_url, session.model, dict(session.headers or {})
+        except Exception:
+            pass
+
+    from src.endpoint_resolver import resolve_endpoint
+
+    endpoint_url, model, headers = resolve_endpoint("default", owner=owner)
+    if not endpoint_url or not model:
+        raise RuntimeError("jarvis_brain_not_configured")
+    return endpoint_url, model, dict(headers or {})
+
+
+async def _jarvis_summary(task: dict, prompt: str, max_tokens: int) -> str:
+    endpoint_url, model, headers = _jarvis_runtime(task)
+    from src.llm_core import llm_call_async
+
+    return await llm_call_async(
+        endpoint_url,
+        model,
+        [{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=max_tokens,
+        headers=headers,
+        timeout=45,
+        workload="background",
+    )
+
+
 async def _spoken_result(task: dict, text: str) -> str:
     label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
     fallback = f"{label} finished. The full result is in the chat."
@@ -387,19 +421,7 @@ async def _spoken_result(task: dict, text: str) -> str:
         f"{text[:16_000]}"
     )
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": JARVIS_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": False,
-                    "options": {"temperature": 0.2, "num_predict": 180},
-                },
-            )
-        response.raise_for_status()
-        spoken = _bounded_spoken_text(str(response.json().get("response") or ""))
+        spoken = _bounded_spoken_text(await _jarvis_summary(task, prompt, 600))
         return spoken or fallback
     except Exception:
         return fallback
@@ -415,19 +437,7 @@ async def _spoken_milestone(task: dict, text: str) -> str:
         f"{text[:4_000]}"
     )
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": JARVIS_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": False,
-                    "options": {"temperature": 0.2, "num_predict": 80},
-                },
-            )
-        response.raise_for_status()
-        spoken = _one_spoken_sentence(str(response.json().get("response") or ""))
+        spoken = _one_spoken_sentence(await _jarvis_summary(task, prompt, 384))
         if spoken and label.casefold() not in spoken.casefold():
             spoken = _one_spoken_sentence(f"{label}: {spoken}")
         return spoken or fallback
@@ -445,19 +455,7 @@ async def _spoken_progress(task: dict, updates: list[str]) -> str:
         "the sentence.\n\nRecent updates:\n- " + "\n- ".join(update[:2_000] for update in updates)
     )
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": JARVIS_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": False,
-                    "options": {"temperature": 0.2, "num_predict": 80},
-                },
-            )
-        response.raise_for_status()
-        spoken = _one_spoken_sentence(str(response.json().get("response") or ""))
+        spoken = _one_spoken_sentence(await _jarvis_summary(task, prompt, 384))
         if spoken and label.casefold() not in spoken.casefold():
             spoken = _one_spoken_sentence(f"{label}: {spoken}")
         return spoken or fallback
@@ -805,19 +803,37 @@ async def stream_task_events(
         await asyncio.sleep(1)
 
 
-async def runtime_status(active_worker: str | None = None) -> dict:
-    model = JARVIS_MODEL
+async def runtime_status(active_worker: str | None = None, owner: str | None = None) -> dict:
+    endpoint_url = ""
+    model = ""
     details: dict[str, Any] = {}
-    parameters = ""
+    context: int | str | None = None
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(f"{OLLAMA_URL}/api/show", json={"model": model})
-        response.raise_for_status()
-        shown = response.json()
-        details = shown.get("details") or {}
-        parameters = str(shown.get("parameters") or "")
+        endpoint_url, model, headers = _jarvis_runtime({"owner": owner} if owner else None)
+        from src.endpoint_resolver import build_models_url
+
+        models_url = build_models_url(endpoint_url)
+        if models_url:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(models_url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+            entries = payload.get("data") if isinstance(payload, dict) else None
+            if isinstance(entries, list):
+                details = next(
+                    (entry for entry in entries if isinstance(entry, dict) and entry.get("id") == model),
+                    {},
+                )
+            context = details.get("max_model_len") or details.get("context_length")
     except Exception as exc:
         details = {"error": str(exc)[:200]}
+    if not context and endpoint_url and model:
+        try:
+            from src.model_context import get_context_length
+
+            context = get_context_length(endpoint_url, model)
+        except Exception:
+            pass
     try:
         from src.settings import load_settings
         settings = load_settings()
@@ -826,27 +842,16 @@ async def runtime_status(active_worker: str | None = None) -> dict:
     return {
         "assistant": "Jarvis",
         "brain_model": model,
-        "architecture": details.get("family") or details.get("families"),
-        "parameter_size": details.get("parameter_size"),
-        "quantization": details.get("quantization_level"),
-        "context": _parameter_value(parameters, "num_ctx"),
+        "architecture": details.get("architecture") or details.get("owned_by"),
+        "parameter_size": details.get("parameter_size") or details.get("parameters"),
+        "quantization": details.get("quantization") or details.get("quantization_level"),
+        "context": context,
         "tts_provider": settings.get("tts_provider"),
         "tts_model": settings.get("tts_model"),
         "tts_voice": settings.get("tts_voice"),
         "active_worker": active_worker,
         "workers": WORKERS,
     }
-
-
-def _parameter_value(parameters: str, name: str) -> int | str | None:
-    for line in parameters.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] == name:
-            try:
-                return int(parts[1])
-            except ValueError:
-                return parts[1]
-    return None
 
 
 def sync_knowledge(documents: list[dict], owner: str = "leo") -> dict:
