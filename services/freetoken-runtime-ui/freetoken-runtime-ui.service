@@ -1,0 +1,26 @@
+[Unit]
+Description=Read-only FreeToken runtime dashboard
+After=network-online.target freetoken-jarvis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freetoken
+Group=freetoken
+Environment=FREETOKEN_UI_HOST=192.168.1.247
+Environment=FREETOKEN_UI_PORT=1921
+Environment=FREETOKEN_API_URL=http://127.0.0.1:1919
+ExecStart=/usr/bin/python3 /opt/freetoken-runtime-ui/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
