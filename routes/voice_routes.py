@@ -1624,6 +1624,33 @@ async def _dispatch_worker_request(
     return task, "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
 
 
+async def _foreground_worker_result(
+    task_id: str,
+    owner: str,
+    *,
+    timeout: float = 90,
+    poll_seconds: float = 0.25,
+) -> tuple[str, str]:
+    """Wait for one selected worker turn without turning it into a background-only reply."""
+    from src.jarvis_agent import get_task
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        task = get_task(task_id) or {}
+        status = str(task.get("status") or "")
+        if status == "completed":
+            result_event = next(
+                (event for event in reversed(task.get("events") or []) if event.get("type") == "result"),
+                {},
+            )
+            reply = str(result_event.get("spoken_text") or task.get("result") or "").strip()
+            return status, reply
+        if status in {"failed", "cancelled", "blocked"}:
+            return status, ""
+        await asyncio.sleep(poll_seconds)
+    return "timeout", ""
+
+
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
     voice_session["_exact_request"] = text
     media = _media_command(text)
@@ -2032,14 +2059,6 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         except Exception as exc:
             logger.warning("Jarvis could not dispatch selected %s task: %s", worker, str(exc)[:240])
             task, action = {}, "blocked"
-        if action == "started":
-            reply = f"{label} is working on that now."
-        elif action == "steered":
-            reply = f"I passed that follow-up to {label}'s active task."
-        elif action == "busy":
-            reply = f"{label} is still working and cannot accept another instruction yet. You can wait, cancel it, or switch agents."
-        else:
-            reply = f"{label} is not connected, so I could not start the request."
         task_ids = [task["task_id"]] if task.get("task_id") and action != "blocked" else []
         if action in {"started", "steered"}:
             yield {
@@ -2049,6 +2068,24 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "workspace": workspace,
                 "foreground": True,
             }
+        foreground_status = ""
+        foreground_reply = ""
+        if worker == "pc-codex" and action in {"started", "steered"} and task_ids:
+            foreground_status, foreground_reply = await _foreground_worker_result(task_ids[0], owner)
+        if foreground_status == "completed" and foreground_reply:
+            reply = foreground_reply
+            action = "completed"
+        elif foreground_status in {"failed", "cancelled", "blocked"}:
+            reply = f"{label} could not complete that request. The task details are in the chat."
+            action = foreground_status
+        elif action == "started":
+            reply = f"{label} is still working. I’ll deliver the result here when it finishes."
+        elif action == "steered":
+            reply = f"I passed that follow-up to {label}'s active task."
+        elif action == "busy":
+            reply = f"{label} is still working and cannot accept another instruction yet. You can wait, cancel it, or switch agents."
+        else:
+            reply = f"{label} is not connected, so I could not start the request."
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, f"selected_{action}_{worker}", task_ids)
         return

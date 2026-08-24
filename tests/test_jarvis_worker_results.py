@@ -86,12 +86,23 @@ async def test_spoken_result_caps_source_and_output(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_short_plain_result_skips_summary_model(monkeypatch):
+    async def must_not_summarize(*_args, **_kwargs):
+        raise AssertionError("a short conversational result must stay on the fast path")
+
+    monkeypatch.setattr(jarvis_agent, "_jarvis_summary", must_not_summarize)
+    assert await jarvis_agent._spoken_result(
+        _task(), "Good evening, Leo. I’m good—settled in and ready. How are you?",
+    ) == "Good evening, Leo. I’m good—settled in and ready. How are you?"
+
+
+@pytest.mark.asyncio
 async def test_spoken_result_falls_back_when_configured_brain_fails(monkeypatch):
     async def summary(_task, _prompt, _max_tokens):
         raise RuntimeError("offline")
 
     monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
-    assert await jarvis_agent._spoken_result(_task(), "full raw result") == (
+    assert await jarvis_agent._spoken_result(_task(), "| Item | Status |\n| --- | --- |\n| Check | complete |") == (
         "Friday finished. The full result is in the chat."
     )
 

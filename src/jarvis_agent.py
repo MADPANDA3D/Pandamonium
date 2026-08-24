@@ -413,6 +413,9 @@ async def _spoken_result(task: dict, text: str) -> str:
     fallback = f"{label} finished. The full result is in the chat."
     if not text.strip():
         return fallback
+    plain = " ".join(text.split())
+    if len(plain) <= 600 and not re.search(r"(?:```|^\s*[#|*-]\s|\n\s*[#|*-]\s)", text):
+        return plain
     prompt = (
         f"Summarize this {label} result for spoken playback. Use two to four natural sentences covering "
         "the outcome, any blocker, and the next action. Speak plainly; do not read tables, Markdown, paths, "

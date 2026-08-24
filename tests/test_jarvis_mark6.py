@@ -811,6 +811,31 @@ async def test_friday_handoff_greeting_does_not_launch_a_deep_codex_task():
 
 
 @pytest.mark.asyncio
+async def test_foreground_friday_result_becomes_the_spoken_reply(monkeypatch):
+    async def dispatch(*_args, **_kwargs):
+        return {"task_id": "friday-task"}, "started"
+
+    async def foreground(task_id, owner):
+        assert (task_id, owner) == ("friday-task", "leo")
+        return "completed", "Good evening, Leo. I’m ready."
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(voice_routes, "_foreground_worker_result", foreground)
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Good evening Friday. How are you?",
+            "leo",
+            {"target": "pc-codex", "workspace": "home-lab"},
+        )
+    ]
+
+    assert events[-1]["assistant_text"] == "Good evening, Leo. I’m ready."
+    assert events[-1]["diagnostics"]["guard_reason"] == "selected_completed_pc-codex"
+    assert any(event.get("type") == "agent_task" and event.get("foreground") for event in events)
+
+
+@pytest.mark.asyncio
 async def test_old_worker_question_does_not_capture_direct_gordon_turn(monkeypatch):
     monkeypatch.setattr(jarvis_agent, "get_task", lambda _task_id: {
         "task_id": "pc-question",
