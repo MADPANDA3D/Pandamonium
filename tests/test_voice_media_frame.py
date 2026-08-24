@@ -81,6 +81,11 @@ async def test_camera_and_media_events_use_only_enumerated_controls():
 async def test_describe_uses_in_memory_frame_and_persists_only_model_metadata(monkeypatch):
     seen = {}
 
+    class Manager:
+        def get_session(self, session_id):
+            assert session_id == "chat-1"
+            return SimpleNamespace(model="vision-selected", endpoint_url="http://vision.test/v1/chat/completions")
+
     def analyze(image_bytes, image_format, owner=None, preferred_model=None):
         seen.update(
             bytes=image_bytes,
@@ -92,6 +97,7 @@ async def test_describe_uses_in_memory_frame_and_persists_only_model_metadata(mo
 
     monkeypatch.setattr(chat_helpers, "model_supports_vision", lambda *_args: True)
     monkeypatch.setattr(document_processor, "analyze_image_bytes_with_vl_result", analyze)
+    monkeypatch.setattr(voice_routes, "_SESSION_MANAGER", Manager())
 
     events = [
         event
@@ -107,7 +113,7 @@ async def test_describe_uses_in_memory_frame_and_persists_only_model_metadata(mo
         "bytes": ONE_PIXEL_PNG,
         "image_format": "image/png",
         "owner": "alice",
-        "preferred_model": voice_routes.JARVIS_MODEL,
+        "preferred_model": "vision-selected",
     }
     assert events[0] == {"type": "assistant_delta", "text": "I see a brightly lit workspace."}
     assert events[-1]["diagnostics"]["vision_model"] == "vision-test"
@@ -134,6 +140,11 @@ def test_voice_response_never_persists_frame(monkeypatch, tmp_path):
         voice_routes,
         "load_settings",
         lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+    )
+    monkeypatch.setattr(
+        voice_routes,
+        "resolve_endpoint",
+        lambda *_args, **_kwargs: ("http://selected.test/v1/chat/completions", "selected-model", {}),
     )
     monkeypatch.setattr(chat_helpers, "model_supports_vision", lambda *_args: False)
     monkeypatch.setattr(

@@ -667,6 +667,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
+            if key == "tts_agent_voices":
+                if not isinstance(val, dict):
+                    raise HTTPException(400, "tts_agent_voices must be an object")
+                allowed_agents = {"Jarvis", "Gordon", "Friday"}
+                sanitized = {
+                    agent: str(voice).strip()[:128]
+                    for agent, voice in val.items()
+                    if agent in allowed_agents and isinstance(voice, str)
+                }
+                val = {**DEFAULT_SETTINGS["tts_agent_voices"], **sanitized}
             current[key] = val
         _save_settings(current)
         return current

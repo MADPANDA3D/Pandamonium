@@ -1584,8 +1584,8 @@
             </div>
           </div>
           <div class="admin-card">
-            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>Jarvis Voice<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-ttsEnabledToggle" checked><span class="admin-slider"></span></label></h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Configure the TTS voice used by Jarvis live call mode.</div>
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>Voice<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-ttsEnabledToggle" checked><span class="admin-slider"></span></label></h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Configure speech output for voice calls. The selected chat agent remains the brain.</div>
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
               <div style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Provider</label>
@@ -1605,7 +1605,7 @@
                 <input id="set-ttsModelInput" type="text" placeholder="model name" style="flex:1;padding:5px;display:none;">
               </div>
               <div id="set-ttsVoiceRow" style="display:flex;align-items:center;gap:0.75rem;">
-                <label class="settings-label">Voice</label>
+                <label class="settings-label">Default voice</label>
                 <select id="set-ttsVoiceSelect" class="settings-select">
                   <option value="alloy">Alloy</option>
                   <option value="ash">Ash</option>
@@ -1618,6 +1618,14 @@
                   <option value="shimmer">Shimmer</option>
                 </select>
                 <input id="set-ttsVoiceInput" type="text" placeholder="af_heart" style="flex:1;padding:5px;display:none;">
+              </div>
+              <div id="set-ttsAgentVoicesRow" style="display:flex;align-items:flex-start;gap:0.75rem;">
+                <label class="settings-label" style="padding-top:5px;">Agent voices</label>
+                <div style="display:flex;flex:1;flex-direction:column;gap:0.35rem;">
+                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Jarvis</span><select id="set-ttsJarvisVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
+                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Gordon</span><select id="set-ttsGordonVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
+                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Friday</span><select id="set-ttsFridayVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
+                </div>
               </div>
               <div id="set-ttsSpeedRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Speed</label>

@@ -67,6 +67,7 @@ class TTSService:
             "tts_provider": saved.get("tts_provider", "disabled"),
             "tts_model": saved.get("tts_model", "tts-1"),
             "tts_voice": saved.get("tts_voice", "alloy"),
+            "tts_agent_voices": saved.get("tts_agent_voices", {}),
             "tts_speed": saved.get("tts_speed", "1"),
         }
 
@@ -225,6 +226,39 @@ class TTSService:
         return None
 
     def list_voices(self) -> list[dict[str, str]]:
+        settings = self._load_settings()
+        provider = str(settings.get("tts_provider") or "")
+        if provider.startswith("endpoint:"):
+            endpoint_id = provider.split(":", 1)[1]
+            from src.database import SessionLocal, ModelEndpoint
+
+            db = SessionLocal()
+            try:
+                endpoint = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
+                base_url = str(getattr(endpoint, "base_url", "") or "").rstrip("/")
+                api_key = str(getattr(endpoint, "api_key", "") or "")
+            finally:
+                db.close()
+            if base_url:
+                headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+                try:
+                    response = httpx.get(f"{base_url}/voices", headers=headers, timeout=5)
+                    response.raise_for_status()
+                    voices = response.json().get("voices") or []
+                    catalog = [
+                        {
+                            "id": str(voice.get("id") or "").strip(),
+                            "label": str(voice.get("label") or voice.get("id") or "").strip(),
+                        }
+                        for voice in voices
+                        if isinstance(voice, dict)
+                        and voice.get("id")
+                        and voice.get("available", True) is not False
+                    ]
+                    if catalog:
+                        return catalog
+                except Exception as exc:
+                    logger.warning("Could not list voices from TTS endpoint %s: %s", endpoint_id, str(exc)[:160])
         return list(KOKORO_VOICES)
 
     def set_voice(self, voice: str):

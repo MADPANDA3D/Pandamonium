@@ -17,6 +17,11 @@ def _server_tts_settings(monkeypatch):
         "load_settings",
         lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
     )
+    monkeypatch.setattr(
+        voice_routes,
+        "resolve_endpoint",
+        lambda *_args, **_kwargs: ("http://selected.test/v1/chat/completions", "selected-model", {}),
+    )
 
 
 class FakeServerTTS:

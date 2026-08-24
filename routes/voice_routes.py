@@ -25,20 +25,16 @@ from src.agent_loop import stream_agent_loop
 from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
+from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
 from src.settings import load_settings
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
 from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_pcm16
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
-JARVIS_OLLAMA_URL = os.getenv("ODYSSEUS_JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-JARVIS_GENERATE_URL = f"{JARVIS_OLLAMA_URL}/api/generate"
-JARVIS_CHAT_URL = f"{JARVIS_OLLAMA_URL}/v1/chat/completions"
-JARVIS_MODEL = os.getenv("ODYSSEUS_VOICE_MODEL", "qwen3.5-jarvis-v5:latest")
 VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
 VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
-VOICE_OLLAMA_KEEP_ALIVE = os.getenv("ODYSSEUS_VOICE_OLLAMA_KEEP_ALIVE", "30m")
 VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
 VOICE_SERVER_TTS_ERROR = (
     "Voice Orb requires server-generated TTS. "
@@ -74,23 +70,29 @@ Coordinate work without simulating actions, client state, inspections, approvals
 Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
 PC Codex owns local project, code, and document inspection. VPS Codex is only for work that explicitly names the VPS. Hermes is explicit-only; never infer or auto-dispatch Hermes.
 Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
+FRIDAY_VOICE_SYSTEM_PROMPT = """You are Friday, Leo's Codex agent speaking through Odysseus voice.
+Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify."""
 
 WORKER_LABELS = {
     "pc-codex": "PC Codex",
     "hermes": "Hermes",
     "vps-codex": "VPS Codex",
 }
-VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon"}
-CHARACTER_TTS_VOICES = {"Gordon": "gordon_chatterbox"}
-ACTIVE_VOICE_TARGETS = {"jarvis"} | {
+VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon", "friday": "Friday"}
+DIRECT_MODEL_TARGETS = {"jarvis", "friday"}
+ACTIVE_VOICE_TARGETS = DIRECT_MODEL_TARGETS | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
 VOICE_WORKSPACES = {"madpanda3d", "business", "home-lab", "project-linux", "vps-ops"}
 
 
 class VoiceSessionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: str = "jarvis_call"
     chat_session_id: str | None = None
+    endpoint_id: str | None = Field(default=None, max_length=200)
+    model: str | None = Field(default=None, max_length=500)
 
 
 class VoiceTurnCreate(BaseModel):
@@ -447,29 +449,6 @@ async def _select_spoken_text(prompt: str, response_text: str) -> str:
     paragraphs = [part for part in re.split(r"\n\s*\n", response_text) if part.strip()]
     if len(response_text) <= 1200 and len(paragraphs) <= 3:
         return response_text
-
-    summary_prompt = (
-        "Summarize the response below for spoken playback. Return only two or three short conversational "
-        "paragraphs, no markdown tables, code, paths, citations, headings, or preamble. Keep the important "
-        "outcome, blocker, and next action. Maximum 1200 characters.\n\nRESPONSE:\n"
-        + response_text[:12000]
-    )
-    payload = {
-        "model": JARVIS_MODEL,
-        "prompt": summary_prompt,
-        "options": {"temperature": 0.1, "num_predict": 320, "num_ctx": 8192},
-        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
-        "stream": False,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            result = await client.post(JARVIS_GENERATE_URL, json=payload)
-        result.raise_for_status()
-        summary = _strip_think_blocks(str(result.json().get("response") or ""))
-        if summary:
-            return _bounded_spoken_text(summary)
-    except Exception as exc:
-        logger.warning("Jarvis spoken-summary fallback used: %s", str(exc)[:200])
     return _bounded_spoken_text(response_text)
 
 
@@ -482,7 +461,37 @@ async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
 
 def _tts_voice_for_final(final: dict[str, Any]) -> str | None:
     character = str((final.get("diagnostics") or {}).get("character_name") or "")
-    return CHARACTER_TTS_VOICES.get(character)
+    voices = load_settings().get("tts_agent_voices") or {}
+    if not isinstance(voices, dict):
+        return None
+    voice = voices.get(character)
+    return str(voice).strip() if isinstance(voice, str) and voice.strip() else None
+
+
+def _voice_character_name(voice_session: dict[str, Any]) -> str:
+    return VOICE_TARGET_LABELS.get(str(voice_session.get("target") or "jarvis"), "Jarvis")
+
+
+def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
+    return FRIDAY_VOICE_SYSTEM_PROMPT if voice_session.get("target") == "friday" else VOICE_SYSTEM_PROMPT
+
+
+def _voice_chat_session(chat_session_id: str):
+    if not chat_session_id or not _SESSION_MANAGER:
+        return None
+    try:
+        return _SESSION_MANAGER.get_session(chat_session_id)
+    except Exception:
+        return None
+
+
+def _decorate_voice_final(final: dict[str, Any], voice_session: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = final.setdefault("diagnostics", {})
+    target = str(voice_session.get("target") or "jarvis")
+    diagnostics.setdefault("character_name", _voice_character_name(voice_session))
+    if target == "friday":
+        diagnostics.setdefault("direct_target", "friday")
+    return final
 
 
 def _num_predict_for_text(text: str) -> int:
@@ -1323,14 +1332,13 @@ def _server_final_event(text: str, reply: str, guard_reason: str, task_ids: list
         "type": "final",
         "assistant_text": reply,
         "diagnostics": {
-            "model": JARVIS_MODEL,
+            "model": "odysseus-router",
             "transcript_chars": len(text),
             "assistant_chars": len(reply),
             "brain_ms": 0,
             "brain_first_token_ms": 0,
             "num_ctx": VOICE_CONTEXT_LENGTH,
             "num_predict": 0,
-            "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
             "guard_reason": guard_reason,
             "task_ids": task_ids,
             **extra,
@@ -1480,11 +1488,10 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 from src.chat_helpers import model_supports_vision
                 from src.document_processor import analyze_image_bytes_with_vl_result
 
-                preferred_model = (
-                    JARVIS_MODEL
-                    if model_supports_vision(JARVIS_MODEL, JARVIS_CHAT_URL)
-                    else None
-                )
+                chat_session = _voice_chat_session(chat_session_id)
+                session_model = str(getattr(chat_session, "model", "") or "")
+                session_endpoint = str(getattr(chat_session, "endpoint_url", "") or "")
+                preferred_model = session_model if model_supports_vision(session_model, session_endpoint) else None
                 result = await asyncio.to_thread(
                     analyze_image_bytes_with_vl_result,
                     frame["bytes"],
@@ -1588,7 +1595,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "hermes": "home-lab",
         }.get(target_switch, _workspace_for_text(text))
         label = VOICE_TARGET_LABELS.get(target_switch, "Jarvis")
-        if target_switch != "jarvis":
+        if target_switch not in DIRECT_MODEL_TARGETS:
             from src.jarvis_agent import worker_statuses
 
             target_status = (await worker_statuses()).get(target_switch) or {}
@@ -1599,14 +1606,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                     "type": "final",
                     "assistant_text": reply,
                     "diagnostics": {
-                        "model": JARVIS_MODEL,
+                        "model": "odysseus-router",
                         "transcript_chars": len(text),
                         "assistant_chars": len(reply),
                         "brain_ms": 0,
                         "brain_first_token_ms": 0,
                         "num_ctx": VOICE_CONTEXT_LENGTH,
                         "num_predict": 0,
-                        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
                         "guard_reason": f"{target_switch}_not_connected",
                         "task_ids": [],
                     },
@@ -1830,36 +1836,36 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         return
 
     if _asks_runtime_status(text):
-        from src.jarvis_agent import runtime_status
-
-        runtime = await runtime_status()
+        chat_session = _voice_chat_session(chat_session_id)
+        model = str(getattr(chat_session, "model", "") or "unknown model")
+        character = _voice_character_name(voice_session)
+        settings = load_settings()
+        provider = str(settings.get("tts_provider") or "disabled")
+        voice = _tts_voice_for_final({"diagnostics": {"character_name": character}}) or str(settings.get("tts_voice") or "default")
         reply = (
-            f"I am Jarvis, running on {runtime.get('brain_model')}. "
-            f"The server reports a {runtime.get('architecture')} architecture with {runtime.get('parameter_size')} parameters, "
-            f"{runtime.get('quantization')} quantization, and a {runtime.get('context')}-token context allocation. "
-            f"My voice is {runtime.get('tts_model')} through {runtime.get('tts_provider')}, using {runtime.get('tts_voice')}."
+            f"I am {character}, using {model} for this voice call. "
+            f"Speech is rendered through {provider}, using {voice}."
         )
         yield {"type": "assistant_delta", "text": reply}
         yield {
             "type": "final",
             "assistant_text": reply,
             "diagnostics": {
-                "model": JARVIS_MODEL,
+                "model": model,
                 "transcript_chars": len(text),
                 "assistant_chars": len(reply),
                 "brain_ms": 0,
-                "num_ctx": runtime.get("context"),
+                "num_ctx": VOICE_CONTEXT_LENGTH,
                 "num_predict": 0,
-                "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
                 "guard_reason": "server_runtime_status",
-                "runtime": runtime,
+                "character_name": character,
                 "task_ids": [],
             },
             "task_ids": [],
         }
         return
 
-    if selected_target != "jarvis":
+    if selected_target not in DIRECT_MODEL_TARGETS:
         worker = selected_target
         workspace = "vps-ops" if worker == "vps-codex" else ("home-lab" if worker == "hermes" else selected_workspace)
         label = WORKER_LABELS.get(worker, "Worker")
@@ -1939,31 +1945,38 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
+    selected_target = str(voice_session.get("target") or "jarvis")
     if (
         _media_command(text)
         or _foreground_command(text)
         or _unsupported_voice_control(text)
         or _task_control_intent(text)
         or _target_switch(text)
-        or _is_casual_greeting(text)
-        or _background_delegation(text)
         or _asks_runtime_status(text)
-        or _asks_current_business(text)
-        or str(voice_session.get("target") or "jarvis") != "jarvis"
+        or selected_target not in DIRECT_MODEL_TARGETS
+        or (
+            selected_target == "jarvis"
+            and (
+                _is_casual_greeting(text)
+                or _background_delegation(text)
+                or _asks_current_business(text)
+            )
+        )
     ):
         async for event in _server_routed_events(chat_session_id, text, owner, voice_session):
             yield event
         return
-    messages = [{"role": "system", "content": VOICE_SYSTEM_PROMPT}, *chat_session.get_context_messages()]
+    messages = [{"role": "system", "content": _voice_system_prompt(voice_session)}, *chat_session.get_context_messages()]
     full_response = ""
     task_ids: list[str] = []
     started = time.perf_counter()
     first_token_ms: int | None = None
     metrics: dict[str, Any] = {}
     async for chunk in stream_agent_loop(
-        JARVIS_CHAT_URL,
-        JARVIS_MODEL,
+        chat_session.endpoint_url,
+        chat_session.model,
         messages,
+        headers=getattr(chat_session, "headers", None),
         temperature=0.35,
         max_tokens=_num_predict_for_text(text),
         max_rounds=8,
@@ -2005,18 +2018,20 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     if not reply:
         raise RuntimeError("Jarvis voice model returned empty content")
     diagnostics = {
-        "model": JARVIS_MODEL,
+        "model": chat_session.model,
         "transcript_chars": len(text),
         "assistant_chars": len(reply),
         "brain_ms": int((time.perf_counter() - started) * 1000),
         "brain_first_token_ms": first_token_ms,
         "num_ctx": VOICE_CONTEXT_LENGTH,
         "num_predict": _num_predict_for_text(text),
-        "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
         "guard_reason": None,
         "agent_metrics": metrics,
+        "character_name": _voice_character_name(voice_session),
         "task_ids": task_ids,
     }
+    if selected_target == "friday":
+        diagnostics["direct_target"] = "friday"
     yield {"type": "final", "assistant_text": reply, "diagnostics": diagnostics, "task_ids": task_ids}
 
 
@@ -2029,7 +2044,7 @@ async def _jarvis_reply(
     final: dict[str, Any] | None = None
     async for event in _jarvis_events(chat_session_id, text, owner, voice_session or {}):
         if event.get("type") == "final":
-            final = event
+            final = _decorate_voice_final(event, voice_session or {})
     if not final:
         raise RuntimeError("Jarvis voice model returned no final event")
     return final["assistant_text"], final["diagnostics"], final.get("task_ids") or []
@@ -2101,8 +2116,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             "interruption": "stop_and_redirect",
             "stores_raw_audio": False,
             "stt_endpoint": "pc-whisper-stt",
-            "brain_endpoint": "jarvis-ollama-local",
-            "voice_model": JARVIS_MODEL,
+            "brain_endpoint": "selected-chat-session",
+            "voice_model": None,
             "tts_provider": tts_provider,
             "server_tts_ready": server_tts_ready,
             "server_tts_error": None if server_tts_ready else VOICE_SERVER_TTS_ERROR,
@@ -2155,34 +2170,12 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 else:
                     job.add_done_callback(release_when_done)
 
-        payload = {
-            "model": JARVIS_MODEL,
-            "prompt": "Reply exactly: ready",
-            "options": {"temperature": 0, "num_predict": 1},
-            "keep_alive": VOICE_OLLAMA_KEEP_ALIVE,
-            "stream": False,
-        }
-        brain_started = time.perf_counter()
         tts_task = asyncio.create_task(prewarm_tts())
-        brain_ok = False
-        brain_error = None
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                response = await client.post(JARVIS_GENERATE_URL, json=payload)
-            response.raise_for_status()
-            brain_ok = True
-        except Exception as exc:
-            logger.warning("Jarvis voice prewarm failed: %s", exc)
-            brain_error = str(exc)[:200]
-        brain_ms = int((time.perf_counter() - brain_started) * 1000)
-
         tts_state, tts_ok, tts_ms, tts_error = await tts_task
 
         return {
-            "ok": brain_ok and tts_state != "failed",
-            "model": JARVIS_MODEL,
-            "brain_ms": brain_ms,
-            "brain_error": brain_error,
+            "ok": tts_state != "failed",
+            "brain_state": "selected-chat-session",
             "tts_state": tts_state,
             "tts_ok": tts_ok,
             "tts_ms": tts_ms,
@@ -2212,14 +2205,31 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 except Exception:
                     chat_session_id = None
             if not chat_session_id:
+                resolved = (
+                    resolve_endpoint_by_id(payload.endpoint_id, payload.model, owner=owner)
+                    if payload.endpoint_id
+                    else resolve_endpoint("default", owner=owner)
+                )
+                if not resolved or not resolved[0] or not resolved[1]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"message": "Select a configured model before starting voice"},
+                    )
+                endpoint_url, model, headers = resolved
                 chat_session_id = str(uuid.uuid4())
-                session_manager.create_session(
+                created_session = session_manager.create_session(
                     session_id=chat_session_id,
                     name=_chat_session_name(),
-                    endpoint_url=JARVIS_CHAT_URL,
-                    model=JARVIS_MODEL,
+                    endpoint_url=endpoint_url,
+                    model=model,
                     owner=owner,
                 )
+                if created_session is not None:
+                    created_session.headers = headers or {}
+                    if headers:
+                        from routes.session_routes import _persist_session_headers
+
+                        _persist_session_headers(chat_session_id, headers)
         session = {
             "id": session_id,
             "owner": owner,
@@ -2252,7 +2262,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
     ):
         if payload.target not in ACTIVE_VOICE_TARGETS:
             raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
-        if payload.target != "jarvis":
+        if payload.target not in DIRECT_MODEL_TARGETS:
             from src.jarvis_agent import worker_statuses
 
             target_status = (await worker_statuses()).get(payload.target) or {}
@@ -2315,6 +2325,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
         task = None
         diagnostics: dict[str, Any]
+        linked_chat = _voice_chat_session(str(session.get("chat_session_id") or ""))
+        linked_model = str(getattr(linked_chat, "model", "") or "odysseus-router")
         action = _detect_safe_action(text)
         if action:
             task = await _execute_action(
@@ -2323,7 +2335,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             )
             reply = "Running that in the background, sir."
             diagnostics = {
-                "model": JARVIS_MODEL,
+                "model": linked_model,
                 "transcript_chars": len(text),
                 "assistant_chars": len(reply),
                 "guard_reason": "safe_action",
@@ -2341,7 +2353,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 session["status"] = "failed"
                 session["updated_at"] = _now()
                 _append_diagnostic(session, {
-                    "model": JARVIS_MODEL,
+                    "model": linked_model,
                     "transcript_chars": len(text),
                     "assistant_chars": 0,
                     "guard_reason": "brain_failure",
@@ -2435,7 +2447,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                         event_session["updated_at"] = _now()
                         _save_state(event_state)
                     if event.get("type") == "final":
-                        final = event
+                        final = _decorate_voice_final(event, turn_session)
+                        event = final
                     yield f"data: {json.dumps(event)}\n\n"
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
@@ -2479,7 +2492,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 current = _session(current_state, session_id)
                 current["status"] = "failed"
                 _append_diagnostic(current, {
-                    "model": JARVIS_MODEL,
+                    "model": str(getattr(_voice_chat_session(chat_session_id), "model", "") or "odysseus-router"),
                     "transcript_chars": len(text),
                     "assistant_chars": 0,
                     "guard_reason": "brain_failure",

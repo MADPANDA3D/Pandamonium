@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -16,7 +17,20 @@ def _single_user_voice_mode(monkeypatch):
     monkeypatch.setattr(
         voice_routes,
         "load_settings",
-        lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+        lambda: {
+            "tts_enabled": True,
+            "tts_provider": "endpoint:test-tts",
+            "tts_agent_voices": {
+                "Jarvis": "jarvis_chatterbox",
+                "Gordon": "gordon_chatterbox",
+                "Friday": "",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        voice_routes,
+        "resolve_endpoint",
+        lambda *_args, **_kwargs: ("http://selected.test/v1/chat/completions", "selected-model", {}),
     )
 
 
@@ -281,37 +295,75 @@ def test_voice_num_predict_stays_short_unless_detail_requested():
     assert voice_routes._num_predict_for_text("Explain this in detail.") == voice_routes.VOICE_LONG_NUM_PREDICT
 
 
-def test_spoken_text_policy_keeps_short_summarizes_long_and_honors_read_all(monkeypatch):
-    summary = "The work completed successfully.\n\nOne blocker remains, and the next action is documented."
-
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"response": summary}
-
-    class FakeAsyncClient:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, *_args, **_kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr(voice_routes.httpx, "AsyncClient", FakeAsyncClient)
+def test_spoken_text_policy_keeps_short_bounds_long_and_honors_read_all():
     short = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
     long = "A long response with details. " * 80
 
     assert asyncio.run(voice_routes._select_spoken_text("Tell me", short)) == short
-    assert asyncio.run(voice_routes._select_spoken_text("Tell me", long)) == summary
+    assert asyncio.run(voice_routes._select_spoken_text("Tell me", long)) == voice_routes._bounded_spoken_text(long)
     assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 4000)) == "x" * 4000
-    assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 5000)) == summary
+    assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 5000)) == voice_routes._bounded_spoken_text("x" * 5000)
+
+
+@pytest.mark.parametrize(
+    ("target", "endpoint", "model", "character"),
+    [
+        ("jarvis", "http://freetoken.test/v1/chat/completions", "jarvis", "Jarvis"),
+        ("friday", "https://chatgpt.com/backend-api/codex/responses", "gpt-5-codex", "Friday"),
+    ],
+)
+def test_voice_uses_selected_chat_brain(monkeypatch, target, endpoint, model, character):
+    captured = {}
+
+    class LinkedSession:
+        endpoint_url = endpoint
+        headers = {"Authorization": "Bearer selected"}
+
+        def __init__(self):
+            self.model = model
+
+        def get_context_messages(self):
+            return [{"role": "user", "content": "How are you?"}]
+
+    class Manager:
+        def get_session(self, session_id):
+            assert session_id == "chat-selected"
+            return LinkedSession()
+
+    async def fake_stream(endpoint_url, selected_model, messages, **kwargs):
+        captured.update(
+            endpoint_url=endpoint_url,
+            model=selected_model,
+            messages=messages,
+            headers=kwargs.get("headers"),
+        )
+        yield 'data: {"delta":"Selected brain online."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(voice_routes, "_SESSION_MANAGER", Manager())
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", fake_stream)
+
+    events = asyncio.run(_collect_voice_events("chat-selected", target))
+
+    assert captured["endpoint_url"] == endpoint
+    assert captured["model"] == model
+    assert captured["headers"] == {"Authorization": "Bearer selected"}
+    assert events[-1]["diagnostics"]["model"] == model
+    assert events[-1]["diagnostics"]["character_name"] == character
+    if target == "friday":
+        assert events[-1]["diagnostics"]["direct_target"] == "friday"
+
+
+async def _collect_voice_events(chat_session_id, target):
+    return [
+        event
+        async for event in voice_routes._jarvis_events(
+            chat_session_id,
+            "Explain the selected runtime in one sentence.",
+            "",
+            {"target": target},
+        )
+    ]
 
 
 def test_voice_prewarm_wakes_tts_without_cache(monkeypatch):

@@ -51,6 +51,11 @@ DEFAULT_SETTINGS = {
     "tts_provider": "disabled",
     "tts_model": "tts-1",
     "tts_voice": "alloy",
+    "tts_agent_voices": {
+        "Jarvis": "jarvis_chatterbox",
+        "Gordon": "gordon_chatterbox",
+        "Friday": "",
+    },
     "tts_speed": "1",
     "stt_enabled": False,
     "stt_provider": "disabled",

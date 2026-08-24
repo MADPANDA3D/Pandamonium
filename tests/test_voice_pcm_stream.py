@@ -17,7 +17,16 @@ def _single_user_voice_mode(monkeypatch):
     monkeypatch.setattr(
         voice_routes,
         "load_settings",
-        lambda: {"tts_enabled": True, "tts_provider": "endpoint:test-tts"},
+        lambda: {
+            "tts_enabled": True,
+            "tts_provider": "endpoint:test-tts",
+            "tts_agent_voices": {"Gordon": "gordon_chatterbox"},
+        },
+    )
+    monkeypatch.setattr(
+        voice_routes,
+        "resolve_endpoint",
+        lambda *_args, **_kwargs: ("http://selected.test/v1/chat/completions", "selected-model", {}),
     )
 
 
@@ -87,7 +96,7 @@ def test_voice_turn_audio_streams_semantic_chatterbox_blocks(monkeypatch, tmp_pa
     client = TestClient(app)
     session = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
     speech_turn = voice_routes._register_speech_turn(session["id"])
-    speech_turn.voice = voice_routes.CHARACTER_TTS_VOICES["Gordon"]
+    speech_turn.voice = voice_routes._tts_voice_for_final({"diagnostics": {"character_name": "Gordon"}})
     spoken = "\n\n".join((
         " ".join(["The first paragraph reports verified progress without losing context."] * 7),
         " ".join(["The second paragraph remains clear because Chatterbox starts a fresh block."] * 7),

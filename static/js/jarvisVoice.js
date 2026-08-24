@@ -95,7 +95,7 @@ const WORKER_LABELS = {
   hermes: 'Hermes',
   'vps-codex': 'VPS Codex',
 };
-const VOICE_TARGET_LABELS = { ...WORKER_LABELS, hermes: 'Gordon' };
+const VOICE_TARGET_LABELS = { ...WORKER_LABELS, hermes: 'Gordon', friday: 'Friday' };
 let workerCatalog = {
   jarvis: { enabled: true, machine: 'Nimbus', connection: { state: 'connected' } },
   'pc-codex': { enabled: true, machine: 'Local workstation', connection: { state: 'checking' } },
@@ -103,9 +103,11 @@ let workerCatalog = {
   'vps-codex': { enabled: false, machine: 'Remote server', connection: { state: 'gated' } },
 };
 
-function voiceTargetForModel(modelId) {
+function voiceTargetForModel(modelId, endpointUrl = '') {
   const model = String(modelId || '').trim().toLowerCase().split('/').pop();
-  return model === 'hermes-agent' ? 'hermes' : 'jarvis';
+  if (model === 'hermes-agent') return 'hermes';
+  if (String(endpointUrl || '').toLowerCase().includes('chatgpt.com/backend-api/codex')) return 'friday';
+  return 'jarvis';
 }
 
 function $(id) {
@@ -1678,10 +1680,16 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
 async function createSession(callGeneration = voiceCallGeneration) {
   const selectionRevisionAtStart = targetSelectionRevision;
   const activeChatSessionId = window.sessionModule?.getCurrentSessionId?.() || null;
+  const pendingChat = window.sessionModule?.getPendingChat?.() || null;
   const session = await fetchJson('/api/voice/sessions', {
     method: 'POST',
     headers: browserTimezoneHeaders(),
-    body: JSON.stringify({ mode: 'jarvis_call', chat_session_id: activeChatSessionId }),
+    body: JSON.stringify({
+      mode: 'jarvis_call',
+      chat_session_id: activeChatSessionId,
+      endpoint_id: pendingChat?.endpointId || null,
+      model: pendingChat?.modelId || window.sessionModule?.getCurrentModel?.() || null,
+    }),
   });
   if (!isCurrentVoiceCall(callGeneration)) {
     await interruptVoiceSession(session.id);
@@ -2314,8 +2322,11 @@ async function startCall() {
 
   unlockPlaybackAudio();
   if (!pendingVoiceTargetState) {
-    const selectedTarget = voiceTargetForModel(window.sessionModule?.getCurrentModel?.());
-    if (selectedTarget === 'hermes') {
+    const selectedTarget = voiceTargetForModel(
+      window.sessionModule?.getCurrentModel?.(),
+      window.sessionModule?.getCurrentEndpointUrl?.(),
+    );
+    if (selectedTarget !== 'jarvis') {
       if (!setVoiceTarget(selectedTarget)) return;
     } else {
       setVoiceTarget('jarvis', false);
