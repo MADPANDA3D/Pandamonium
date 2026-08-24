@@ -66,13 +66,15 @@ JARVIS_TOOLS = {
 }
 VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private AI partner and voice orchestrator.
 Be terse and conversational: normally one or two spoken sentences unless Leo asks for depth. Never describe pacing or offer a capability menu.
+Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff.
 Follow conversational continuity. Ambiguous follow-ups refer to the preceding conversation. Server-injected context blocks, including current date and time, are background data only; never explain, summarize, or quote them unless Leo explicitly asks about that subject.
 Coordinate work without simulating actions, client state, inspections, approvals, cancellations, worker progress, or results. Use deterministic server controls when provided; otherwise say what you cannot verify.
 Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
 Friday owns local project, code, and document inspection through PC Codex. VPS Codex is only for work that explicitly names the VPS. Gordon is the Hermes agent and is explicit-only; never infer or auto-dispatch him.
 Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
 FRIDAY_VOICE_SYSTEM_PROMPT = """You are Friday, Leo's Codex agent speaking through Odysseus voice.
-Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify."""
+Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify.
+Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff."""
 
 WORKER_LABELS = {
     "pc-codex": "Friday",
@@ -447,10 +449,68 @@ def _bounded_spoken_text(text: str, limit: int = 1200) -> str:
     return bounded + "."
 
 
+def _requested_artifact_kind(prompt: str) -> str | None:
+    if not re.search(
+        r"\b(?:write|draft|create|build|generate|prepare|make|produce|compose|implement|update|edit|revise|rewrite)\b",
+        prompt,
+        re.IGNORECASE,
+    ):
+        return None
+    kinds = (
+        ("script", r"\b(?:script|program)\b"),
+        ("code", r"\b(?:code|function|class|module)\b"),
+        ("configuration", r"\b(?:config|configuration|dockerfile|compose file)\b"),
+        ("query", r"\b(?:query|sql)\b"),
+        ("email", r"\bemail\b"),
+        ("document", r"\b(?:document|report|paper|proposal|article|post|readme)\b"),
+        ("plan", r"\b(?:plan|checklist|workflow)\b"),
+        ("table", r"\b(?:table|spreadsheet)\b"),
+        ("presentation", r"\b(?:presentation|slide deck|slides)\b"),
+    )
+    return next((kind for kind, pattern in kinds if re.search(pattern, prompt, re.IGNORECASE)), None)
+
+
+def _structured_artifact_kind(response_text: str) -> str | None:
+    if re.search(r"(?m)^\s*(?:```|~~~)", response_text):
+        return "code"
+    if re.search(r"(?m)^\s*\|.+\|\s*$\n\s*\|\s*:?-{3,}", response_text):
+        return "table"
+    if len(re.findall(r"(?m)^\s*[-*+]\s+\[[ xX]\]\s+", response_text)) >= 2:
+        return "checklist"
+    if len(re.findall(r"(?m)^\s*#{1,6}\s+", response_text)) >= 2:
+        return "document"
+    return None
+
+
+def _artifact_spoken_handoff(prompt: str, response_text: str) -> str | None:
+    requested_kind = _requested_artifact_kind(prompt)
+    kind = requested_kind or _structured_artifact_kind(response_text)
+    if not kind:
+        return None
+
+    boundary = re.search(
+        r"(?m)^\s*(?:```|~~~|#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|\|.+\|\s*$)",
+        response_text,
+    )
+    lead = response_text[:boundary.start()].strip() if boundary else ""
+    lead = re.sub(r"`([^`]+)`", r"\1", lead)
+    lead = re.sub(r"[*_~]+", "", lead)
+    lead = " ".join(lead.split())
+    if len(lead) >= 60:
+        return _bounded_spoken_text(lead, 420)
+
+    if requested_kind:
+        return f"I finished the {requested_kind}. It's in the chat for you to review."
+    return f"I put the complete {kind} in the chat for you to review."
+
+
 async def _select_spoken_text(prompt: str, response_text: str) -> str:
     response_text = response_text.strip()
-    if _asks_read_all(prompt) and len(response_text) <= 4000:
-        return response_text
+    if _asks_read_all(prompt):
+        return response_text if len(response_text) <= 4000 else _bounded_spoken_text(response_text)
+    artifact_handoff = _artifact_spoken_handoff(prompt, response_text)
+    if artifact_handoff:
+        return artifact_handoff
     paragraphs = [part for part in re.split(r"\n\s*\n", response_text) if part.strip()]
     if len(response_text) <= 1200 and len(paragraphs) <= 3:
         return response_text
@@ -459,8 +519,6 @@ async def _select_spoken_text(prompt: str, response_text: str) -> str:
 
 async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
     response_text = str(final["assistant_text"]).strip()
-    if (final.get("diagnostics") or {}).get("direct_target"):
-        return response_text
     return await _select_spoken_text(prompt, response_text)
 
 

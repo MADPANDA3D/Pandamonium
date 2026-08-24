@@ -177,25 +177,20 @@ def test_stream_keeps_slow_agent_alive_and_opens_audio_after_final(monkeypatch, 
     assert completed is True
 
 
-def test_direct_gordon_speech_keeps_the_complete_answer_without_jarvis_summarizer(monkeypatch):
-    async def must_not_summarize(*_args, **_kwargs):
-        raise AssertionError("direct Gordon speech must not pass through Jarvis")
-
-    monkeypatch.setattr(voice_routes, "_select_spoken_text", must_not_summarize)
-    full_answer = "\n\n".join(
-        (f"Section {index}. " + "Gordon keeps every word in this direct answer. " * 10).strip()
-        for index in range(1, 6)
+def test_direct_gordon_speech_uses_the_shared_artifact_handoff_policy():
+    full_answer = (
+        "I finished the shell script. It validates the target before creating a timestamped backup.\n\n"
+        "```bash\nrsync -a --delete source/ destination/\n```"
     )
-    assert len(full_answer) > 1200
     final = {
         "assistant_text": full_answer,
         "diagnostics": {"direct_target": "hermes"},
     }
 
-    spoken = asyncio.run(voice_routes._spoken_text_for_final("Tell me", final))
+    spoken = asyncio.run(voice_routes._spoken_text_for_final("Write a backup script", final))
 
-    assert spoken == full_answer
-    assert spoken.endswith("Gordon keeps every word in this direct answer.")
+    assert spoken == "I finished the shell script. It validates the target before creating a timestamped backup."
+    assert "rsync" not in spoken
 
 
 def test_direct_gordon_uses_his_voice_and_router_failures_keep_the_default():
@@ -303,6 +298,26 @@ def test_spoken_text_policy_keeps_short_bounds_long_and_honors_read_all():
     assert asyncio.run(voice_routes._select_spoken_text("Tell me", long)) == voice_routes._bounded_spoken_text(long)
     assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 4000)) == "x" * 4000
     assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 5000)) == voice_routes._bounded_spoken_text("x" * 5000)
+
+
+def test_spoken_text_policy_hands_off_artifacts_without_reading_them_aloud():
+    response = (
+        "I finished the Python script. It validates the input, writes a backup, and reports failures clearly.\n\n"
+        "```python\nprint('full artifact stays in chat')\n```"
+    )
+
+    spoken = asyncio.run(voice_routes._select_spoken_text("Write me a Python script", response))
+
+    assert spoken == "I finished the Python script. It validates the input, writes a backup, and reports failures clearly."
+    assert "print" not in spoken
+
+
+def test_spoken_text_policy_uses_a_human_fallback_for_an_artifact_without_a_summary():
+    response = "```python\nprint('full artifact stays in chat')\n```"
+
+    spoken = asyncio.run(voice_routes._select_spoken_text("Create a Python script", response))
+
+    assert spoken == "I finished the script. It's in the chat for you to review."
 
 
 @pytest.mark.parametrize(
