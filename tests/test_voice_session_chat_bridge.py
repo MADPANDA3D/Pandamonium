@@ -343,7 +343,7 @@ def test_voice_uses_selected_chat_brain(monkeypatch, target, endpoint, model, ch
     monkeypatch.setattr(voice_routes, "_SESSION_MANAGER", Manager())
     monkeypatch.setattr(voice_routes, "stream_agent_loop", fake_stream)
 
-    events = asyncio.run(_collect_voice_events("chat-selected", target))
+    events = asyncio.run(_collect_voice_events("chat-selected", target, origin_target=target))
 
     assert captured["endpoint_url"] == endpoint
     assert captured["model"] == model
@@ -354,14 +354,56 @@ def test_voice_uses_selected_chat_brain(monkeypatch, target, endpoint, model, ch
         assert events[-1]["diagnostics"]["direct_target"] == "friday"
 
 
-async def _collect_voice_events(chat_session_id, target):
+def test_transferred_voice_uses_the_target_agent_endpoint(monkeypatch):
+    captured = {}
+
+    class LinkedJarvisSession:
+        endpoint_url = "http://freetoken.test/v1/chat/completions"
+        model = "jarvis"
+        headers = {}
+
+        def get_context_messages(self):
+            return [{"role": "user", "content": "Transfer context"}]
+
+    class Manager:
+        def get_session(self, _session_id):
+            return LinkedJarvisSession()
+
+    async def fake_stream(endpoint_url, selected_model, _messages, **kwargs):
+        captured.update(endpoint_url=endpoint_url, model=selected_model, headers=kwargs.get("headers"))
+        yield 'data: {"delta":"Friday online."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(voice_routes, "_SESSION_MANAGER", Manager())
+    monkeypatch.setattr(
+        voice_routes,
+        "_resolve_voice_target_endpoint",
+        lambda target, _owner: (
+            "https://chatgpt.com/backend-api/codex/responses",
+            "gpt-5-codex",
+            {"Authorization": "Bearer friday"},
+        ) if target == "friday" else None,
+    )
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", fake_stream)
+
+    events = asyncio.run(_collect_voice_events("chat-selected", "friday", origin_target="jarvis"))
+
+    assert captured == {
+        "endpoint_url": "https://chatgpt.com/backend-api/codex/responses",
+        "model": "gpt-5-codex",
+        "headers": {"Authorization": "Bearer friday"},
+    }
+    assert events[-1]["diagnostics"]["character_name"] == "Friday"
+
+
+async def _collect_voice_events(chat_session_id, target, origin_target=None):
     return [
         event
         async for event in voice_routes._jarvis_events(
             chat_session_id,
             "Explain the selected runtime in one sentence.",
             "",
-            {"target": target},
+            {"target": target, "origin_target": origin_target or target},
         )
     ]
 

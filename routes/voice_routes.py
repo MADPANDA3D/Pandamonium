@@ -80,6 +80,10 @@ WORKER_LABELS = {
 }
 VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon", "friday": "Friday"}
 DIRECT_MODEL_TARGETS = {"jarvis", "friday"}
+VOICE_TARGET_ENDPOINT_NAMES = {
+    "jarvis": ("Jarvis",),
+    "friday": ("Friday", "ChatGPT Subscription"),
+}
 ACTIVE_VOICE_TARGETS = DIRECT_MODEL_TARGETS | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
@@ -584,6 +588,7 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
 _NAMED_WORKER_ALIASES = (
     ("vps-codex", r"(?:vps(?:\s+codex)?|online\s+server|public\s+server|hosting\s+server|mad\s*panda\s+hosting)"),
     ("hermes", r"(?:hermes|gordon)"),
+    ("friday", r"friday"),
     (
         "pc-codex",
         r"(?:pc\s+code(?:x|cs)|my\s+(?:pc(?:\s+codex)?|codex|computer)|desktop\s+codex|computer\s+codex|"
@@ -592,6 +597,50 @@ _NAMED_WORKER_ALIASES = (
     ),
     ("jarvis", r"jarvis"),
 )
+
+
+def _runtime_voice_target(endpoint_url: str, model: str) -> str:
+    if str(model or "").strip().lower() == "hermes-agent":
+        return "hermes"
+    if "chatgpt.com/backend-api/codex" in str(endpoint_url or "").lower():
+        return "friday"
+    return "jarvis"
+
+
+def _voice_origin_target(voice_session: dict[str, Any], chat_session: Any = None) -> str:
+    saved = str(voice_session.get("origin_target") or "")
+    if saved in ACTIVE_VOICE_TARGETS:
+        return saved
+    return _runtime_voice_target(
+        getattr(chat_session, "endpoint_url", ""),
+        getattr(chat_session, "model", ""),
+    )
+
+
+def _resolve_voice_target_endpoint(target: str, owner: str) -> tuple[str, str, dict] | None:
+    names = VOICE_TARGET_ENDPOINT_NAMES.get(target) or ()
+    if not names:
+        return None
+    from core.database import ModelEndpoint, SessionLocal
+    from src.auth_helpers import owner_filter
+
+    db = SessionLocal()
+    try:
+        query = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)  # noqa: E712
+        if owner:
+            query = owner_filter(query, ModelEndpoint, owner)
+        rows = query.all()
+        for name in names:
+            matches = [row for row in rows if str(row.name or "").casefold() == name.casefold()]
+            if owner:
+                matches.sort(key=lambda row: row.owner != owner)
+            if matches:
+                resolved = resolve_endpoint_by_id(matches[0].id, owner=owner)
+                if resolved:
+                    return resolved
+    finally:
+        db.close()
+    return None
 
 
 def _named_worker_route_after(text: str, offset: int) -> tuple[str, str] | None:
@@ -612,7 +661,7 @@ def _named_worker_route_after(text: str, offset: int) -> tuple[str, str] | None:
 
 def _target_switch(text: str) -> str | None:
     direct_command = re.search(
-        r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis)\b[\s,.:;-]*)*"
+        r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis|gordon|hermes|friday)\b[\s,.:;-]*)*"
         r"(?:(?:(?:can|could|would|will)\s+you|(?:can|could|may)\s+i|let\s+me)\s+)?(?:please\s+)?"
         r"(?:(?:talk|speak|connect|switch|transfer)(?:\s+me)?(?:\s+back)?\s+(?:to|with)|"
         r"put\s+me\s+(?:through\s+to|on\s+the\s+phone\s+with))\s+",
@@ -1595,30 +1644,36 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "hermes": "home-lab",
         }.get(target_switch, _workspace_for_text(text))
         label = VOICE_TARGET_LABELS.get(target_switch, "Jarvis")
-        if target_switch not in DIRECT_MODEL_TARGETS:
+        chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
+        origin_target = _voice_origin_target(voice_session, chat_session)
+        target_connected = True
+        if target_switch in DIRECT_MODEL_TARGETS and target_switch != origin_target:
+            target_connected = bool(_resolve_voice_target_endpoint(target_switch, owner))
+        elif target_switch not in DIRECT_MODEL_TARGETS:
             from src.jarvis_agent import worker_statuses
 
             target_status = (await worker_statuses()).get(target_switch) or {}
-            if not target_status.get("enabled"):
-                reply = f"{label} is not connected, so I have not switched you or claimed a task is running."
-                yield {"type": "assistant_delta", "text": reply}
-                yield {
-                    "type": "final",
-                    "assistant_text": reply,
-                    "diagnostics": {
-                        "model": "odysseus-router",
-                        "transcript_chars": len(text),
-                        "assistant_chars": len(reply),
-                        "brain_ms": 0,
-                        "brain_first_token_ms": 0,
-                        "num_ctx": VOICE_CONTEXT_LENGTH,
-                        "num_predict": 0,
-                        "guard_reason": f"{target_switch}_not_connected",
-                        "task_ids": [],
-                    },
+            target_connected = bool(target_status.get("enabled"))
+        if not target_connected:
+            reply = f"{label} is not connected, so I have not switched you or claimed a task is running."
+            yield {"type": "assistant_delta", "text": reply}
+            yield {
+                "type": "final",
+                "assistant_text": reply,
+                "diagnostics": {
+                    "model": "odysseus-router",
+                    "transcript_chars": len(text),
+                    "assistant_chars": len(reply),
+                    "brain_ms": 0,
+                    "brain_first_token_ms": 0,
+                    "num_ctx": VOICE_CONTEXT_LENGTH,
+                    "num_predict": 0,
+                    "guard_reason": f"{target_switch}_not_connected",
                     "task_ids": [],
-                }
-                return
+                },
+                "task_ids": [],
+            }
+            return
         reply = (
             _casual_greeting_reply(text, voice_session)
             if target_switch == "jarvis" and _is_casual_greeting(text)
@@ -1946,6 +2001,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
     selected_target = str(voice_session.get("target") or "jarvis")
+    origin_target = _voice_origin_target(voice_session, chat_session)
     if (
         _media_command(text)
         or _foreground_command(text)
@@ -1966,6 +2022,15 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         async for event in _server_routed_events(chat_session_id, text, owner, voice_session):
             yield event
         return
+    endpoint_url = chat_session.endpoint_url
+    model = chat_session.model
+    headers = getattr(chat_session, "headers", None)
+    if selected_target != origin_target:
+        resolved = _resolve_voice_target_endpoint(selected_target, owner)
+        if not resolved:
+            label = VOICE_TARGET_LABELS.get(selected_target, selected_target)
+            raise RuntimeError(f"{label} voice endpoint is not connected")
+        endpoint_url, model, headers = resolved
     messages = [{"role": "system", "content": _voice_system_prompt(voice_session)}, *chat_session.get_context_messages()]
     full_response = ""
     task_ids: list[str] = []
@@ -1973,10 +2038,10 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     first_token_ms: int | None = None
     metrics: dict[str, Any] = {}
     async for chunk in stream_agent_loop(
-        chat_session.endpoint_url,
-        chat_session.model,
+        endpoint_url,
+        model,
         messages,
-        headers=getattr(chat_session, "headers", None),
+        headers=headers,
         temperature=0.35,
         max_tokens=_num_predict_for_text(text),
         max_rounds=8,
@@ -2018,7 +2083,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     if not reply:
         raise RuntimeError("Jarvis voice model returned empty content")
     diagnostics = {
-        "model": chat_session.model,
+        "model": model,
         "transcript_chars": len(text),
         "assistant_chars": len(reply),
         "brain_ms": int((time.perf_counter() - started) * 1000),
@@ -2193,6 +2258,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         state = _load_state()
         session_id = str(uuid.uuid4())
         chat_session_id = payload.chat_session_id.strip() if payload.chat_session_id else None
+        runtime_endpoint_url = ""
+        runtime_model = ""
         if session_manager:
             if chat_session_id:
                 try:
@@ -2200,6 +2267,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     linked_owner = getattr(linked, "owner", None)
                     if linked_owner != owner and not (not owner and linked_owner is None):
                         raise HTTPException(status_code=403, detail={"message": "Chat session does not belong to this user"})
+                    runtime_endpoint_url = str(getattr(linked, "endpoint_url", "") or "")
+                    runtime_model = str(getattr(linked, "model", "") or "")
                 except HTTPException:
                     raise
                 except Exception:
@@ -2216,6 +2285,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                         detail={"message": "Select a configured model before starting voice"},
                     )
                 endpoint_url, model, headers = resolved
+                runtime_endpoint_url = endpoint_url
+                runtime_model = model
                 chat_session_id = str(uuid.uuid4())
                 created_session = session_manager.create_session(
                     session_id=chat_session_id,
@@ -2240,7 +2311,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             "updated_at": _now(),
             "turns": [],
             "tasks": [],
-            "target": "jarvis",
+            "target": _runtime_voice_target(runtime_endpoint_url, runtime_model),
+            "origin_target": _runtime_voice_target(runtime_endpoint_url, runtime_model),
             "workspace": "home-lab",
             "active_task_id": None,
             "codex_thread_id": None,
@@ -2272,6 +2344,11 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             raise HTTPException(status_code=400, detail={"message": "Unknown voice workspace"})
         state = _load_state()
         session = _owned_session(state, session_id, owner)
+        linked = session_manager.get_session(session.get("chat_session_id")) if session_manager else None
+        origin_target = _voice_origin_target(session, linked)
+        if payload.target in DIRECT_MODEL_TARGETS and payload.target != origin_target:
+            if not _resolve_voice_target_endpoint(payload.target, owner):
+                raise HTTPException(status_code=409, detail={"message": "Voice worker is not connected"})
         session["target"] = payload.target
         session["workspace"] = payload.workspace
         if payload.task_id is not None:
