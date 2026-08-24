@@ -756,25 +756,27 @@ def _named_worker_route_after(text: str, offset: int) -> tuple[str, str] | None:
 
 
 def _target_switch(text: str) -> str | None:
+    command_text = _voice_command_words(text)
     direct_command = re.search(
         r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis|gordon|hermes|friday)\b[\s,.:;-]*)*"
         r"(?:(?:do\s+me\s+(?:a\s+)?favor|do\s+us\s+(?:a\s+)?favor)\b[\s,.:;-]*)?"
         r"(?:(?:(?:can|could|would|will)\s+you|(?:can|could|may)\s+i|let\s+me)\s+)?(?:please\s+)?"
         r"(?:(?:talk|speak|connect|switch|transfer)(?:\s+me)?(?:\s+back)?\s+(?:to|with)|"
+        r"be\s+transferred(?:\s+back)?\s+to|be\s+put\s+(?:through\s+to|on\s+the\s+phone\s+with)|"
         r"put\s+me\s+(?:through\s+to|on\s+the\s+phone\s+with))\s+",
-        text,
+        command_text,
         re.IGNORECASE,
     )
     first_person_request = re.search(
         r"\b(?:i\s+(?:want|need|would\s+like)|i['’]d\s+like)\s+to\s+(?:now\s+)?"
         r"(?:(?:talk|speak|connect|switch|transfer)(?:\s+me)?(?:\s+back)?\s+(?:to|with)|"
         r"be\s+transferred(?:\s+back)?\s+to|be\s+put\s+(?:through\s+to|on\s+the\s+phone\s+with))\s+",
-        text,
+        command_text,
         re.IGNORECASE,
     )
     jarvis_return = re.search(
         r"^\s*(?:(?:okay|ok|please)\b[\s,.:;-]*)*(?:return|go|come)\s+(?:back\s+)?to\s+jarvis\b",
-        text,
+        command_text,
         re.IGNORECASE,
     )
     switch_request = direct_command or first_person_request
@@ -782,7 +784,7 @@ def _target_switch(text: str) -> str | None:
         return None
     if jarvis_return:
         return "jarvis"
-    route = _named_worker_route_after(text, switch_request.end())
+    route = _named_worker_route_after(command_text, switch_request.end())
     return route[0] if route else None
 
 
@@ -849,9 +851,10 @@ def _voice_words(text: str) -> str:
 def _voice_command_words(text: str) -> str:
     value = _voice_words(text)
     prefixes = (
-        r"^(?:(?:hey|okay|ok|please)\s+)*(?:jarvis\s+)?",
+        r"^(?:(?:hey|okay|ok|please|all right|alright)\s+)*(?:(?:jarvis|friday|gordon|hermes)\s+)?",
+        r"^(?:(?:great|good|nice) work)\s+",
         r"^(?:can|could|would|will) you (?:please )?",
-        r"^i (?:want|need|would like)(?: you)? to (?:please )?",
+        r"^(?:i (?:want|need|would like)|i'd like)(?: you)? to (?:now )?(?:please )?",
         r"^(?:actually )?do me (?:a )?favor(?: and)? (?:please )?",
         r"^actually ",
         r"^(?:go ahead and|please) ",

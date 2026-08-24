@@ -45,6 +45,9 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("Friday, transfer me back to Jarvis") == "jarvis"
     assert _target_switch("Friday, transfer me to Gordon") == "hermes"
     assert _target_switch("Do me a favor, can you transfer me back to Jarvis, please?") == "jarvis"
+    assert _target_switch(
+        "All right Jarvis great work can you do me a favor and transfer me to Gordon please?"
+    ) == "hermes"
     assert _target_switch("Talk to my PC") == "pc-codex"
     assert _target_switch("Talk to PC Codex about Hermes") == "pc-codex"
     assert _target_switch("Talk to Hermes about the VPS") == "hermes"
@@ -755,7 +758,7 @@ async def test_target_switch_precedes_active_worker_dispatch(monkeypatch):
         event
         async for event in _server_routed_events(
             "chat-1",
-            "Talk to Hermes",
+            "All right Jarvis great work can you do me a favor and transfer me to Gordon please?",
             "leo",
             {"target": "pc-codex", "workspace": "home-lab", "active_task_id": "pc-task"},
         )

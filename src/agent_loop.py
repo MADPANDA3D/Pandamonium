@@ -2749,7 +2749,9 @@ async def stream_agent_loop(
 
     # RAG-based tool selection: retrieve relevant tools for this query.
     # If caller provided a pre-computed set (e.g. task_scheduler), use that.
-    _relevant_tools = relevant_tools
+    # Selection grows and shrinks during this request. Copy caller-owned sets
+    # so a long-lived route allowlist cannot accumulate tools across turns.
+    _relevant_tools = set(relevant_tools) if relevant_tools is not None else None
     _t1 = time.time()
     if _relevant_tools:
         logger.info(f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)")

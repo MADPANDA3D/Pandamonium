@@ -54,7 +54,7 @@ DEFAULT_SETTINGS = {
     "tts_agent_voices": {
         "Jarvis": "jarvis_chatterbox",
         "Gordon": "gordon_chatterbox",
-        "Friday": "",
+        "Friday": "friday_chatterbox",
     },
     "tts_speed": "1",
     "stt_enabled": False,
