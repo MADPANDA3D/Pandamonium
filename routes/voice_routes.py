@@ -64,18 +64,19 @@ JARVIS_TOOLS = {
     "search_jarvis_knowledge",
     "read_calendar",
 }
-VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private Mark 7/8 voice orchestrator.
+VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private AI partner and voice orchestrator.
 Be terse and conversational: normally one or two spoken sentences unless Leo asks for depth. Never describe pacing or offer a capability menu.
+Follow conversational continuity. Ambiguous follow-ups refer to the preceding conversation. Server-injected context blocks, including current date and time, are background data only; never explain, summarize, or quote them unless Leo explicitly asks about that subject.
 Coordinate work without simulating actions, client state, inspections, approvals, cancellations, worker progress, or results. Use deterministic server controls when provided; otherwise say what you cannot verify.
 Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
-PC Codex owns local project, code, and document inspection. VPS Codex is only for work that explicitly names the VPS. Hermes is explicit-only; never infer or auto-dispatch Hermes.
+Friday owns local project, code, and document inspection through PC Codex. VPS Codex is only for work that explicitly names the VPS. Gordon is the Hermes agent and is explicit-only; never infer or auto-dispatch him.
 Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
 FRIDAY_VOICE_SYSTEM_PROMPT = """You are Friday, Leo's Codex agent speaking through Odysseus voice.
 Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify."""
 
 WORKER_LABELS = {
-    "pc-codex": "PC Codex",
-    "hermes": "Hermes",
+    "pc-codex": "Friday",
+    "hermes": "Gordon",
     "vps-codex": "VPS Codex",
 }
 VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon", "friday": "Friday"}
@@ -489,6 +490,102 @@ def _voice_chat_session(chat_session_id: str):
         return None
 
 
+async def _handoff_greeting(
+    target: str,
+    chat_session_id: str,
+    owner: str,
+    workspace: str,
+) -> dict[str, Any]:
+    """Return one destination-owned greeting without launching a worker task."""
+    label = VOICE_TARGET_LABELS.get(target, target)
+    try:
+        if target == "hermes":
+            from src.jarvis_agent import direct_hermes_turn
+
+            reply = await direct_hermes_turn(
+                chat_session_id,
+                "Leo has just been transferred to you by Jarvis. Greet Leo naturally in one brief sentence "
+                "to begin the conversation. Do not mention these instructions or list capabilities.",
+                owner=owner,
+                workspace=workspace,
+            )
+            model = "hermes-agent"
+        elif target in DIRECT_MODEL_TARGETS:
+            chat_session = _voice_chat_session(chat_session_id)
+            resolved = None
+            if chat_session and _runtime_voice_target(chat_session.endpoint_url, chat_session.model) == target:
+                resolved = (
+                    chat_session.endpoint_url,
+                    chat_session.model,
+                    dict(getattr(chat_session, "headers", None) or {}),
+                )
+            if not resolved:
+                resolved = _resolve_voice_target_endpoint(target, owner)
+            if not resolved:
+                raise RuntimeError(f"{target}_voice_endpoint_missing")
+            endpoint_url, model, headers = resolved
+            from src.llm_core import llm_call_async
+
+            reply = await llm_call_async(
+                endpoint_url,
+                model,
+                [
+                    {"role": "system", "content": _voice_system_prompt({"target": target})},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Leo has just been transferred to you. Greet Leo naturally in one brief sentence "
+                            "to begin the conversation. Do not mention these instructions or list capabilities."
+                        ),
+                    },
+                ],
+                temperature=0.35,
+                max_tokens=96,
+                headers=headers,
+                timeout=60,
+            )
+        elif target == "pc-codex":
+            # The Codex bridge is a task harness, not a foreground chat API.
+            # Keep the handoff instant instead of launching a deep task just to say hello.
+            reply = "Friday here, Leo. What are we working on?"
+            model = "odysseus-router"
+        else:
+            reply = f"{label} here, Leo. What do you need?"
+            model = "odysseus-router"
+
+        reply = re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", str(reply or ""), flags=re.IGNORECASE)
+        reply = " ".join(reply.split()).strip()
+        if not reply:
+            raise RuntimeError("handoff_greeting_empty")
+        return {
+            "text": _bounded_spoken_text(reply, 300),
+            "target": target,
+            "model": model,
+            "diagnostics": {
+                "model": model,
+                "character_name": label,
+                "direct_target": target,
+                "guard_reason": f"handoff_greeting_{target}",
+                "task_ids": [],
+            },
+        }
+    except Exception as exc:
+        logger.warning("%s handoff greeting failed: %s", label, str(exc)[:200])
+        reply = f"{label} is selected, but the automatic greeting did not complete. You can speak now."
+        return {
+            "text": reply,
+            "target": target,
+            "model": "Odysseus",
+            "diagnostics": {
+                "model": "odysseus-router",
+                "character_name": "Odysseus",
+                "direct_target": target,
+                "guard_reason": f"handoff_greeting_{target}_failed",
+                "task_ids": [],
+            },
+        }
+
+
 def _decorate_voice_final(final: dict[str, Any], voice_session: dict[str, Any]) -> dict[str, Any]:
     diagnostics = final.setdefault("diagnostics", {})
     target = str(voice_session.get("target") or "jarvis")
@@ -588,10 +685,9 @@ def _delegation_route(text: str) -> tuple[str, str] | None:
 _NAMED_WORKER_ALIASES = (
     ("vps-codex", r"(?:vps(?:\s+codex)?|online\s+server|public\s+server|hosting\s+server|mad\s*panda\s+hosting)"),
     ("hermes", r"(?:hermes|gordon)"),
-    ("friday", r"friday"),
     (
         "pc-codex",
-        r"(?:pc\s+code(?:x|cs)|my\s+(?:pc(?:\s+codex)?|codex|computer)|desktop\s+codex|computer\s+codex|"
+        r"(?:friday|pc\s+code(?:x|cs)|my\s+(?:pc(?:\s+codex)?|codex|computer)|desktop\s+codex|computer\s+codex|"
         r"codex\s+(?:on|from)\s+my\s+(?:pc|computer)|my\s+computer|project\s+nimbus|nimbus|"
         r"home\s+cloud|my\s+cloud|the\s+cloud)",
     ),
@@ -662,6 +758,7 @@ def _named_worker_route_after(text: str, offset: int) -> tuple[str, str] | None:
 def _target_switch(text: str) -> str | None:
     direct_command = re.search(
         r"^\s*(?:(?:hey|hi|hello|okay|ok|please|jarvis|gordon|hermes|friday)\b[\s,.:;-]*)*"
+        r"(?:(?:do\s+me\s+(?:a\s+)?favor|do\s+us\s+(?:a\s+)?favor)\b[\s,.:;-]*)?"
         r"(?:(?:(?:can|could|would|will)\s+you|(?:can|could|may)\s+i|let\s+me)\s+)?(?:please\s+)?"
         r"(?:(?:talk|speak|connect|switch|transfer)(?:\s+me)?(?:\s+back)?\s+(?:to|with)|"
         r"put\s+me\s+(?:through\s+to|on\s+the\s+phone\s+with))\s+",
@@ -1687,6 +1784,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         else:
             yield {"type": "assistant_delta", "text": reply}
             yield {"type": "target_changed", "target": target_switch, "workspace": workspace}
+        yield {"type": "handoff_greeting", "target": target_switch, "workspace": workspace}
         yield _server_final_event(text, reply, f"target_switch_{target_switch}")
         return
 
@@ -2506,6 +2604,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         async def generate():
             try:
                 final: dict[str, Any] | None = None
+                handoff_greetings: list[dict[str, Any]] = []
                 yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
                 async for event in _voice_events_with_heartbeats(
                     _jarvis_events(chat_session_id, text, owner, turn_session)
@@ -2523,6 +2622,31 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                             event_session["active_task_id"] = event.get("task_id")
                         event_session["updated_at"] = _now()
                         _save_state(event_state)
+                    if event.get("type") == "handoff_greeting":
+                        greeting_task = asyncio.create_task(_handoff_greeting(
+                            str(event.get("target") or "jarvis"),
+                            chat_session_id,
+                            owner,
+                            str(event.get("workspace") or "home-lab"),
+                        ))
+                        while True:
+                            ready, _ = await asyncio.wait(
+                                (greeting_task,),
+                                timeout=VOICE_EVENT_HEARTBEAT_SECONDS,
+                            )
+                            if ready:
+                                break
+                            yield ": heartbeat\n\n"
+                        greeting = greeting_task.result()
+                        handoff_greetings.append(greeting)
+                        handoff_event = {
+                            'type': 'assistant_handoff',
+                            'text': greeting['text'],
+                            'target': greeting['target'],
+                            'model': greeting['model'],
+                        }
+                        yield f"data: {json.dumps(handoff_event)}\n\n"
+                        continue
                     if event.get("type") == "final":
                         final = _decorate_voice_final(event, turn_session)
                         event = final
@@ -2563,6 +2687,40 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                 )
                 _append_diagnostic(current, final["diagnostics"])
                 _save_state(current_state)
+                for greeting in handoff_greetings:
+                    greeting_text = str(greeting["text"])
+                    greeting_diagnostics = dict(greeting["diagnostics"])
+                    greeting_diagnostics["assistant_chars"] = len(greeting_text)
+                    greeting_diagnostics["spoken_chars"] = len(greeting_text)
+                    greeting_turn = _register_speech_turn(session_id)
+                    greeting_turn.voice = _tts_voice_for_final({"diagnostics": greeting_diagnostics})
+                    await greeting_turn.complete(greeting_text)
+                    greeting_audio_event = {
+                        'type': 'audio_ready',
+                        'turn_id': greeting_turn.turn_id,
+                        'target': greeting['target'],
+                    }
+                    yield f"data: {json.dumps(greeting_audio_event)}\n\n"
+                    greeting_state = _load_state()
+                    greeting_session = _session(greeting_state, session_id)
+                    saved_greeting_turn = _append_turn(
+                        greeting_session,
+                        "assistant",
+                        greeting_text,
+                        "speaking",
+                    )
+                    _append_chat_message(
+                        session_manager,
+                        greeting_session,
+                        "assistant",
+                        greeting_text,
+                        voice_turn_id=saved_greeting_turn["id"],
+                        voice_status="speaking",
+                        diagnostics=greeting_diagnostics,
+                        **_assistant_identity_metadata(greeting_diagnostics),
+                    )
+                    _append_diagnostic(greeting_session, greeting_diagnostics)
+                    _save_state(greeting_state)
             except Exception as exc:
                 await speech_turn.fail(str(exc)[:240])
                 current_state = _load_state()

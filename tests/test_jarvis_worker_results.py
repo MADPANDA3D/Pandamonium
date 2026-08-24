@@ -92,7 +92,7 @@ async def test_spoken_result_falls_back_when_configured_brain_fails(monkeypatch)
 
     monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     assert await jarvis_agent._spoken_result(_task(), "full raw result") == (
-        "PC Codex finished. The full result is in the chat."
+        "Friday finished. The full result is in the chat."
     )
 
 
@@ -110,7 +110,7 @@ async def test_spoken_milestone_is_one_bounded_sentence(monkeypatch):
     monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     spoken = await jarvis_agent._spoken_milestone(_task(), "Tests completed.")
 
-    assert spoken == "PC Codex: The focused verification now passes cleanly."
+    assert spoken == "Friday: The focused verification now passes cleanly."
     assert len(spoken) <= 240
     assert captured["max_tokens"] == 384
 
@@ -123,7 +123,7 @@ async def test_spoken_milestone_failure_uses_non_raw_fallback(monkeypatch):
     monkeypatch.setattr(jarvis_agent, "_jarvis_summary", summary)
     spoken = await jarvis_agent._spoken_milestone(_task(), "SECRET RAW TABLE CONTENT")
 
-    assert spoken == "PC Codex completed a milestone; details are in the activity history."
+    assert spoken == "Friday completed a milestone; details are in the activity history."
     assert "SECRET RAW TABLE CONTENT" not in spoken
     assert len(spoken) <= 240
 
@@ -250,7 +250,7 @@ async def test_live_result_keeps_raw_chat_text_and_adds_spoken_summary(tmp_path,
     assert saved["events"][0]["spoken_text"].startswith("PC Codex finished")
     assert saved["events"][0]["metadata"]["result_summary"] is True
     assert manager.messages[0][1].content == raw
-    assert manager.messages[0][1].metadata["character_name"] == "PC Codex"
+    assert manager.messages[0][1].metadata["character_name"] == "Friday"
     assert manager.messages[1][1].content == "PC Codex finished the Mark 6 check. The full table is in the chat."
     assert manager.messages[1][1].metadata["character_name"] == "Jarvis"
 

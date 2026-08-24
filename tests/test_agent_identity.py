@@ -14,3 +14,9 @@ def test_jarvis_identity_is_prepended_without_losing_active_preset():
     assert prompt == f"{JARVIS_SYSTEM_PROMPT}\n\nBe concise."
     assert jarvis_chat_prompt("gpt-5.5", "Be concise.") == "Be concise."
     assert jarvis_chat_prompt("gordon", None) is None
+
+
+def test_jarvis_identity_keeps_followups_on_the_conversation():
+    assert "Ambiguous follow-ups" in JARVIS_SYSTEM_PROMPT
+    assert "current date and time" in JARVIS_SYSTEM_PROMPT
+    assert "active architecture build is Mark 5" not in JARVIS_SYSTEM_PROMPT

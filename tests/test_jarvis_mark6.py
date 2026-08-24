@@ -41,9 +41,10 @@ def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("Put me on the phone with Gordon") == "hermes"
     assert _target_switch("Put me through to Gordon") == "hermes"
     assert _target_switch("I would like to be transferred to Gordon") == "hermes"
-    assert _target_switch("Transfer me to Friday") == "friday"
+    assert _target_switch("Transfer me to Friday") == "pc-codex"
     assert _target_switch("Friday, transfer me back to Jarvis") == "jarvis"
     assert _target_switch("Friday, transfer me to Gordon") == "hermes"
+    assert _target_switch("Do me a favor, can you transfer me back to Jarvis, please?") == "jarvis"
     assert _target_switch("Talk to my PC") == "pc-codex"
     assert _target_switch("Talk to PC Codex about Hermes") == "pc-codex"
     assert _target_switch("Talk to Hermes about the VPS") == "hermes"
@@ -176,8 +177,8 @@ async def test_compound_voice_request_starts_pc_and_hermes_as_scoped_tasks(monke
         ("hermes", "home-lab"),
     ]
     pc_prompt, hermes_prompt = calls[0][2], calls[1][2]
-    assert "Handle only the work explicitly assigned to PC Codex" in pc_prompt
-    assert "Handle only the work explicitly assigned to Hermes" in hermes_prompt
+    assert "Handle only the work explicitly assigned to Friday" in pc_prompt
+    assert "Handle only the work explicitly assigned to Gordon" in hermes_prompt
     assert "ODYSSEUS_ARTIFACT" in pc_prompt
     assert "ODYSSEUS_ARTIFACT" not in hermes_prompt
     assert [event["worker"] for event in events if event["type"] == "agent_task"] == [
@@ -187,8 +188,8 @@ async def test_compound_voice_request_starts_pc_and_hermes_as_scoped_tasks(monke
     assert events[-1]["diagnostics"]["guard_reason"] == (
         "delegation_multi_pc-codex_started_hermes_started"
     )
-    assert "PC Codex is opening the document in Odysseus" in events[-1]["assistant_text"]
-    assert "Hermes is handling its part" in events[-1]["assistant_text"]
+    assert "Friday is opening the document in Odysseus" in events[-1]["assistant_text"]
+    assert "Gordon is handling its part" in events[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio
@@ -214,8 +215,8 @@ async def test_compound_dispatch_failure_does_not_block_the_other_worker(monkeyp
     assert calls == ["pc-codex", "hermes"]
     assert [event["task_id"] for event in events if event["type"] == "agent_task"] == ["hermes-task"]
     assert events[-1]["task_ids"] == ["hermes-task"]
-    assert "PC Codex is not connected" in events[-1]["assistant_text"]
-    assert "Hermes is handling its part" in events[-1]["assistant_text"]
+    assert "Friday is not connected" in events[-1]["assistant_text"]
+    assert "Gordon is handling its part" in events[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio
@@ -627,9 +628,31 @@ async def test_direct_jarvis_address_returns_from_selected_worker_without_task(t
         )
     ]
 
-    assert [event["type"] for event in events] == ["target_changed", "assistant_delta", "final"]
+    assert [event["type"] for event in events] == [
+        "target_changed", "assistant_delta", "handoff_greeting", "final",
+    ]
     assert events[0]["target"] == "jarvis"
     assert events[-1]["assistant_text"] == expected_reply
+
+
+@pytest.mark.asyncio
+async def test_polite_gordon_return_request_switches_before_the_model_sees_it():
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Do me a favor, can you transfer me back to Jarvis, please?",
+            "leo",
+            {"target": "hermes", "workspace": "home-lab"},
+        )
+    ]
+
+    assert events[0] == {
+        "type": "target_changed", "target": "jarvis", "workspace": "home-lab",
+    }
+    assert events[2] == {
+        "type": "handoff_greeting", "target": "jarvis", "workspace": "home-lab",
+    }
+    assert events[-1]["diagnostics"]["guard_reason"] == "target_switch_jarvis"
 
 
 @pytest.mark.asyncio
@@ -738,7 +761,9 @@ async def test_target_switch_precedes_active_worker_dispatch(monkeypatch):
         )
     ]
 
-    assert [event["type"] for event in events] == ["assistant_delta", "target_changed", "final"]
+    assert [event["type"] for event in events] == [
+        "assistant_delta", "target_changed", "handoff_greeting", "final",
+    ]
     assert events[0]["text"] == "Transferring you to Gordon now—one moment, please."
     assert events[1]["target"] == "hermes"
     assert events[-1]["task_ids"] == []
@@ -763,9 +788,23 @@ async def test_explicit_switch_wins_over_jarvis_vocative(monkeypatch):
         )
     ]
 
-    assert [event["type"] for event in events] == ["assistant_delta", "target_changed", "final"]
+    assert [event["type"] for event in events] == [
+        "assistant_delta", "target_changed", "handoff_greeting", "final",
+    ]
     assert events[1]["target"] == "pc-codex"
     assert events[-1]["diagnostics"]["guard_reason"] == "target_switch_pc-codex"
+
+
+@pytest.mark.asyncio
+async def test_friday_handoff_greeting_does_not_launch_a_deep_codex_task():
+    greeting = await voice_routes._handoff_greeting(
+        "pc-codex", "chat-1", "leo", "home-lab",
+    )
+
+    assert greeting["text"] == "Friday here, Leo. What are we working on?"
+    assert greeting["target"] == "pc-codex"
+    assert greeting["diagnostics"]["character_name"] == "Friday"
+    assert greeting["diagnostics"]["model"] == "odysseus-router"
 
 
 @pytest.mark.asyncio
@@ -1275,7 +1314,7 @@ async def test_voice_cancel_uses_named_broker_task_not_browser_task_id(monkeypat
 
     assert calls == [("hermes-live", "cancel", None, False, "leo")]
     assert events[-1]["diagnostics"]["guard_reason"] == "worker_cancel_requested"
-    assert events[-1]["assistant_text"].startswith("Cancellation requested for Hermes")
+    assert events[-1]["assistant_text"].startswith("Cancellation requested for Gordon")
 
 
 @pytest.mark.asyncio
@@ -1469,9 +1508,10 @@ async def test_cancellation_failure_warns_task_may_still_run(monkeypatch):
 
 
 def test_voice_system_prompt_assigns_workers_without_inference():
-    assert "PC Codex owns local project, code, and document inspection" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "Friday owns local project, code, and document inspection through PC Codex" in voice_routes.VOICE_SYSTEM_PROMPT
     assert "VPS Codex is only for work that explicitly names the VPS" in voice_routes.VOICE_SYSTEM_PROMPT
-    assert "Hermes is explicit-only" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "Gordon is the Hermes agent and is explicit-only" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "Ambiguous follow-ups refer to the preceding conversation" in voice_routes.VOICE_SYSTEM_PROMPT
 
 
 def test_vps_worker_schema_exposes_its_only_valid_workspace():

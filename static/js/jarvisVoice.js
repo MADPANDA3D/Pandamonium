@@ -91,13 +91,13 @@ const VOICE_MEDIA_CONTROL_ALLOWLIST = new Set([
 ]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
-  'pc-codex': 'PC Codex',
-  hermes: 'Hermes',
+  'pc-codex': 'Friday',
+  hermes: 'Gordon',
   'vps-codex': 'VPS Codex',
 };
 const VOICE_TARGET_LABELS = { ...WORKER_LABELS, hermes: 'Gordon', friday: 'Friday' };
 let workerCatalog = {
-  jarvis: { enabled: true, machine: 'Nimbus', connection: { state: 'connected' } },
+  jarvis: { enabled: true, machine: 'Self-hosted', connection: { state: 'connected' } },
   'pc-codex': { enabled: true, machine: 'Local workstation', connection: { state: 'checking' } },
   hermes: { enabled: false, machine: 'Hermes laptop', connection: { state: 'gated' } },
   'vps-codex': { enabled: false, machine: 'Remote server', connection: { state: 'gated' } },
@@ -1601,9 +1601,13 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
         if (!isCurrentVoiceCall(callGeneration)) {
           turnAudioPromise = Promise.resolve();
         } else {
-          activeAudioTurnId = event.turn_id;
-          setStatus('buffering');
-          const promise = playVoiceTurnAudio(event.turn_id, timings, turnSessionId);
+          const previousAudio = turnAudioPromise || Promise.resolve();
+          const promise = previousAudio.then(() => {
+            if (!isCurrentVoiceCall(callGeneration)) return null;
+            activeAudioTurnId = event.turn_id;
+            setStatus('buffering');
+            return playVoiceTurnAudio(event.turn_id, timings, turnSessionId);
+          });
           activeTurnAudioPromise = promise;
           turnAudioPromise = promise;
           promise.then(() => {
@@ -1614,6 +1618,13 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
             if (activeTurnAudioPromise === promise) activeTurnAudioPromise = null;
             if (activeAudioTurnId === event.turn_id) activeAudioTurnId = null;
           });
+        }
+      }
+      else if (event.type === 'assistant_handoff') {
+        if (isCurrentVoiceCall(callGeneration)) {
+          liveAssistantMessage = null;
+          const label = VOICE_TARGET_LABELS[event.target] || event.model || event.target || 'Agent';
+          appendLiveAssistant(event.text || '', label);
         }
       }
       else if (event.type === 'state' && event.state !== 'listening' && isCurrentVoiceCall(callGeneration)) setStatus(event.state);
