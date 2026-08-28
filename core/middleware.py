@@ -3,6 +3,7 @@
 
 import os
 import secrets
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -17,6 +18,17 @@ INTERNAL_TOOL_TOKEN = os.environ.get("ODYSSEUS_INTERNAL_TOKEN") or secrets.token
 INTERNAL_TOOL_HEADER = "X-Odysseus-Internal-Token"
 # Pseudo-username on in-process tool-loopback requests; require_admin trusts it and it is reserved.
 INTERNAL_TOOL_USER = "internal-tool"
+
+
+def _oracle_frame_source() -> str:
+    """Return one HTTPS origin for the opt-in ORACLE iframe, or no exception."""
+    configured = os.getenv("ODYSSEUS_ORACLE_URL", "").strip()
+    if not configured:
+        return ""
+    parsed = urlsplit(configured)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return ""
+    return f"https://{parsed.netloc}"
 
 
 def is_cors_preflight(method: str, headers) -> bool:
@@ -124,6 +136,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # Migrating to nonce-only requires templating the HTML files +
             # auditing every JS-set style attribute. Since inline styles
             # don't execute script, the residual risk is visual-only.
+            oracle_frame_source = _oracle_frame_source()
+            frame_sources = f"'self' {oracle_frame_source}" if oracle_frame_source else "'self'"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
@@ -132,7 +146,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "img-src 'self' data: blob: https:; "
                 "media-src 'self' blob:; "
                 "connect-src 'self'; "
-                "frame-src 'self'; "
+                f"frame-src {frame_sources}; "
                 "frame-ancestors 'none'"
             )
         return response

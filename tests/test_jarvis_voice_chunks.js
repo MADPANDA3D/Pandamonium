@@ -13,6 +13,10 @@ const style = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8
 const serviceWorker = fs.readFileSync(path.join(__dirname, '../static/sw.js'), 'utf8');
 const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_worker_adapters.py'), 'utf8');
 
+assert.match(index, /id="oracle-protocol-panel"[\s\S]*?id="oracle-protocol-frame"/);
+assert.match(style, /\.oracle-protocol-panel[\s\S]*?right: 34vw;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
+assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'oracle_protocol_engage'[\s\S]*?'oracle_protocol_shutdown'/);
+assert.match(source, /function applyVoiceUIControl\(event\)[\s\S]*?VOICE_PROTOCOL_CONTROL_ALLOWLIST\.has\(protocolControl\)[\s\S]*?engageOracleProtocol\(\)/);
 assert.match(source, /turns\/\$\{encodeURIComponent\(turnId\)\}\/audio/);
 assert.match(source, /playPcmAudioStream/);
 assert.match(source, /response\.body\.getReader\(\)/);
@@ -201,7 +205,7 @@ assert.match(index, /<button[^>]*data-worker="hermes"[^>]*>\s*<span>Gordon<\/spa
 assert.match(index, /<button[^>]*data-worker="pc-codex"[^>]*>\s*<span>Friday<\/span><small>Local workstation · checking<\/small>\s*<\/button>/);
 assert.match(index, /style\.css\?v=20260722T162202Z/);
 assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260722T162202Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260828T020000Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
 assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v366'/);

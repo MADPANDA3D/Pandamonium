@@ -58,6 +58,8 @@ let activeAudioTurnId = null;
 let captureAudioContext = null;
 let captureVoicedMs = 0;
 let voiceCallGeneration = 0;
+let oracleProtocolUrl = '';
+let oracleProtocolHideTimer = null;
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -88,6 +90,10 @@ const VOICE_MEDIA_CONTROL_ALLOWLIST = new Set([
   'camera_open',
   'camera_close',
   'media_play:motivational-abstract',
+]);
+const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
+  'oracle_protocol_engage',
+  'oracle_protocol_shutdown',
 ]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
@@ -619,7 +625,57 @@ function voiceRequestPayload(text) {
   return payload;
 }
 
+function configureOracleProtocol(url) {
+  const configured = String(url || '').trim();
+  if (!configured) {
+    oracleProtocolUrl = '';
+    return;
+  }
+  try {
+    const target = new URL(configured, window.location.origin);
+    const sameOrigin = target.origin === window.location.origin;
+    oracleProtocolUrl = (target.protocol === 'https:' || sameOrigin) ? target.href : '';
+  } catch (_) {
+    oracleProtocolUrl = '';
+  }
+}
+
+function engageOracleProtocol() {
+  const panel = $('oracle-protocol-panel');
+  const frame = $('oracle-protocol-frame');
+  if (!panel || !frame || !oracleProtocolUrl) {
+    showToast('ORACLE is not configured on this Odysseus host.');
+    return;
+  }
+  if (oracleProtocolHideTimer) window.clearTimeout(oracleProtocolHideTimer);
+  if (!frame.getAttribute('src')) frame.setAttribute('src', oracleProtocolUrl);
+  panel.hidden = false;
+  panel.setAttribute('aria-hidden', 'false');
+  window.requestAnimationFrame(() => panel.classList.add('is-open'));
+}
+
+function shutdownOracleProtocol(immediate = false) {
+  const panel = $('oracle-protocol-panel');
+  if (!panel) return;
+  if (oracleProtocolHideTimer) window.clearTimeout(oracleProtocolHideTimer);
+  panel.classList.remove('is-open');
+  panel.setAttribute('aria-hidden', 'true');
+  const finish = () => {
+    panel.hidden = true;
+    oracleProtocolHideTimer = null;
+  };
+  if (immediate || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) finish();
+  else oracleProtocolHideTimer = window.setTimeout(finish, 200);
+}
+
 function applyVoiceUIControl(event) {
+  const protocolControl = String(event.ui_event || '');
+  if (VOICE_PROTOCOL_CONTROL_ALLOWLIST.has(protocolControl)) {
+    if (protocolControl === 'oracle_protocol_engage') engageOracleProtocol();
+    else shutdownOracleProtocol();
+    return;
+  }
+
   const viewControl = `${event.ui_event || ''}:${event.view || ''}`;
   if (VOICE_UI_CONTROL_ALLOWLIST.has(viewControl)) {
     handleUIControl(event);
@@ -1708,6 +1764,7 @@ async function createSession(callGeneration = voiceCallGeneration) {
   }
   sessionId = session.id;
   chatSessionId = session.chat_session_id || null;
+  configureOracleProtocol(session.oracle_protocol_url);
   const savedTarget = session.target || 'jarvis';
   const savedWorkspace = session.workspace || 'home-lab';
   activeWorkerTaskId = session.active_task_id || null;
@@ -2420,6 +2477,7 @@ function endCall() {
   stopTracks();
   setAudioSessionType('auto');
   voiceOrbMedia.stopMedia();
+  shutdownOracleProtocol(true);
   setStatus('idle');
   const panel = $('jarvis-call-panel');
   const closingGeneration = voiceCallGeneration;

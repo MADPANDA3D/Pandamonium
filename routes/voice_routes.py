@@ -32,6 +32,7 @@ from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
+ORACLE_PROTOCOL_URL = os.getenv("ODYSSEUS_ORACLE_URL", "").strip()
 VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
 VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
@@ -289,6 +290,23 @@ def _set_voice_status(session_id: str, status: str, **fields: Any) -> dict:
     session["status"] = status
     session["updated_at"] = _now()
     session.update(fields)
+    _save_state(state)
+    return session
+
+
+def _set_oracle_protocol_state(
+    session_id: str,
+    *,
+    pending: bool | None = None,
+    active: bool | None = None,
+) -> dict:
+    state = _load_state()
+    session = _session(state, session_id)
+    if pending is not None:
+        session["oracle_protocol_pending"] = pending
+    if active is not None:
+        session["oracle_protocol_active"] = active
+    session["updated_at"] = _now()
     _save_state(state)
     return session
 
@@ -986,6 +1004,48 @@ def _voice_control_intent(text: str) -> tuple[str, str, str | None] | None:
     return ("media", media, None) if media else None
 
 
+def _oracle_protocol_intent(text: str, voice_session: dict) -> str | None:
+    """Parse the two ORACLE controls and their bounded confirmation exchange."""
+    value = _normalized_voice_control(text)
+    if not value:
+        return None
+
+    pending = bool(voice_session.get("oracle_protocol_pending"))
+    active = bool(voice_session.get("oracle_protocol_active"))
+    if pending:
+        if re.fullmatch(
+            r"(?:yes|yes sir|correct|exactly|affirmative|that's right|that is right|engage it|do it)",
+            value,
+        ):
+            return "engage"
+        if re.fullmatch(r"(?:no|no sir|negative|not now|never mind|nevermind)", value):
+            return "decline"
+
+    if re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return None
+    if re.fullmatch(
+        r"(?:engage|activate|open|show|launch)(?: the)? oracle(?: protocol)?",
+        value,
+    ):
+        return "engage"
+    if re.fullmatch(
+        r"(?:shut down|shutdown|disengage|deactivate|close|hide)(?: the)? oracle(?: protocol)?",
+        value,
+    ):
+        return "shutdown"
+    if active and re.fullmatch(
+        r"(?:shut down|shutdown|disengage|deactivate|close|hide)(?: the)? protocol",
+        value,
+    ):
+        return "shutdown"
+    if re.fullmatch(
+        r"(?:buddy )?(?:i|we) (?:(?:might|may|could) need|could use|need) (?:some )?eyes in the sky",
+        value,
+    ):
+        return "suggest"
+    return None
+
+
 def _foreground_command(text: str) -> tuple[str, str | None] | None:
     """Return one narrow, browser-owned foreground action."""
     intent = _voice_control_intent(text)
@@ -1008,7 +1068,7 @@ def _unsupported_voice_control(text: str) -> bool:
     detection_value = value or _voice_words(text)
     raw = text.lower().replace("’", "'")
     known_target = bool(re.search(
-        r"\b(?:calendar|documents?|eyes|camera|motivational|current view|window|panel)\b",
+        r"\b(?:calendar|documents?|eyes|camera|motivational|oracle|protocol|current view|window|panel)\b",
         raw,
     ))
     arbitrary_browser_target = bool(re.search(
@@ -1711,6 +1771,54 @@ async def _foreground_worker_result(
 
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
     voice_session["_exact_request"] = text
+    oracle_intent = _oracle_protocol_intent(text, voice_session)
+    if oracle_intent:
+        active = bool(voice_session.get("oracle_protocol_active"))
+        ui_event = None
+        if oracle_intent == "suggest":
+            pending = True
+            reply = "Did you mean the ORACLE protocol, sir?"
+            guard = "oracle_protocol_confirmation"
+        elif oracle_intent == "decline":
+            pending = False
+            reply = "Very good, sir. ORACLE remains offline."
+            guard = "oracle_protocol_declined"
+        elif oracle_intent == "engage" and not ORACLE_PROTOCOL_URL:
+            pending = False
+            reply = "The ORACLE protocol is not configured on this Odysseus host."
+            guard = "oracle_protocol_unavailable"
+        elif oracle_intent == "engage" and active:
+            pending = False
+            reply = "ORACLE is already online, sir."
+            guard = "oracle_protocol_already_active"
+        elif oracle_intent == "engage":
+            pending = False
+            active = True
+            ui_event = "oracle_protocol_engage"
+            reply = "ORACLE protocol engaged. You now have eyes in the sky, sir."
+            guard = "oracle_protocol_engaged"
+        elif not active:
+            pending = False
+            reply = "ORACLE is already offline, sir."
+            guard = "oracle_protocol_already_offline"
+        else:
+            pending = False
+            active = False
+            ui_event = "oracle_protocol_shutdown"
+            reply = "ORACLE protocol offline, sir."
+            guard = "oracle_protocol_shutdown"
+
+        voice_session["oracle_protocol_pending"] = pending
+        voice_session["oracle_protocol_active"] = active
+        voice_session_id = str(voice_session.get("id") or "")
+        if voice_session_id:
+            _set_oracle_protocol_state(voice_session_id, pending=pending, active=active)
+        if ui_event:
+            yield {"type": "ui_control", "ui_event": ui_event}
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard)
+        return
+
     media = _media_command(text)
     if media:
         vision_model = ""
@@ -2513,6 +2621,9 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             "active_task_id": None,
             "codex_thread_id": None,
             "stores_raw_audio": False,
+            "oracle_protocol_url": ORACLE_PROTOCOL_URL,
+            "oracle_protocol_pending": False,
+            "oracle_protocol_active": False,
         }
         state.setdefault("sessions", {})[session_id] = session
         _save_state(state)

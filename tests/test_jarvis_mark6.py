@@ -1140,6 +1140,57 @@ def test_near_voice_controls_never_execute_or_fall_through():
     assert voice_routes._task_control_intent("Don't cancel the Hermes task")[0] == "rejected"
 
 
+def test_oracle_protocol_language_is_bounded_and_state_aware():
+    session = {}
+    assert voice_routes._oracle_protocol_intent(
+        "Hey buddy, I might need some eyes in the sky",
+        session,
+    ) == "suggest"
+    assert voice_routes._oracle_protocol_intent("yes", session) is None
+    assert voice_routes._oracle_protocol_intent("engage the Oracle protocol", session) == "engage"
+    assert voice_routes._oracle_protocol_intent("shutdown the protocol", session) is None
+    assert voice_routes._oracle_protocol_intent(
+        "shutdown the protocol",
+        {"oracle_protocol_active": True},
+    ) == "shutdown"
+    assert voice_routes._oracle_protocol_intent("do not engage Oracle", session) is None
+
+
+@pytest.mark.asyncio
+async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypatch):
+    monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
+    session = {"target": "jarvis"}
+
+    suggested = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Hey buddy, I might need some eyes in the sky",
+            "leo",
+            session,
+        )
+    ]
+    assert suggested[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_confirmation"
+    assert suggested[-1]["assistant_text"] == "Did you mean the ORACLE protocol, sir?"
+    assert session["oracle_protocol_pending"] is True
+
+    engaged = [
+        event async for event in _server_routed_events("chat-1", "yes", "leo", session)
+    ]
+    assert engaged[0] == {"type": "ui_control", "ui_event": "oracle_protocol_engage"}
+    assert engaged[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_engaged"
+    assert session["oracle_protocol_active"] is True
+    assert session["oracle_protocol_pending"] is False
+
+    shutdown = [
+        event async for event in _server_routed_events(
+            "chat-1", "shutdown the protocol", "leo", session,
+        )
+    ]
+    assert shutdown[0] == {"type": "ui_control", "ui_event": "oracle_protocol_shutdown"}
+    assert shutdown[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_shutdown"
+    assert session["oracle_protocol_active"] is False
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "text",

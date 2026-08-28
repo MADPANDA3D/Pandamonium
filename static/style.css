@@ -40550,6 +40550,74 @@ body.theme-frosted .modal {
   border-color: color-mix(in srgb, #c06cff 42%, var(--input-border, #3d2b4a));
   box-shadow: 0 0 0 1px rgba(180, 102, 255, 0.15), 0 14px 44px rgba(0, 0, 0, 0.34);
 }
+.oracle-protocol-panel {
+  position: fixed;
+  top: 0;
+  right: 34vw;
+  bottom: 0;
+  left: calc(var(--icon-rail-w, 48px) + var(--sidebar-w, 0px));
+  z-index: 9999;
+  overflow: hidden;
+  border-right: 1px solid rgba(112, 237, 245, 0.28);
+  background: #02060a;
+  box-shadow: 18px 0 48px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateX(14px);
+  transition: opacity 200ms ease, transform 200ms ease;
+  pointer-events: none;
+}
+.oracle-protocol-panel.is-open {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
+  opacity: 0;
+  transform: translateX(100%);
+  pointer-events: none;
+}
+.oracle-protocol-panel[hidden] {
+  display: none;
+}
+.oracle-protocol-status {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(112, 237, 245, 0.32);
+  border-radius: 4px;
+  background: rgba(2, 7, 12, 0.78);
+  color: #70edf5;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  line-height: 1;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+.oracle-protocol-status small {
+  color: rgba(179, 233, 239, 0.58);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+.oracle-protocol-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #70edf5;
+  box-shadow: 0 0 10px rgba(112, 237, 245, 0.72);
+}
+.oracle-protocol-frame {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #02060a;
+}
 .jarvis-call-panel {
   position: fixed;
   top: 0;
@@ -41225,6 +41293,9 @@ body.theme-frosted .modal {
     height: 44px;
     flex-basis: 44px;
   }
+  .oracle-protocol-panel {
+    inset: 0;
+  }
   .jarvis-sphere-core {
     width: 27px;
     height: 27px;
@@ -41298,6 +41369,9 @@ body.theme-frosted .modal {
 }
 @media (prefers-reduced-motion: reduce) {
   .jarvis-call-panel {
+    transition: none;
+  }
+  .oracle-protocol-panel {
     transition: none;
   }
   .jarvis-task-indicator,

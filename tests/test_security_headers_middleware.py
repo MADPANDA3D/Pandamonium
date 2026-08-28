@@ -66,3 +66,20 @@ def test_permissions_policy_allows_same_origin_media_and_disables_geolocation():
     assert "camera=(self)" in policy
     assert "microphone=()" not in policy
     assert "microphone=(self)" in policy
+
+
+def test_oracle_https_origin_is_the_only_opt_in_frame_source(monkeypatch):
+    monkeypatch.setenv("ODYSSEUS_ORACLE_URL", "https://oracle.example-tailnet.ts.net/workspace")
+    response = _client().get("/")
+
+    policy = response.headers["content-security-policy"]
+    assert "frame-src 'self' https://oracle.example-tailnet.ts.net;" in policy
+
+
+def test_oracle_insecure_origin_does_not_widen_frame_policy(monkeypatch):
+    monkeypatch.setenv("ODYSSEUS_ORACLE_URL", "http://oracle.example.test/")
+    response = _client().get("/")
+
+    policy = response.headers["content-security-policy"]
+    assert "frame-src 'self';" in policy
+    assert "oracle.example.test" not in policy
