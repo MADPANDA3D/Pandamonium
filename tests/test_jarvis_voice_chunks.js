@@ -14,7 +14,7 @@ const serviceWorker = fs.readFileSync(path.join(__dirname, '../static/sw.js'), '
 const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_worker_adapters.py'), 'utf8');
 
 assert.match(index, /id="oracle-protocol-panel"[\s\S]*?id="oracle-protocol-frame"/);
-assert.match(style, /\.oracle-protocol-panel[\s\S]*?right: 34vw;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
+assert.match(style, /\.oracle-protocol-panel[\s\S]*?inset: 0;[\s\S]*?z-index: 10001;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
 assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'oracle_protocol_engage'[\s\S]*?'oracle_protocol_shutdown'[\s\S]*?'oracle_protocol_command'/);
 assert.match(source, /function applyOracleProtocolControl\(event\)[\s\S]*?sendOracleProtocolCommand\(String\(event\.tool/);
 assert.match(source, /function handleOracleProtocolMessage\(event\)[\s\S]*?event\.origin !== oracleProtocolOrigin\(\)/);

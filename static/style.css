@@ -40552,15 +40552,10 @@ body.theme-frosted .modal {
 }
 .oracle-protocol-panel {
   position: fixed;
-  top: 0;
-  right: 34vw;
-  bottom: 0;
-  left: calc(var(--icon-rail-w, 48px) + var(--sidebar-w, 0px));
-  z-index: 9999;
+  inset: 0;
+  z-index: 10001;
   overflow: hidden;
-  border-right: 1px solid rgba(112, 237, 245, 0.28);
   background: #02060a;
-  box-shadow: 18px 0 48px rgba(0, 0, 0, 0.28);
   opacity: 0;
   transform: translateX(14px);
   transition: opacity 200ms ease, transform 200ms ease;

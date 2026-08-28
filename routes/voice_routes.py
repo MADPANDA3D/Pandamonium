@@ -584,7 +584,11 @@ def _voice_character_name(voice_session: dict[str, Any]) -> str:
 
 
 def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
-    return FRIDAY_VOICE_SYSTEM_PROMPT if voice_session.get("target") == "friday" else VOICE_SYSTEM_PROMPT
+    return (
+        FRIDAY_VOICE_SYSTEM_PROMPT
+        if voice_session.get("target") in {"friday", "pc-codex"}
+        else VOICE_SYSTEM_PROMPT
+    )
 
 
 def _voice_chat_session(chat_session_id: str):
@@ -938,6 +942,19 @@ def _background_delegation(text: str) -> tuple[str, str] | None:
     return routes[0] if routes else None
 
 
+def _selected_pc_codex_task_request(text: str) -> bool:
+    """Keep selected Friday conversational unless Leo clearly requests work."""
+    value = _voice_command_words(text)
+    return bool(re.match(
+        r"^(?:(?:task|job)(?: for)? friday(?: to| with)? )?"
+        r"(?:analy[sz]e|audit|build|change|check|compare|create|debug|deploy|diagnose|edit|"
+        r"find|fix|implement|inspect|investigate|load|open|patch|pull|push|read|restart|review|"
+        r"run|search|start|stop|test|update|verify|write)\b",
+        value,
+        re.IGNORECASE,
+    ))
+
+
 def _is_document_open_request(text: str) -> bool:
     return bool(
         re.search(r"\b(?:open(?:\s+up)?|show|pull\s+up|load)\b", text, re.IGNORECASE)
@@ -1046,6 +1063,9 @@ def _oracle_protocol_intent(text: str, voice_session: dict) -> str | None:
         if re.fullmatch(
             r"(?:yes(?: sir|(?: the)? oracle(?: protocol)?)?|correct|exactly|affirmative|that's right|that is right|engage it|do it)",
             value,
+        ) or re.fullmatch(
+            r"yes(?: i(?:'m| am) talking about| i mean| that is| it's| it is)?(?: the)? oracle(?: protocol)?",
+            value,
         ):
             return "engage"
         if re.fullmatch(r"(?:no|no sir|negative|not now|never mind|nevermind)", value):
@@ -1124,6 +1144,11 @@ def _oracle_protocol_command(text: str, voice_session: dict) -> tuple[str, dict[
         return "control_cctv", {"action": action}
     if re.fullmatch(r"(?:show|turn on|enable)(?: the)? camera viewsheds?", value):
         return "control_cctv", {"action": "viewshed", "enabled": True}
+    if "oracle" in value and re.search(
+        r"\b(?:end ?points?|tools?|controls?|capabilit(?:y|ies))\b",
+        value,
+    ):
+        return "report_capabilities", {}
     return None
 
 
@@ -1930,6 +1955,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         if tool == "report_current_view":
             reply = _oracle_current_view_reply(voice_session)
             guard = "oracle_protocol_current_view"
+        elif tool == "report_capabilities":
+            reply = (
+                "Yes. I can read ORACLE's current view, inspect an entity, change its visual style, "
+                "toggle data layers, and control CCTV through the Odysseus bridge. Raw server internals "
+                "are not exposed as voice endpoints."
+            )
+            guard = "oracle_protocol_capabilities"
         else:
             yield {
                 "type": "ui_control",
@@ -2437,6 +2469,9 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         raise RuntimeError("voice_chat_session_not_found")
     selected_target = str(voice_session.get("target") or "jarvis")
     origin_target = _voice_origin_target(voice_session, chat_session)
+    selected_pc_codex_task = (
+        selected_target == "pc-codex" and _selected_pc_codex_task_request(text)
+    )
     if (
         _oracle_protocol_intent(text, voice_session)
         or _oracle_protocol_command(text, voice_session)
@@ -2446,7 +2481,11 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         or _task_control_intent(text)
         or _target_switch(text)
         or _asks_runtime_status(text)
-        or selected_target not in DIRECT_MODEL_TARGETS
+        or (
+            selected_target not in DIRECT_MODEL_TARGETS
+            and selected_target != "pc-codex"
+        )
+        or selected_pc_codex_task
         or (
             selected_target == "jarvis"
             and (
@@ -2462,7 +2501,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     endpoint_url = chat_session.endpoint_url
     model = chat_session.model
     headers = getattr(chat_session, "headers", None)
-    if selected_target != origin_target:
+    if selected_target != origin_target and selected_target != "pc-codex":
         resolved = _resolve_voice_target_endpoint(selected_target, owner)
         if not resolved:
             label = VOICE_TARGET_LABELS.get(selected_target, selected_target)
@@ -2474,6 +2513,11 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     started = time.perf_counter()
     first_token_ms: int | None = None
     metrics: dict[str, Any] = {}
+    voice_tools = (
+        JARVIS_TOOLS - {"start_agent_task", "read_agent_task"}
+        if selected_target == "pc-codex"
+        else JARVIS_TOOLS
+    )
     async for chunk in stream_agent_loop(
         endpoint_url,
         model,
@@ -2485,9 +2529,9 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         max_tool_calls=6,
         context_length=VOICE_CONTEXT_LENGTH,
         session_id=chat_session_id,
-        disabled_tools=set(TOOL_TAGS) - JARVIS_TOOLS,
+        disabled_tools=set(TOOL_TAGS) - voice_tools,
         owner=owner,
-        relevant_tools=JARVIS_TOOLS,
+        relevant_tools=voice_tools,
     ):
         if not chunk.startswith("data: "):
             continue
@@ -2527,12 +2571,12 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         "brain_first_token_ms": first_token_ms,
         "num_ctx": VOICE_CONTEXT_LENGTH,
         "num_predict": _num_predict_for_text(text),
-        "guard_reason": None,
+        "guard_reason": "friday_conversation" if selected_target == "pc-codex" else None,
         "agent_metrics": metrics,
         "character_name": _voice_character_name(voice_session),
         "task_ids": task_ids,
     }
-    if selected_target == "friday":
+    if selected_target in {"friday", "pc-codex"}:
         diagnostics["direct_target"] = "friday"
     yield {"type": "final", "assistant_text": reply, "diagnostics": diagnostics, "task_ids": task_ids}
 

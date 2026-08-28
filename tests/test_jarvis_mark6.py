@@ -824,7 +824,7 @@ async def test_foreground_friday_result_becomes_the_spoken_reply(monkeypatch):
     events = [
         event async for event in _server_routed_events(
             "chat-1",
-            "Good evening Friday. How are you?",
+            "Friday, inspect the active project configuration.",
             "leo",
             {"target": "pc-codex", "workspace": "home-lab"},
         )
@@ -833,6 +833,59 @@ async def test_foreground_friday_result_becomes_the_spoken_reply(monkeypatch):
     assert events[-1]["assistant_text"] == "Good evening, Leo. I’m ready."
     assert events[-1]["diagnostics"]["guard_reason"] == "selected_completed_pc-codex"
     assert any(event.get("type") == "agent_task" and event.get("foreground") for event in events)
+
+
+def test_selected_friday_only_dispatches_explicit_work_requests():
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Are you actually up and running, Friday?",
+    )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "We're getting there one piece at a time. It's all teamwork, wouldn't you say?",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Friday, inspect the active project's protocol configuration.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_selected_friday_conversation_uses_voice_model_without_task_tools(monkeypatch):
+    captured = {}
+
+    async def model_stream(_endpoint_url, _model, messages, **kwargs):
+        captured["messages"] = messages
+        captured["disabled_tools"] = kwargs["disabled_tools"]
+        captured["relevant_tools"] = kwargs["relevant_tools"]
+        yield 'data: {"delta":"I am up and running, Leo."}'
+        yield 'data: {"type":"metrics","data":{}}'
+        yield "data: [DONE]"
+
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(
+            endpoint_url="http://jarvis.test/v1/chat/completions",
+            model="jarvis-model",
+            headers={},
+            get_context_messages=lambda: [{"role": "user", "content": "Are you there?"}],
+        )),
+    )
+
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1",
+            "Are you actually up and running, Friday?",
+            "leo",
+            {"target": "pc-codex", "origin_target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+
+    assert events[-1]["assistant_text"] == "I am up and running, Leo."
+    assert events[-1]["diagnostics"]["guard_reason"] == "friday_conversation"
+    assert events[-1]["diagnostics"]["character_name"] == "Friday"
+    assert captured["messages"][0]["content"] == voice_routes.FRIDAY_VOICE_SYSTEM_PROMPT
+    assert "start_agent_task" not in captured["relevant_tools"]
+    assert "read_agent_task" not in captured["relevant_tools"]
 
 
 @pytest.mark.asyncio
@@ -1164,6 +1217,9 @@ def test_oracle_protocol_language_is_bounded_and_state_aware():
     assert voice_routes._oracle_protocol_command("next CCTV camera", active) == (
         "control_cctv", {"action": "next"},
     )
+    assert voice_routes._oracle_protocol_command(
+        "Are you able to see the endpoints in the Oracle Protocol?", active,
+    ) == ("report_capabilities", {})
     assert voice_routes._oracle_protocol_command("switch to FLIR", session) is None
 
 
@@ -1185,7 +1241,9 @@ async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypat
     assert session["oracle_protocol_pending"] is True
 
     engaged = [
-        event async for event in _server_routed_events("chat-1", "yes", "leo", session)
+        event async for event in _server_routed_events(
+            "chat-1", "Yes, I'm talking about the Oracle Protocol", "leo", session,
+        )
     ]
     assert engaged[0] == {"type": "ui_control", "ui_event": "oracle_protocol_engage"}
     assert engaged[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_engaged"
@@ -1260,6 +1318,14 @@ async def test_oracle_protocol_uses_real_voice_dispatch_and_controls_current_vie
     ]
     assert "FLIR" in reported[-1]["assistant_text"]
     assert "Live Flights" in reported[-1]["assistant_text"]
+
+    capabilities = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Can you see the Oracle protocol endpoints?", "leo", session,
+        )
+    ]
+    assert capabilities[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_capabilities"
+    assert "control CCTV" in capabilities[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio
