@@ -1,8 +1,42 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src import madpanda_knowledge as knowledge
+
+
+def test_sync_worker_has_a_hard_memory_ceiling(tmp_path: Path, monkeypatch):
+    called = {}
+
+    def run(command, **kwargs):
+        called["command"] = command
+        return SimpleNamespace(returncode=0, stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(knowledge, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(knowledge.subprocess, "run", run)
+
+    assert knowledge.sync_in_worker({"sync_id": "sync-1"}) == {"ok": True}
+    assert called["command"][:3] == [
+        "/usr/bin/prlimit",
+        f"--as={3 * 1024**3}",
+        "--",
+    ]
+    assert not list(tmp_path.glob("knowledge-sync-*.json"))
+
+
+def test_sync_worker_rejects_overlap(monkeypatch):
+    monkeypatch.setattr(
+        knowledge.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+    )
+    knowledge.SYNC_WORKER_LOCK.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="knowledge_sync_busy"):
+            knowledge.sync_in_worker({"sync_id": "overlap"})
+    finally:
+        knowledge.SYNC_WORKER_LOCK.release()
 
 
 def test_agent_scope_blocks_client_without_client_name():

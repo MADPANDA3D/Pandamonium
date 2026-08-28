@@ -33,7 +33,9 @@ PROPOSALS_FILE = DATA_DIR / "madpanda_knowledge_proposals.json"
 AUDIT_FILE = DATA_DIR / "madpanda_knowledge_audit.jsonl"
 AGENTS_FILE = Path(os.getenv("ODYSSEUS_KNOWLEDGE_AGENTS_FILE", "/etc/odysseus-knowledge-agents.json"))
 LOCK = threading.RLock()
+SYNC_WORKER_LOCK = threading.Lock()
 _STORE: "KnowledgeStore | None" = None
+SYNC_WORKER_MEMORY_BYTES = 3 * 1024**3
 
 
 @dataclass(frozen=True)
@@ -419,6 +421,8 @@ def store() -> KnowledgeStore:
 
 
 def sync_in_worker(payload: dict[str, Any]) -> dict[str, Any]:
+    if not SYNC_WORKER_LOCK.acquire(blocking=False):
+        raise RuntimeError("knowledge_sync_busy")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     path = ""
     try:
@@ -427,7 +431,16 @@ def sync_in_worker(payload: dict[str, Any]) -> dict[str, Any]:
             path = stream.name
         os.chmod(path, 0o600)
         completed = subprocess.run(
-            [sys.executable, "-m", "src.madpanda_knowledge", "sync-worker", path],
+            [
+                "/usr/bin/prlimit",
+                f"--as={SYNC_WORKER_MEMORY_BYTES}",
+                "--",
+                sys.executable,
+                "-m",
+                "src.madpanda_knowledge",
+                "sync-worker",
+                path,
+            ],
             cwd="/opt/odysseus",
             capture_output=True,
             text=True,
@@ -440,6 +453,7 @@ def sync_in_worker(payload: dict[str, Any]) -> dict[str, Any]:
     finally:
         if path:
             Path(path).unlink(missing_ok=True)
+        SYNC_WORKER_LOCK.release()
 
 
 def _source_fingerprint(row: dict[str, Any]) -> str:
