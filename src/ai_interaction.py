@@ -573,6 +573,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a built-in theme preset (dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
+      oracle_protocol <engage|shutdown|style> [style] — Open/close ORACLE or switch its visual style.
       open_panel <name>       — Open a panel (documents, gallery, email, sessions, notes, memories, skills, settings, cookbook)
       open_email_reply <uid> [folder] [reply|reply-all|ai-reply] [body text] — Open a reply draft document for an email; does not send. ALWAYS append the body text when the user told you what to say (one-shot draft); only omit body when the user just asked to "open a reply" without content.
       get_toggles             — Return current toggle states (server-side knowledge)
@@ -772,6 +773,36 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
             "results": "Highlights cleared",
         }
 
+    elif action == "oracle_protocol":
+        command = parts[1].lower() if len(parts) > 1 else ""
+        if command in {"engage", "open", "activate", "show"}:
+            return {
+                "ui_event": "oracle_protocol_engage",
+                "results": "ORACLE protocol engaged",
+            }
+        if command in {"shutdown", "close", "deactivate", "hide"}:
+            return {
+                "ui_event": "oracle_protocol_shutdown",
+                "results": "ORACLE protocol offline",
+            }
+        if command in {"style", "view", "mode"}:
+            requested = parts[2].lower() if len(parts) > 2 else ""
+            aliases = {
+                "normal": "normal", "optical": "normal", "crt": "retro", "retro": "retro",
+                "nvg": "surveillance", "night vision": "surveillance", "flir": "thermal",
+                "thermal": "thermal", "anime": "anime", "noir": "noir", "snow": "snow",
+            }
+            style = aliases.get(requested)
+            if not style:
+                return {"error": "oracle_protocol style needs: normal, CRT, NVG, FLIR, anime, noir, or snow"}
+            return {
+                "ui_event": "oracle_protocol_command",
+                "tool": "set_visual_style",
+                "arguments": {"style": style},
+                "results": f"Switching ORACLE to {requested.upper()}",
+            }
+        return {"error": "oracle_protocol needs: engage, shutdown, or style <name>"}
+
     elif action == "open_panel":
         # Open a top-level panel/modal: documents/library, gallery,
         # email, sessions, notes, memories, skills, settings, cookbook.
@@ -877,7 +908,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
         }
 
     else:
-        return {"error": f"Unknown action '{action}'. Use: toggle, set_mode, switch_model, set_theme, highlight, clear_highlight, get_toggles"}
+        return {"error": f"Unknown action '{action}'. Use: toggle, set_mode, switch_model, set_theme, oracle_protocol, highlight, clear_highlight, get_toggles"}
 
 
 # ---------------------------------------------------------------------------

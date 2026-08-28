@@ -36,7 +36,10 @@ export function handleUIControl(uiData) {
   var esc = uiModule.esc;
 
   try {
-    if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {
+    if (String(uiEvent).startsWith('oracle_protocol_')) {
+      window.jarvisVoice?.applyOracleProtocolControl?.(uiData);
+
+    } else if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {
       var toggleMap = {
         web: 'web-toggle', bash: 'bash-toggle', rag: 'rag-toggle',
         research: 'research-toggle', incognito: 'incognito-toggle',

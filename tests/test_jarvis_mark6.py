@@ -1154,6 +1154,17 @@ def test_oracle_protocol_language_is_bounded_and_state_aware():
         {"oracle_protocol_active": True},
     ) == "shutdown"
     assert voice_routes._oracle_protocol_intent("do not engage Oracle", session) is None
+    active = {"oracle_protocol_active": True}
+    assert voice_routes._oracle_protocol_command("switch to FLIR", active) == (
+        "set_visual_style", {"style": "thermal"},
+    )
+    assert voice_routes._oracle_protocol_command("look at the current view", active) == (
+        "report_current_view", {},
+    )
+    assert voice_routes._oracle_protocol_command("next CCTV camera", active) == (
+        "control_cctv", {"action": "next"},
+    )
+    assert voice_routes._oracle_protocol_command("switch to FLIR", session) is None
 
 
 @pytest.mark.asyncio
@@ -1189,6 +1200,66 @@ async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypat
     assert shutdown[0] == {"type": "ui_control", "ui_event": "oracle_protocol_shutdown"}
     assert shutdown[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_shutdown"
     assert session["oracle_protocol_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_oracle_protocol_uses_real_voice_dispatch_and_controls_current_view(monkeypatch):
+    monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(get_context_messages=lambda: [])),
+    )
+
+    async def must_not_call_model(*_args, **_kwargs):
+        raise AssertionError("ORACLE control reached the LLM")
+        yield ""  # pragma: no cover
+
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", must_not_call_model)
+    session = {"target": "jarvis"}
+    suggested = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "I might need some eyes in the sky", "leo", session,
+        )
+    ]
+    assert suggested[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_confirmation"
+    assert session["oracle_protocol_pending"] is True
+
+    engaged = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Yes, the Oracle protocol", "leo", session,
+        )
+    ]
+    assert engaged[0] == {"type": "ui_control", "ui_event": "oracle_protocol_engage"}
+
+    styled = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Switch to FLIR", "leo", session,
+        )
+    ]
+    assert styled[0] == {
+        "type": "ui_control",
+        "ui_event": "oracle_protocol_command",
+        "tool": "set_visual_style",
+        "arguments": {"style": "thermal"},
+    }
+    assert styled[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_visual_style"
+
+    session["_client_state"] = {
+        "oracle": {
+            "ready": True,
+            "style": "thermal",
+            "camera": {"latitude": 30.267, "longitude": -97.743, "heightM": 15000},
+            "layers": [{"id": "flights", "name": "Live Flights", "enabled": True}],
+        },
+    }
+    reported = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "What are we looking at in Oracle", "leo", session,
+        )
+    ]
+    assert "FLIR" in reported[-1]["assistant_text"]
+    assert "Live Flights" in reported[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio

@@ -15,8 +15,11 @@ const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_
 
 assert.match(index, /id="oracle-protocol-panel"[\s\S]*?id="oracle-protocol-frame"/);
 assert.match(style, /\.oracle-protocol-panel[\s\S]*?right: 34vw;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
-assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'oracle_protocol_engage'[\s\S]*?'oracle_protocol_shutdown'/);
-assert.match(source, /function applyVoiceUIControl\(event\)[\s\S]*?VOICE_PROTOCOL_CONTROL_ALLOWLIST\.has\(protocolControl\)[\s\S]*?engageOracleProtocol\(\)/);
+assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'oracle_protocol_engage'[\s\S]*?'oracle_protocol_shutdown'[\s\S]*?'oracle_protocol_command'/);
+assert.match(source, /function applyOracleProtocolControl\(event\)[\s\S]*?sendOracleProtocolCommand\(String\(event\.tool/);
+assert.match(source, /function handleOracleProtocolMessage\(event\)[\s\S]*?event\.origin !== oracleProtocolOrigin\(\)/);
+assert.match(source, /function voiceRequestPayload\(text\)[\s\S]*?clientState\.oracle = oracle/);
+assert.match(source, /fetchJson\('\/api\/voice\/oracle-config'\)/);
 assert.match(source, /turns\/\$\{encodeURIComponent\(turnId\)\}\/audio/);
 assert.match(source, /playPcmAudioStream/);
 assert.match(source, /response\.body\.getReader\(\)/);

@@ -60,6 +60,10 @@ let captureVoicedMs = 0;
 let voiceCallGeneration = 0;
 let oracleProtocolUrl = '';
 let oracleProtocolHideTimer = null;
+let oracleProtocolState = null;
+let oracleProtocolReady = false;
+let oracleProtocolCommandSequence = 0;
+let oracleProtocolPendingCommands = [];
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -94,6 +98,14 @@ const VOICE_MEDIA_CONTROL_ALLOWLIST = new Set([
 const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
   'oracle_protocol_engage',
   'oracle_protocol_shutdown',
+  'oracle_protocol_command',
+]);
+const ORACLE_TOOL_ALLOWLIST = new Set([
+  'set_visual_style',
+  'get_current_view_state',
+  'get_entity_context',
+  'set_layer_visibility',
+  'control_cctv',
 ]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
@@ -614,7 +626,10 @@ function mediaVoiceCommand(text) {
 }
 
 function voiceRequestPayload(text) {
-  const payload = { text, client_state: collectClientState() };
+  const clientState = collectClientState();
+  const oracle = voiceOracleClientState();
+  if (oracle) clientState.oracle = oracle;
+  const payload = { text, client_state: clientState };
   if (mediaVoiceCommand(text) === 'camera_describe' && voiceOrbMedia.getState().cameraOpen) {
     try {
       payload.frame = voiceOrbMedia.captureFrame();
@@ -629,14 +644,103 @@ function configureOracleProtocol(url) {
   const configured = String(url || '').trim();
   if (!configured) {
     oracleProtocolUrl = '';
+    oracleProtocolReady = false;
+    oracleProtocolState = null;
+    oracleProtocolPendingCommands = [];
     return;
   }
   try {
     const target = new URL(configured, window.location.origin);
     const sameOrigin = target.origin === window.location.origin;
-    oracleProtocolUrl = (target.protocol === 'https:' || sameOrigin) ? target.href : '';
+    const nextUrl = (target.protocol === 'https:' || sameOrigin) ? target.href : '';
+    if (nextUrl !== oracleProtocolUrl) {
+      oracleProtocolReady = false;
+      oracleProtocolState = null;
+      oracleProtocolPendingCommands = [];
+    }
+    oracleProtocolUrl = nextUrl;
   } catch (_) {
     oracleProtocolUrl = '';
+  }
+}
+
+function oracleProtocolOrigin() {
+  try { return oracleProtocolUrl ? new URL(oracleProtocolUrl).origin : ''; }
+  catch (_) { return ''; }
+}
+
+function voiceOracleClientState() {
+  if (!oracleProtocolState || oracleProtocolState.ok === false) return null;
+  const panel = $('oracle-protocol-panel');
+  const camera = oracleProtocolState.camera || {};
+  const validCamera = [camera.latitude, camera.longitude, camera.heightM].every(Number.isFinite)
+    ? { latitude: camera.latitude, longitude: camera.longitude, heightM: camera.heightM }
+    : null;
+  const layers = Array.isArray(oracleProtocolState.layers)
+    ? oracleProtocolState.layers.slice(0, 64).map(layer => ({
+      id: String(layer?.id || '').slice(0, 80),
+      name: String(layer?.name || '').slice(0, 120),
+      enabled: Boolean(layer?.enabled),
+      count: Math.max(0, Math.min(10000000, Math.round(Number(layer?.count) || 0))),
+      error: layer?.error ? String(layer.error).slice(0, 200) : null,
+    })).filter(layer => layer.id && layer.name)
+    : [];
+  return {
+    ready: oracleProtocolReady,
+    panel_open: Boolean(panel && !panel.hidden),
+    updated_at_ms: Date.now(),
+    style: ['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow'].includes(oracleProtocolState.style)
+      ? oracleProtocolState.style : 'normal',
+    camera: validCamera,
+    layers,
+  };
+}
+
+function flushOracleProtocolCommands() {
+  if (!oracleProtocolReady) return;
+  const frame = $('oracle-protocol-frame');
+  const origin = oracleProtocolOrigin();
+  if (!frame?.contentWindow || !origin) return;
+  const queued = oracleProtocolPendingCommands;
+  oracleProtocolPendingCommands = [];
+  queued.forEach(message => frame.contentWindow.postMessage(message, origin));
+}
+
+function sendOracleProtocolCommand(tool, args = {}) {
+  if (!ORACLE_TOOL_ALLOWLIST.has(tool)) {
+    console.warn('Ignored unsupported ORACLE tool:', tool);
+    return false;
+  }
+  const message = {
+    source: 'odysseus',
+    type: 'oracle_command',
+    id: `oracle-${Date.now()}-${++oracleProtocolCommandSequence}`,
+    tool,
+    arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
+  };
+  if (!oracleProtocolReady) {
+    oracleProtocolPendingCommands = [...oracleProtocolPendingCommands.slice(-7), message];
+    return true;
+  }
+  const frame = $('oracle-protocol-frame');
+  const origin = oracleProtocolOrigin();
+  if (!frame?.contentWindow || !origin) return false;
+  frame.contentWindow.postMessage(message, origin);
+  return true;
+}
+
+function handleOracleProtocolMessage(event) {
+  const frame = $('oracle-protocol-frame');
+  if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== oracleProtocolOrigin()) return;
+  const message = event.data;
+  if (!message || message.source !== 'oracle') return;
+  const state = message.type === 'oracle_state'
+    ? message.state
+    : (message.type === 'oracle_result' && message.result?.action === 'get_current_view_state' ? message.result : null);
+  if (state && typeof state === 'object') {
+    oracleProtocolState = state;
+    oracleProtocolReady = state.ok !== false;
+    flushOracleProtocolCommands();
   }
 }
 
@@ -668,11 +772,22 @@ function shutdownOracleProtocol(immediate = false) {
   else oracleProtocolHideTimer = window.setTimeout(finish, 200);
 }
 
+function applyOracleProtocolControl(event) {
+  const control = String(event?.ui_event || '');
+  if (!VOICE_PROTOCOL_CONTROL_ALLOWLIST.has(control)) return false;
+  if (control === 'oracle_protocol_engage') engageOracleProtocol();
+  else if (control === 'oracle_protocol_shutdown') shutdownOracleProtocol();
+  else {
+    engageOracleProtocol();
+    sendOracleProtocolCommand(String(event.tool || ''), event.arguments || {});
+  }
+  return true;
+}
+
 function applyVoiceUIControl(event) {
   const protocolControl = String(event.ui_event || '');
   if (VOICE_PROTOCOL_CONTROL_ALLOWLIST.has(protocolControl)) {
-    if (protocolControl === 'oracle_protocol_engage') engageOracleProtocol();
-    else shutdownOracleProtocol();
+    applyOracleProtocolControl(event);
     return;
   }
 
@@ -2631,6 +2746,10 @@ function bind() {
   });
 
   window.addEventListener('message', handleSphereMessage);
+  window.addEventListener('message', handleOracleProtocolMessage);
+  fetchJson('/api/voice/oracle-config')
+    .then(config => configureOracleProtocol(config.oracle_protocol_url))
+    .catch(() => {});
   setVoiceTarget('jarvis', false);
   loadWorkerCatalog().catch(() => {});
   setStatus('idle');
@@ -2644,4 +2763,11 @@ if (document.readyState === 'loading') {
   bind();
 }
 
-window.jarvisVoice = { startCall, endCall, interrupt, isActive: isCallActive, restoreSessionTasks };
+window.jarvisVoice = {
+  startCall,
+  endCall,
+  interrupt,
+  isActive: isCallActive,
+  restoreSessionTasks,
+  applyOracleProtocolControl,
+};

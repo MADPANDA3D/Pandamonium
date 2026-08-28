@@ -134,12 +134,42 @@ class VoiceDocumentClientState(BaseModel):
     id: str | None = Field(default=None, max_length=200)
 
 
+class VoiceOracleCameraState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    heightM: float = Field(ge=-1000, le=100_000_000)
+
+
+class VoiceOracleLayerState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(max_length=80)
+    name: str = Field(max_length=120)
+    enabled: bool = False
+    count: int = Field(default=0, ge=0, le=10_000_000)
+    error: str | None = Field(default=None, max_length=200)
+
+
+class VoiceOracleClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool = False
+    panel_open: bool = False
+    updated_at_ms: int = Field(default=0, ge=0)
+    style: Literal["normal", "retro", "surveillance", "thermal", "anime", "noir", "snow"] = "normal"
+    camera: VoiceOracleCameraState | None = None
+    layers: list[VoiceOracleLayerState] = Field(default_factory=list, max_length=64)
+
+
 class VoiceClientState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     active_view: Literal["calendar", "document", "chat"] | None = None
     calendar: VoiceCalendarClientState = Field(default_factory=VoiceCalendarClientState)
     document: VoiceDocumentClientState = Field(default_factory=VoiceDocumentClientState)
+    oracle: VoiceOracleClientState | None = None
 
 
 class VoiceFrame(BaseModel):
@@ -1014,7 +1044,7 @@ def _oracle_protocol_intent(text: str, voice_session: dict) -> str | None:
     active = bool(voice_session.get("oracle_protocol_active"))
     if pending:
         if re.fullmatch(
-            r"(?:yes|yes sir|correct|exactly|affirmative|that's right|that is right|engage it|do it)",
+            r"(?:yes(?: sir|(?: the)? oracle(?: protocol)?)?|correct|exactly|affirmative|that's right|that is right|engage it|do it)",
             value,
         ):
             return "engage"
@@ -1044,6 +1074,81 @@ def _oracle_protocol_intent(text: str, voice_session: dict) -> str | None:
     ):
         return "suggest"
     return None
+
+
+_ORACLE_STYLE_ALIASES = {
+    "normal": "normal",
+    "optical": "normal",
+    "crt": "retro",
+    "retro": "retro",
+    "night vision": "surveillance",
+    "nvg": "surveillance",
+    "flir": "thermal",
+    "thermal": "thermal",
+    "anime": "anime",
+    "noir": "noir",
+    "snow": "snow",
+}
+
+
+def _oracle_protocol_command(text: str, voice_session: dict) -> tuple[str, dict[str, Any]] | None:
+    """Parse bounded commands for an already-active ORACLE workspace."""
+    if not voice_session.get("oracle_protocol_active"):
+        return None
+    value = _normalized_voice_control(text)
+    if not value or re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return None
+
+    style_match = re.fullmatch(
+        r"(?:switch|change|set|go)(?: oracle)?(?: over)?(?: to)? (normal|optical|crt|retro|night vision|nvg|flir|thermal|anime|noir|snow)(?: mode| view| style)?",
+        value,
+    )
+    if style_match:
+        return "set_visual_style", {"style": _ORACLE_STYLE_ALIASES[style_match.group(1)]}
+
+    if re.fullmatch(
+        r"(?:look at|inspect|report|describe|read)(?: a| the)? current(?: oracle)? view|"
+        r"what (?:am i|are we) looking at(?: in oracle)?|"
+        r"what(?:'s| is)(?: on| in)?(?: the)? current oracle view",
+        value,
+    ):
+        return "report_current_view", {}
+
+    if re.fullmatch(r"(?:turn on|enable|show)(?: the)? (?:cctv|camera)(?: layer| feed| feeds)?", value):
+        return "control_cctv", {"action": "enable"}
+    if re.fullmatch(r"(?:turn off|disable|hide)(?: the)? (?:cctv|camera)(?: layer| feed| feeds)?", value):
+        return "control_cctv", {"action": "disable"}
+    cctv_match = re.fullmatch(r"(?:show|select|go to)? ?(next|previous|prev|nearest) (?:cctv )?camera", value)
+    if cctv_match:
+        action = "prev" if cctv_match.group(1) in {"previous", "prev"} else cctv_match.group(1)
+        return "control_cctv", {"action": action}
+    if re.fullmatch(r"(?:show|turn on|enable)(?: the)? camera viewsheds?", value):
+        return "control_cctv", {"action": "viewshed", "enabled": True}
+    return None
+
+
+def _oracle_current_view_reply(voice_session: dict) -> str:
+    client = voice_session.get("_client_state")
+    oracle = client.get("oracle") if isinstance(client, dict) else None
+    if not isinstance(oracle, dict) or not oracle.get("ready"):
+        return "ORACLE is online, but its current view has not reported back yet, sir."
+
+    style = str(oracle.get("style") or "normal")
+    style_label = {"retro": "CRT", "surveillance": "NVG", "thermal": "FLIR"}.get(style, style.upper())
+    camera = oracle.get("camera") if isinstance(oracle.get("camera"), dict) else {}
+    location = ""
+    try:
+        location = (
+            f" at {float(camera['latitude']):.3f}, {float(camera['longitude']):.3f}"
+            f" from {max(0, round(float(camera['heightM']) / 1000)):,} kilometers up"
+        )
+    except (KeyError, TypeError, ValueError):
+        pass
+    layers = oracle.get("layers") if isinstance(oracle.get("layers"), list) else []
+    enabled = [str(layer.get("name") or layer.get("id") or "").strip() for layer in layers if isinstance(layer, dict) and layer.get("enabled")]
+    enabled = [name for name in enabled if name][:4]
+    layer_text = f" Enabled layers include {', '.join(enabled)}." if enabled else " No data layers are currently enabled."
+    return f"ORACLE is showing {style_label}{location}.{layer_text}"
 
 
 def _foreground_command(text: str) -> tuple[str, str | None] | None:
@@ -1819,6 +1924,32 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         yield _server_final_event(text, reply, guard)
         return
 
+    oracle_command = _oracle_protocol_command(text, voice_session)
+    if oracle_command:
+        tool, arguments = oracle_command
+        if tool == "report_current_view":
+            reply = _oracle_current_view_reply(voice_session)
+            guard = "oracle_protocol_current_view"
+        else:
+            yield {
+                "type": "ui_control",
+                "ui_event": "oracle_protocol_command",
+                "tool": tool,
+                "arguments": arguments,
+            }
+            if tool == "set_visual_style":
+                style = str(arguments.get("style") or "normal")
+                label = {"retro": "CRT", "surveillance": "NVG", "thermal": "FLIR"}.get(style, style.upper())
+                reply = f"Switching ORACLE to {label}, sir."
+                guard = "oracle_protocol_visual_style"
+            else:
+                action = str(arguments.get("action") or "command")
+                reply = f"Sending the {action} command to ORACLE, sir."
+                guard = "oracle_protocol_cctv"
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, guard)
+        return
+
     media = _media_command(text)
     if media:
         vision_model = ""
@@ -2307,7 +2438,9 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     selected_target = str(voice_session.get("target") or "jarvis")
     origin_target = _voice_origin_target(voice_session, chat_session)
     if (
-        _media_command(text)
+        _oracle_protocol_intent(text, voice_session)
+        or _oracle_protocol_command(text, voice_session)
+        or _media_command(text)
         or _foreground_command(text)
         or _unsupported_voice_control(text)
         or _task_control_intent(text)
@@ -2494,6 +2627,10 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             "action_bridge": ACTION_BRIDGE_URL,
             "safe_actions": sorted(SAFE_ACTIONS),
         }
+
+    @router.get("/oracle-config")
+    async def oracle_config(_owner: str = Depends(require_user)):
+        return {"oracle_protocol_url": ORACLE_PROTOCOL_URL}
 
     @router.post("/prewarm")
     async def prewarm_voice_brain(_owner: str = Depends(require_user)):
