@@ -41221,8 +41221,45 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
   display: none;
 }
 @media (min-width: 721px) {
+  html.oracle-protocol-active .jarvis-call-panel {
+    top: 58%;
+    right: auto;
+    bottom: auto;
+    left: clamp(24px, 4vw, 72px);
+    width: clamp(170px, 12vw, 220px);
+    height: clamp(170px, 12vw, 220px);
+    min-height: 0;
+    overflow: visible;
+    transform: translate(-140%, -50%);
+  }
+  html.oracle-protocol-active .jarvis-call-panel.is-open {
+    transform: translate(0, -50%);
+  }
+  html.oracle-protocol-active .jarvis-agent-workspace,
+  html.oracle-protocol-active .jarvis-activity-rail,
+  html.oracle-protocol-active .jarvis-call-copy,
+  html.oracle-protocol-active .jarvis-call-actions {
+    display: none !important;
+  }
+  html.oracle-protocol-active .jarvis-call-orb,
+  html.oracle-protocol-active .jarvis-call-panel.has-agent-task .jarvis-call-orb {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  html.oracle-protocol-active .toast {
+    top: calc(58% + clamp(94px, 7vw, 126px));
+    right: auto;
+    left: clamp(24px, 4vw, 72px);
+    z-index: 10003;
+    min-width: clamp(170px, 12vw, 220px);
+    max-width: clamp(220px, 18vw, 340px);
+  }
   body.jarvis-voice-active .chat-container {
     margin-right: 34vw;
+  }
+  body.jarvis-voice-active.oracle-protocol-active .chat-container {
+    margin-right: 0;
   }
   body.jarvis-voice-active .msg .body {
     overflow-x: auto;

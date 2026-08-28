@@ -1120,11 +1120,45 @@ def _oracle_protocol_command(text: str, voice_session: dict) -> tuple[str, dict[
         return None
 
     style_match = re.fullmatch(
-        r"(?:switch|change|set|go)(?: oracle)?(?: over)?(?: to)? (normal|optical|crt|retro|night vision|nvg|flir|thermal|anime|noir|snow)(?: mode| view| style)?",
+        r"(?:now\s+)?(?:please\s+)?(?:switch|change|set|put|make|go)"
+        r"(?:\s+(?:oracle|it))?(?:\s+back)?(?:\s+over)?"
+        r"(?:\s+(?:to|into|in))?(?:\s+the)?\s+"
+        r"(normal|optical|crt|retro|night vision|nvg|flir|thermal|anime|noir|snow)"
+        r"(?:\s+(?:mode|view|style))?(?:\s+please)?",
         value,
     )
     if style_match:
         return "set_visual_style", {"style": _ORACLE_STYLE_ALIASES[style_match.group(1)]}
+
+    if re.fullmatch(
+        r"(?:(?:yes|okay|ok) )?(?:(?:i|we) (?:need|want)(?: you)? to )?"
+        r"(?:zoom|pull)(?: oracle)?(?: all the way)?(?: out)? to (?:a |the )?"
+        r"(?:full |whole )?(?:globe|earth|planet)(?: view)?(?: please)?|"
+        r"(?:zoom|pull)(?: oracle)? all the way out(?: please)?",
+        value,
+    ):
+        return "zoom_to_globe", {}
+
+    location_match = re.fullmatch(
+        r"(?:show|give)(?: me)?(?: a| the)?(?: global| continental| regional)?"
+        r" (?:view|overview) of (.{1,160}?)(?: please)?",
+        value,
+    )
+    if location_match:
+        return "fly_to_location", {"query": location_match.group(1).strip(), "viewMode": "overview"}
+
+    cockpit_enter = re.fullmatch(
+        r"(?:switch|change|go|enter)(?: oracle)?(?: over)?(?: to| into)?(?: the)?"
+        r" (?:pilot|cockpit)(?: mode)?(?: please)?",
+        value,
+    )
+    if cockpit_enter:
+        return "control_cockpit", {"action": "enter"}
+    if re.fullmatch(
+        r"(?:exit|leave|close|disable)(?: the)? (?:pilot|cockpit)(?: mode)?(?: please)?",
+        value,
+    ):
+        return "control_cockpit", {"action": "exit"}
 
     if re.fullmatch(
         r"(?:look at|inspect|report|describe|read)(?: a| the)? current(?: oracle)? view|"
@@ -1150,6 +1184,25 @@ def _oracle_protocol_command(text: str, voice_session: dict) -> tuple[str, dict[
     ):
         return "report_capabilities", {}
     return None
+
+
+def _oracle_protocol_unavailable_command(text: str, voice_session: dict) -> bool:
+    """Fail closed when an active ORACLE request names a control we have not bridged."""
+    if not voice_session.get("oracle_protocol_active"):
+        return False
+    value = _normalized_voice_control(text)
+    if not value or re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return False
+    return bool(
+        re.match(
+            r"(?:now )?(?:please )?(?:switch|change|set|show|zoom|go|fly|open|close|enable|disable|turn|track|focus|add|remove)\b",
+            value,
+        )
+        and re.search(
+            r"\b(?:oracle|view|mode|style|globe|map|layers?|cctv|camera|flir|nvg|night vision|crt|thermal|snow|noir|anime|cockpit|pilot)\b",
+            value,
+        )
+    )
 
 
 def _oracle_current_view_reply(voice_session: dict) -> str:
@@ -1957,9 +2010,9 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             guard = "oracle_protocol_current_view"
         elif tool == "report_capabilities":
             reply = (
-                "Yes. I can read ORACLE's current view, inspect an entity, change its visual style, "
-                "toggle data layers, and control CCTV through the Odysseus bridge. Raw server internals "
-                "are not exposed as voice endpoints."
+                "I can change ORACLE's visual style, read its current view, show the full globe, "
+                "open a named regional overview, enter or exit Cockpit, and control CCTV. "
+                "If another control is not connected, I will say so instead of claiming it ran."
             )
             guard = "oracle_protocol_capabilities"
         else:
@@ -1972,14 +2025,29 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             if tool == "set_visual_style":
                 style = str(arguments.get("style") or "normal")
                 label = {"retro": "CRT", "surveillance": "NVG", "thermal": "FLIR"}.get(style, style.upper())
-                reply = f"Switching ORACLE to {label}, sir."
+                reply = f"Sending the {label} command to ORACLE, sir."
                 guard = "oracle_protocol_visual_style"
+            elif tool == "zoom_to_globe":
+                reply = "Sending ORACLE to full-globe view, sir."
+                guard = "oracle_protocol_globe_view"
+            elif tool == "fly_to_location":
+                reply = f"Sending ORACLE to an overview of {arguments.get('query')}, sir."
+                guard = "oracle_protocol_location"
+            elif tool == "control_cockpit":
+                reply = f"Sending the Cockpit {arguments.get('action')} command to ORACLE, sir."
+                guard = "oracle_protocol_cockpit"
             else:
                 action = str(arguments.get("action") or "command")
                 reply = f"Sending the {action} command to ORACLE, sir."
                 guard = "oracle_protocol_cctv"
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, guard)
+        return
+
+    if _oracle_protocol_unavailable_command(text, voice_session):
+        reply = "That ORACLE control is not connected yet, sir."
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "oracle_protocol_control_unavailable")
         return
 
     media = _media_command(text)
@@ -2473,9 +2541,10 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         selected_target == "pc-codex" and _selected_pc_codex_task_request(text)
     )
     if (
-        _oracle_protocol_intent(text, voice_session)
-        or _oracle_protocol_command(text, voice_session)
-        or _media_command(text)
+            _oracle_protocol_intent(text, voice_session)
+            or _oracle_protocol_command(text, voice_session)
+            or _oracle_protocol_unavailable_command(text, voice_session)
+            or _media_command(text)
         or _foreground_command(text)
         or _unsupported_voice_control(text)
         or _task_control_intent(text)

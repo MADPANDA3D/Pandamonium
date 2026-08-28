@@ -16,9 +16,13 @@ const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_
 assert.match(index, /id="oracle-protocol-panel"[\s\S]*?id="oracle-protocol-frame"/);
 assert.match(style, /\.oracle-protocol-panel[\s\S]*?inset: 0;[\s\S]*?z-index: 10001;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
 assert.match(style, /\.jarvis-call-panel[\s\S]*?z-index: 10002;/);
+assert.match(style, /html\.oracle-protocol-active \.jarvis-call-panel[\s\S]*?left: clamp\(24px, 4vw, 72px\)[\s\S]*?width: clamp\(170px, 12vw, 220px\)/);
+assert.match(style, /html\.oracle-protocol-active \.jarvis-call-actions[\s\S]*?display: none !important/);
 assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'oracle_protocol_engage'[\s\S]*?'oracle_protocol_shutdown'[\s\S]*?'oracle_protocol_command'/);
+assert.match(source, /ORACLE_TOOL_ALLOWLIST = new Set\(\[[\s\S]*?'fly_to_location'[\s\S]*?'zoom_to_globe'[\s\S]*?'control_cockpit'/);
 assert.match(source, /function applyOracleProtocolControl\(event\)[\s\S]*?sendOracleProtocolCommand\(String\(event\.tool/);
 assert.match(source, /function handleOracleProtocolMessage\(event\)[\s\S]*?event\.origin !== oracleProtocolOrigin\(\)/);
+assert.match(source, /function oracleProtocolResultMessage\(pending, result = \{\}\)/);
 assert.match(source, /function voiceRequestPayload\(text\)[\s\S]*?clientState\.oracle = oracle/);
 assert.match(source, /fetchJson\('\/api\/voice\/oracle-config'\)/);
 assert.match(source, /turns\/\$\{encodeURIComponent\(turnId\)\}\/audio/);
@@ -212,7 +216,7 @@ assert.match(index, /sessions\.js\?v=20260719T024058Z/);
 assert.match(index, /jarvisVoice\.js\?v=20260828T020000Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v366'/);
+assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v367'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
@@ -448,9 +452,23 @@ const executableSource = source
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
     "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
+assert.equal(
+  placement.oracleProtocolResultMessage(
+    { tool: 'set_visual_style', arguments: { style: 'thermal' } },
+    { ok: true, action: 'set_visual_style', style: 'thermal' },
+  ),
+  'ORACLE confirmed: FLIR active.',
+);
+assert.equal(
+  placement.oracleProtocolResultMessage(
+    { tool: 'zoom_to_globe', arguments: {} },
+    { ok: false, error: 'camera unavailable' },
+  ),
+  'ORACLE rejected globe view: camera unavailable',
+);
 assert.equal(placement.setAudioSessionType('playback'), false);
 sandbox.navigator.audioSession = { type: 'auto' };
 assert.equal(placement.setAudioSessionType('play-and-record'), true);

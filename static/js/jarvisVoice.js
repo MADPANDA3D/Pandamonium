@@ -64,6 +64,7 @@ let oracleProtocolState = null;
 let oracleProtocolReady = false;
 let oracleProtocolCommandSequence = 0;
 let oracleProtocolPendingCommands = [];
+const oracleProtocolPendingResults = new Map();
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -81,6 +82,7 @@ const MIN_VOICED_MS = 280;
 const VOICE_CUE_GAIN = 0.12;
 const VOICE_PREWARM_TIMEOUT_MS = 2500;
 const CALL_PANEL_TRANSITION_MS = 280;
+const ORACLE_COMMAND_TIMEOUT_MS = 8000;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
@@ -102,6 +104,9 @@ const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
 ]);
 const ORACLE_TOOL_ALLOWLIST = new Set([
   'set_visual_style',
+  'fly_to_location',
+  'zoom_to_globe',
+  'control_cockpit',
   'get_current_view_state',
   'get_entity_context',
   'set_layer_visibility',
@@ -647,6 +652,7 @@ function configureOracleProtocol(url) {
     oracleProtocolReady = false;
     oracleProtocolState = null;
     oracleProtocolPendingCommands = [];
+    clearOracleProtocolPendingResults();
     return;
   }
   try {
@@ -657,6 +663,7 @@ function configureOracleProtocol(url) {
       oracleProtocolReady = false;
       oracleProtocolState = null;
       oracleProtocolPendingCommands = [];
+      clearOracleProtocolPendingResults();
     }
     oracleProtocolUrl = nextUrl;
   } catch (_) {
@@ -703,7 +710,52 @@ function flushOracleProtocolCommands() {
   if (!frame?.contentWindow || !origin) return;
   const queued = oracleProtocolPendingCommands;
   oracleProtocolPendingCommands = [];
-  queued.forEach(message => frame.contentWindow.postMessage(message, origin));
+  queued.forEach(message => postOracleProtocolCommand(frame, origin, message));
+}
+
+function clearOracleProtocolPendingResults() {
+  oracleProtocolPendingResults.forEach(pending => window.clearTimeout(pending.timeoutId));
+  oracleProtocolPendingResults.clear();
+}
+
+function oracleProtocolCommandLabel(tool, args = {}) {
+  if (tool === 'set_visual_style') {
+    return { retro: 'CRT', surveillance: 'NVG', thermal: 'FLIR' }[args.style]
+      || String(args.style || 'visual style').toUpperCase();
+  }
+  if (tool === 'zoom_to_globe') return 'globe view';
+  if (tool === 'fly_to_location') return args.query || args.locationId || 'requested location';
+  if (tool === 'control_cockpit') return 'Cockpit';
+  if (tool === 'control_cctv') return `CCTV ${args.action || 'command'}`;
+  if (tool === 'set_layer_visibility') return `${args.layerId || 'data layer'} ${args.enabled ? 'on' : 'off'}`;
+  return String(tool || 'command').replaceAll('_', ' ');
+}
+
+function oracleProtocolResultMessage(pending, result = {}) {
+  const label = oracleProtocolCommandLabel(pending?.tool, pending?.arguments);
+  if (result?.ok === false) return `ORACLE rejected ${label}: ${result.error || 'command failed'}`;
+  if (pending?.tool === 'set_visual_style') return `ORACLE confirmed: ${label} active.`;
+  if (pending?.tool === 'zoom_to_globe') return 'ORACLE confirmed: globe view active.';
+  if (pending?.tool === 'fly_to_location') return `ORACLE confirmed: ${result.label || label} in view.`;
+  if (pending?.tool === 'control_cockpit') {
+    return `ORACLE confirmed: Cockpit ${result.state?.active ? 'active' : 'offline'}.`;
+  }
+  return `ORACLE confirmed: ${label}.`;
+}
+
+function postOracleProtocolCommand(frame, origin, message) {
+  frame.contentWindow.postMessage(message, origin);
+  const timeoutId = window.setTimeout(() => {
+    const pending = oracleProtocolPendingResults.get(message.id);
+    if (!pending) return;
+    oracleProtocolPendingResults.delete(message.id);
+    showToast(`ORACLE did not confirm: ${oracleProtocolCommandLabel(message.tool, message.arguments)}.`, 4200);
+  }, ORACLE_COMMAND_TIMEOUT_MS);
+  oracleProtocolPendingResults.set(message.id, {
+    tool: message.tool,
+    arguments: message.arguments,
+    timeoutId,
+  });
 }
 
 function sendOracleProtocolCommand(tool, args = {}) {
@@ -725,7 +777,7 @@ function sendOracleProtocolCommand(tool, args = {}) {
   const frame = $('oracle-protocol-frame');
   const origin = oracleProtocolOrigin();
   if (!frame?.contentWindow || !origin) return false;
-  frame.contentWindow.postMessage(message, origin);
+  postOracleProtocolCommand(frame, origin, message);
   return true;
 }
 
@@ -734,6 +786,14 @@ function handleOracleProtocolMessage(event) {
   if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== oracleProtocolOrigin()) return;
   const message = event.data;
   if (!message || message.source !== 'oracle') return;
+  if (message.type === 'oracle_result') {
+    const pending = oracleProtocolPendingResults.get(message.id);
+    if (pending) {
+      window.clearTimeout(pending.timeoutId);
+      oracleProtocolPendingResults.delete(message.id);
+      showToast(oracleProtocolResultMessage(pending, message.result), message.result?.ok === false ? 5200 : 3200);
+    }
+  }
   const state = message.type === 'oracle_state'
     ? message.state
     : (message.type === 'oracle_result' && message.result?.action === 'get_current_view_state' ? message.result : null);
@@ -755,6 +815,8 @@ function engageOracleProtocol() {
   if (!frame.getAttribute('src')) frame.setAttribute('src', oracleProtocolUrl);
   panel.hidden = false;
   panel.setAttribute('aria-hidden', 'false');
+  document.body?.classList.add('oracle-protocol-active');
+  document.documentElement?.classList.add('oracle-protocol-active');
   window.requestAnimationFrame(() => panel.classList.add('is-open'));
 }
 
@@ -764,8 +826,12 @@ function shutdownOracleProtocol(immediate = false) {
   if (oracleProtocolHideTimer) window.clearTimeout(oracleProtocolHideTimer);
   panel.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
+  oracleProtocolPendingCommands = [];
+  clearOracleProtocolPendingResults();
   const finish = () => {
     panel.hidden = true;
+    document.body?.classList.remove('oracle-protocol-active');
+    document.documentElement?.classList.remove('oracle-protocol-active');
     oracleProtocolHideTimer = null;
   };
   if (immediate || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) finish();

@@ -1211,6 +1211,24 @@ def test_oracle_protocol_language_is_bounded_and_state_aware():
     assert voice_routes._oracle_protocol_command("switch to FLIR", active) == (
         "set_visual_style", {"style": "thermal"},
     )
+    assert voice_routes._oracle_protocol_command("Now switch it to Snow please", active) == (
+        "set_visual_style", {"style": "snow"},
+    )
+    assert voice_routes._oracle_protocol_command("Switch back to normal view", active) == (
+        "set_visual_style", {"style": "normal"},
+    )
+    assert voice_routes._oracle_protocol_command("Switch back to night vision", active) == (
+        "set_visual_style", {"style": "surveillance"},
+    )
+    assert voice_routes._oracle_protocol_command("Yes, I need to zoom to globe view please", active) == (
+        "zoom_to_globe", {},
+    )
+    assert voice_routes._oracle_protocol_command("Show me a global view of North America", active) == (
+        "fly_to_location", {"query": "north america", "viewMode": "overview"},
+    )
+    assert voice_routes._oracle_protocol_command("Switch to pilot mode", active) == (
+        "control_cockpit", {"action": "enter"},
+    )
     assert voice_routes._oracle_protocol_command("look at the current view", active) == (
         "report_current_view", {},
     )
@@ -1221,6 +1239,7 @@ def test_oracle_protocol_language_is_bounded_and_state_aware():
         "Are you able to see the endpoints in the Oracle Protocol?", active,
     ) == ("report_capabilities", {})
     assert voice_routes._oracle_protocol_command("switch to FLIR", session) is None
+    assert voice_routes._oracle_protocol_unavailable_command("Switch to orbital mode", active)
 
 
 @pytest.mark.asyncio
@@ -1302,6 +1321,26 @@ async def test_oracle_protocol_uses_real_voice_dispatch_and_controls_current_vie
         "arguments": {"style": "thermal"},
     }
     assert styled[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_visual_style"
+
+    globe = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Yes, I need to zoom to globe view please", "leo", session,
+        )
+    ]
+    assert globe[0] == {
+        "type": "ui_control",
+        "ui_event": "oracle_protocol_command",
+        "tool": "zoom_to_globe",
+        "arguments": {},
+    }
+    assert globe[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_globe_view"
+
+    unavailable = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Switch to orbital mode", "leo", session,
+        )
+    ]
+    assert unavailable[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_control_unavailable"
 
     session["_client_state"] = {
         "oracle": {
