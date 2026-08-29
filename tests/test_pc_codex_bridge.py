@@ -101,7 +101,7 @@ def test_bridge_resumes_after_stable_event_id(tmp_path):
     assert bridge._resume_after(task, 0, "missing") == 0
 
 
-def test_pc_bridge_uses_dedicated_interaction_workspace(tmp_path, monkeypatch):
+def test_pc_bridge_routes_task_to_selected_workspace(tmp_path, monkeypatch):
     class IdleThread:
         def __init__(self, *args, **kwargs):
             pass
@@ -111,10 +111,8 @@ def test_pc_bridge_uses_dedicated_interaction_workspace(tmp_path, monkeypatch):
 
     source = tmp_path / "Home Lab"
     source.mkdir()
-    interaction = tmp_path / "Jarvis Codex Workspace"
     monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
-    monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", interaction)
     monkeypatch.setattr(bridge.threading, "Thread", IdleThread)
 
     task = bridge.create_task({
@@ -125,17 +123,24 @@ def test_pc_bridge_uses_dedicated_interaction_workspace(tmp_path, monkeypatch):
     })
 
     try:
-        assert task.data["cwd"] == str(interaction.resolve())
+        assert task.data["cwd"] == str(source.resolve())
         assert task.data["source_root"] == str(source.resolve())
         assert task.data["workspace"] == "home-lab"
         assert task.data["codex_thread_id"] == "019f5022-a520-7de0-9208-018cd2d4d222"
-        assert interaction.is_dir()
-        assert bridge._runtime_workspace_roots(task) == [str(interaction.resolve())]
-        instructions = bridge._task_developer_instructions(task)
-        assert f"selected source workspace is {source.resolve()}" in instructions
-        assert "Treat it as read-only." in instructions
+        assert bridge._runtime_workspace_roots(task) == [str(source.resolve())]
     finally:
         bridge.TASKS.pop(task.task_id, None)
+
+
+def test_pc_bridge_rejects_missing_routed_workspace(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge, "WORKSPACES", {"missing": str(tmp_path / "missing")})
+
+    try:
+        bridge.create_task({"workspace": "missing", "prompt": "Inspect only."})
+    except ValueError as exc:
+        assert str(exc) == "workspace_not_found"
+    else:
+        raise AssertionError("bridge accepted a missing routed workspace")
 
 
 def test_bridge_never_adds_source_as_a_write_root(tmp_path):
@@ -156,7 +161,6 @@ def test_bridge_rejects_write_and_caller_preapproval(tmp_path, monkeypatch):
     source.mkdir()
     monkeypatch.delenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", raising=False)
     monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
-    monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", tmp_path / "interaction")
 
     for payload in (
         {"permission_mode": "workspace_write", "approved": True},
@@ -185,11 +189,9 @@ def test_bridge_private_profile_allows_only_preapproved_workspace_write(tmp_path
 
     source = tmp_path / "source"
     source.mkdir()
-    interaction = tmp_path / "interaction"
     monkeypatch.setenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", "true")
     monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(bridge, "WORKSPACES", {"home-lab": str(source)})
-    monkeypatch.setattr(bridge, "INTERACTION_WORKSPACE", interaction)
     monkeypatch.setattr(bridge.threading, "Thread", IdleThread)
 
     for payload, error in (
@@ -218,13 +220,8 @@ def test_bridge_private_profile_allows_only_preapproved_workspace_write(tmp_path
 
     try:
         assert task.data["approved"] is True
-        assert bridge._runtime_workspace_roots(task) == [
-            str(interaction.resolve()),
-            str(source.resolve()),
-        ]
-        instructions = bridge._task_developer_instructions(task)
-        assert "explicitly approved workspace-write task" in instructions
-        assert "Treat it as read-only" not in instructions
+        assert task.data["cwd"] == str(source.resolve())
+        assert bridge._runtime_workspace_roots(task) == [str(source.resolve())]
     finally:
         bridge.TASKS.pop(task.task_id, None)
 
@@ -241,9 +238,7 @@ def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypat
 
     process = Process()
     source = tmp_path / "source"
-    interaction = tmp_path / "interaction"
     source.mkdir()
-    interaction.mkdir()
     monkeypatch.setenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", "true")
     monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: process)
@@ -261,7 +256,7 @@ def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypat
         "task_id": "task-private",
         "worker": "pc-codex",
         "workspace": "home-lab",
-        "cwd": str(interaction),
+        "cwd": str(source),
         "source_root": str(source),
         "permission_mode": "workspace_write",
         "approved": True,
@@ -275,7 +270,59 @@ def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypat
     messages = [json.loads(line) for line in process.stdin.getvalue().splitlines()]
     started = next(message for message in messages if message.get("id") == 2)
     assert started["params"]["sandbox"] == "workspace-write"
-    assert started["params"]["runtimeWorkspaceRoots"] == [str(interaction), str(source)]
+    assert started["params"]["runtimeWorkspaceRoots"] == [str(source)]
+
+
+def test_bridge_waits_for_turn_completed_after_final_answer(tmp_path, monkeypatch):
+    messages = [
+        {"method": "item/completed", "params": {"item": {
+            "type": "agentMessage",
+            "phase": "final_answer",
+            "text": "ROUTED_CWD_OK",
+        }}},
+        {"method": "turn/completed", "params": {}},
+    ]
+
+    class Process:
+        def __init__(self):
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO("".join(json.dumps(message) + "\n" for message in messages))
+            self.stderr = io.StringIO()
+
+        def poll(self):
+            return 0
+
+    source = tmp_path / "source"
+    source.mkdir()
+    monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: Process())
+
+    def read_until(_task, request_id, timeout=60):
+        if request_id == 1:
+            return {}
+        if request_id == 2:
+            return {"thread": {"id": "thread-1"}}
+        return {"turn": {"id": "turn-1"}}
+
+    monkeypatch.setattr(bridge, "_read_until", read_until)
+    task = bridge.Task({
+        "task_id": "task-completion",
+        "worker": "pc-codex",
+        "workspace": "home-lab",
+        "cwd": str(source),
+        "source_root": str(source),
+        "permission_mode": "read_only",
+        "approved": False,
+        "prompt": "Reply exactly.",
+        "status": "queued",
+        "events": [],
+    })
+
+    bridge._run_task(task)
+
+    assert task.data["status"] == "completed"
+    assert task.data["result"] == "ROUTED_CWD_OK"
+    assert task.proc.stdout.tell() == len(task.proc.stdout.getvalue())
 
 
 def test_codex_command_applies_explicit_model_defaults(monkeypatch):

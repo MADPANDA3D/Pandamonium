@@ -30,10 +30,6 @@ CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
 WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
-INTERACTION_WORKSPACE = Path(os.getenv(
-    "JARVIS_CODEX_INTERACTION_WORKSPACE",
-    str(Path.home() / ".local/share/jarvis/pc-codex-workspace"),
-)).expanduser()
 CODEX_MODEL = os.getenv(
     "JARVIS_CODEX_MODEL",
     "gpt-5.6-terra" if WORKER_ID == "pc-codex" else "",
@@ -484,7 +480,7 @@ def _run_task(task: Task) -> None:
         task.data["codex_turn_id"] = turn["turn"]["id"]
         task.save()
         assert task.proc.stdout
-        while task.data.get("status") not in TERMINAL:
+        while True:
             line = task.proc.stdout.readline()
             if not line:
                 break
@@ -533,12 +529,11 @@ def create_task(payload: dict) -> Task:
     source_root = WORKSPACES.get(workspace)
     if not source_root:
         raise ValueError("unknown_workspace")
-    source_root = str(Path(source_root).expanduser().resolve())
-    if WORKER_ID == "pc-codex":
-        INTERACTION_WORKSPACE.mkdir(parents=True, exist_ok=True)
-        cwd = str(INTERACTION_WORKSPACE.resolve())
-    else:
-        cwd = source_root
+    source_path = Path(source_root).expanduser().resolve()
+    if not source_path.is_dir():
+        raise ValueError("workspace_not_found")
+    source_root = str(source_path)
+    cwd = source_root
     prompt = str(payload.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("prompt_required")
@@ -752,7 +747,6 @@ class Handler(BaseHTTPRequestHandler):
 def self_check() -> None:
     assert WORKER_ID in {"pc-codex", "vps-codex"}
     assert all(Path(path).is_absolute() for path in WORKSPACES.values())
-    assert INTERACTION_WORKSPACE.is_absolute()
     assert _codex_command()[-2:] == ["app-server", "--stdio"]
     assert _safe_tool_text({"type": "webSearch", "query": "test"}) == "Web search completed: test"
     assert MAX_TASK_RUNTIME >= 60
