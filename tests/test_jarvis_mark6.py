@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+import src.agent_loop as agent_loop
 import src.jarvis_agent as jarvis_agent
 from routes import voice_routes
 from routes.agent_task_routes import TaskApproval
@@ -1194,7 +1195,7 @@ def test_near_voice_controls_never_execute_or_fall_through():
     assert voice_routes._task_control_intent("Don't cancel the Hermes task")[0] == "rejected"
 
 
-def test_oracle_protocol_language_is_bounded_and_state_aware():
+def test_oracle_protocol_lifecycle_language_is_bounded_and_state_aware():
     session = {}
     assert voice_routes._oracle_protocol_intent(
         "Hey buddy, I might need some eyes in the sky",
@@ -1208,82 +1209,74 @@ def test_oracle_protocol_language_is_bounded_and_state_aware():
         {"oracle_protocol_active": True},
     ) == "shutdown"
     assert voice_routes._oracle_protocol_intent("do not engage Oracle", session) is None
-    active = {"oracle_protocol_active": True}
-    assert voice_routes._oracle_protocol_command("switch to FLIR", active) == (
-        "set_visual_style", {"style": "thermal"},
-    )
-    assert voice_routes._oracle_protocol_command("Now switch it to Snow please", active) == (
-        "set_visual_style", {"style": "snow"},
-    )
-    assert voice_routes._oracle_protocol_command("Switch back to normal view", active) == (
-        "set_visual_style", {"style": "normal"},
-    )
-    assert voice_routes._oracle_protocol_command("Switch back to night vision", active) == (
-        "set_visual_style", {"style": "surveillance"},
-    )
-    assert voice_routes._oracle_protocol_command("Yes, I need to zoom to globe view please", active) == (
-        "zoom_to_globe", {},
-    )
-    assert voice_routes._oracle_protocol_command("Show me a global view of North America", active) == (
-        "fly_to_location", {"query": "north america", "viewMode": "overview"},
-    )
-    assert voice_routes._oracle_protocol_command("Switch to pilot mode", active) == (
-        "control_cockpit", {"action": "enter"},
-    )
-    assert voice_routes._oracle_protocol_command("look at the current view", active) == (
-        "report_current_view", {},
-    )
-    assert voice_routes._oracle_protocol_command("next CCTV camera", active) == (
-        "control_cctv", {"action": "next"},
-    )
-    assert voice_routes._oracle_protocol_command(
-        "Are you able to see the endpoints in the Oracle Protocol?", active,
-    ) == ("report_capabilities", {})
-    assert voice_routes._oracle_protocol_command("switch to FLIR", session) is None
-    assert voice_routes._oracle_protocol_unavailable_command("Switch to orbital mode", active)
-    assert voice_routes._oracle_protocol_negated_command("Do not switch ORACLE to FLIR")
 
 
-def test_oracle_fast_alias_families_are_flexible_and_bounded():
-    active = {"oracle_protocol_active": True}
-    assert voice_routes._oracle_protocol_commands("Moons out, Goons out", active) == [
-        ("set_visual_style", {"style": "surveillance"}),
+def _oracle_voice_session(*tool_names):
+    return {
+        "id": "voice-1",
+        "target": "jarvis",
+        "oracle_protocol_active": True,
+        "_client_state": {
+            "oracle": {
+                "ready": True,
+                "style": "normal",
+                "layers": [],
+                "capabilities": {
+                    "protocol": "oracle",
+                    "version": "1",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": name,
+                            "description": f"Native {name} capability",
+                            "parameters": {"type": "object", "properties": {}},
+                        }
+                        for name in tool_names
+                    ],
+                },
+            },
+        },
+    }
+
+
+def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
+    session = _oracle_voice_session(
+        "fly_to_location",
+        "set_visual_style",
+        "control_cctv",
+        "analyst_query",
+        "control_cockpit",
+    )
+    specs = voice_routes._oracle_tool_specs(session)
+    assert [tool["name"] for tool in specs] == [
+        "fly_to_location",
+        "set_visual_style",
+        "control_cctv",
+        "analyst_query",
+        "control_cockpit",
     ]
-    assert voice_routes._oracle_protocol_commands("The moon is out and the goons are out", active) == [
-        ("set_visual_style", {"style": "surveillance"}),
+    assert [schema["function"]["name"] for schema in voice_routes._oracle_tool_schemas(specs)] == [
+        tool["name"] for tool in specs
     ]
-    assert voice_routes._oracle_protocol_commands("Pull up a thermal heat map across the U.S.", active) == [
-        ("set_visual_style", {"style": "thermal"}),
-        ("fly_to_location", {"query": "United States", "viewMode": "overview"}),
-    ]
-    assert voice_routes._oracle_protocol_commands("Explain what a heatmap is", active) == []
-    assert voice_routes._oracle_protocol_commands("Do not show a heatmap of the US", active) == []
+    prompt = voice_routes._voice_system_prompt(session)
+    assert "sole intelligence, identity, memory, and voice" in prompt
+    assert "what you can do in ORACLE mode" in prompt
+    assert "satellite over Tel Aviv and enable CCTV" in prompt
+    assert "find a flight heading to Miami" in prompt
+    assert "Moons out, Goons out" in prompt
 
 
-def test_oracle_semantic_planner_candidate_and_schema_are_bounded():
-    active = {"oracle_protocol_active": True}
-    assert voice_routes._oracle_semantic_candidate("Paint the United States in thermal colors", active)
-    assert voice_routes._oracle_semantic_candidate("Make ORACLE look like Predator", active)
-    assert not voice_routes._oracle_semantic_candidate("Explain thermal imaging", active)
-    assert not voice_routes._oracle_semantic_candidate("Do not switch ORACLE to FLIR", active)
-
-    assert voice_routes._parse_oracle_semantic_plan(
-        '```json\n{"commands":['
-        '{"action":"style","value":"FLIR"},'
-        '{"action":"location","value":"United States"}]}\n```'
-    ) == [
-        {"action": "style", "value": "FLIR"},
-        {"action": "location", "value": "United States"},
-    ]
-    assert voice_routes._parse_oracle_semantic_plan(
-        '{"commands":[{"action":"shell","value":"whoami"}]}'
-    ) == []
-    assert voice_routes._parse_oracle_semantic_plan(
-        '{"commands":[{"action":"layer","value":"traffic","state":"maybe"}]}'
-    ) == []
-    assert voice_routes._parse_oracle_semantic_plan(
-        '{"commands":[],"explanation":"no"}'
-    ) == []
+def test_oracle_dynamic_native_calls_convert_without_a_static_tool_tag():
+    blocks, used_native, converted = agent_loop._resolve_tool_blocks(
+        "",
+        [{"name": "set_visual_style", "arguments": '{"style":"thermal"}', "id": "call-1"}],
+        round_num=1,
+        is_api_model=True,
+        extra_tool_names={"set_visual_style"},
+    )
+    assert used_native is True
+    assert blocks == [agent_loop.ToolBlock("set_visual_style", '{"style":"thermal"}')]
+    assert converted[0]["id"] == "call-1"
 
 
 @pytest.mark.asyncio
@@ -1324,139 +1317,59 @@ async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_oracle_protocol_uses_real_voice_dispatch_and_controls_current_view(monkeypatch):
-    monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
-    monkeypatch.setattr(
-        voice_routes,
-        "_SESSION_MANAGER",
-        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(get_context_messages=lambda: [])),
+async def test_oracle_native_executor_waits_for_the_real_browser_result():
+    session = _oracle_voice_session("set_visual_style")
+    executor = voice_routes._oracle_tool_executor(
+        session,
+        "leo",
+        voice_routes._oracle_tool_specs(session),
     )
+    progress = []
 
-    async def must_not_call_model(*_args, **_kwargs):
-        raise AssertionError("ORACLE control reached the LLM")
-        yield ""  # pragma: no cover
+    async def receive_call(payload):
+        progress.append(payload)
+        call_id = payload["oracle_call"]["call_id"]
+        voice_routes._ORACLE_TOOL_CALLS[("voice-1", call_id)]["future"].set_result({
+            "ok": True,
+            "action": "set_visual_style",
+            "style": "surveillance",
+        })
 
-    monkeypatch.setattr(voice_routes, "stream_agent_loop", must_not_call_model)
-    session = {"target": "jarvis"}
-    suggested = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "I might need some eyes in the sky", "leo", session,
-        )
-    ]
-    assert suggested[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_confirmation"
-    assert session["oracle_protocol_pending"] is True
-
-    engaged = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Yes, the Oracle protocol", "leo", session,
-        )
-    ]
-    assert engaged[0] == {"type": "ui_control", "ui_event": "oracle_protocol_engage"}
-
-    styled = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Switch to FLIR", "leo", session,
-        )
-    ]
-    assert styled[0] == {
-        "type": "ui_control",
-        "ui_event": "oracle_protocol_command",
-        "tool": "set_visual_style",
-        "arguments": {"style": "thermal"},
-    }
-    assert styled[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_visual_style"
-
-    globe = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Yes, I need to zoom to globe view please", "leo", session,
-        )
-    ]
-    assert globe[0] == {
-        "type": "ui_control",
-        "ui_event": "oracle_protocol_command",
-        "tool": "zoom_to_globe",
-        "arguments": {},
-    }
-    assert globe[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_globe_view"
-
-    session["_client_state"] = {
-        "oracle": {
-            "ready": True,
-            "style": "thermal",
-            "camera": {"latitude": 30.267, "longitude": -97.743, "heightM": 15000},
-            "layers": [{"id": "flights", "name": "Live Flights", "enabled": True}],
-        },
-    }
-    reported = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "What are we looking at in Oracle", "leo", session,
-        )
-    ]
-    assert "FLIR" in reported[-1]["assistant_text"]
-    assert "Live Flights" in reported[-1]["assistant_text"]
-
-    capabilities = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Can you see the Oracle protocol endpoints?", "leo", session,
-        )
-    ]
-    assert capabilities[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_capabilities"
-    assert "control CCTV" in capabilities[-1]["assistant_text"]
+    description, result = await executor(
+        SimpleNamespace(tool_type="set_visual_style", content='{"style":"surveillance"}'),
+        receive_call,
+    )
+    assert description == "ORACLE set_visual_style"
+    assert result["ok"] is True
+    assert progress[0]["oracle_call"]["arguments"] == {"style": "surveillance"}
+    assert voice_routes._ORACLE_TOOL_CALLS == {}
 
 
 @pytest.mark.asyncio
-async def test_oracle_natural_language_falls_through_to_jarvis_bounded_tools(monkeypatch):
+async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monkeypatch):
     calls = []
-    controls = iter([
-        [
-            {
-                "ui_event": "oracle_protocol_command",
-                "tool": "set_visual_style",
-                "arguments": {"style": "surveillance"},
-                "results": "Switching ORACLE to NVG",
-            },
-        ],
-        [
-            {
-                "ui_event": "oracle_protocol_engage",
-                "results": "ORACLE protocol engaged",
-            },
-            {
-                "ui_event": "oracle_protocol_command",
-                "tool": "set_visual_style",
-                "arguments": {"style": "thermal"},
-                "results": "Switching ORACLE to FLIR",
-            },
-            {
-                "ui_event": "oracle_protocol_command",
-                "tool": "fly_to_location",
-                "arguments": {"query": "United States", "viewMode": "overview"},
-                "results": "Sending ORACLE to an overview of United States",
-            },
-        ],
-        [
-            {
-                "ui_event": "oracle_protocol_command",
-                "tool": "shell",
-                "arguments": {"command": "nope"},
-                "results": "unsupported",
-            },
-        ],
-    ])
 
     async def model_stream(_endpoint_url, _model, messages, **kwargs):
-        calls.append({"messages": messages, "relevant_tools": kwargs["relevant_tools"]})
-        for control in next(controls):
-            yield "data: " + json.dumps({"type": "ui_control", "data": control})
-        yield 'data: {"delta":"Done."}'
-        yield 'data: {"type":"metrics","data":{}}'
+        calls.append({"messages": messages, "kwargs": kwargs})
+        yield "data: " + json.dumps({
+            "type": "tool_progress",
+            "tool": "set_visual_style",
+            "oracle_call": {
+                "call_id": "oracle_call_1",
+                "tool": "set_visual_style",
+                "arguments": {"style": "surveillance"},
+            },
+        })
+        yield "data: " + json.dumps({
+            "type": "tool_output",
+            "tool": "set_visual_style",
+            "output": '{"ok":true,"style":"surveillance"}',
+        })
+        yield 'data: {"delta":"Night vision is active."}'
+        yield 'data: {"type":"metrics","data":{"rounds":2}}'
         yield "data: [DONE]"
 
-    async def no_semantic_plan(*_args, **_kwargs):
-        return []
-
     monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
-    monkeypatch.setattr(voice_routes, "_oracle_semantic_plan_controls", no_semantic_plan)
     monkeypatch.setattr(
         voice_routes,
         "_SESSION_MANAGER",
@@ -1467,141 +1380,38 @@ async def test_oracle_natural_language_falls_through_to_jarvis_bounded_tools(mon
             get_context_messages=lambda: [],
         )),
     )
-    session = {"target": "jarvis", "oracle_protocol_active": True}
-
-    moon = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Give me predator vision in ORACLE", "leo", session,
-        )
-    ]
-    heatmap = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Paint a temperature picture of the whole country", "leo", session,
-        )
-    ]
-    unsupported = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Switch to orbital mode", "leo", session,
-        )
-    ]
-
-    assert moon[0] == {
-        "type": "ui_control",
-        "ui_event": "oracle_protocol_command",
-        "tool": "set_visual_style",
-        "arguments": {"style": "surveillance"},
-    }
-    assert [event.get("tool") for event in heatmap if event.get("type") == "ui_control"] == [
+    session = _oracle_voice_session(
         "set_visual_style",
         "fly_to_location",
-    ]
-    assert moon[-1]["diagnostics"]["guard_reason"] == "oracle_semantic_tool"
-    assert heatmap[-1]["diagnostics"]["guard_reason"] == "oracle_semantic_tool"
-    assert "confirm each result" in heatmap[-1]["assistant_text"]
-    assert not any(event.get("type") == "ui_control" for event in unsupported)
-    assert unsupported[-1]["assistant_text"] == "Done."
-    assert len(calls) == 3
-    assert all("ui_control" in call["relevant_tools"] for call in calls)
-    assert "Moons out, Goons out" in calls[0]["messages"][0]["content"]
-
-    negated = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Do not switch ORACLE to FLIR", "leo", session,
-        )
-    ]
-    assert negated[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_negated"
-    assert len(calls) == 3
-
-
-@pytest.mark.asyncio
-async def test_oracle_semantic_planner_emits_a_validated_batch_in_one_model_call(monkeypatch):
-    calls = []
-
-    async def planner_call(_endpoint_url, _model, messages, **kwargs):
-        calls.append({"messages": messages, "kwargs": kwargs})
-        return json.dumps({
-            "commands": [
-                {"action": "engage"},
-                {"action": "style", "value": "FLIR"},
-                {"action": "location", "value": "United States"},
-            ],
-        })
-
-    async def model_stream(*_args, **_kwargs):
-        raise AssertionError("a valid semantic plan must bypass the multi-round agent loop")
-        yield
-
-    monkeypatch.setattr(voice_routes, "llm_call_async", planner_call)
-    monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
-    monkeypatch.setattr(
-        voice_routes,
-        "_SESSION_MANAGER",
-        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(
-            endpoint_url="http://jarvis.test/v1/chat/completions",
-            model="jarvis-model",
-            headers={},
-            get_context_messages=lambda: [
-                {"role": "assistant", "content": "ORACLE is active."},
-                {"role": "user", "content": "Paint the United States in thermal colors"},
-            ],
-        )),
+        "control_cctv",
+        "analyst_query",
+        "control_cockpit",
     )
-    session = {"target": "jarvis", "oracle_protocol_active": True}
 
     events = [
         event async for event in voice_routes._jarvis_events(
-            "chat-1", "Paint the United States in thermal colors", "leo", session,
+            "chat-1", "Moons out, Goons out", "leo", session,
         )
     ]
 
-    assert [event.get("tool") for event in events if event.get("type") == "ui_control"] == [
-        "set_visual_style",
-        "fly_to_location",
+    assert events[0] == {
+        "type": "ui_control",
+        "ui_event": "oracle_protocol_command",
+        "call_id": "oracle_call_1",
+        "tool": "set_visual_style",
+        "arguments": {"style": "surveillance"},
+        "server_managed": True,
+    }
+    assert events[-1]["assistant_text"] == "Night vision is active."
+    assert events[-1]["diagnostics"]["guard_reason"] == "oracle_native_tools"
+    assert callable(calls[0]["kwargs"]["tool_executor"])
+    assert set(calls[0]["kwargs"]["relevant_tools"]) >= {
+        "set_visual_style", "fly_to_location", "control_cctv", "analyst_query", "control_cockpit",
+    }
+    assert [schema["function"]["name"] for schema in calls[0]["kwargs"]["extra_tool_schemas"]] == [
+        "set_visual_style", "fly_to_location", "control_cctv", "analyst_query", "control_cockpit",
     ]
-    assert events[-1]["diagnostics"]["guard_reason"] == "oracle_semantic_plan"
-    assert len(calls) == 1
-    assert calls[0]["kwargs"]["max_retries"] == 1
-    assert calls[0]["kwargs"]["max_tokens"] == 384
-    assert "ORACLE is active." in calls[0]["messages"][1]["content"]
-
-
-@pytest.mark.asyncio
-async def test_oracle_established_aliases_bypass_the_model(monkeypatch):
-    async def model_stream(*_args, **_kwargs):
-        raise AssertionError("established ORACLE aliases must not wait on the model")
-        yield
-
-    monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
-    monkeypatch.setattr(
-        voice_routes,
-        "_SESSION_MANAGER",
-        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(
-            endpoint_url="http://jarvis.test/v1/chat/completions",
-            model="jarvis-model",
-            headers={},
-            get_context_messages=lambda: [],
-        )),
-    )
-    session = {"target": "jarvis", "oracle_protocol_active": True}
-
-    moon = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "The moon is out and the goons are out", "leo", session,
-        )
-    ]
-    heatmap = [
-        event async for event in voice_routes._jarvis_events(
-            "chat-1", "Pull up a thermal heat map across the U.S.", "leo", session,
-        )
-    ]
-
-    assert moon[0]["tool"] == "set_visual_style"
-    assert moon[0]["arguments"] == {"style": "surveillance"}
-    assert [event.get("tool") for event in heatmap if event.get("type") == "ui_control"] == [
-        "set_visual_style",
-        "fly_to_location",
-    ]
-    assert heatmap[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_composite"
+    assert "Moons out, Goons out" in calls[0]["messages"][0]["content"]
 
 
 @pytest.mark.asyncio

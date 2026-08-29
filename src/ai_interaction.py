@@ -573,7 +573,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a built-in theme preset (dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
-      oracle_protocol <engage|shutdown|style|globe|location|cockpit|cctv|layer> [value] — Send a bounded ORACLE control.
+      oracle_protocol <engage|shutdown> — Open or close the ORACLE protocol interface.
       open_panel <name>       — Open a panel (documents, gallery, email, sessions, notes, memories, skills, settings, cookbook)
       open_email_reply <uid> [folder] [reply|reply-all|ai-reply] [body text] — Open a reply draft document for an email; does not send. ALWAYS append the body text when the user told you what to say (one-shot draft); only omit body when the user just asked to "open a reply" without content.
       get_toggles             — Return current toggle states (server-side knowledge)
@@ -775,7 +775,6 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 
     elif action == "oracle_protocol":
         command = parts[1].lower() if len(parts) > 1 else ""
-        requested = parts[2].strip() if len(parts) > 2 else ""
         if command in {"engage", "open", "activate", "show"}:
             return {
                 "ui_event": "oracle_protocol_engage",
@@ -786,87 +785,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
                 "ui_event": "oracle_protocol_shutdown",
                 "results": "ORACLE protocol offline",
             }
-        if command in {"style", "view", "mode"}:
-            requested = requested.lower()
-            aliases = {
-                "normal": "normal", "optical": "normal", "crt": "retro", "retro": "retro",
-                "nvg": "surveillance", "night vision": "surveillance", "flir": "thermal",
-                "thermal": "thermal", "anime": "anime", "noir": "noir", "snow": "snow",
-            }
-            style = aliases.get(requested)
-            if not style:
-                return {"error": "oracle_protocol style needs: normal, CRT, NVG, FLIR, anime, noir, or snow"}
-            return {
-                "ui_event": "oracle_protocol_command",
-                "tool": "set_visual_style",
-                "arguments": {"style": style},
-                "results": f"Switching ORACLE to {requested.upper()}",
-            }
-        if command in {"globe", "earth", "world"}:
-            return {
-                "ui_event": "oracle_protocol_command",
-                "tool": "zoom_to_globe",
-                "arguments": {},
-                "results": "Sending ORACLE to full-globe view",
-            }
-        if command in {"location", "overview", "region"}:
-            if not requested or len(requested) > 160:
-                return {"error": "oracle_protocol location needs a place up to 160 characters"}
-            return {
-                "ui_event": "oracle_protocol_command",
-                "tool": "fly_to_location",
-                "arguments": {"query": requested, "viewMode": "overview"},
-                "results": f"Sending ORACLE to an overview of {requested}",
-            }
-        if command == "cockpit":
-            cockpit_action = {"open": "enter", "on": "enter", "close": "exit", "off": "exit"}.get(
-                requested.lower(), requested.lower(),
-            )
-            if cockpit_action not in {"enter", "exit"}:
-                return {"error": "oracle_protocol cockpit needs enter or exit"}
-            return {
-                "ui_event": "oracle_protocol_command",
-                "tool": "control_cockpit",
-                "arguments": {"action": cockpit_action},
-                "results": f"Sending ORACLE Cockpit {cockpit_action}",
-            }
-        if command == "cctv":
-            cctv = requested.lower()
-            aliases = {
-                "on": "enable", "show": "enable", "off": "disable", "hide": "disable",
-                "previous": "prev", "closest": "nearest",
-            }
-            cctv = aliases.get(cctv, cctv)
-            arguments = None
-            if cctv in {"enable", "disable", "next", "prev", "nearest", "focus"}:
-                arguments = {"action": cctv}
-            elif cctv.startswith("select ") and 0 < len(cctv[7:].strip()) <= 120:
-                arguments = {"action": "select", "cameraQuery": requested[7:].strip()}
-            elif cctv in {"viewshed on", "viewshed off"}:
-                arguments = {"action": "viewshed", "enabled": cctv.endswith(" on")}
-            if arguments is None:
-                return {"error": "oracle_protocol cctv needs enable, disable, next, previous, nearest, focus, select <camera>, or viewshed on|off"}
-            return {
-                "ui_event": "oracle_protocol_command",
-                "tool": "control_cctv",
-                "arguments": arguments,
-                "results": f"Sending ORACLE CCTV {requested}",
-            }
-        if command == "layer":
-            layer_parts = requested.rsplit(" ", 1)
-            if len(layer_parts) != 2 or not layer_parts[0].strip():
-                return {"error": "oracle_protocol layer needs <layer name> on|off"}
-            layer_name, state = layer_parts[0].strip(), layer_parts[1].lower()
-            if len(layer_name) > 120 or state not in {"on", "off", "enable", "disable"}:
-                return {"error": "oracle_protocol layer needs <layer name> on|off"}
-            enabled = state in {"on", "enable"}
-            return {
-                "ui_event": "oracle_protocol_command",
-                "tool": "set_layer_visibility",
-                "arguments": {"layerId": layer_name, "enabled": enabled},
-                "results": f"Turning ORACLE layer {layer_name} {'on' if enabled else 'off'}",
-            }
-        return {"error": "oracle_protocol needs engage, shutdown, style, globe, location, cockpit, cctv, or layer"}
+        return {"error": "oracle_protocol only opens or closes ORACLE; use the active ORACLE native tools for map actions"}
 
     elif action == "open_panel":
         # Open a top-level panel/modal: documents/library, gallery,

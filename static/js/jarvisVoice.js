@@ -62,6 +62,7 @@ let oracleProtocolUrl = '';
 let oracleProtocolHideTimer = null;
 let oracleProtocolState = null;
 let oracleProtocolReady = false;
+let oracleProtocolCapabilities = null;
 let oracleProtocolCommandSequence = 0;
 let oracleProtocolPendingCommands = [];
 const oracleProtocolPendingResults = new Map();
@@ -82,7 +83,7 @@ const MIN_VOICED_MS = 280;
 const VOICE_CUE_GAIN = 0.12;
 const VOICE_PREWARM_TIMEOUT_MS = 2500;
 const CALL_PANEL_TRANSITION_MS = 280;
-const ORACLE_COMMAND_TIMEOUT_MS = 8000;
+const ORACLE_COMMAND_TIMEOUT_MS = 40000;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
@@ -101,16 +102,6 @@ const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
   'oracle_protocol_engage',
   'oracle_protocol_shutdown',
   'oracle_protocol_command',
-]);
-const ORACLE_TOOL_ALLOWLIST = new Set([
-  'set_visual_style',
-  'fly_to_location',
-  'zoom_to_globe',
-  'control_cockpit',
-  'get_current_view_state',
-  'get_entity_context',
-  'set_layer_visibility',
-  'control_cctv',
 ]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
@@ -651,6 +642,7 @@ function configureOracleProtocol(url) {
     oracleProtocolUrl = '';
     oracleProtocolReady = false;
     oracleProtocolState = null;
+    oracleProtocolCapabilities = null;
     oracleProtocolPendingCommands = [];
     clearOracleProtocolPendingResults();
     return;
@@ -662,12 +654,16 @@ function configureOracleProtocol(url) {
     if (nextUrl !== oracleProtocolUrl) {
       oracleProtocolReady = false;
       oracleProtocolState = null;
+      oracleProtocolCapabilities = null;
       oracleProtocolPendingCommands = [];
       clearOracleProtocolPendingResults();
     }
     oracleProtocolUrl = nextUrl;
   } catch (_) {
     oracleProtocolUrl = '';
+    oracleProtocolReady = false;
+    oracleProtocolState = null;
+    oracleProtocolCapabilities = null;
   }
 }
 
@@ -677,13 +673,13 @@ function oracleProtocolOrigin() {
 }
 
 function voiceOracleClientState() {
-  if (!oracleProtocolState || oracleProtocolState.ok === false) return null;
+  if ((!oracleProtocolState || oracleProtocolState.ok === false) && !oracleProtocolCapabilities) return null;
   const panel = $('oracle-protocol-panel');
-  const camera = oracleProtocolState.camera || {};
+  const camera = oracleProtocolState?.camera || {};
   const validCamera = [camera.latitude, camera.longitude, camera.heightM].every(Number.isFinite)
     ? { latitude: camera.latitude, longitude: camera.longitude, heightM: camera.heightM }
     : null;
-  const layers = Array.isArray(oracleProtocolState.layers)
+  const layers = Array.isArray(oracleProtocolState?.layers)
     ? oracleProtocolState.layers.slice(0, 64).map(layer => ({
       id: String(layer?.id || '').slice(0, 80),
       name: String(layer?.name || '').slice(0, 120),
@@ -696,11 +692,38 @@ function voiceOracleClientState() {
     ready: oracleProtocolReady,
     panel_open: Boolean(panel && !panel.hidden),
     updated_at_ms: Date.now(),
-    style: ['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow'].includes(oracleProtocolState.style)
+    style: ['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow'].includes(oracleProtocolState?.style)
       ? oracleProtocolState.style : 'normal',
     camera: validCamera,
     layers,
+    capabilities: oracleProtocolCapabilities,
   };
+}
+
+function sanitizeOracleProtocolCapabilities(value) {
+  if (!value || value.protocol !== 'oracle' || !Array.isArray(value.tools)) return null;
+  const tools = value.tools.slice(0, 64).map(tool => {
+    const name = String(tool?.name || '');
+    if (!/^[a-z][a-z0-9_]{0,79}$/.test(name)) return null;
+    const parameters = tool?.parameters;
+    if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return null;
+    return {
+      type: 'function',
+      name,
+      description: String(tool?.description || '').slice(0, 2000),
+      parameters,
+    };
+  }).filter(Boolean);
+  if (!tools.length) return null;
+  return {
+    protocol: 'oracle',
+    version: String(value.version || '1').slice(0, 80),
+    tools,
+  };
+}
+
+function oracleProtocolToolNames() {
+  return new Set((oracleProtocolCapabilities?.tools || []).map(tool => tool.name));
 }
 
 function flushOracleProtocolCommands() {
@@ -714,7 +737,16 @@ function flushOracleProtocolCommands() {
 }
 
 function clearOracleProtocolPendingResults() {
-  oracleProtocolPendingResults.forEach(pending => window.clearTimeout(pending.timeoutId));
+  oracleProtocolPendingResults.forEach((pending, callId) => {
+    window.clearTimeout(pending.timeoutId);
+    if (pending.serverManaged) {
+      submitOracleProtocolResult(callId, pending, {
+        ok: false,
+        action: pending.tool,
+        error: 'ORACLE protocol closed before the tool finished',
+      });
+    }
+  });
   oracleProtocolPendingResults.clear();
 }
 
@@ -743,32 +775,61 @@ function oracleProtocolResultMessage(pending, result = {}) {
   return `ORACLE confirmed: ${label}.`;
 }
 
+function submitOracleProtocolResult(callId, pending, result) {
+  if (!pending?.voiceSessionId) return Promise.resolve(false);
+  return fetchJson(`/api/voice/sessions/${encodeURIComponent(pending.voiceSessionId)}/oracle-results`, {
+    method: 'POST',
+    body: JSON.stringify({ call_id: callId, tool: pending.tool, result }),
+  }).then(() => true).catch(error => {
+    console.warn('Could not return ORACLE tool result to Jarvis:', error?.message || String(error));
+    return false;
+  });
+}
+
 function postOracleProtocolCommand(frame, origin, message) {
-  frame.contentWindow.postMessage(message, origin);
+  frame.contentWindow.postMessage({
+    source: 'odysseus',
+    type: 'oracle_command',
+    id: message.id,
+    tool: message.tool,
+    arguments: message.arguments,
+  }, origin);
   const timeoutId = window.setTimeout(() => {
     const pending = oracleProtocolPendingResults.get(message.id);
     if (!pending) return;
     oracleProtocolPendingResults.delete(message.id);
-    showToast(`ORACLE did not confirm: ${oracleProtocolCommandLabel(message.tool, message.arguments)}.`, 4200);
+    if (pending.serverManaged) {
+      submitOracleProtocolResult(message.id, pending, {
+        ok: false,
+        action: message.tool,
+        error: 'ORACLE did not return a tool result in time',
+      });
+    } else {
+      showToast(`ORACLE did not confirm: ${oracleProtocolCommandLabel(message.tool, message.arguments)}.`, 4200);
+    }
   }, ORACLE_COMMAND_TIMEOUT_MS);
   oracleProtocolPendingResults.set(message.id, {
     tool: message.tool,
     arguments: message.arguments,
+    voiceSessionId: message.voiceSessionId || '',
+    serverManaged: Boolean(message.serverManaged),
     timeoutId,
   });
 }
 
-function sendOracleProtocolCommand(tool, args = {}) {
-  if (!ORACLE_TOOL_ALLOWLIST.has(tool)) {
+function sendOracleProtocolCommand(tool, args = {}, options = {}) {
+  if (!oracleProtocolToolNames().has(tool)) {
     console.warn('Ignored unsupported ORACLE tool:', tool);
     return false;
   }
   const message = {
     source: 'odysseus',
     type: 'oracle_command',
-    id: `oracle-${Date.now()}-${++oracleProtocolCommandSequence}`,
+    id: options.messageId || `oracle-${Date.now()}-${++oracleProtocolCommandSequence}`,
     tool,
     arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
+    voiceSessionId: options.voiceSessionId || '',
+    serverManaged: Boolean(options.serverManaged),
   };
   if (!oracleProtocolReady) {
     oracleProtocolPendingCommands = [...oracleProtocolPendingCommands.slice(-7), message];
@@ -786,12 +847,23 @@ function handleOracleProtocolMessage(event) {
   if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== oracleProtocolOrigin()) return;
   const message = event.data;
   if (!message || message.source !== 'oracle') return;
+  if (message.type === 'oracle_capabilities') {
+    oracleProtocolCapabilities = sanitizeOracleProtocolCapabilities(message.capabilities);
+  }
   if (message.type === 'oracle_result') {
     const pending = oracleProtocolPendingResults.get(message.id);
     if (pending) {
       window.clearTimeout(pending.timeoutId);
       oracleProtocolPendingResults.delete(message.id);
-      showToast(oracleProtocolResultMessage(pending, message.result), message.result?.ok === false ? 5200 : 3200);
+      if (pending.serverManaged) {
+        submitOracleProtocolResult(message.id, pending, message.result || {
+          ok: false,
+          action: pending.tool,
+          error: 'ORACLE returned an empty tool result',
+        });
+      } else {
+        showToast(oracleProtocolResultMessage(pending, message.result), message.result?.ok === false ? 5200 : 3200);
+      }
     }
   }
   const state = message.type === 'oracle_state'
@@ -845,7 +917,22 @@ function applyOracleProtocolControl(event) {
   else if (control === 'oracle_protocol_shutdown') shutdownOracleProtocol();
   else {
     engageOracleProtocol();
-    sendOracleProtocolCommand(String(event.tool || ''), event.arguments || {});
+    const tool = String(event.tool || '');
+    const callId = String(event.call_id || '');
+    const voiceSessionId = String(event.voice_session_id || sessionId || '');
+    const serverManaged = Boolean(event.server_managed);
+    const sent = sendOracleProtocolCommand(tool, event.arguments || {}, {
+      messageId: callId,
+      voiceSessionId,
+      serverManaged,
+    });
+    if (!sent && serverManaged && callId && voiceSessionId) {
+      submitOracleProtocolResult(callId, { tool, voiceSessionId }, {
+        ok: false,
+        action: tool,
+        error: 'ORACLE native tool is not available in the current interface',
+      });
+    }
   }
   return true;
 }
@@ -1877,7 +1964,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
         }
       }
       else if (event.type === 'ui_control' && isCurrentVoiceCall(callGeneration)) {
-        applyVoiceUIControl(event);
+        applyVoiceUIControl({ ...event, voice_session_id: turnSessionId });
       }
       else if (event.type === 'agent_task') {
         const currentCall = isCurrentVoiceCall(callGeneration);
