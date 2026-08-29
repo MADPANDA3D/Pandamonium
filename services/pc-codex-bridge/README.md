@@ -2,6 +2,8 @@
 
 This private bridge adapts Codex App Server tasks to the Odysseus worker protocol. It binds to localhost by default, accepts only server-mapped workspace aliases, persists Codex thread IDs, and emits replayable normalized events.
 
+Callers may provide a `thread_title`; the bridge applies it through Codex's native thread naming API so persistent sessions remain visible and consistently named in Codex Desktop.
+
 The runtime bundle is exactly two Python files: copy
 `jarvis_codex_bridge.py` and `core/atomic_io.py` into the same install
 directory (the latter as `atomic_io.py`). The bridge intentionally remains

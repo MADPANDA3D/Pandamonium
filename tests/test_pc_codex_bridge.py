@@ -119,6 +119,7 @@ def test_pc_bridge_routes_task_to_selected_workspace(tmp_path, monkeypatch):
         "session_id": "session-1",
         "workspace": "home-lab",
         "prompt": "Inspect the current handoff.",
+        "thread_title": "Discord | 2026-08-29 04:31 EDT | #dev-channel | LEO",
         "codex_thread_id": "019f5022-a520-7de0-9208-018cd2d4d222",
     })
 
@@ -126,6 +127,7 @@ def test_pc_bridge_routes_task_to_selected_workspace(tmp_path, monkeypatch):
         assert task.data["cwd"] == str(source.resolve())
         assert task.data["source_root"] == str(source.resolve())
         assert task.data["workspace"] == "home-lab"
+        assert task.data["thread_title"] == "Discord | 2026-08-29 04:31 EDT | #dev-channel | LEO"
         assert task.data["codex_thread_id"] == "019f5022-a520-7de0-9208-018cd2d4d222"
         assert bridge._runtime_workspace_roots(task) == [str(source.resolve())]
     finally:
@@ -302,6 +304,8 @@ def test_bridge_waits_for_turn_completed_after_final_answer(tmp_path, monkeypatc
             return {}
         if request_id == 2:
             return {"thread": {"id": "thread-1"}}
+        if request_id == 20:
+            return {}
         return {"turn": {"id": "turn-1"}}
 
     monkeypatch.setattr(bridge, "_read_until", read_until)
@@ -314,6 +318,7 @@ def test_bridge_waits_for_turn_completed_after_final_answer(tmp_path, monkeypatc
         "permission_mode": "read_only",
         "approved": False,
         "prompt": "Reply exactly.",
+        "thread_title": "Discord | 2026-08-29 04:31 EDT | #dev-channel | LEO",
         "status": "queued",
         "events": [],
     })
@@ -322,6 +327,17 @@ def test_bridge_waits_for_turn_completed_after_final_answer(tmp_path, monkeypatc
 
     assert task.data["status"] == "completed"
     assert task.data["result"] == "ROUTED_CWD_OK"
+    assert any(
+        message == {
+            "id": 20,
+            "method": "thread/name/set",
+            "params": {
+                "threadId": "thread-1",
+                "name": "Discord | 2026-08-29 04:31 EDT | #dev-channel | LEO",
+            },
+        }
+        for message in map(json.loads, task.proc.stdin.getvalue().splitlines())
+    )
     assert task.proc.stdout.tell() == len(task.proc.stdout.getvalue())
 
 

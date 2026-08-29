@@ -467,6 +467,13 @@ def _run_task(task: Task) -> None:
             })
         started = _read_until(task, 2)
         thread_id = started["thread"]["id"]
+        if task.data.get("thread_title"):
+            task.send({
+                "id": 20,
+                "method": "thread/name/set",
+                "params": {"threadId": thread_id, "name": task.data["thread_title"]},
+            })
+            _read_until(task, 20)
         task.data["codex_thread_id"] = thread_id
         task.data["status"] = "running"
         task.save()
@@ -547,6 +554,7 @@ def create_task(payload: dict) -> Task:
         except ValueError as exc:
             raise ValueError("invalid_codex_thread_id") from exc
     now = int(time.time())
+    thread_title = " ".join(str(payload.get("thread_title") or "").split())[:200] or None
     data = {
         "task_id": str(uuid.uuid4()),
         "worker": WORKER_ID,
@@ -557,6 +565,7 @@ def create_task(payload: dict) -> Task:
         "permission_mode": permission,
         "approved": approved,
         "prompt": prompt[:50000],
+        "thread_title": thread_title,
         "codex_thread_id": codex_thread_id,
         "status": "queued",
         "result": None,
