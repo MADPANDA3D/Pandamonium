@@ -1390,7 +1390,6 @@ async def _oracle_semantic_plan_controls(
             timeout=60,
             max_retries=1,
             session_id=chat_session_id,
-            workload="foreground",
         )
     except Exception as exc:
         logger.warning("ORACLE semantic planner failed: %s", str(exc)[:180])
