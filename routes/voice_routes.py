@@ -610,6 +610,7 @@ def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
 ORACLE is currently {state}. Interpret Leo's ORACLE language semantically; exact wording is never required.
 Use ui_control action=oracle_protocol with name engage, shutdown, style, globe, location, cockpit, cctv, or layer. Use value for the style/place/action/layer state.
 Natural aliases are intentional: "Moons out, Goons out" means NVG. A heatmap of a place means FLIR plus a location overview of that place.
+Never call engage when ORACLE is already active, or shutdown when it is already offline.
 The tool boundary validates every action. Say you sent the request; the ORACLE interface confirms the actual result."""
 
 
@@ -1206,6 +1207,48 @@ def _oracle_protocol_command(text: str, voice_session: dict) -> tuple[str, dict[
     ):
         return "report_capabilities", {}
     return None
+
+
+def _oracle_protocol_commands(text: str, voice_session: dict) -> list[tuple[str, dict[str, Any]]]:
+    """Resolve instant alias families before using Jarvis for the long tail."""
+    if not voice_session.get("oracle_protocol_active"):
+        return []
+    value = _normalized_voice_control(text)
+    if not value or re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return []
+
+    if re.fullmatch(
+        r"(?:the )?moons?(?: is| are|'s)? out(?: and| so)? (?:the )?goons?(?: is| are|'re)? out",
+        value,
+    ):
+        return [("set_visual_style", {"style": "surveillance"})]
+
+    heatmap_match = re.fullmatch(
+        r"(?:show(?: me)?|display|open|bring up|pull up|put up|give me|let me see)"
+        r"(?: a| the)?(?: thermal| flir)? heat ?map(?: view)?"
+        r" (?:of|over|for|across) (.{1,160})",
+        value,
+    )
+    if heatmap_match:
+        place = heatmap_match.group(1).strip()
+        place = {
+            "us": "United States",
+            "u s": "United States",
+            "usa": "United States",
+            "u s a": "United States",
+            "the us": "United States",
+            "the u s": "United States",
+            "the usa": "United States",
+            "united states": "United States",
+            "the united states": "United States",
+        }.get(place, place)
+        return [
+            ("set_visual_style", {"style": "thermal"}),
+            ("fly_to_location", {"query": place, "viewMode": "overview"}),
+        ]
+
+    command = _oracle_protocol_command(text, voice_session)
+    return [command] if command else []
 
 
 def _oracle_protocol_unavailable_command(text: str, voice_session: dict) -> bool:
@@ -2042,9 +2085,9 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         yield _server_final_event(text, reply, guard)
         return
 
-    oracle_command = _oracle_protocol_command(text, voice_session)
-    if oracle_command:
-        tool, arguments = oracle_command
+    oracle_commands = _oracle_protocol_commands(text, voice_session)
+    if oracle_commands:
+        tool, arguments = oracle_commands[0]
         if tool == "report_current_view":
             reply = _oracle_current_view_reply(voice_session)
             guard = "oracle_protocol_current_view"
@@ -2055,6 +2098,17 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "If another control is not connected, I will say so instead of claiming it ran."
             )
             guard = "oracle_protocol_capabilities"
+        elif len(oracle_commands) > 1:
+            for command_tool, command_arguments in oracle_commands:
+                yield {
+                    "type": "ui_control",
+                    "ui_event": "oracle_protocol_command",
+                    "tool": command_tool,
+                    "arguments": command_arguments,
+                }
+            place = oracle_commands[-1][1].get("query")
+            reply = f"Sending FLIR and an overview of {place} to ORACLE, sir."
+            guard = "oracle_protocol_composite"
         else:
             yield {
                 "type": "ui_control",
@@ -2588,7 +2642,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     )
     if (
             _oracle_protocol_intent(text, voice_session)
-            or _oracle_protocol_command(text, voice_session)
+            or _oracle_protocol_commands(text, voice_session)
             or _oracle_protocol_negated_command(text)
             or _media_command(text)
         or _foreground_command(text)
@@ -2691,6 +2745,8 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
                 semantic_oracle_tools.append(tool)
             else:
                 active = ui_event == "oracle_protocol_engage"
+                if active == bool(voice_session.get("oracle_protocol_active")):
+                    continue
                 voice_session["oracle_protocol_active"] = active
                 voice_session["oracle_protocol_pending"] = False
                 voice_session_id = str(voice_session.get("id") or "")
