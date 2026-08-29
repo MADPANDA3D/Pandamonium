@@ -1266,7 +1266,7 @@ def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
     assert "Moons out, Goons out" in prompt
 
 
-def test_oracle_dynamic_native_calls_convert_without_a_static_tool_tag():
+def test_oracle_dynamic_native_calls_convert_without_a_static_tool_tag(caplog):
     blocks, used_native, converted = agent_loop._resolve_tool_blocks(
         "",
         [{"name": "set_visual_style", "arguments": '{"style":"thermal"}', "id": "call-1"}],
@@ -1277,6 +1277,7 @@ def test_oracle_dynamic_native_calls_convert_without_a_static_tool_tag():
     assert used_native is True
     assert blocks == [agent_loop.ToolBlock("set_visual_style", '{"style":"thermal"}')]
     assert converted[0]["id"] == "call-1"
+    assert "Unknown function call" not in caplog.text
 
 
 @pytest.mark.asyncio

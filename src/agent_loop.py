@@ -2194,9 +2194,11 @@ def _resolve_tool_blocks(
         for tc in native_tool_calls:
             tc_name = tc.get("name", "")
             tc_args = tc.get("arguments", "{}")
-            block = function_call_to_tool_block(tc_name, tc_args)
-            if block is None and tc_name in extra_tool_names:
-                block = ToolBlock(tc_name, tc_args)
+            block = (
+                ToolBlock(tc_name, tc_args)
+                if tc_name in extra_tool_names
+                else function_call_to_tool_block(tc_name, tc_args)
+            )
             if block:
                 tool_blocks.append(block)
                 converted_calls.append(tc)
