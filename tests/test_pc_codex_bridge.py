@@ -158,6 +158,24 @@ def test_bridge_never_adds_source_as_a_write_root(tmp_path):
     assert "Treat it as read-only" in bridge._task_developer_instructions(task)
 
 
+def test_discord_tasks_receive_jarvis_identity_at_developer_priority(tmp_path):
+    task = bridge.Task({
+        "task_id": "discord-task",
+        "worker": "pc-codex",
+        "session_id": "discord:1:2:3:4",
+        "workspace": "discord-mod",
+        "cwd": str(tmp_path),
+        "status": "running",
+        "events": [],
+    })
+
+    instructions = bridge._task_developer_instructions(task)
+
+    assert instructions.startswith("You are JARVIS, Leo's persistent AI assistant")
+    assert "Codex is your execution engine" in instructions
+    assert "You are PC Codex working for Jarvis and Leo" not in instructions
+
+
 def test_bridge_rejects_write_and_caller_preapproval(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.mkdir()

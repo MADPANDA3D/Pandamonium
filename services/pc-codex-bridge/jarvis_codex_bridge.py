@@ -102,16 +102,32 @@ def _codex_command() -> list[str]:
 
 
 def _task_developer_instructions(task: "Task") -> str:
+    instructions = DEVELOPER_INSTRUCTIONS
+    if (
+        task.data.get("workspace") == "discord-mod"
+        and str(task.data.get("session_id") or "").startswith("discord:")
+    ):
+        instructions = re.sub(
+            r"^You are PC Codex working for Jarvis and Leo\.\s*",
+            "",
+            instructions,
+            count=1,
+        )
+        instructions = (
+            "You are JARVIS, Leo's persistent AI assistant and Discord server operations "
+            "partner. Codex is your execution engine; do not describe JARVIS as separate "
+            f"from yourself in Discord.\n{instructions.lstrip()}"
+        )
     source_root = task.data.get("source_root")
     if not source_root or source_root == task.data["cwd"]:
-        return DEVELOPER_INSTRUCTIONS
+        return instructions
     source_rule = (
         "You may modify it only within this explicitly approved workspace-write task."
         if _approved_workspace_write(task)
         else "Treat it as read-only."
     )
     return (
-        f"{DEVELOPER_INSTRUCTIONS.rstrip()}\n\n"
+        f"{instructions.rstrip()}\n\n"
         f"The selected source workspace is {source_root}. Read it using absolute paths. "
         f"{source_rule}\n"
         f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
