@@ -1260,6 +1260,32 @@ def test_oracle_fast_alias_families_are_flexible_and_bounded():
     assert voice_routes._oracle_protocol_commands("Do not show a heatmap of the US", active) == []
 
 
+def test_oracle_semantic_planner_candidate_and_schema_are_bounded():
+    active = {"oracle_protocol_active": True}
+    assert voice_routes._oracle_semantic_candidate("Paint the United States in thermal colors", active)
+    assert voice_routes._oracle_semantic_candidate("Make ORACLE look like Predator", active)
+    assert not voice_routes._oracle_semantic_candidate("Explain thermal imaging", active)
+    assert not voice_routes._oracle_semantic_candidate("Do not switch ORACLE to FLIR", active)
+
+    assert voice_routes._parse_oracle_semantic_plan(
+        '```json\n{"commands":['
+        '{"action":"style","value":"FLIR"},'
+        '{"action":"location","value":"United States"}]}\n```'
+    ) == [
+        {"action": "style", "value": "FLIR"},
+        {"action": "location", "value": "United States"},
+    ]
+    assert voice_routes._parse_oracle_semantic_plan(
+        '{"commands":[{"action":"shell","value":"whoami"}]}'
+    ) == []
+    assert voice_routes._parse_oracle_semantic_plan(
+        '{"commands":[{"action":"layer","value":"traffic","state":"maybe"}]}'
+    ) == []
+    assert voice_routes._parse_oracle_semantic_plan(
+        '{"commands":[],"explanation":"no"}'
+    ) == []
+
+
 @pytest.mark.asyncio
 async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypatch):
     monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
@@ -1426,7 +1452,11 @@ async def test_oracle_natural_language_falls_through_to_jarvis_bounded_tools(mon
         yield 'data: {"type":"metrics","data":{}}'
         yield "data: [DONE]"
 
+    async def no_semantic_plan(*_args, **_kwargs):
+        return []
+
     monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
+    monkeypatch.setattr(voice_routes, "_oracle_semantic_plan_controls", no_semantic_plan)
     monkeypatch.setattr(
         voice_routes,
         "_SESSION_MANAGER",
@@ -1481,6 +1511,58 @@ async def test_oracle_natural_language_falls_through_to_jarvis_bounded_tools(mon
     ]
     assert negated[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_negated"
     assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_oracle_semantic_planner_emits_a_validated_batch_in_one_model_call(monkeypatch):
+    calls = []
+
+    async def planner_call(_endpoint_url, _model, messages, **kwargs):
+        calls.append({"messages": messages, "kwargs": kwargs})
+        return json.dumps({
+            "commands": [
+                {"action": "engage"},
+                {"action": "style", "value": "FLIR"},
+                {"action": "location", "value": "United States"},
+            ],
+        })
+
+    async def model_stream(*_args, **_kwargs):
+        raise AssertionError("a valid semantic plan must bypass the multi-round agent loop")
+        yield
+
+    monkeypatch.setattr(voice_routes, "llm_call_async", planner_call)
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(
+            endpoint_url="http://jarvis.test/v1/chat/completions",
+            model="jarvis-model",
+            headers={},
+            get_context_messages=lambda: [
+                {"role": "assistant", "content": "ORACLE is active."},
+                {"role": "user", "content": "Paint the United States in thermal colors"},
+            ],
+        )),
+    )
+    session = {"target": "jarvis", "oracle_protocol_active": True}
+
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Paint the United States in thermal colors", "leo", session,
+        )
+    ]
+
+    assert [event.get("tool") for event in events if event.get("type") == "ui_control"] == [
+        "set_visual_style",
+        "fly_to_location",
+    ]
+    assert events[-1]["diagnostics"]["guard_reason"] == "oracle_semantic_plan"
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["max_retries"] == 1
+    assert calls[0]["kwargs"]["max_tokens"] == 384
+    assert "ORACLE is active." in calls[0]["messages"][1]["content"]
 
 
 @pytest.mark.asyncio
