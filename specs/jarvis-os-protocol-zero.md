@@ -171,6 +171,10 @@ ownership boundaries so later protocols do not overlap:
 | `JOS-P6` | Learning, evaluation, and promotion |
 | `JOS-P7` | Observability, recovery, and rollback |
 
+Extension contracts use a separate namespace. `JOS-EXT-1` defines how an
+independently maintained project becomes a Jarvis capability without becoming
+a second agent or model; see [Jarvis OS Extension Protocol](jarvis-os-extension-protocol.md).
+
 ## Definition of success
 
 `JOS-P0` succeeds when replacing GPT-OSS with a compatible test engine changes
