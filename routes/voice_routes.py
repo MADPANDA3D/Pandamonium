@@ -64,6 +64,20 @@ JARVIS_TOOLS = {
     "read_agent_task",
     "search_jarvis_knowledge",
     "read_calendar",
+    "ui_control",
+}
+ORACLE_SEMANTIC_UI_EVENTS = {
+    "oracle_protocol_engage",
+    "oracle_protocol_shutdown",
+    "oracle_protocol_command",
+}
+ORACLE_SEMANTIC_TOOLS = {
+    "set_visual_style",
+    "fly_to_location",
+    "zoom_to_globe",
+    "control_cockpit",
+    "set_layer_visibility",
+    "control_cctv",
 }
 VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private AI partner and voice orchestrator.
 Be terse and conversational: normally one or two spoken sentences unless Leo asks for depth. Never describe pacing or offer a capability menu.
@@ -584,11 +598,19 @@ def _voice_character_name(voice_session: dict[str, Any]) -> str:
 
 
 def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
-    return (
+    prompt = (
         FRIDAY_VOICE_SYSTEM_PROMPT
         if voice_session.get("target") in {"friday", "pc-codex"}
         else VOICE_SYSTEM_PROMPT
     )
+    if voice_session.get("target") in {"friday", "pc-codex"}:
+        return prompt
+    state = "active" if voice_session.get("oracle_protocol_active") else "offline"
+    return prompt + f"""
+ORACLE is currently {state}. Interpret Leo's ORACLE language semantically; exact wording is never required.
+Use ui_control action=oracle_protocol with name engage, shutdown, style, globe, location, cockpit, cctv, or layer. Use value for the style/place/action/layer state.
+Natural aliases are intentional: "Moons out, Goons out" means NVG. A heatmap of a place means FLIR plus a location overview of that place.
+The tool boundary validates every action. Say you sent the request; the ORACLE interface confirms the actual result."""
 
 
 def _voice_chat_session(chat_session_id: str):
@@ -1200,6 +1222,24 @@ def _oracle_protocol_unavailable_command(text: str, voice_session: dict) -> bool
         )
         and re.search(
             r"\b(?:oracle|view|mode|style|globe|map|layers?|cctv|camera|flir|nvg|night vision|crt|thermal|snow|noir|anime|cockpit|pilot)\b",
+            value,
+        )
+    )
+
+
+def _oracle_protocol_negated_command(text: str) -> bool:
+    """Block negated ORACLE mutations before semantic interpretation."""
+    value = _normalized_voice_control(text)
+    if not value or not re.search(r"\b(?:don't|do not|never|not)\b", value):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:engage|activate|open|show|launch|shutdown|disengage|deactivate|close|hide|"
+            r"switch|change|set|put|make|go|zoom|fly|enable|disable|turn)\b",
+            value,
+        )
+        and re.search(
+            r"\b(?:oracle|protocol|flir|nvg|night vision|thermal|crt|globe|cctv|camera|cockpit|layer|map)\b",
             value,
         )
     )
@@ -2011,7 +2051,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         elif tool == "report_capabilities":
             reply = (
                 "I can change ORACLE's visual style, read its current view, show the full globe, "
-                "open a named regional overview, enter or exit Cockpit, and control CCTV. "
+                "open a named regional overview, enter or exit Cockpit, control CCTV, and turn data layers on or off. "
                 "If another control is not connected, I will say so instead of claiming it ran."
             )
             guard = "oracle_protocol_capabilities"
@@ -2042,6 +2082,12 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 guard = "oracle_protocol_cctv"
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, guard)
+        return
+
+    if _oracle_protocol_negated_command(text):
+        reply = "Understood. I did not change ORACLE."
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "oracle_protocol_negated")
         return
 
     if _oracle_protocol_unavailable_command(text, voice_session):
@@ -2543,7 +2589,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     if (
             _oracle_protocol_intent(text, voice_session)
             or _oracle_protocol_command(text, voice_session)
-            or _oracle_protocol_unavailable_command(text, voice_session)
+            or _oracle_protocol_negated_command(text)
             or _media_command(text)
         or _foreground_command(text)
         or _unsupported_voice_control(text)
@@ -2579,6 +2625,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     messages = [{"role": "system", "content": _voice_system_prompt(voice_session)}, *chat_session.get_context_messages()]
     full_response = ""
     task_ids: list[str] = []
+    semantic_oracle_tools: list[str] = []
     started = time.perf_counter()
     first_token_ms: int | None = None
     metrics: dict[str, Any] = {}
@@ -2613,6 +2660,8 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             continue
         if "delta" in data and not data.get("thinking"):
             delta = str(data.get("delta") or "")
+            if semantic_oracle_tools:
+                continue
             if delta and first_token_ms is None:
                 first_token_ms = int((time.perf_counter() - started) * 1000)
             full_response += delta
@@ -2627,9 +2676,37 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
                     yield {"type": "agent_task", "task_id": task_id, "worker": tool_data.get("worker")}
             except json.JSONDecodeError:
                 pass
+        elif data.get("type") == "ui_control" and isinstance(data.get("data"), dict):
+            control = data["data"]
+            ui_event = str(control.get("ui_event") or "")
+            if ui_event not in ORACLE_SEMANTIC_UI_EVENTS:
+                continue
+            event = {"type": "ui_control", "ui_event": ui_event}
+            if ui_event == "oracle_protocol_command":
+                tool = str(control.get("tool") or "")
+                arguments = control.get("arguments")
+                if tool not in ORACLE_SEMANTIC_TOOLS or not isinstance(arguments, dict):
+                    continue
+                event.update({"tool": tool, "arguments": arguments})
+                semantic_oracle_tools.append(tool)
+            else:
+                active = ui_event == "oracle_protocol_engage"
+                voice_session["oracle_protocol_active"] = active
+                voice_session["oracle_protocol_pending"] = False
+                voice_session_id = str(voice_session.get("id") or "")
+                if voice_session_id:
+                    _set_oracle_protocol_state(voice_session_id, pending=False, active=active)
+                semantic_oracle_tools.append(ui_event)
+            yield event
         elif data.get("type") == "metrics":
             metrics = data.get("data") or {}
-    reply = _strip_think_blocks(full_response).strip()
+    reply = (
+        "I sent that ORACLE control. The interface will confirm the result."
+        if len(semantic_oracle_tools) == 1
+        else "I sent those ORACLE controls. The interface will confirm each result."
+        if semantic_oracle_tools
+        else _strip_think_blocks(full_response).strip()
+    )
     if not reply:
         raise RuntimeError("Jarvis voice model returned empty content")
     diagnostics = {
@@ -2640,7 +2717,11 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         "brain_first_token_ms": first_token_ms,
         "num_ctx": VOICE_CONTEXT_LENGTH,
         "num_predict": _num_predict_for_text(text),
-        "guard_reason": "friday_conversation" if selected_target == "pc-codex" else None,
+        "guard_reason": (
+            "friday_conversation" if selected_target == "pc-codex"
+            else "oracle_semantic_tool" if semantic_oracle_tools
+            else None
+        ),
         "agent_metrics": metrics,
         "character_name": _voice_character_name(voice_session),
         "task_ids": task_ids,
