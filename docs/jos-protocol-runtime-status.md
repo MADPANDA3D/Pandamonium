@@ -39,6 +39,9 @@ is not a deployment or live-environment acceptance claim. The read-only
 [MAD-755 compatibility matrix](jos-extension-compatibility-matrix.md) records
 the four selected repository classes, their native integration surfaces, and
 the generic host gaps that must close before compatibility can be claimed.
+The [MAD-756 release assessment](jos-public-release-readiness.md) keeps the
+public release gate closed until those proofs, public defaults, clean-room
+onboarding, and an explicitly selected distribution strategy are complete.
 
 ## Integrated verification
 
