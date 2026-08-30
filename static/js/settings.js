@@ -213,7 +213,7 @@ async function initContextBudgetSettings() {
     derived_knowledge: 10,
     tool_catalog: 20,
     tool_result: 30,
-    oracle_state: 20,
+    extension_state: 20,
     time: 5,
   };
 

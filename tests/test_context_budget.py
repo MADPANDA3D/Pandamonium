@@ -113,11 +113,17 @@ def test_context_class_budgets_are_exposed_in_existing_agent_tools_settings():
     for class_name in (
         "conversation", "working_state", "recalled_memory",
         "retrieved_knowledge", "derived_knowledge", "tool_catalog",
-        "tool_result", "oracle_state", "time",
+        "tool_result", "extension_state", "time",
     ):
         assert f'data-context-budget-class="{class_name}"' in html
     assert "initContextBudgetSettings();" in javascript
     assert "context_class_budget_percent: budgets" in javascript
+
+
+def test_legacy_oracle_budget_migrates_to_generic_extension_state():
+    from src.context_budget import context_class_budget_percent
+
+    assert context_class_budget_percent({"oracle_state": 33})["extension_state"] == 33
 
 
 def test_alias_map_registers_friendly_names():

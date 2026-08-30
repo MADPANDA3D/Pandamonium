@@ -7,12 +7,12 @@ This record describes the source state on branch
 | --- | --- | --- |
 | `JOS-P0` | Canonical engine contract | Odysseus mounts the installation-configured agent around a replaceable engine |
 | `JOS-P1` | Source implementation | Authenticated settings own one identity/constitution across chat, agent, primary voice, authority, and diagnostics |
-| `JOS-P2` | Agent/chat source baseline; portability pending | Context manifest, trust, omissions, compaction, and budgets work; `oracle_state` must become generic in `MAD-750` |
-| `JOS-P3` | Source baseline; provider portability pending | Canonical memory provenance, review/migration, and optional projections work; private provider defaults/docs remain `MAD-750` |
-| `JOS-P4` | Agent-loop baseline; broker convergence pending | Agent-loop tools share the envelope; direct voice worker dispatch does not yet (`MAD-750`) |
-| `JOS-P5` | Agent-loop baseline; generic extension policy pending | Receipts work in the agent loop; extension authority is ORACLE-specific and broker paths use native gates (`MAD-750`) |
-| `JOS-P6` | Source baseline; configured identity matching pending | Promotion lifecycle works; safety matching still contains reference names (`MAD-750`) |
-| `JOS-P7` | Agent-loop/learning baseline; request convergence pending | Correlated agent events and rollback evidence work; plain chat/direct broker traces remain `MAD-750` |
+| `JOS-P2` | Generic source implementation | Context manifests, trust, omissions, compaction, and budgets include reference-neutral extension state with extension IDs |
+| `JOS-P3` | Generic source implementation | Canonical memory provenance and optional projections use public defaults with backward-compatible legacy aliases |
+| `JOS-P4` | Generic source implementation | Agent-loop tools and direct voice worker dispatch share the action envelope; extension targets retain actual IDs |
+| `JOS-P5` | Generic source implementation | Receipts and direct worker decisions work; extension permission comes from declared server metadata and fails closed |
+| `JOS-P6` | Generic source implementation | Promotion lifecycle protects the configured agent and operator identities rather than reference names |
+| `JOS-P7` | Generic request-level source implementation | Agent, plain chat, direct worker, and learning events retain correlated protocol traces |
 | `JOS-EXT-1` | Canonical contract with an ORACLE reference adapter | Generic manifest, registry, installer, and host proof remain `MAD-751` through `MAD-754` |
 
 ## Implementation chain
@@ -27,19 +27,23 @@ The dependency order was completed as planned:
 6. P5 authority receipts — `43519cbf`
 7. P7 operational traces/rollback — `4c87c531`
 8. P6 learning/promotion — `f06e8a0b`
+9. Generic P2-P7 convergence — `MAD-750` (commit recorded at issue close)
 
 The implementation reuses Odysseus's native session, memory, skill, tool,
 worker, diagnostics, settings, backup, and ORACLE paths. It adds protocol
 records and enforcement around those paths rather than a second orchestrator.
-The evidence-backed portability and path-coverage limits are recorded in
-[the MAD-748 audit](jos-portability-audit.md); "source baseline" is not a claim
-that every compatible route is already reference-neutral or trace-enveloped.
+The evidence-backed portability findings and their source resolutions are
+recorded in [the MAD-748 audit](jos-portability-audit.md). Source implementation
+is not a deployment or live-environment acceptance claim.
 
 ## Integrated verification
 
 - P1 compatibility selection: 217 passed.
 - Regression selection covering the repaired full-suite failures: 275 passed.
 - Complete repository suite after P1 convergence: 4,967 passed, 4 skipped, 0 failed.
+- MAD-750 P2-P7 focused selection: 277 passed, 0 failed.
+- Complete repository suite after generic P2-P7 convergence: 4,974 passed,
+  4 skipped, 0 failed.
 - Python compilation and `git diff --check` pass.
 - The four skipped tests remain intentional suite skips; nine warnings are
   existing SQLAlchemy/Starlette/Pydantic deprecations and scheduler test

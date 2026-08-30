@@ -983,8 +983,25 @@ async def test_selected_codex_followup_steers_without_duplicate_persistence(monk
 @pytest.mark.asyncio
 async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
     captured = {}
+    operational_events = []
+
+    class Authority:
+        def decide(self, call, **_kwargs):
+            captured["action_call"] = call
+            return {
+                "decision_id": "decision-1",
+                "decision": "allow",
+                "permission_mode": "bounded_write",
+                "policy_basis": "existing_scoped_policy",
+            }
 
     monkeypatch.setattr(jarvis_agent, "find_active_task", lambda *_args: None)
+    monkeypatch.setattr(voice_routes, "authority_store", Authority())
+    monkeypatch.setattr(
+        voice_routes,
+        "record_operational_event",
+        lambda **values: operational_events.append(values) or {"event_id": f"event-{len(operational_events)}"},
+    )
 
     async def start_task(worker, session_id, workspace, prompt, permission_mode, approved, owner, codex_thread_id=None):
         captured.update(
@@ -1014,6 +1031,10 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
     assert result == "started"
     assert captured["workspace"] == "business"
     assert captured["codex_thread_id"] is None
+    assert captured["action_call"]["target"] == "worker"
+    assert captured["action_call"]["agent_id"] == "assistant"
+    assert [event["event_type"] for event in operational_events] == ["approval", "result"]
+    assert operational_events[0]["request_id"] == operational_events[1]["request_id"]
 
 
 def test_active_task_lookup_is_workspace_scoped(tmp_path, monkeypatch):

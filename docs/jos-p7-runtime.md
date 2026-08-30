@@ -1,9 +1,9 @@
 # JOS-P7 Runtime Baseline
 
-Odysseus now has one request-level operational trace for the agent loop and
-learning lifecycle over its existing metrics, health probes, durable
-sessions/tasks, backup tooling, and recovery mechanisms. Plain chat and direct
-voice broker paths await convergence in `MAD-750`.
+Odysseus now has one request-level operational trace across agent turns, plain
+chat, direct voice worker dispatch, and the learning lifecycle. It reuses the
+existing metrics, health probes, durable sessions/tasks, backup tooling, and
+recovery mechanisms.
 
 ## Runtime contract
 
@@ -11,6 +11,10 @@ voice broker paths await convergence in `MAD-750`.
   envelope for engine start/final response, P5 decisions, and P4 results.
   Request, session, task, and call identifiers remain correlated across those
   events.
+- Direct and streaming plain-chat engine calls record start and terminal events
+  with their existing session, operator, model, usage, and duration data.
+- Direct voice worker dispatch records its P5 decision and P4 result using the
+  same request ID while preserving the existing durable worker task evidence.
 - All eight outcomes remain distinct: succeeded, failed, denied, cancelled,
   timed out, unknown, degraded, and unavailable. Unknown actions retain P4's
   no-automatic-retry rule.

@@ -61,6 +61,9 @@ _ADMINISTRATIVE = frozenset(
 )
 _READ_ACTIONS = frozenset({"list", "get", "read", "view", "search", "find", "status", "health"})
 _PUBLIC_READS = frozenset({"web_search", "web_fetch", "get_runtime_status"})
+_EXTENSION_PERMISSION_MODES = frozenset(
+    {"read_only", "bounded_write", "external_side_effect", "destructive", "controlled_administrative"}
+)
 
 
 def _now() -> datetime:
@@ -148,9 +151,14 @@ def permission_mode_for(call: Mapping[str, Any]) -> str:
     name = str(call.get("name") or "")
     arguments = call.get("arguments") if isinstance(call.get("arguments"), Mapping) else {}
     action = str(arguments.get("action") or "").lower()
+    target = str(call.get("target") or "")
+    if target.startswith("extension:"):
+        policy = call.get("capability_policy") if isinstance(call.get("capability_policy"), Mapping) else {}
+        declared = str(policy.get("permission_mode") or "")
+        return declared if declared in _EXTENSION_PERMISSION_MODES else "unclassified"
     if name in _READ_ONLY_NAMES or action in _READ_ACTIONS:
         return "read_only"
-    if name in _LOCAL_WRITES or str(call.get("target") or "") == "extension:oracle":
+    if name in _LOCAL_WRITES:
         return "bounded_write"
     if name in _EXTERNAL:
         return "external_side_effect"
@@ -256,8 +264,6 @@ class AuthorityStore:
             decision, basis = "deny", "unclassified_capability"
         elif mode == "read_only":
             decision, basis = "allow", "owner_scoped_read"
-        elif str(call.get("target") or "") == "extension:oracle":
-            decision, basis = "allow", "engaged_oracle_scope"
         elif native_approval_gate:
             decision, basis = "allow", "native_staged_approval"
         elif mode in {"bounded_write", "controlled_administrative"}:

@@ -2619,6 +2619,7 @@ async def stream_agent_loop(
     uploaded_files: Optional[List[Dict]] = None,
     workload: str = "foreground",
     extra_tool_schemas: Optional[List[Dict]] = None,
+    extension_capabilities: Optional[Dict[str, Dict[str, Any]]] = None,
     tool_executor=None,
     base_context_manifest: Optional[Dict[str, Any]] = None,
     context_extensions: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -2638,6 +2639,11 @@ async def stream_agent_loop(
     mcp_mgr = get_mcp_manager()
     prep_timings: Dict[str, float] = {}
     extra_tool_schemas = list(extra_tool_schemas or [])
+    extension_capabilities = {
+        str(name): dict(metadata)
+        for name, metadata in (extension_capabilities or {}).items()
+        if str(name).strip() and isinstance(metadata, dict)
+    }
     _action_request_id = str(uuid.uuid4())
     _request_trace_started = time.monotonic()
     base_context_manifest = dict(base_context_manifest or {})
@@ -3464,10 +3470,15 @@ async def stream_agent_loop(
             for schema in mcp_schemas
             if schema.get("function", {}).get("name")
         }
-        _extension_names = {
+        _extra_schema_names = {
             schema.get("function", {}).get("name")
             for schema in extra_tool_schemas
             if schema.get("function", {}).get("name")
+        }
+        _extension_names = set(extension_capabilities) & _extra_schema_names
+        _extension_ids = {
+            name: str(extension_capabilities[name].get("extension_id") or "")
+            for name in _extension_names
         }
         _schema_priority = set(forced_tools or set()) | _extension_names
         # When a workspace is active, keep the tiny discovery schema ahead of
@@ -4268,7 +4279,7 @@ async def stream_agent_loop(
                 target=classify_target(
                     block.tool_type,
                     mcp_names=_mcp_names,
-                    extension_names=_extension_names,
+                    extension_ids=_extension_ids,
                 ),
                 authority_ref=None,
                 limits={
@@ -4277,6 +4288,7 @@ async def stream_agent_loop(
                     "max_rounds": max_rounds,
                     "max_tool_calls": max_tool_calls,
                 },
+                capability_policy=extension_capabilities.get(block.tool_type),
             )
             _action_started_at = utc_now()
             _action_started_monotonic = time.monotonic()

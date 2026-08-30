@@ -95,7 +95,7 @@ results. Evaluator errors and `unknown` verdicts never count as a pass.
 A stronger teacher may diagnose a failed student turn, take over the current
 task, and propose a draft skill. The captured trace remains untrusted data.
 
-- Teacher output does not change Jarvis identity or authority.
+- Teacher output does not change the configured agent identity or authority.
 - Teacher-authored skills start as candidates with the teacher and source trace
   recorded.
 - User-specific hosts, paths, credentials, thread IDs, and one-off values are
@@ -113,7 +113,7 @@ Automatic promotion MAY be enabled for low-risk artifacts only when policy
 defines minimum evidence, confidence, pass rate, sample count, scope, and
 rollback behavior. The following never auto-promote:
 
-- Jarvis constitution or identity changes;
+- configured agent constitution or identity changes;
 - new authority, credentials, secret access, or approval bypasses;
 - destructive, publishing, messaging, financial, or infrastructure actions;
 - artifacts whose only evidence is producer self-evaluation;

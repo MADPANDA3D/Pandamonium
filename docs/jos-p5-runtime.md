@@ -8,14 +8,15 @@ validation and native execution.
 - `src/authority_protocol.py` classifies each action as read-only, bounded
   write, external side effect, destructive, controlled administrative, or
   unclassified. New/unclassified effectful capabilities fail closed.
-- Every decision binds operator, Jarvis identity, session, request, call,
+- Every decision binds operator, configured agent identity, session, request, call,
   capability target, exact argument fingerprint, permission mode, policy
   basis, and expiry. The decision ID becomes the P4 call's `authority_ref`.
 - Existing owner/public restrictions, guide-only policy, staged email approval,
-  worker write gates, and engaged ORACLE scope remain the native enforcement
-  mechanisms. The authority layer records agent-loop decisions; direct broker
-  dispatch still relies on its native gate, and extension policy remains
-  ORACLE-specific until `MAD-750`.
+  and worker write gates remain native enforcement mechanisms. The authority
+  layer records agent-loop and direct voice worker decisions.
+- Extension permission mode comes from server-supplied capability metadata.
+  Missing or invalid metadata is unclassified and denied; an engaged extension
+  does not receive an ORACLE-specific authority shortcut.
 - External and destructive operations without an existing native staged gate
   return `authority_approval_required` before dispatch.
 - `routes/authority_routes.py` lets the authenticated operator inspect pending
@@ -36,7 +37,8 @@ keep the global store ephemeral.
 ## Verification
 
 `tests/test_authority_protocol.py` covers unauthenticated and wrong-owner
-denial, disabled policy, fail-closed new capabilities, exact fingerprints,
-all receipt scopes and states, expiry/revocation, secret redaction, and a live
+denial, disabled policy, fail-closed new capabilities, two extension IDs with
+declared read/write modes, undeclared extension denial, exact fingerprints, all
+receipt scopes and states, expiry/revocation, secret redaction, and a live
 agent-loop approval/consume cycle. Existing worker and ORACLE security suites
 continue to cover their native gates.

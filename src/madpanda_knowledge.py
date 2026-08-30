@@ -23,18 +23,39 @@ from src.knowledge_source_policy import validate_wiki_ingest
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "madpanda_knowledge_v1_fastembed"
-QDRANT_DOCUMENT_COLLECTION = os.getenv("JARVIS_QDRANT_DOCUMENT_COLLECTION", "jarvis_documents")
-QDRANT_WIKI_COLLECTION = os.getenv("JARVIS_QDRANT_WIKI_COLLECTION", "jarvis_wiki")
+LEGACY_COLLECTION_NAME = "madpanda_knowledge_v1_fastembed"
+GENERIC_COLLECTION_NAME = "odysseus_knowledge_v1_fastembed"
 KNOWLEDGE_EMBEDDING_MODEL = os.getenv(
     "ODYSSEUS_KNOWLEDGE_EMBEDDING_MODEL",
     "BAAI/bge-small-en-v1.5",
 )
 DATA_DIR = Path(os.getenv("ODYSSEUS_DATA_DIR", "/srv/odysseus/data"))
-MANIFEST_FILE = DATA_DIR / "madpanda_knowledge_v1_manifest.json"
-SYNC_DIR = DATA_DIR / "madpanda_knowledge_sync"
-PROPOSALS_FILE = DATA_DIR / "madpanda_knowledge_proposals.json"
-AUDIT_FILE = DATA_DIR / "madpanda_knowledge_audit.jsonl"
+
+
+def _compatible_data_path(generic_name: str, legacy_name: str) -> Path:
+    generic = DATA_DIR / generic_name
+    legacy = DATA_DIR / legacy_name
+    return legacy if legacy.exists() and not generic.exists() else generic
+
+
+MANIFEST_FILE = _compatible_data_path("odysseus_knowledge_v1_manifest.json", "madpanda_knowledge_v1_manifest.json")
+SYNC_DIR = _compatible_data_path("odysseus_knowledge_sync", "madpanda_knowledge_sync")
+PROPOSALS_FILE = _compatible_data_path("odysseus_knowledge_proposals.json", "madpanda_knowledge_proposals.json")
+AUDIT_FILE = _compatible_data_path("odysseus_knowledge_audit.jsonl", "madpanda_knowledge_audit.jsonl")
+COLLECTION_NAME = (
+    os.getenv("ODYSSEUS_KNOWLEDGE_COLLECTION")
+    or (LEGACY_COLLECTION_NAME if MANIFEST_FILE.name.startswith("madpanda_") else GENERIC_COLLECTION_NAME)
+)
+QDRANT_DOCUMENT_COLLECTION = (
+    os.getenv("ODYSSEUS_QDRANT_DOCUMENT_COLLECTION")
+    or os.getenv("JARVIS_QDRANT_DOCUMENT_COLLECTION")
+    or "odysseus_documents"
+)
+QDRANT_WIKI_COLLECTION = (
+    os.getenv("ODYSSEUS_QDRANT_WIKI_COLLECTION")
+    or os.getenv("JARVIS_QDRANT_WIKI_COLLECTION")
+    or "odysseus_wiki"
+)
 AGENTS_FILE = Path(os.getenv("ODYSSEUS_KNOWLEDGE_AGENTS_FILE", "/etc/odysseus-knowledge-agents.json"))
 LOCK = threading.RLock()
 SYNC_WORKER_LOCK = threading.Lock()

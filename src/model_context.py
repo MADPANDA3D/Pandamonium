@@ -576,7 +576,7 @@ _UNTRUSTED_SOURCE_CLASSES = (
     (("active editor", "active email", "uploaded files"), "working_state"),
     (("tool execution results", "tool result"), "tool_result"),
     (("mcp tools", "integrations", "skills", "available skills"), "tool_catalog"),
-    (("oracle",), "oracle_state"),
+    (("extension.", "oracle"), "extension_state"),
 )
 
 _SAFE_SOURCE_PREFIXES = (
@@ -615,11 +615,15 @@ def _context_tag(message: Dict[str, Any]) -> Dict[str, str]:
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     explicit = metadata.get("jos_context") if isinstance(metadata.get("jos_context"), dict) else {}
     if explicit.get("class"):
-        return {
+        tag = {
             "class": str(explicit["class"]),
             "source": str(explicit.get("source") or metadata.get("source") or "unknown"),
             "trust": str(explicit.get("trust") or "unknown"),
         }
+        extension_id = explicit.get("extension_id") or metadata.get("extension_id")
+        if extension_id:
+            tag["extension_id"] = str(extension_id)
+        return tag
 
     source = str(metadata.get("source") or "").strip()
     source_lower = source.lower()
@@ -706,7 +710,7 @@ def annotate_context_messages(messages: List[Dict]) -> List[Dict]:
 def _summarize_context(messages: List[Dict]) -> Dict[str, Any]:
     classes: Dict[str, Dict[str, int]] = {}
     trust: Dict[str, Dict[str, int]] = {}
-    sources: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    sources: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
     annotated = annotate_context_messages(messages)
     for message in annotated:
         tag = message["metadata"]["jos_context"]
@@ -717,7 +721,8 @@ def _summarize_context(messages: List[Dict]) -> Dict[str, Any]:
         trust_row = trust.setdefault(tag["trust"], {"messages": 0, "tokens": 0})
         trust_row["messages"] += 1
         trust_row["tokens"] += tokens
-        key = (tag["class"], tag["source"], tag["trust"])
+        extension_id = str(tag.get("extension_id") or "")
+        key = (tag["class"], tag["source"], tag["trust"], extension_id)
         source_row = sources.setdefault(key, {
             "class": tag["class"],
             "source": tag["source"],
@@ -725,6 +730,8 @@ def _summarize_context(messages: List[Dict]) -> Dict[str, Any]:
             "messages": 0,
             "tokens": 0,
         })
+        if extension_id:
+            source_row["extension_id"] = extension_id
         source_row["messages"] += 1
         source_row["tokens"] += tokens
     return {

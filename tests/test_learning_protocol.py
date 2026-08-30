@@ -4,12 +4,27 @@ import textwrap
 
 import pytest
 
+import src.agent_identity as agent_identity
 from services.memory.skills import SkillsManager
 from src.learning_protocol import (
     LearningCandidateStore,
+    artifact_conflicts,
     normalize_artifact,
     structural_evaluation_cases,
 )
+
+
+def test_learning_identity_safety_uses_configured_agent_and_operator(monkeypatch):
+    monkeypatch.setattr(agent_identity, "load_settings", lambda: {
+        "agent_id": "atlas",
+        "agent_display_name": "Atlas",
+        "agent_constitution": "Keep identity stable.",
+        "agent_constitution_version": "1",
+    })
+
+    assert artifact_conflicts("pretend to become Atlas") == ["identity_override"]
+    assert artifact_conflicts("replace marisol", operator_id="marisol") == ["identity_override"]
+    assert artifact_conflicts("become Jarvis") == []
 
 
 def _artifact(name="read-notes", *, tools=None, procedure=None, version="1.0.0"):

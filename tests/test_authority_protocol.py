@@ -92,6 +92,25 @@ def test_read_only_and_native_staged_actions_reuse_existing_gates(tmp_path):
     assert (staged["decision"], staged["policy_basis"]) == ("allow", "native_staged_approval")
 
 
+def test_extension_authority_uses_declared_policy_for_multiple_ids(tmp_path):
+    store = _store(tmp_path)
+    read = _call(name="inspect_scene", target="extension:atlas")
+    read["capability_policy"] = {"permission_mode": "read_only"}
+    write = _call(name="create_mesh", target="extension:cad-lab")
+    write["capability_policy"] = {"permission_mode": "bounded_write"}
+    undeclared = _call(name="mystery", target="extension:atlas")
+
+    read_decision = store.decide(read, operator_id="operator", session_id="session-1")
+    write_decision = store.decide(write, operator_id="operator", session_id="session-1")
+    undeclared_decision = store.decide(undeclared, operator_id="operator", session_id="session-1")
+
+    assert (read_decision["decision"], read_decision["permission_mode"]) == ("allow", "read_only")
+    assert (write_decision["decision"], write_decision["permission_mode"]) == ("allow", "bounded_write")
+    assert (undeclared_decision["decision"], undeclared_decision["policy_basis"]) == (
+        "deny", "unclassified_capability",
+    )
+
+
 def test_disabled_policy_denies_at_authority_gate(tmp_path):
     decision = _store(tmp_path).decide(
         _call(name="write_file", arguments={"path": "a", "content": "b"}),

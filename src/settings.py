@@ -152,7 +152,7 @@ DEFAULT_SETTINGS = {
         "derived_knowledge": 10,
         "tool_catalog": 20,
         "tool_result": 30,
-        "oracle_state": 20,
+        "extension_state": 20,
         "time": 5,
     },
     "agent_stream_timeout_seconds": 300,

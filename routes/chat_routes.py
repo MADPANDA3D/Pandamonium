@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import uuid
 import logging
 from datetime import datetime
 from typing import Dict, Any, AsyncGenerator, List, Optional
@@ -48,6 +49,8 @@ from src.tool_policy import (
     is_web_search_explicitly_denied,
     web_search_enabled_for_turn,
 )
+from src.authority_protocol import operator_identity
+from src.operational_protocol import record_operational_event
 
 logger = logging.getLogger(__name__)
 
@@ -548,15 +551,46 @@ def setup_chat_routes(
 
         ctx.messages, ctx.context_manifest = _refresh_context_manifest(ctx, ctx.messages)
 
-        reply = await llm_call_async(
-            sess.endpoint_url,
-            sess.model,
-            ctx.messages,
-            headers=sess.headers,
-            temperature=ctx.preset.temperature,
-            max_tokens=ctx.preset.max_tokens,
-            prompt_type=preset_id,
+        request_id = str(uuid.uuid4())
+        request_started = time.monotonic()
+        record_operational_event(
+            request_id=request_id,
             session_id=session,
+            operator_id=operator_identity(owner),
+            actor=f"engine:{sess.model}",
+            component="chat",
+            event_type="started",
+            status="running",
+            metadata={"mode": "chat", "streaming": False},
+        )
+        try:
+            reply = await llm_call_async(
+                sess.endpoint_url,
+                sess.model,
+                ctx.messages,
+                headers=sess.headers,
+                temperature=ctx.preset.temperature,
+                max_tokens=ctx.preset.max_tokens,
+                prompt_type=preset_id,
+            )
+        except asyncio.CancelledError:
+            record_operational_event(
+                request_id=request_id, session_id=session, operator_id=operator_identity(owner),
+                actor=f"engine:{sess.model}", component="chat", event_type="response",
+                status="cancelled", duration=time.monotonic() - request_started,
+            )
+            raise
+        except Exception as exc:
+            record_operational_event(
+                request_id=request_id, session_id=session, operator_id=operator_identity(owner),
+                actor=f"engine:{sess.model}", component="chat", event_type="response",
+                status="failed", duration=time.monotonic() - request_started, error=exc,
+            )
+            raise
+        record_operational_event(
+            request_id=request_id, session_id=session, operator_id=operator_identity(owner),
+            actor=f"engine:{sess.model}", component="chat", event_type="response",
+            status="succeeded", duration=time.monotonic() - request_started,
         )
         _clean_reply, _clean_md = clean_thinking_for_save(
             reply,
@@ -1303,9 +1337,22 @@ def setup_chat_routes(
                 return
             elif chat_mode == "chat" or hermes_agent_api:
                 _chat_start = time.time()
+                _chat_trace_start = time.monotonic()
+                _chat_request_id = str(uuid.uuid4())
+                _chat_trace_closed = False
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
+                record_operational_event(
+                    request_id=_chat_request_id,
+                    session_id=session,
+                    operator_id=operator_identity(_user),
+                    actor=f"engine:{sess.model}",
+                    component="chat",
+                    event_type="started",
+                    status="running",
+                    metadata={"mode": "chat", "streaming": True},
+                )
                 # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
                 try:
                     _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
@@ -1433,6 +1480,21 @@ def setup_chat_routes(
                                     allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
                                 )
                             _stream_set(session, status="done")
+                            record_operational_event(
+                                request_id=_chat_request_id,
+                                session_id=session,
+                                operator_id=operator_identity(_user),
+                                actor=f"engine:{_actual_model or _answered_by or _requested_model}",
+                                component="chat",
+                                event_type="response",
+                                status="succeeded",
+                                duration=time.monotonic() - _chat_trace_start,
+                                usage={
+                                    "input_tokens": (last_metrics or {}).get("input_tokens"),
+                                    "output_tokens": (last_metrics or {}).get("output_tokens"),
+                                },
+                            )
+                            _chat_trace_closed = True
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):
                     if full_response:
@@ -1448,6 +1510,24 @@ def setup_chat_routes(
                         sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md))
                         if not incognito:
                             session_manager.save_sessions()
+                    if not _chat_trace_closed:
+                        record_operational_event(
+                            request_id=_chat_request_id, session_id=session,
+                            operator_id=operator_identity(_user), actor=f"engine:{_requested_model}",
+                            component="chat", event_type="response", status="cancelled",
+                            duration=time.monotonic() - _chat_trace_start,
+                        )
+                        _chat_trace_closed = True
+                    raise
+                except Exception as exc:
+                    if not _chat_trace_closed:
+                        record_operational_event(
+                            request_id=_chat_request_id, session_id=session,
+                            operator_id=operator_identity(_user), actor=f"engine:{_requested_model}",
+                            component="chat", event_type="response", status="failed",
+                            duration=time.monotonic() - _chat_trace_start, error=exc,
+                        )
+                        _chat_trace_closed = True
                     raise
                 finally:
                     _active_streams.pop(session, None)

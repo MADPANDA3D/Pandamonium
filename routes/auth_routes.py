@@ -695,7 +695,12 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 sanitized = {}
                 for class_name, default_percent in defaults.items():
                     try:
-                        percent = int(val.get(class_name, default_percent))
+                        raw = (
+                            val.get(class_name, val.get("oracle_state", default_percent))
+                            if class_name == "extension_state"
+                            else val.get(class_name, default_percent)
+                        )
+                        percent = int(raw)
                     except (TypeError, ValueError):
                         raise HTTPException(400, f"Invalid context budget for {class_name}")
                     sanitized[class_name] = max(1, min(percent, 100))

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
@@ -18,6 +19,7 @@ MAX_SUMMARY_CHARS = 4_000
 ACTION_STATUSES = frozenset(
     {"succeeded", "failed", "denied", "cancelled", "timed_out", "unknown"}
 )
+_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 _TEXT_ARGUMENTS = {
     "bash": "command",
@@ -138,6 +140,7 @@ def normalize_action_call(
     target: str,
     authority_ref: str | None,
     limits: Mapping[str, Any] | None = None,
+    capability_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Map native-provider or textual syntax to the JOS-P4 logical call."""
     return {
@@ -151,12 +154,14 @@ def normalize_action_call(
         "target": str(target),
         "authority_ref": authority_ref,
         "limits": dict(limits or {}),
+        "capability_policy": dict(capability_policy or {}),
     }
 
 
-def classify_target(name: str, *, mcp_names: set[str], extension_names: set[str]) -> str:
-    if name in extension_names:
-        return "extension:oracle"
+def classify_target(name: str, *, mcp_names: set[str], extension_ids: Mapping[str, str]) -> str:
+    extension_id = str(extension_ids.get(name) or "")
+    if extension_id:
+        return f"extension:{extension_id}" if _EXTENSION_ID.fullmatch(extension_id) else "extension:invalid"
     if name in mcp_names or name.startswith("mcp__"):
         return "mcp"
     if name in {"start_agent_task", "read_agent_task"}:

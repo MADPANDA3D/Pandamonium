@@ -22,7 +22,10 @@ from core.constants import DATA_DIR
 from core.atomic_io import atomic_write_json
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
-from src.agent_identity import agent_system_prompt, configured_agent_name
+from src.agent_identity import agent_system_prompt, configured_agent_id, configured_agent_name
+from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
+from src.authority_protocol import authority_store, operator_identity
+from src.operational_protocol import record_operational_event
 from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
@@ -1908,31 +1911,103 @@ async def _dispatch_worker_request(
         task_instructions=prompt,
     )
     active = find_active_task(chat_session_id, worker, workspace, owner)
-    if active:
-        if worker in {"pc-codex", "vps-codex"} and active.get("status") not in {"waiting", "waiting_approval"}:
-            try:
-                await task_action(
-                    active["task_id"],
-                    "steer",
-                    {"prompt": prompt},
-                    persist_user_message=False,
-                    owner=owner,
-                )
-                return active, "steered"
-            except Exception as exc:
-                logger.info("%s active task rejected steering: %s", worker, str(exc)[:160])
-        return active, "busy"
-
-    task = await start_task(
-        worker,
-        chat_session_id,
-        workspace,
-        prompt,
-        permission_mode,
-        False,
-        owner,
+    request_id = str(voice_session.get("_protocol_request_id") or uuid.uuid4())
+    call = normalize_action_call(
+        request_id=request_id,
+        call_id=str(uuid.uuid4()),
+        agent_id=configured_agent_id(),
+        actor="odysseus:voice-router",
+        capability_version="",
+        name="start_agent_task",
+        arguments={
+            "action": "steer" if active else "start",
+            "worker": worker,
+            "workspace": workspace,
+            "permission_mode": permission_mode,
+            "prompt": prompt,
+        },
+        target="worker",
+        authority_ref=None,
     )
-    return task, "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
+    catalog = compose_capability_catalog(fallback_names={"start_agent_task"})
+    call["capability_version"] = catalog["version"]
+    validation_error = validate_action_call(call, catalog)
+    if validation_error:
+        raise PermissionError(validation_error["category"])
+    decision = authority_store.decide(
+        call,
+        operator_id=operator_identity(owner),
+        session_id=chat_session_id,
+    )
+    call["authority_ref"] = decision["decision_id"]
+    record_operational_event(
+        request_id=request_id,
+        session_id=chat_session_id,
+        call_id=call["call_id"],
+        operator_id=operator_identity(owner),
+        actor="odysseus:authority",
+        component="control_plane",
+        event_type="approval",
+        status={"allow": "succeeded", "deny": "denied"}.get(decision["decision"], "approval_required"),
+        evidence_refs=[{"decision_id": decision["decision_id"]}],
+        metadata={"permission_mode": decision["permission_mode"], "policy_basis": decision["policy_basis"]},
+    )
+    if decision["decision"] != "allow":
+        raise PermissionError("worker_dispatch_not_authorized")
+
+    started = time.monotonic()
+    action = "blocked"
+    task: dict[str, Any] = {}
+    try:
+        if active:
+            if worker in {"pc-codex", "vps-codex"} and active.get("status") not in {"waiting", "waiting_approval"}:
+                try:
+                    await task_action(
+                        active["task_id"],
+                        "steer",
+                        {"prompt": prompt},
+                        persist_user_message=False,
+                        owner=owner,
+                    )
+                    task, action = active, "steered"
+                except Exception as exc:
+                    logger.info("%s active task rejected steering: %s", worker, str(exc)[:160])
+            if not task:
+                task, action = active, "busy"
+        else:
+            task = await start_task(
+                worker,
+                chat_session_id,
+                workspace,
+                prompt,
+                permission_mode,
+                False,
+                owner,
+            )
+            action = "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
+    except Exception as exc:
+        record_operational_event(
+            request_id=request_id, session_id=chat_session_id, call_id=call["call_id"],
+            operator_id=operator_identity(owner), actor=call["actor"], component="worker",
+            event_type="result", status="failed", duration=time.monotonic() - started, error=exc,
+            metadata={"capability": call["name"], "worker": worker, "workspace": workspace},
+        )
+        raise
+    record_operational_event(
+        request_id=request_id,
+        session_id=chat_session_id,
+        task_id=str(task.get("task_id") or "") or None,
+        call_id=call["call_id"],
+        operator_id=operator_identity(owner),
+        actor=call["actor"],
+        component="worker",
+        event_type="result",
+        status="succeeded" if action in {"started", "steered"} else "degraded",
+        duration=time.monotonic() - started,
+        evidence_refs=[{"task_id": task.get("task_id"), "worker": worker, "workspace": workspace}],
+        metadata={"capability": call["name"], "dispatch_action": action},
+    )
+    return task, action
 
 
 async def _foreground_worker_result(
@@ -1963,6 +2038,7 @@ async def _foreground_worker_result(
 
 
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
+    voice_session.setdefault("_protocol_request_id", str(uuid.uuid4()))
     voice_session["_exact_request"] = text
     oracle_intent = _oracle_protocol_intent(text, voice_session)
     if oracle_intent:
@@ -2497,6 +2573,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
+    voice_session["_protocol_request_id"] = str(uuid.uuid4())
     selected_target = str(voice_session.get("target") or "jarvis")
     origin_target = _voice_origin_target(voice_session, chat_session)
     selected_pc_codex_task = (
@@ -2572,6 +2649,10 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         owner=owner,
         relevant_tools=voice_tools,
         extra_tool_schemas=oracle_schemas,
+        extension_capabilities={
+            name: {"extension_id": "oracle", "permission_mode": "bounded_write"}
+            for name in oracle_names
+        },
         tool_executor=(
             _oracle_tool_executor(voice_session, owner, oracle_specs)
             if oracle_specs

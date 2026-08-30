@@ -93,6 +93,40 @@ def test_manifest_reports_class_level_trimming():
     assert manifest["mounted"]["classes"]["operator_intent"]["messages"] == 1
 
 
+def test_extension_state_reports_ids_for_two_extensions_and_none():
+    messages = _messages() + [
+        {
+            "role": "user",
+            "content": "extension state one",
+            "metadata": {"jos_context": {
+                "class": "extension_state", "source": "extension.atlas",
+                "trust": "untrusted_data", "extension_id": "atlas",
+            }},
+        },
+        {
+            "role": "user",
+            "content": "extension state two",
+            "metadata": {"jos_context": {
+                "class": "extension_state", "source": "extension.cad-lab",
+                "trust": "untrusted_data", "extension_id": "cad-lab",
+            }},
+        },
+    ]
+    manifest = build_context_manifest(messages, 4096, extensions={
+        "atlas": {"engaged": True, "state_mounted": True, "tool_count": 1},
+        "cad-lab": {"engaged": False, "state_mounted": False, "tool_count": 0},
+    })
+    extension_sources = {
+        row["extension_id"] for row in manifest["mounted"]["sources"]
+        if row.get("extension_id")
+    }
+
+    assert manifest["mounted"]["classes"]["extension_state"]["messages"] == 2
+    assert extension_sources == {"atlas", "cad-lab"}
+    assert set(manifest["extensions"]) == {"atlas", "cad-lab"}
+    assert build_context_manifest(_messages(), 4096)["extensions"] == {}
+
+
 def test_internal_tags_do_not_change_provider_payload():
     raw = _messages()
     annotated = annotate_context_messages(raw)

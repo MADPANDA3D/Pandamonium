@@ -96,3 +96,13 @@ action/authority/operational records use its `agent_id`, private constitutions
 are hidden from non-admin reads, and knowledge paths no longer fall back to
 literal owner `leo` or agent `jarvis`. The implementation evidence is recorded
 in [the P1 runtime record](jos-p1-runtime.md). No deployment claim is implied.
+
+`MAD-750` resolved `P2-1` through `P6-1` and `FLOW-1` through `FLOW-2` in source.
+The shared context class is `extension_state` with a legacy `oracle_state`
+settings alias; action targets retain actual extension IDs; extension authority
+uses declared server metadata and fails closed; learning protects configured
+identities; optional projection defaults are public and keep legacy aliases;
+and plain chat plus direct voice worker dispatch now produce correlated P7
+events. The evidence is recorded in
+[the generic P2-P7 runtime record](jos-p2-p7-portability-runtime.md). No
+deployment claim is implied.

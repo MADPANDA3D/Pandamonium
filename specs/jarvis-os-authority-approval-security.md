@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Agent-loop source baseline implemented; generic extension policy pending
+**Status:** Generic source implementation; live acceptance pending
 
 **Runtime record:** [JOS-P5 runtime baseline](../docs/jos-p5-runtime.md)
 
@@ -44,7 +44,7 @@ Before an effectful call executes, Odysseus MUST produce a logical
 | --- | --- |
 | `decision_id` | Stable audit identifier |
 | `operator_id` | Authenticated human owner |
-| `agent_id` | Jarvis or the explicitly selected actor |
+| `agent_id` | Installation-configured agent or explicitly selected actor |
 | `session_id`, `request_id`, `call_id` | Bound request scope |
 | `capability` | Canonical action name and target |
 | `argument_fingerprint` | Exact approved action content |
@@ -109,6 +109,11 @@ The baseline classes are:
 Repository and extension policies may narrow these classes. They cannot widen
 them through prompt text.
 
+Extension capabilities MUST declare a server-owned permission mode in their
+catalog metadata. Missing or invalid extension permission metadata is
+unclassified and denied; neither an extension ID nor engaged lifecycle state
+grants authority by itself.
+
 ## Secrets and private data
 
 Credentials, tokens, private keys, encryption keys, and provider secrets MUST:
@@ -148,12 +153,12 @@ permission mode, task, and approval receipt required for that operation.
 | Worker mutation and approval gate | `src/agent_worker_adapters.py`, `src/jarvis_agent.py` |
 | Secret encryption | `src/secret_storage.py` |
 | URL and path confinement | `src/url_security.py`, `src/tool_execution.py` |
-| ORACLE origin/action enforcement | `routes/voice_routes.py`, ORACLE bridge |
+| Reference-extension origin/action enforcement | `routes/voice_routes.py`, ORACLE bridge |
 
-The current runtime has strong owner/admin and worker-write gates, but it does
-not yet expose one approval-receipt contract across all effectful tools.
-Privilege handling also needs a protocol rule that newly introduced permission
-keys fail closed rather than depending on UI defaults.
+The current runtime retains the existing owner/admin and worker-write gates and
+adds the common decision envelope to agent-loop actions and direct voice worker
+dispatch. Newly introduced permission keys and extension capabilities without
+server-owned policy metadata fail closed rather than depending on UI defaults.
 
 ## Compatibility gate
 

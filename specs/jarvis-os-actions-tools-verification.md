@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Agent-loop source baseline implemented; broker convergence pending
+**Status:** Generic source implementation; live acceptance pending
 
 **Runtime record:** [JOS-P4 runtime baseline](../docs/jos-p4-runtime.md)
 
@@ -51,7 +51,7 @@ The logical `ActionCall` contains:
 | `capability_version` | Catalog/schema version used for validation |
 | `name` | Canonical capability name |
 | `arguments` | Validated bounded arguments |
-| `target` | Tool, extension, worker, or UI runner |
+| `target` | Tool, `extension:<extension_id>`, worker, or UI runner |
 | `authority_ref` | `JOS-P5` decision or approval receipt |
 | `limits` | Timeout, output, round, and resource bounds |
 
@@ -124,9 +124,10 @@ dependencies, return each result before the next dependent decision, and stop
 or compensate according to declared failure policy. Partial success is reported
 as partial success with the successful and failed calls identified.
 
-ORACLE actions use this same loop through `JOS-EXT-1`; they are not a separate
-command brain. Worker tasks also return through the same evidence contract even
-when their internal execution is asynchronous.
+Extension actions use this same loop through `JOS-EXT-1`; they are not separate
+command brains. ORACLE is the first reference adapter. Worker tasks also return
+through the same evidence contract even when their internal execution is
+asynchronous.
 
 ## Current implementation anchors
 
@@ -140,7 +141,7 @@ when their internal execution is asynchronous.
 | Tool loop and result threading | `src/agent_loop.py` |
 | Optional independent completion verifier | `src/agent_loop.py` |
 | Worker task lifecycle and evidence | `src/jarvis_agent.py`, `src/agent_worker_adapters.py` |
-| ORACLE native result correlation | `routes/voice_routes.py` |
+| Reference-extension result correlation | `routes/voice_routes.py` |
 
 The current runtime already enforces many stages, but result shapes and
 correlation are heterogeneous across built-ins, MCP, UI, workers, and

@@ -6,6 +6,19 @@ import pytest
 from src import madpanda_knowledge as knowledge
 
 
+def test_generic_knowledge_paths_preserve_existing_legacy_installation(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(knowledge, "DATA_DIR", tmp_path)
+    assert knowledge._compatible_data_path("odysseus.json", "madpanda.json") == tmp_path / "odysseus.json"
+
+    legacy = tmp_path / "madpanda.json"
+    legacy.write_text("{}", encoding="utf-8")
+    assert knowledge._compatible_data_path("odysseus.json", "madpanda.json") == legacy
+
+    generic = tmp_path / "odysseus.json"
+    generic.write_text("{}", encoding="utf-8")
+    assert knowledge._compatible_data_path("odysseus.json", "madpanda.json") == generic
+
+
 def test_sync_worker_has_a_hard_memory_ceiling(tmp_path: Path, monkeypatch):
     called = {}
 

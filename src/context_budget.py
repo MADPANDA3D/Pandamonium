@@ -24,7 +24,7 @@ DEFAULT_CLASS_BUDGET_PERCENT = {
     "derived_knowledge": 10,
     "tool_catalog": 20,
     "tool_result": 30,
-    "oracle_state": 20,
+    "extension_state": 20,
     "time": 5,
 }
 
@@ -106,7 +106,14 @@ def context_class_budget_percent(value=None) -> dict[str, int]:
     result = dict(DEFAULT_CLASS_BUDGET_PERCENT)
     for name in result:
         try:
-            percent = int(value.get(name, result[name]))
+            # Preserve the pre-MAD-750 ORACLE-specific saved budget as a
+            # compatibility alias while new installs use the generic class.
+            raw = (
+                value.get(name, value.get("oracle_state", result[name]))
+                if name == "extension_state"
+                else value.get(name, result[name])
+            )
+            percent = int(raw)
         except (TypeError, ValueError):
             continue
         result[name] = max(1, min(percent, 100))

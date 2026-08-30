@@ -7,6 +7,7 @@ from src.authority_protocol import AuthorityStore
 from src.action_protocol import (
     MAX_ARGUMENT_BYTES,
     build_action_result,
+    classify_target,
     compose_capability_catalog,
     denied_action_result,
     normalize_action_call,
@@ -50,6 +51,15 @@ def test_native_and_text_calls_normalize_to_same_logical_arguments():
     textual = _call(arguments=json.dumps({"path": "README.md"}), version=catalog["version"])
     assert native == textual
     assert validate_action_call(native, catalog) is None
+
+
+def test_extension_targets_keep_actual_ids_and_no_extension_stays_a_tool():
+    targets = {"orbit": "atlas", "sketch": "cad-lab"}
+
+    assert classify_target("orbit", mcp_names=set(), extension_ids=targets) == "extension:atlas"
+    assert classify_target("sketch", mcp_names=set(), extension_ids=targets) == "extension:cad-lab"
+    assert classify_target("read_file", mcp_names=set(), extension_ids={}) == "tool"
+    assert classify_target("orbit", mcp_names=set(), extension_ids={"orbit": "BAD ID"}) == "extension:invalid"
 
 
 def test_text_code_tools_receive_named_arguments():
@@ -208,6 +218,7 @@ async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypat
         yield "data: [DONE]\n\n"
 
     executed = []
+    operational_events = []
 
     async def oracle_executor(block, progress):
         executed.append(block.tool_type)
@@ -219,6 +230,11 @@ async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypat
     monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
+    monkeypatch.setattr(
+        agent_loop,
+        "record_operational_event",
+        lambda **values: operational_events.append(values) or {"event_id": f"event-{len(operational_events)}"},
+    )
 
     outputs = []
     async for chunk in agent_loop.stream_agent_loop(
@@ -227,6 +243,10 @@ async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypat
         [{"role": "user", "content": "Focus Earth, then track the ISS"}],
         relevant_tools={"oracle_focus", "oracle_track"},
         extra_tool_schemas=schemas,
+        extension_capabilities={
+            name: {"extension_id": "oracle", "permission_mode": "bounded_write"}
+            for name in {"oracle_focus", "oracle_track"}
+        },
         tool_executor=oracle_executor,
         max_rounds=1,
     ):
@@ -240,3 +260,6 @@ async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypat
         ("focus-1", "succeeded"),
         ("track-2", "failed"),
     ]
+    assert [
+        row["component"] for row in operational_events if row.get("event_type") == "result"
+    ] == ["extension:oracle", "extension:oracle"]

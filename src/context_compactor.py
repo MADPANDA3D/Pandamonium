@@ -221,7 +221,7 @@ _DROP_PRIORITY = {
     "conversation": 40,
     "time": 50,
     "working_state": 60,
-    "oracle_state": 70,
+    "extension_state": 70,
     "tool_result": 80,
 }
 
@@ -354,7 +354,7 @@ def trim_for_context(
     # tails only if the protected set itself cannot fit. Current intent is last.
     shrink_order = (
         "working_state", "retrieved_knowledge", "derived_knowledge",
-        "recalled_memory", "tool_result", "oracle_state", "time",
+        "recalled_memory", "tool_result", "extension_state", "time",
         "policy", "identity_policy", "operator_intent",
     )
     for context_class in shrink_order:

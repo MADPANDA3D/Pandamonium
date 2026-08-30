@@ -14,7 +14,7 @@ import httpx
 
 
 class QdrantProjection:
-    DEFAULT_COLLECTION = "jarvis_memory_personal"
+    DEFAULT_COLLECTION = "odysseus_memory"
 
     def __init__(
         self,
@@ -25,15 +25,19 @@ class QdrantProjection:
         client: Optional[httpx.Client] = None,
     ):
         self.url = (url if url is not None else os.getenv("QDRANT_URL", "")).rstrip("/")
-        self.collection = collection or os.getenv(
-            "JARVIS_QDRANT_MEMORY_COLLECTION",
-            self.DEFAULT_COLLECTION,
+        self.collection = (
+            collection
+            or os.getenv("ODYSSEUS_QDRANT_MEMORY_COLLECTION")
+            or os.getenv("JARVIS_QDRANT_MEMORY_COLLECTION")
+            or self.DEFAULT_COLLECTION
         )
         self.enabled = bool(self.url)
-        self.read_enabled = self.enabled and os.getenv(
-            "JARVIS_QDRANT_READS_ENABLED",
-            "false",
-        ).strip().lower() in {"1", "true", "yes", "on"}
+        read_setting = (
+            os.getenv("ODYSSEUS_QDRANT_READS_ENABLED")
+            or os.getenv("JARVIS_QDRANT_READS_ENABLED")
+            or "false"
+        )
+        self.read_enabled = self.enabled and read_setting.strip().lower() in {"1", "true", "yes", "on"}
         self.healthy = self.enabled
         self.last_error = ""
         self._vector_size: Optional[int] = None
@@ -108,6 +112,8 @@ class QdrantProjection:
         try:
             return str(uuid.UUID(canonical_id))
         except (ValueError, TypeError, AttributeError):
+            # Keep the original namespace so a rebuilt generic projection
+            # addresses the same canonical points as existing installations.
             return str(uuid.uuid5(uuid.NAMESPACE_URL, f"jarvis:{canonical_id}"))
 
     def upsert(self, memory: Dict, vector: List[float]) -> None:

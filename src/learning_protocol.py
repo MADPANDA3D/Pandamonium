@@ -51,10 +51,6 @@ _UNSAFE_PATTERNS = {
         r"\b(bypass|skip|disable|forge|fake|never ask)\b.{0,80}\b(approval|authority|permission|receipt|policy)\b",
         re.I | re.S,
     ),
-    "identity_override": re.compile(
-        r"\b(change|replace|pretend|impersonate|become)\b.{0,80}\b(identity|operator|owner|jarvis|leo)\b",
-        re.I | re.S,
-    ),
 }
 _READ_ONLY_CAPABILITIES = frozenset(
     {
@@ -109,7 +105,7 @@ def normalize_artifact(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
-def artifact_conflicts(artifact: Any) -> list[str]:
+def artifact_conflicts(artifact: Any, *, operator_id: str | None = None) -> list[str]:
     text = json.dumps(artifact, ensure_ascii=False, default=str)
     # Safety procedures commonly say "do not bypass approval".  Preserve the
     # prohibition while preventing that quoted boundary from looking like an
@@ -120,7 +116,30 @@ def artifact_conflicts(artifact: Any) -> list[str]:
         text,
         flags=re.I,
     )
-    return [name for name, pattern in _UNSAFE_PATTERNS.items() if pattern.search(text)]
+    conflicts = [name for name, pattern in _UNSAFE_PATTERNS.items() if pattern.search(text)]
+    try:
+        from src.agent_identity import resolve_agent_identity
+        identity = resolve_agent_identity()
+        protected = {
+            "identity", "operator", "owner",
+            str(identity.get("agent_id") or ""),
+            str(identity.get("agent_display_name") or ""),
+            str(operator_id or ""),
+        }
+    except Exception:
+        protected = {"identity", "operator", "owner", str(operator_id or "")}
+    terms = sorted(
+        (re.escape(value) for value in protected if 1 < len(value) <= 80),
+        key=len,
+        reverse=True,
+    )
+    if terms and re.search(
+        rf"\b(change|replace|pretend|impersonate|become)\b.{{0,80}}\b(?:{'|'.join(terms)})\b",
+        text,
+        re.I | re.S,
+    ):
+        conflicts.append("identity_override")
+    return conflicts
 
 
 def classify_risk(artifact: Mapping[str, Any], capabilities: Sequence[str] | None = None) -> str:
@@ -251,7 +270,7 @@ class LearningCandidateStore:
         if not str(owner_scope or "").strip():
             raise ValueError("candidate_owner_scope_required")
         normalized = normalize_artifact(dict(artifact or {}))
-        conflicts = artifact_conflicts(normalized)
+        conflicts = artifact_conflicts(normalized, operator_id=owner_scope)
         caps = sorted({str(item) for item in (capabilities or normalized.get("requires_toolsets") or []) if str(item)})
         risk = classify_risk(normalized, caps)
         candidate = {

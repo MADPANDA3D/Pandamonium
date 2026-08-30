@@ -39,32 +39,22 @@ endpoint does not convert them into personal memory.
 
 Set `QDRANT_URL` to enable projection writes. `QDRANT_API_KEY` is optional for a
 protected endpoint. Collection names can be overridden independently. Leave
-`JARVIS_QDRANT_READS_ENABLED=false` until rebuild, owner isolation, deletion,
+`ODYSSEUS_QDRANT_READS_ENABLED=false` until rebuild, owner isolation, deletion,
 outage, and rollback checks pass against a live Qdrant service.
+
+New installations use `odysseus_memory`, `odysseus_documents`, and
+`odysseus_wiki`. The generic `ODYSSEUS_QDRANT_*` variables take precedence;
+legacy `JARVIS_QDRANT_*` variables and existing MADPANDA knowledge data paths
+remain compatibility aliases. The canonical ledger/source set can rebuild any
+projection.
 
 If Qdrant fails, canonical writes and Chroma recall continue. Unset
 `QDRANT_URL` to roll back without converting memory or documents.
 
-## Current KarpathyWiki finding
+## Derived-wiki boundary
 
-The live vault is `/home/leo/the-lab`; KarpathyWiki `1.22.1` is installed and
-the `wiki/` output contains 2,851 Markdown pages. The plugin is not ready to
-generate: its custom endpoint points at local Ollama, but no model or watched
-folders are selected and `llmReady` is false.
-
-The P3 inventory currently admits 1,376 pages and excludes 1,475: 1,431 have
-dependency/build lineage and 44 lack source links. This confirms that the wiki
-can add derived navigation value, but it must be regenerated from a scoped
-canonical source set before broad indexing.
-
-Reproduce the read-only inventory:
-
-```bash
-.venv/bin/python scripts/jarvis_knowledge_inventory.py \
-  --vault-root /home/leo/the-lab \
-  --wiki-root /home/leo/the-lab/wiki \
-  --plugin-manifest /home/leo/the-lab/.obsidian/plugins/karpathywiki/manifest.json
-```
-
-No plugin settings, watched folders, Qdrant service, or existing wiki pages are
-changed by this baseline.
+Wiki output remains optional derived knowledge, never canonical personal
+memory. An installation may inventory its own vault and generated wiki only
+after it supplies explicit roots. Dependency/build lineage, secrets, plugin
+state, and pages without source links remain excluded. The public runtime
+record contains no operator path, endpoint, inventory count, or plugin state.

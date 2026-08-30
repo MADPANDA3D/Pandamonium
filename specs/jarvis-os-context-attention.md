@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Runtime baseline implemented; live acceptance pending
+**Status:** Generic source implementation; live acceptance pending
 
 **Context owner:** Odysseus
 
@@ -130,7 +130,7 @@ budget; they intentionally do not sum to 100:
 | Derived wiki knowledge | 10% |
 | Native and described tool catalog | 20% |
 | Correlated tool results | 30% |
-| ORACLE extension state | 20% |
+| Active extension state | 20% |
 | Current-time context | 5% |
 
 Identity, policy, presentation, and the current operator request are protected
@@ -203,8 +203,8 @@ continues unchanged.
 - irrelevant memory and large wiki pages cannot displace current intent;
 - every mounted memory and knowledge excerpt retains a source locator;
 - prompt-injection text in every retrieval lane remains data;
-- ORACLE state appears only while the extension is engaged and is removed on
-  disengage;
+- each extension state retains its extension ID, appears only while that
+  extension is engaged, and is removed on disengage;
 - disabled tools do not reappear through tool retrieval or a skill;
 - a retrieval or compaction failure degrades visibly while chat continues with
   the remaining valid packet;
