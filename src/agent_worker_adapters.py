@@ -10,6 +10,8 @@ from typing import Any, Protocol
 
 import httpx
 
+from src.agent_identity import configured_agent_name
+
 MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
 
 
@@ -88,8 +90,10 @@ def _last_remote_event_id(task: dict[str, Any]) -> str:
 
 
 def _hermes_instructions(task: dict[str, Any]) -> str:
+    operator = str(task.get("owner") or "the authenticated operator")
     base = (
-        "You are Hermes working for Leo through Jarvis. Give factual milestone updates and a clear final result. "
+        f"You are the selected Hermes worker operating for {operator} through {configured_agent_name()} and "
+        "Odysseus. Give factual milestone updates and a clear final result. "
         "Never claim an action completed without tool evidence. "
         "Only after a subtask is complete and verified by tool evidence, you may emit one reasoning update as "
         f"{MILESTONE_MARKER} <one completed-subtask update>. Do not use that marker for plans, activity, "

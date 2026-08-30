@@ -1,4 +1,4 @@
-"""Jarvis live voice session and safe action bridge routes."""
+"""Live voice session and safe action bridge routes."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from core.constants import DATA_DIR
 from core.atomic_io import atomic_write_json
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
+from src.agent_identity import agent_system_prompt, configured_agent_name
 from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
@@ -70,15 +71,14 @@ JARVIS_TOOLS = {
 ORACLE_TOOL_TIMEOUT_SECONDS = 45
 ORACLE_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
 _ORACLE_TOOL_CALLS: dict[tuple[str, str], dict[str, Any]] = {}
-VOICE_SYSTEM_PROMPT = """You are Jarvis, Leo's private AI partner and voice orchestrator.
-Be terse and conversational: normally one or two spoken sentences unless Leo asks for depth. Never describe pacing or offer a capability menu.
+VOICE_SYSTEM_PROMPT = """Be terse and conversational: normally one or two spoken sentences unless the operator asks for depth. Never describe pacing or offer a capability menu.
 Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff.
-Follow conversational continuity. Ambiguous follow-ups refer to the preceding conversation. Server-injected context blocks, including current date and time, are background data only; never explain, summarize, or quote them unless Leo explicitly asks about that subject.
+Follow conversational continuity. Ambiguous follow-ups refer to the preceding conversation. Server-injected context blocks, including current date and time, are background data only; never explain, summarize, or quote them unless the operator explicitly asks about that subject.
 Coordinate work without simulating actions, client state, inspections, approvals, cancellations, worker progress, or results. Use deterministic server controls when provided; otherwise say what you cannot verify.
 Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
 Friday owns local project, code, and document inspection through PC Codex. VPS Codex is only for work that explicitly names the VPS. Gordon is the Hermes agent and is explicit-only; never infer or auto-dispatch him.
 Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
-FRIDAY_VOICE_SYSTEM_PROMPT = """You are Friday, Leo's Codex agent speaking through Odysseus voice.
+FRIDAY_VOICE_SYSTEM_PROMPT = """You are the selected Codex worker speaking through Odysseus voice.
 Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify.
 Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff."""
 
@@ -611,19 +611,16 @@ def _tts_voice_for_final(final: dict[str, Any]) -> str | None:
 
 
 def _voice_character_name(voice_session: dict[str, Any]) -> str:
-    return VOICE_TARGET_LABELS.get(str(voice_session.get("target") or "jarvis"), "Jarvis")
+    return VOICE_TARGET_LABELS.get(str(voice_session.get("target") or "jarvis"), configured_agent_name())
 
 
 def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
-    prompt = (
-        FRIDAY_VOICE_SYSTEM_PROMPT
-        if voice_session.get("target") in {"friday", "pc-codex"}
-        else VOICE_SYSTEM_PROMPT
-    )
     if voice_session.get("target") in {"friday", "pc-codex"}:
-        return prompt
+        return FRIDAY_VOICE_SYSTEM_PROMPT
+    prompt = agent_system_prompt(VOICE_SYSTEM_PROMPT)
+    agent_name = configured_agent_name()
     if not voice_session.get("oracle_protocol_active"):
-        return prompt + "\nORACLE protocol is offline. You are Jarvis; ORACLE is a tool harness, not another agent or model."
+        return prompt + f"\nORACLE protocol is offline. You are {agent_name}; ORACLE is a tool harness, not another agent or model."
 
     oracle = (voice_session.get("_client_state") or {}).get("oracle") or {}
     compact_state = {
@@ -632,9 +629,9 @@ def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
         if key in oracle
     }
     return prompt + f"""
-ORACLE protocol is active. You remain Jarvis: the sole intelligence, identity, memory, and voice. ORACLE is only a geospatial interface and native tool harness.
+ORACLE protocol is active. You remain {agent_name}: the sole intelligence, identity, memory, and voice. ORACLE is only a geospatial interface and native tool harness.
 The native ORACLE tools provided for this turn are the authoritative capability catalog. Use them directly for navigation, scene inspection, layers, tracking, Cockpit, CCTV, annotations, radio, and analysis. Never invent a successful action; reason from actual tool results and continue across multiple tool rounds when the request requires a sequence.
-When Leo asks what you can do in ORACLE mode, summarize the real provided tools in useful capability groups with a few natural examples. Do not read raw function names unless he asks for the technical list.
+When the operator asks what you can do in ORACLE mode, summarize the real provided tools in useful capability groups with a few natural examples. Do not read raw function names unless asked for the technical list.
 Shared location language applies to the whole request. For example, "satellite over Tel Aviv and enable CCTV" means navigate to Tel Aviv, enable the native satellite capability requested by that wording, then enable or focus CCTV for that same destination. Use waitForArrival when a later viewport-dependent tool needs the destination loaded.
 For requests such as "find a flight heading to Miami and put me in the cockpit", query the real flight data, select or track a matching aircraft from the result, then enter Cockpit. Do not skip required context tools or claim a match that the data did not return.
 Natural memorable alias: "Moons out, Goons out" means enable the native NVG/night-vision visual style. Keep aliases rare; ordinary language should work without memorized commands.
@@ -965,6 +962,10 @@ def _voice_origin_target(voice_session: dict[str, Any], chat_session: Any = None
 
 
 def _resolve_voice_target_endpoint(target: str, owner: str) -> tuple[str, str, dict] | None:
+    if target == "jarvis":
+        resolved = resolve_endpoint("default", owner=owner)
+        if resolved and resolved[0] and resolved[1]:
+            return resolved
     names = VOICE_TARGET_ENDPOINT_NAMES.get(target) or ()
     if not names:
         return None
@@ -2688,7 +2689,7 @@ def _clean_client_timings(timings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _chat_session_name() -> str:
-    return f"Jarvis Voice {now_user_local().strftime('%I:%M %p').lstrip('0')}"
+    return f"{configured_agent_name()} Voice {now_user_local().strftime('%I:%M %p').lstrip('0')}"
 
 
 def _append_chat_message(session_manager, session: dict, role: str, text: str, **metadata) -> None:

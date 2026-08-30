@@ -5,8 +5,8 @@ This record describes the source state on branch
 
 | Protocol | Source status | Runtime owner / boundary |
 | --- | --- | --- |
-| `JOS-P0` | Canonical engine contract | Odysseus mounts Jarvis around a replaceable engine |
-| `JOS-P1` | Canonical contract; runtime convergence still separate | Odysseus-owned identity and constitution |
+| `JOS-P0` | Canonical engine contract | Odysseus mounts the installation-configured agent around a replaceable engine |
+| `JOS-P1` | Source implementation | Authenticated settings own one identity/constitution across chat, agent, primary voice, authority, and diagnostics |
 | `JOS-P2` | Agent/chat source baseline; portability pending | Context manifest, trust, omissions, compaction, and budgets work; `oracle_state` must become generic in `MAD-750` |
 | `JOS-P3` | Source baseline; provider portability pending | Canonical memory provenance, review/migration, and optional projections work; private provider defaults/docs remain `MAD-750` |
 | `JOS-P4` | Agent-loop baseline; broker convergence pending | Agent-loop tools share the envelope; direct voice worker dispatch does not yet (`MAD-750`) |
@@ -37,9 +37,9 @@ that every compatible route is already reference-neutral or trace-enveloped.
 
 ## Integrated verification
 
-- Cross-protocol selection: 177 passed.
+- P1 compatibility selection: 217 passed.
 - Regression selection covering the repaired full-suite failures: 275 passed.
-- Complete repository suite: 4,961 passed, 4 skipped, 0 failed.
+- Complete repository suite after P1 convergence: 4,967 passed, 4 skipped, 0 failed.
 - Python compilation and `git diff --check` pass.
 - The four skipped tests remain intentional suite skips; nine warnings are
   existing SQLAlchemy/Starlette/Pydantic deprecations and scheduler test
@@ -50,8 +50,9 @@ that every compatible route is already reference-neutral or trace-enveloped.
 - Nothing in this protocol sequence was deployed to CT103 or CT104.
 - No container, service, model endpoint, provider credential, Qdrant instance,
   Obsidian vault, KarpathyWiki build, ChatGPT export, or Manus export changed.
-- P1 runtime convergence remains separate: eliminate model-name inference and
-  mount one canonical identity/constitution record across chat and voice.
+- P1 now uses public-safe `assistant` / `Assistant` defaults. A private Jarvis
+  constitution is an installation setting, not a model-name trigger or source
+  default. Live configuration/deployment remains operator-selected.
 - Live Qdrant projection enablement, canonical lab/Obsidian inventory, and
   ChatGPT/Manus migration require runtime configuration or source exports plus
   explicit acceptance. Whole transcripts never become personal memory.

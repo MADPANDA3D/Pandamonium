@@ -25,6 +25,9 @@ _SENSITIVE_KEY_EXACT = (
     # trigger outbound webhook sends; do not expose it to non-admin settings
     # callers even though it is not secret-shaped.
     "reminder_webhook_integration_id",
+    # The operator-authored constitution is a hidden system prompt. Public and
+    # non-admin settings reads may see its presence, never its content.
+    "agent_constitution",
 )
 
 

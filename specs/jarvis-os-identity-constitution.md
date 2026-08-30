@@ -2,7 +2,7 @@
 
 **Protocol ID:** `JOS-P1`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
 **Status:** Baseline contract
 
@@ -10,8 +10,9 @@
 
 ## Purpose
 
-Jarvis must remain the same system when his reasoning engine, active extension,
-voice surface, or delegated worker changes.
+The configured agent must remain the same system when its reasoning engine,
+active extension, voice surface, or delegated worker changes. Jarvis is the
+reference installation, not a required public assistant name.
 
 `JOS-P1` defines the stable Jarvis identity, the constitutional rules mounted
 for every Jarvis turn, and the boundary between identity, presentation,
@@ -19,7 +20,7 @@ capability, and backend metadata. It extends the engine separation established
 by [JOS-P0](jarvis-os-protocol-zero.md); it does not select a model or rewrite
 the working prompt stack.
 
-## System hierarchy
+## Reference system hierarchy
 
 - Leo is the authenticated operator and final product authority.
 - Jarvis is Leo's persistent protocol-governed AI system.
@@ -34,6 +35,10 @@ Leo may deliberately change Jarvis's constitution through an authenticated,
 auditable control-plane operation. A conversation, retrieved document, model
 output, tool result, extension payload, or backend checkpoint cannot rewrite it.
 
+Public installations resolve the same hierarchy from their authenticated
+operator and installation-configured agent record. Leo, Jarvis, the named
+workers, and the listed workspaces are the reference profile only.
+
 ## Canonical identity record
 
 Odysseus MUST be able to resolve this logical record before constructing a
@@ -41,10 +46,10 @@ Jarvis turn:
 
 | Field | Meaning |
 | --- | --- |
-| `agent_id` | Stable machine identity; `jarvis` |
-| `display_name` | Stable operator-facing name; `Jarvis` |
+| `agent_id` | Stable installation-configured machine identity; public default `assistant`, reference value `jarvis` |
+| `display_name` | Stable installation-configured operator-facing name; public default `Assistant`, reference value `Jarvis` |
 | `operator_id` | Authenticated owner of the active session |
-| `role` | Leo's private AI partner and orchestrator |
+| `constitution` | Operator-authored system contract; generic safe public default, private reference value configured after installation |
 | `constitution_version` | Version of the approved constitutional contract |
 | `active_actor` | Jarvis or the explicitly selected worker speaking now |
 
@@ -164,11 +169,13 @@ Odysseus already contains partial `JOS-P1` behavior:
 | Voice identity and selected actor | `routes/voice_routes.py` |
 | Per-turn capability enforcement | `src/tool_policy.py` |
 
-The current runtime still duplicates some Jarvis guidance between chat and
-voice and uses backend model-name matching as a compatibility trigger in parts
-of chat and agent prompt assembly. Those are implementation gaps against this
-contract, not new identity sources. Runtime consolidation should be selected
-and tested as a separate implementation slice.
+The runtime resolves this record through the existing authenticated settings
+path. `src/agent_identity.py` mounts it on chat, agent, and primary voice turns;
+action, authority, and operational records use the same stable `agent_id`.
+Invalid hand-edited values fall back field-by-field to the documented public
+default and appear as degraded identity diagnostics without exposing the
+constitution body. Legacy worker and voice target names remain routing aliases,
+not identity sources.
 
 ## Compatibility gate
 

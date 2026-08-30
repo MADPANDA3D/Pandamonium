@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 import src.agent_loop as agent_loop
+import src.agent_identity as agent_identity
 import src.jarvis_agent as jarvis_agent
 from routes import voice_routes
 from routes.agent_task_routes import TaskApproval
@@ -1269,6 +1270,24 @@ def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
     assert "satellite over Tel Aviv and enable CCTV" in prompt
     assert "find a flight heading to Miami" in prompt
     assert "Moons out, Goons out" in prompt
+
+
+def test_primary_voice_keeps_configured_identity_across_oracle_lifecycle(monkeypatch):
+    monkeypatch.setattr(agent_identity, "load_settings", lambda: {
+        "agent_id": "atlas",
+        "agent_display_name": "Atlas",
+        "agent_constitution": "Stay accurate across every surface.",
+        "agent_constitution_version": "2026.1",
+    })
+    offline = voice_routes._voice_system_prompt({"target": "jarvis", "oracle_protocol_active": False})
+    online = voice_routes._voice_system_prompt(_oracle_voice_session("fly_to_location"))
+
+    for prompt in (offline, online):
+        assert "You are Atlas" in prompt
+        assert "stable agent id: atlas" in prompt
+        assert "Stay accurate across every surface." in prompt
+    assert "ORACLE protocol is offline" in offline
+    assert "ORACLE protocol is active" in online
 
 
 def test_oracle_dynamic_native_calls_convert_without_a_static_tool_tag(caplog):

@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from src.agent_identity import configured_agent_id
+
 from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
 
@@ -235,7 +237,7 @@ class AuthorityStore:
     ) -> dict[str, Any]:
         now = _now()
         operator = str(operator_id or "").strip()
-        agent_id = str(call.get("agent_id") or "jarvis")
+        agent_id = str(call.get("agent_id") or configured_agent_id())
         session = str(session_id or "")
         mode = permission_mode_for(call)
         fingerprint = argument_fingerprint(call)

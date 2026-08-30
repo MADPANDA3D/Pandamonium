@@ -23,6 +23,7 @@ from src.settings import (
     save_features as _save_features,
     DEFAULT_SETTINGS,
 )
+from src.agent_identity import validate_agent_identity_setting
 from src.integrations import (
     load_integrations,
     add_integration,
@@ -667,6 +668,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
+            if key in {
+                "agent_id",
+                "agent_display_name",
+                "agent_constitution",
+                "agent_constitution_version",
+            }:
+                try:
+                    val = validate_agent_identity_setting(key, val)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
             if key == "tts_agent_voices":
                 if not isinstance(val, dict):
                     raise HTTPException(400, "tts_agent_voices must be an object")

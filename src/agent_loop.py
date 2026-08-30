@@ -28,7 +28,7 @@ from src.model_context import (
     estimate_tokens,
     estimate_tool_schema_tokens,
 )
-from src.agent_identity import JARVIS_SYSTEM_PROMPT, is_jarvis_model
+from src.agent_identity import agent_system_prompt, configured_agent_id
 from src.action_protocol import (
     build_action_result,
     classify_target,
@@ -1604,8 +1604,7 @@ def _build_system_prompt(
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
 
-    if is_jarvis_model(model):
-        agent_prompt = f"{JARVIS_SYSTEM_PROMPT}\n\n{agent_prompt}"
+    agent_prompt = agent_system_prompt(agent_prompt)
 
     # Dynamic parts that change per request
     mcp_schemas = []
@@ -4261,7 +4260,7 @@ async def stream_agent_loop(
             _action_call = normalize_action_call(
                 request_id=_action_request_id,
                 call_id=str(_native_call.get("id") or uuid.uuid4()),
-                agent_id="jarvis",
+                agent_id=configured_agent_id(),
                 actor=f"engine:{model}",
                 capability_version=_action_catalog["version"],
                 name=block.tool_type,

@@ -3,6 +3,7 @@ import json
 import pytest
 
 import src.operational_protocol as operational
+import src.agent_identity as agent_identity
 from src.operational_protocol import (
     OUTCOME_STATES,
     ProtocolEventStore,
@@ -116,6 +117,28 @@ def test_observability_failure_is_fail_soft(monkeypatch):
     assert operational.record_operational_event(
         actor="engine", component="control_plane", event_type="started", status="running"
     ) is None
+
+
+def test_operational_events_and_diagnostics_use_configured_agent_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_identity, "load_settings", lambda: {
+        "agent_id": "atlas",
+        "agent_display_name": "Atlas",
+        "agent_constitution": "Keep operator authority explicit.",
+        "agent_constitution_version": "2",
+    })
+    event = ProtocolEventStore(tmp_path / "events.jsonl").record(
+        actor="engine:test", component="control_plane", event_type="started", status="running"
+    )
+
+    assert event["agent_id"] == "atlas"
+    assert operational.protocol_status()["identity"] == {
+        "agent_id": "atlas",
+        "display_name": "Atlas",
+        "constitution_version": "2",
+        "status": "healthy",
+        "source": "configured",
+        "fallback_reasons": [],
+    }
 
 
 def test_invalid_event_cannot_invent_success_state(tmp_path):

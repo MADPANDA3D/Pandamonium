@@ -969,10 +969,12 @@ async def _execute_tool_block_impl(
 
         desc = "search_jarvis_knowledge"
         try:
+            if not owner:
+                raise PermissionError("owner_required")
             args = json.loads(content or "{}")
             result = search_knowledge(
                 str(args.get("query") or ""),
-                owner=owner or "leo",
+                owner=owner,
                 client=args.get("client"),
                 limit=int(args.get("limit") or 6),
             )

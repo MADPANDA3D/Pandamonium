@@ -17,6 +17,7 @@ import httpx
 from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
 from core.models import ChatMessage
+from src.agent_identity import configured_agent_id, configured_agent_name
 from src.agent_worker_adapters import adapters, require_worker_task_permission, worker_catalog
 
 TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
@@ -842,7 +843,7 @@ async def runtime_status(active_worker: str | None = None, owner: str | None = N
     except Exception:
         settings = {}
     return {
-        "assistant": "Jarvis",
+        "assistant": configured_agent_name(),
         "brain_model": model,
         "architecture": details.get("architecture") or details.get("owned_by"),
         "parameter_size": details.get("parameter_size") or details.get("parameters"),
@@ -856,8 +857,10 @@ async def runtime_status(active_worker: str | None = None, owner: str | None = N
     }
 
 
-def sync_knowledge(documents: list[dict], owner: str = "leo") -> dict:
+def sync_knowledge(documents: list[dict], owner: str | None = None) -> dict:
     from src.rag_singleton import get_rag_manager
+
+    owner = str(owner or os.environ.get("ODYSSEUS_FALLBACK_OWNER") or "owner@localhost").strip()
 
     rag = get_rag_manager()
     if not rag or not rag.healthy:
@@ -902,12 +905,14 @@ def sync_knowledge(documents: list[dict], owner: str = "leo") -> dict:
     return {"ok": True, "sources": len(next_sources), "chunks_added": added, "chunks_removed": removed, "unchanged": unchanged}
 
 
-def search_knowledge(query: str, owner: str = "leo", client: str | None = None, limit: int = 6) -> dict:
+def search_knowledge(query: str, owner: str | None = None, client: str | None = None, limit: int = 6) -> dict:
+    if not owner:
+        return {"error": "owner_required", "results": []}
     try:
         from src.madpanda_knowledge import agent_by_id, store
 
         return store().search(
-            agent_by_id("jarvis"),
+            agent_by_id(configured_agent_id()),
             query,
             domain="business_client" if client else None,
             client=client,
@@ -922,7 +927,7 @@ def search_knowledge(query: str, owner: str = "leo", client: str | None = None, 
     rag = get_rag_manager()
     if not rag or not rag.healthy:
         return {"error": "rag_unavailable", "results": []}
-    candidates = rag.search(query, k=max(20, min(60, limit * 8)), owner=owner)
+    candidates = rag.search(query, k=max(20, min(60, limit * 8)), owner=str(owner))
     if client:
         wanted = client.casefold()
         candidates = [row for row in candidates if str((row.get("metadata") or {}).get("client") or "").casefold() == wanted]

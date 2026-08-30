@@ -15,6 +15,7 @@ from typing import Any, Mapping
 from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
 from src.authority_protocol import redact_secrets
+from src.agent_identity import agent_identity_status, configured_agent_id
 
 
 EVENTS_FILE = Path(DATA_DIR) / "protocol_events.jsonl"
@@ -74,7 +75,7 @@ class ProtocolEventStore:
         task_id: str | None = None,
         call_id: str | None = None,
         operator_id: str | None = None,
-        agent_id: str | None = "jarvis",
+        agent_id: str | None = None,
         actor: str,
         component: str,
         event_type: str,
@@ -97,7 +98,7 @@ class ProtocolEventStore:
             "task_id": task_id,
             "call_id": call_id,
             "operator_id": operator_id,
-            "agent_id": agent_id,
+            "agent_id": str(agent_id or configured_agent_id()),
             "actor": str(actor)[:200],
             "component": str(component)[:100],
             "event_type": event_type,
@@ -320,6 +321,7 @@ def protocol_status(rollback_registry: RollbackRegistry | None = None) -> dict[s
         learning = {"status": "unavailable"}
     return {
         "protocol_versions": dict(PROTOCOL_VERSIONS),
+        "identity": agent_identity_status(),
         "outcome_taxonomy": sorted(OUTCOME_STATES),
         "rollback_units": registry.snapshot().get("components", {}),
         "backup": backup_status(),

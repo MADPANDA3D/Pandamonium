@@ -60,6 +60,21 @@ def test_webhook_integration_handle_blanked():
     assert out["reminder_webhook_payload_template"] == '{"content":"{{message}}"}'
 
 
+def test_agent_constitution_is_hidden_from_non_admin_settings_reads():
+    out = scrub_settings({
+        "agent_id": "atlas",
+        "agent_display_name": "Atlas",
+        "agent_constitution": "private operator-authored system prompt",
+        "agent_constitution_version": "1",
+    })
+    assert out == {
+        "agent_id": "atlas",
+        "agent_display_name": "Atlas",
+        "agent_constitution": "",
+        "agent_constitution_version": "1",
+    }
+
+
 def test_empty_and_nonstring_secret_values_untouched():
     out = scrub_settings({"api_key": "", "feature_key": 7, "x_token": None})
     assert out["api_key"] == ""     # already empty

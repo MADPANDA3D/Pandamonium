@@ -12,7 +12,7 @@ from core.models import ChatMessage
 from core.database import SessionLocal
 from core.database import Session as DBSession, ModelEndpoint
 from src.llm_core import normalize_model_id
-from src.agent_identity import jarvis_chat_prompt
+from src.agent_identity import agent_system_prompt
 from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
 from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
@@ -738,7 +738,7 @@ async def build_chat_context(
         use_web=use_web and not skip_web,
         use_memory=mem_enabled,
         time_filter=time_filter,
-        preset_system_prompt=jarvis_chat_prompt(sess.model, preset.system_prompt),
+        preset_system_prompt=agent_system_prompt(preset.system_prompt),
         owner=user,
         character_name=preset.character_name,
         agent_mode=agent_mode,

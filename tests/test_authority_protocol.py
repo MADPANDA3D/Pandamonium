@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import src.agent_loop as agent_loop
+import src.agent_identity as agent_identity
 from src.authority_protocol import (
     AuthorityStore,
     audit_safe_action_call,
@@ -57,6 +58,21 @@ def test_unauthenticated_owner_scoped_or_effectful_action_is_denied(tmp_path, mo
     )
     assert decision["decision"] == "deny"
     assert decision["policy_basis"] == "authenticated_operator_required"
+
+
+def test_authority_fallback_uses_installation_agent_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_identity, "load_settings", lambda: {
+        "agent_id": "atlas",
+        "agent_display_name": "Atlas",
+        "agent_constitution": "Keep operator authority explicit.",
+        "agent_constitution_version": "2",
+    })
+    call = _call(name="read_file", arguments={"path": "README.md"})
+    call.pop("agent_id")
+
+    decision = _store(tmp_path).decide(call, operator_id="operator", session_id="session-1")
+
+    assert decision["agent_id"] == "atlas"
 
 
 def test_read_only_and_native_staged_actions_reuse_existing_gates(tmp_path):

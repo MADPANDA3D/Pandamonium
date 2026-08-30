@@ -87,3 +87,12 @@ The P2-P7 source is a useful enforcement baseline, but the branch was not yet a
 public-generic implementation. The next dependency remains `MAD-749`, followed
 by `MAD-750`. No source behavior, service, repository, dependency, deployment,
 or infrastructure changed during this audit.
+
+## Post-audit resolution
+
+`MAD-749` resolved `ID-1` through `ID-4` in source: the existing settings path
+now owns the stable agent record, chat/agent/primary voice mount one resolver,
+action/authority/operational records use its `agent_id`, private constitutions
+are hidden from non-admin reads, and knowledge paths no longer fall back to
+literal owner `leo` or agent `jarvis`. The implementation evidence is recorded
+in [the P1 runtime record](jos-p1-runtime.md). No deployment claim is implied.

@@ -223,7 +223,7 @@ def test_voice_session_title_uses_browser_timezone_context(monkeypatch, tmp_path
 
     assert response.status_code == 200
     assert seen == [(-240, "America/New_York")]
-    assert manager.created[response.json()["chat_session_id"]]["name"] == "Jarvis Voice 9:30 PM"
+    assert manager.created[response.json()["chat_session_id"]]["name"] == "Assistant Voice 9:30 PM"
 
 
 def test_voice_session_accepts_client_timing_diagnostics(monkeypatch, tmp_path):
@@ -323,7 +323,7 @@ def test_spoken_text_policy_uses_a_human_fallback_for_an_artifact_without_a_summ
 @pytest.mark.parametrize(
     ("target", "endpoint", "model", "character"),
     [
-        ("jarvis", "http://freetoken.test/v1/chat/completions", "jarvis", "Jarvis"),
+        ("jarvis", "http://freetoken.test/v1/chat/completions", "jarvis", "Assistant"),
         ("friday", "https://chatgpt.com/backend-api/codex/responses", "gpt-5-codex", "Friday"),
     ],
 )
