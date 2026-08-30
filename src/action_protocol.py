@@ -156,7 +156,7 @@ def normalize_action_call(
 
 def classify_target(name: str, *, mcp_names: set[str], extension_names: set[str]) -> str:
     if name in extension_names:
-        return "extension"
+        return "extension:oracle"
     if name in mcp_names or name.startswith("mcp__"):
         return "mcp"
     if name in {"start_agent_task", "read_agent_task"}:

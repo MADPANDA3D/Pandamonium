@@ -3,6 +3,7 @@ import json
 import pytest
 
 import src.agent_loop as agent_loop
+from src.authority_protocol import AuthorityStore
 from src.action_protocol import (
     MAX_ARGUMENT_BYTES,
     build_action_result,
@@ -151,7 +152,8 @@ def test_validation_denial_is_correlated_and_non_retryable():
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_streams_and_persists_the_same_action_correlation(monkeypatch):
+async def test_agent_loop_streams_and_persists_the_same_action_correlation(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     async def fake_stream(*args, **kwargs):
         call = {
             "id": "native-call-7",
@@ -168,6 +170,7 @@ async def test_agent_loop_streams_and_persists_the_same_action_correlation(monke
     monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
     monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+    monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
 
     events = []
     async for chunk in agent_loop.stream_agent_loop(
@@ -192,7 +195,8 @@ async def test_agent_loop_streams_and_persists_the_same_action_correlation(monke
 
 
 @pytest.mark.asyncio
-async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypatch):
+async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     schemas = [_schema("oracle_focus", "target"), _schema("oracle_track", "target")]
 
     async def fake_stream(*args, **kwargs):
@@ -214,6 +218,7 @@ async def test_oracle_multi_action_preserves_order_and_partial_failure(monkeypat
     monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
     monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
 
     outputs = []
     async for chunk in agent_loop.stream_agent_loop(

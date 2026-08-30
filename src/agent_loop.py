@@ -38,6 +38,13 @@ from src.action_protocol import (
     utc_now,
     validate_action_call,
 )
+from src.authority_protocol import (
+    audit_safe_action_call,
+    authority_store,
+    operator_identity,
+    redact_secret_text,
+    redact_secrets,
+)
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
@@ -4220,6 +4227,8 @@ async def stream_agent_loop(
                 cmd_display = block.content.split("\n")[0].strip()[:80]
             else:
                 cmd_display = full_command
+            _safe_cmd_display = redact_secret_text(cmd_display)
+            _safe_full_command = redact_secret_text(full_command)
 
             _native_call = converted_calls[i] if used_native and i < len(converted_calls) else {}
             _action_call = normalize_action_call(
@@ -4245,6 +4254,23 @@ async def stream_agent_loop(
             )
             _action_started_at = utc_now()
             _validation_error = validate_action_call(_action_call, _action_catalog)
+            _authority_decision = None
+            if not _validation_error:
+                _authority_decision = authority_store.decide(
+                    _action_call,
+                    operator_id=operator_identity(owner),
+                    session_id=session_id,
+                    disabled_reason=(
+                        tool_policy.reason_for(block.tool_type)
+                        if tool_policy and tool_policy.blocks(block.tool_type)
+                        else None
+                    ),
+                    native_approval_gate=(
+                        block.tool_type in {"send_email", "reply_to_email", "bulk_email"}
+                        and bool(get_setting("agent_email_confirm", True))
+                    ),
+                )
+                _action_call["authority_ref"] = _authority_decision["decision_id"]
 
             if _validation_error:
                 desc = f"{block.tool_type}: DENIED"
@@ -4263,6 +4289,28 @@ async def stream_agent_loop(
                     block.tool_type,
                     _validation_error["category"],
                 )
+            elif _authority_decision["decision"] != "allow":
+                _authority_category = (
+                    "approval_required"
+                    if _authority_decision["decision"] == "approval_required"
+                    else "authority_denied"
+                )
+                desc = f"{block.tool_type}: {_authority_decision['decision'].upper()}"
+                result = {
+                    "error": _authority_decision["policy_basis"],
+                    "exit_code": 1,
+                    "blocked": True,
+                }
+                _action_result = denied_action_result(
+                    _action_call,
+                    {
+                        "category": _authority_category,
+                        "detail": _authority_decision["policy_basis"],
+                    },
+                    at=_action_started_at,
+                )
+                if _authority_decision["decision"] == "approval_required":
+                    yield f'data: {json.dumps({"type": "authority_approval_required", "data": _authority_decision})}\n\n'
             elif tool_policy and tool_policy.blocks(block.tool_type):
                 desc = f"{block.tool_type}: BLOCKED"
                 result = {
@@ -4280,7 +4328,7 @@ async def stream_agent_loop(
                 logger.info("Tool blocked before start by policy: %s", block.tool_type)
             else:
                 yield (
-                    f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": cmd_display, "full_command": full_command, "round": round_num, "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "capability_version": _action_call["capability_version"]})}\n\n'
+                    f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": _safe_cmd_display, "full_command": _safe_full_command, "round": round_num, "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "capability_version": _action_call["capability_version"], "authority_ref": _action_call["authority_ref"]})}\n\n'
                 )
 
                 # Streaming progress for long-running tools (bash, python).
@@ -4337,6 +4385,7 @@ async def stream_agent_loop(
                             await _tool_task
                         except (asyncio.CancelledError, Exception):
                             pass
+                result = redact_secrets(result)
                 _action_result = build_action_result(
                     _action_call,
                     result,
@@ -4502,7 +4551,7 @@ async def stream_agent_loop(
                 output_text = _truncate(result["error"])
 
             # Emit tool_output (include ui_event data if present)
-            tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code"), "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "status": _action_result["status"], "evidence": _action_result["evidence"]}
+            tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": _safe_cmd_display, "output": output_text, "exit_code": result.get("exit_code"), "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "status": _action_result["status"], "evidence": _action_result["evidence"], "authority_ref": _action_call.get("authority_ref")}
             if is_doc_tool and "action" in result:
                 tool_output_data.update({
                     "doc_id": result.get("doc_id"),
@@ -4630,12 +4679,14 @@ async def stream_agent_loop(
             tool_event = {
                 "round": round_num,
                 "tool": block.tool_type,
-                "command": cmd_display,
+                "command": _safe_cmd_display,
                 "output": output_text,
                 "exit_code": result.get("exit_code"),
-                "action_call": _action_call,
+                "action_call": audit_safe_action_call(_action_call),
                 "action_result": _action_result,
             }
+            if _authority_decision:
+                tool_event["authority_decision"] = _authority_decision
             if result.get("image_url"):
                 for ik in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
                     if result.get(ik):
