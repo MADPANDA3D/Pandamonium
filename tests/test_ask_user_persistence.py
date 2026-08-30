@@ -69,6 +69,7 @@ def test_ask_user_is_emitted_last_and_persisted(monkeypatch):
             "gpt-4o",
             [{"role": "user", "content": "Ayúdame a elegir un proyecto."}],
             relevant_tools={"ask_user"},
+            owner="leo",
             _is_teacher_run=True,
         )
     )

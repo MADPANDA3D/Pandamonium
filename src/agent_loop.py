@@ -3471,6 +3471,12 @@ async def stream_agent_loop(
             if schema.get("function", {}).get("name")
         }
         _schema_priority = set(forced_tools or set()) | _extension_names
+        # When a workspace is active, keep the tiny discovery schema ahead of
+        # larger navigation schemas. Without it, P2B catalog capping can leave
+        # the model able to read files but unable to resolve which workspace
+        # "this project" refers to.
+        if workspace and "get_workspace" in set(_relevant_tools or ()):
+            _schema_priority.add("get_workspace")
         all_tool_schemas, _dropped_schemas = cap_tool_schemas(
             all_tool_schemas,
             _effective_input_budget,

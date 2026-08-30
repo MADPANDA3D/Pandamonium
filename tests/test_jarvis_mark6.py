@@ -823,6 +823,11 @@ async def test_foreground_friday_result_becomes_the_spoken_reply(monkeypatch):
 
     monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
     monkeypatch.setattr(voice_routes, "_foreground_worker_result", foreground)
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
     events = [
         event async for event in _server_routed_events(
             "chat-1",
