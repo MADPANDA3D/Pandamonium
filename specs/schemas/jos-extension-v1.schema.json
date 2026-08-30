@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis-os.dev/schemas/jos-extension-v1.schema.json",
+  "title": "JOS Extension Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version", "extension_id", "name", "version", "source", "runtime",
+    "capabilities", "permissions", "health", "lifecycle", "data_boundaries",
+    "removal", "rollback"
+  ],
+  "properties": {
+    "protocol_version": {"const": "jos-extension.v1"},
+    "extension_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "version": {"type": "string", "minLength": 1, "maxLength": 80},
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["url", "revision"],
+      "properties": {
+        "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+        "revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+      }
+    },
+    "runtime": {
+      "type": "object", "additionalProperties": false, "required": ["type", "entrypoint"],
+      "properties": {
+        "type": {"enum": ["web", "service", "mcp", "openapi"]},
+        "entrypoint": {"$ref": "#/$defs/relativePath"}
+      }
+    },
+    "capabilities": {
+      "type": "object", "additionalProperties": false, "required": ["descriptor"],
+      "properties": {
+        "descriptor": {"$ref": "#/$defs/descriptor"},
+        "schemas": {"type": "array", "maxItems": 256, "items": {"type": "object"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"descriptor": {"properties": {"type": {"const": "inline"}}}}},
+          "then": {"required": ["schemas"]},
+          "else": {"not": {"required": ["schemas"]}}
+        }
+      ]
+    },
+    "permissions": {
+      "type": "object", "additionalProperties": false, "required": ["default", "capabilities"],
+      "properties": {
+        "default": {"$ref": "#/$defs/permission"},
+        "capabilities": {
+          "type": "object", "additionalProperties": {"$ref": "#/$defs/permission"}
+        }
+      }
+    },
+    "health": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "timeout_seconds"],
+          "properties": {"type": {"const": "catalog"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 30}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "endpoint", "timeout_seconds"],
+          "properties": {"type": {"const": "http"}, "endpoint": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 30}}
+        }
+      ]
+    },
+    "lifecycle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["install", "start", "stop", "remove"],
+      "properties": {
+        "install": {"$ref": "#/$defs/argv"}, "start": {"$ref": "#/$defs/argv"},
+        "stop": {"$ref": "#/$defs/argv"}, "remove": {"$ref": "#/$defs/argv"}
+      }
+    },
+    "data_boundaries": {
+      "type": "object", "additionalProperties": false, "required": ["read", "write", "network"],
+      "properties": {
+        "read": {"$ref": "#/$defs/pathList"}, "write": {"$ref": "#/$defs/pathList"},
+        "network": {"type": "array", "maxItems": 64, "items": {"type": "string", "format": "uri", "pattern": "^https://"}}
+      }
+    },
+    "removal": {
+      "type": "object", "additionalProperties": false, "required": ["remove_paths", "preserve_paths"],
+      "properties": {"remove_paths": {"$ref": "#/$defs/pathList"}, "preserve_paths": {"$ref": "#/$defs/pathList"}}
+    },
+    "rollback": {
+      "type": "object", "additionalProperties": false, "required": ["strategy", "retain_revisions"],
+      "properties": {
+        "strategy": {"const": "pinned_revision"},
+        "retain_revisions": {"type": "integer", "minimum": 1, "maximum": 10}
+      }
+    }
+  },
+  "$defs": {
+    "permission": {"enum": ["read_only", "bounded_write", "external_side_effect", "destructive", "controlled_administrative"]},
+    "relativePath": {"type": "string", "minLength": 1, "maxLength": 500, "not": {"pattern": "^(?:/|.*(?:^|/)\\.\\.(?:/|$))"}},
+    "pathList": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/relativePath"}},
+    "argv": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+    "descriptor": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "inline"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "endpoint"], "properties": {"type": {"enum": ["live_catalog", "openapi"]}, "endpoint": {"type": "string"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "reference"], "properties": {"type": {"const": "mcp"}, "reference": {"type": "string", "minLength": 1, "maxLength": 200}}}
+      ]
+    }
+  }
+}

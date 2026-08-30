@@ -13,7 +13,7 @@ This record describes the source state on branch
 | `JOS-P5` | Generic source implementation | Receipts and direct worker decisions work; extension permission comes from declared server metadata and fails closed |
 | `JOS-P6` | Generic source implementation | Promotion lifecycle protects the configured agent and operator identities rather than reference names |
 | `JOS-P7` | Generic request-level source implementation | Agent, plain chat, direct worker, and learning events retain correlated protocol traces |
-| `JOS-EXT-1` | Canonical contract with an ORACLE reference adapter | Generic manifest, registry, installer, and host proof remain `MAD-751` through `MAD-754` |
+| `JOS-EXT-1` | Generic manifest and metadata-registry source implementation | Installer, ORACLE-owned reference manifest, and generic host proof remain `MAD-752` through `MAD-754` |
 
 ## Implementation chain
 

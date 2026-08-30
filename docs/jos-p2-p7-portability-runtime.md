@@ -43,7 +43,8 @@ adapters already present in Odysseus.
 
 - ORACLE remains the first reference extension; its native code stays outside
   the generic host.
-- The generic manifest, registry, installer, lifecycle host, and reference
-  extension migration remain `MAD-751` through `MAD-754`.
+- The installer, lifecycle host, and reference-extension migration remain
+  `MAD-752` through `MAD-754`; `MAD-751` owns the separate manifest and
+  metadata-registry record.
 - No Git repository was cloned or installed, no service was changed, no data
   was migrated, and no source was deployed.

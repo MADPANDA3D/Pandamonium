@@ -4,7 +4,7 @@
 
 **Version:** `0.1`
 
-**Status:** Baseline contract
+**Status:** Manifest and metadata-registry source implementation; installer and host pending
 
 **Reference extension:** ORACLE
 
@@ -83,6 +83,37 @@ Before activation, Odysseus MUST:
 Tool discovery maps declared manifests, live catalogs, or supported standards
 such as MCP/OpenAPI. It does not guess arbitrary endpoints or execute arbitrary
 repository setup scripts without an explicit adapter and operator approval.
+
+## Manifest v1
+
+The normative schema is
+[`jos-extension-v1.schema.json`](schemas/jos-extension-v1.schema.json). A
+manifest declares:
+
+| Area | Required declaration |
+| --- | --- |
+| Identity | Protocol version, extension ID, display name, extension version |
+| Source | HTTPS repository URL and full pinned Git revision |
+| Runtime | Runtime type and repository-relative entry point |
+| Capabilities | Inline schema or reference to an MCP, OpenAPI, or live catalog descriptor |
+| Authority | Default requested permission plus per-capability overrides |
+| Health | Catalog or HTTP health check and bounded timeout |
+| Lifecycle | Declarative argument vectors for install, start, stop, and removal |
+| Data | Repository-relative read/write paths and explicit HTTPS network origins |
+| Recovery | Removal paths, preserved paths, pinned-revision rollback, retention |
+
+MCP, OpenAPI, and live-catalog manifests reference the existing descriptor;
+they do not copy its tool schemas into the manifest. The responsible adapter
+resolves that descriptor and passes its schemas, health result, and observed
+source revision to the registry. Inline schemas are reserved for extensions
+that have no supported external descriptor.
+
+`src/extension_registry.py` validates and atomically stores only normalized
+manifest metadata and effective capability schemas. It does not fetch an
+endpoint, clone a repository, execute lifecycle vectors, or dispatch a tool.
+Unknown security-relevant fields, malformed or duplicate schemas, unhealthy
+catalogs, revision mismatches, and cross-extension name conflicts fail closed.
+Disabled extensions expose neither tools nor context metadata.
 
 ## Lifecycle
 

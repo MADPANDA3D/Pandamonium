@@ -1,0 +1,20 @@
+{
+  "protocol_version": "jos-extension.v1",
+  "extension_id": "oracle",
+  "name": "ORACLE",
+  "version": "0.1.0",
+  "source": {
+    "url": "https://github.com/MADPANDA3D/ORACLE.git",
+    "revision": "f3a3da54cdea7845adbbcf48f0a8b5a278b85c45"
+  },
+  "runtime": {"type": "web", "entrypoint": "index.html"},
+  "capabilities": {
+    "descriptor": {"type": "live_catalog", "endpoint": "/api/oracle/capabilities"}
+  },
+  "permissions": {"default": "bounded_write", "capabilities": {"inspect_globe": "read_only"}},
+  "health": {"type": "catalog", "timeout_seconds": 5},
+  "lifecycle": {"install": [], "start": [], "stop": [], "remove": []},
+  "data_boundaries": {"read": ["public"], "write": [], "network": []},
+  "removal": {"remove_paths": ["dist"], "preserve_paths": []},
+  "rollback": {"strategy": "pinned_revision", "retain_revisions": 1}
+}

@@ -1,0 +1,20 @@
+{
+  "protocol_version": "jos-extension.v1",
+  "extension_id": "atlas",
+  "name": "Atlas Lab",
+  "version": "2.0.0",
+  "source": {
+    "url": "https://example.org/community/atlas-lab.git",
+    "revision": "1111111111111111111111111111111111111111"
+  },
+  "runtime": {"type": "openapi", "entrypoint": "app/main.py"},
+  "capabilities": {
+    "descriptor": {"type": "openapi", "endpoint": "/openapi.json"}
+  },
+  "permissions": {"default": "read_only", "capabilities": {"create_mesh": "bounded_write"}},
+  "health": {"type": "http", "endpoint": "/health", "timeout_seconds": 3},
+  "lifecycle": {"install": [], "start": [], "stop": [], "remove": []},
+  "data_boundaries": {"read": ["assets"], "write": ["outputs"], "network": ["https://example.org"]},
+  "removal": {"remove_paths": ["outputs"], "preserve_paths": []},
+  "rollback": {"strategy": "pinned_revision", "retain_revisions": 2}
+}
