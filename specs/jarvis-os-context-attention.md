@@ -2,9 +2,9 @@
 
 **Protocol ID:** `JOS-P2`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
-**Status:** Baseline contract
+**Status:** Runtime baseline implemented; live acceptance pending
 
 **Context owner:** Odysseus
 
@@ -17,6 +17,25 @@ piece of information.
 audits the bounded context mounted into a reasoning engine. The engine may
 reason over that context, but it does not choose its own hidden sources or own
 canonical conversation state.
+
+## Implemented baseline
+
+The existing Odysseus context paths now enforce the contract in two layers:
+
+- **P2A observability** tags mounted context by class, source, and trust; reports
+  mounted and removed token estimates, compaction, omissions, native tool
+  catalogs, and extension lifecycle state; and strips internal metadata before
+  provider transport. Implemented in `e6199188`.
+- **P2B enforcement** applies deterministic class ceilings in the shared
+  trimmer, preserves current operator intent and active tool-call/result pairs,
+  bounds large memories/documents/wiki material, budgets native function
+  schemas inside the same usable input window, and exposes the runtime policy
+  in the existing **Settings -> Agent Tools -> Context Attention** panel.
+  Implemented in `0df13d7e`.
+
+This is an implementation baseline, not a deployment record. Qdrant indexes,
+memory admission, source ingestion, and ChatGPT/Manus backfill remain `JOS-P3`
+work and were not added by this slice.
 
 ## Context classes
 
@@ -99,6 +118,26 @@ crowd out the current request.
 Exact class budgets are runtime policy, not protocol constants. They MUST be
 observable and adjustable without changing the reasoning engine.
 
+The current default ceilings are independent percentages of the usable input
+budget; they intentionally do not sum to 100:
+
+| Enforced class | Default ceiling |
+| --- | ---: |
+| Conversation history | 45% |
+| Active working state | 35% |
+| Recalled memory | 15% |
+| Canonical retrieved knowledge | 25% |
+| Derived wiki knowledge | 10% |
+| Native and described tool catalog | 20% |
+| Correlated tool results | 30% |
+| ORACLE extension state | 20% |
+| Current-time context | 5% |
+
+Identity, policy, presentation, and the current operator request are protected
+classes rather than ordinary retrieval allocations. If the protected set alone
+cannot fit, Odysseus reduces dynamic state and result content first, then trusted
+prompt tails, and truncates current intent only as the final fallback.
+
 ## Compaction
 
 When history approaches the usable window, Odysseus MAY summarize or trim older
@@ -139,15 +178,19 @@ documents outrank it when they conflict.
 | Model context discovery and token estimates | `src/model_context.py` |
 | Adaptive input budget | `src/context_budget.py` |
 | History compaction and trimming | `src/context_compactor.py` |
+| Context manifest and native-schema budget | `src/model_context.py` |
 | Source trust wrappers | `src/prompt_security.py` |
 | Dynamic tool attention | `src/tool_index.py` |
 | Current-time context | `src/user_time.py` |
 | Canonical session history | `core/session_manager.py` |
+| Runtime policy persistence | `src/settings.py`, `routes/auth_routes.py` |
+| Operator controls | `static/index.html`, `static/js/settings.js` |
 
-The current runtime has strong pieces but chat and agent paths still assemble
-context through separate flows, and there is no single inspectable attention
-packet or class-level budget report. Compaction summaries also need explicit
-protocol provenance before they can be treated uniformly across engines.
+Chat and agent paths retain their existing assembly flows, but both now pass
+through the shared context annotation, manifest, and enforcement functions.
+Compaction summaries carry derived-context provenance, and compatible providers
+receive the same logical class policy while provider-specific payload sanitizing
+continues unchanged.
 
 ## Compatibility gate
 
