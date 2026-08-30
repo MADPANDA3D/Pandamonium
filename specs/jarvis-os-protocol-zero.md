@@ -158,12 +158,13 @@ an explicit compatibility boundary.
 
 ## Protocol registry
 
-Only `JOS-P0` is specified here. The remaining identifiers reserve clean
-ownership boundaries so later protocols do not overlap:
+`JOS-P0` is specified here. `JOS-P1` and `JOS-EXT-1` are specified in linked
+documents; the remaining identifiers reserve clean ownership boundaries so
+later protocols do not overlap:
 
 | ID | Boundary |
 | --- | --- |
-| `JOS-P1` | Identity and constitution |
+| `JOS-P1` | [Identity and constitution](jarvis-os-identity-constitution.md) |
 | `JOS-P2` | Context and attention |
 | `JOS-P3` | Memory and provenance |
 | `JOS-P4` | Actions, tools, and verification |
