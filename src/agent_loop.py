@@ -12,6 +12,7 @@ import json
 import re
 import time
 import logging
+import uuid
 from typing import Any, AsyncGenerator, List, Dict, Optional, Set
 from urllib.parse import urlparse
 
@@ -28,6 +29,15 @@ from src.model_context import (
     estimate_tool_schema_tokens,
 )
 from src.agent_identity import JARVIS_SYSTEM_PROMPT, is_jarvis_model
+from src.action_protocol import (
+    build_action_result,
+    classify_target,
+    compose_capability_catalog,
+    denied_action_result,
+    normalize_action_call,
+    utc_now,
+    validate_action_call,
+)
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
@@ -3288,6 +3298,7 @@ async def stream_agent_loop(
     time_to_first_token = None
     first_token_received = False
     tool_events = []   # Persist tool executions for history reload
+    _action_request_id = str(uuid.uuid4())
     round_texts = []   # Cleaned text per round for history reload
     # Completion-verifier state (mechanism 3a). _effectful_used flips on when
     # a tool that produces a checkable artifact runs; the verifier only fires
@@ -3443,6 +3454,42 @@ async def stream_agent_loop(
                 "[agent-context] tool catalog capped; omitted=%s",
                 sorted(_dropped_schemas),
             )
+
+        # JOS-P4 observes the exact live catalog for this round. Native engines
+        # get only the schemas actually sent; text engines get the names exposed
+        # in their prompt plus any currently engaged MCP/extension schemas.
+        _text_catalog_names: set[str] = set()
+        if not _is_api_model:
+            _candidate_names = set(_relevant_tools or ())
+            if not _candidate_names:
+                for _section_name in TOOL_SECTIONS:
+                    if isinstance(_section_name, tuple):
+                        _candidate_names.update(_section_name)
+                    else:
+                        _candidate_names.add(_section_name)
+            _text_catalog_names = (
+                _candidate_names | _mcp_names | _extension_names
+            ) - disabled_tools
+        _catalog_schemas = [
+            schema for schema in all_tool_schemas
+            if schema.get("function", {}).get("name") not in disabled_tools
+        ]
+        if _relevant_tools:
+            # Schema capping is a provider-context optimization, not an
+            # authorization boundary. A compatible model may still emit the
+            # already-selected capability through its textual adapter, so keep
+            # the server-side validation schema even when it was omitted from
+            # the provider payload.
+            _catalog_schemas.extend(
+                schema
+                for schema in (FUNCTION_TOOL_SCHEMAS + mcp_schemas + extra_tool_schemas)
+                if schema.get("function", {}).get("name") in _relevant_tools
+                and schema.get("function", {}).get("name") not in disabled_tools
+            )
+        _action_catalog = compose_capability_catalog(
+            _catalog_schemas,
+            fallback_names=_text_catalog_names,
+        )
 
         # Native schemas consume the same provider input window as messages.
         # Leave their measured footprint inside the usable input budget and
@@ -4174,17 +4221,66 @@ async def stream_agent_loop(
             else:
                 cmd_display = full_command
 
-            if tool_policy and tool_policy.blocks(block.tool_type):
+            _native_call = converted_calls[i] if used_native and i < len(converted_calls) else {}
+            _action_call = normalize_action_call(
+                request_id=_action_request_id,
+                call_id=str(_native_call.get("id") or uuid.uuid4()),
+                agent_id="jarvis",
+                actor=f"engine:{model}",
+                capability_version=_action_catalog["version"],
+                name=block.tool_type,
+                arguments=_native_call.get("arguments", block.content),
+                target=classify_target(
+                    block.tool_type,
+                    mcp_names=_mcp_names,
+                    extension_names=_extension_names,
+                ),
+                authority_ref=None,
+                limits={
+                    "timeout_seconds": 60,
+                    "max_output_bytes": 65536,
+                    "max_rounds": max_rounds,
+                    "max_tool_calls": max_tool_calls,
+                },
+            )
+            _action_started_at = utc_now()
+            _validation_error = validate_action_call(_action_call, _action_catalog)
+
+            if _validation_error:
+                desc = f"{block.tool_type}: DENIED"
+                result = {
+                    "error": _validation_error["detail"],
+                    "exit_code": 1,
+                    "blocked": True,
+                }
+                _action_result = denied_action_result(
+                    _action_call,
+                    _validation_error,
+                    at=_action_started_at,
+                )
+                logger.info(
+                    "Tool denied by JOS-P4 validation: %s (%s)",
+                    block.tool_type,
+                    _validation_error["category"],
+                )
+            elif tool_policy and tool_policy.blocks(block.tool_type):
                 desc = f"{block.tool_type}: BLOCKED"
                 result = {
                     "error": tool_policy.reason_for(block.tool_type),
                     "exit_code": 1,
                     "blocked": True,
                 }
+                _action_result = build_action_result(
+                    _action_call,
+                    result,
+                    started_at=_action_started_at,
+                    finished_at=utc_now(),
+                    description=desc,
+                )
                 logger.info("Tool blocked before start by policy: %s", block.tool_type)
             else:
                 yield (
-                    f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": cmd_display, "full_command": full_command, "round": round_num})}\n\n'
+                    f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": cmd_display, "full_command": full_command, "round": round_num, "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "capability_version": _action_call["capability_version"]})}\n\n'
                 )
 
                 # Streaming progress for long-running tools (bash, python).
@@ -4241,6 +4337,13 @@ async def stream_agent_loop(
                             await _tool_task
                         except (asyncio.CancelledError, Exception):
                             pass
+                _action_result = build_action_result(
+                    _action_call,
+                    result,
+                    started_at=_action_started_at,
+                    finished_at=utc_now(),
+                    description=desc,
+                )
 
             # A skill the model just loaded can prescribe tools that weren't
             # RAG-selected this turn (declared via requires_toolsets in its
@@ -4399,7 +4502,7 @@ async def stream_agent_loop(
                 output_text = _truncate(result["error"])
 
             # Emit tool_output (include ui_event data if present)
-            tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
+            tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code"), "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "status": _action_result["status"], "evidence": _action_result["evidence"]}
             if is_doc_tool and "action" in result:
                 tool_output_data.update({
                     "doc_id": result.get("doc_id"),
@@ -4530,6 +4633,8 @@ async def stream_agent_loop(
                 "command": cmd_display,
                 "output": output_text,
                 "exit_code": result.get("exit_code"),
+                "action_call": _action_call,
+                "action_result": _action_result,
             }
             if result.get("image_url"):
                 for ik in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):

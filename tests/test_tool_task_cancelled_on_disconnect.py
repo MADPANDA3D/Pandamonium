@@ -33,6 +33,7 @@ import src.agent_loop as al
 
 def test_tool_task_cancelled_on_generator_close(monkeypatch):
     cancelled = {"v": False}
+    monkeypatch.setenv("AUTH_ENABLED", "false")
 
     async def _slow_exec(block, *a, progress_cb=None, **k):
         if progress_cb:
