@@ -2,9 +2,9 @@
 
 **Protocol ID:** `JOS-EXT-1`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
-**Status:** Manifest, registry, pinned installer, and generic live-catalog host source implementation
+**Status:** Manifest, registry, pinned installer, generic live-catalog host, and native skill-bundle contract
 
 **Reference extension:** ORACLE
 
@@ -135,6 +135,56 @@ Its built-in adapters support static web extensions with inline schemas and
 configured external web runtimes with bounded live catalogs; both require empty
 lifecycle vectors. MCP, OpenAPI, service, or command-driven runtimes stop with
 `extension_adapter_required` until an explicit host adapter exists.
+
+### Native skill-bundle adapter
+
+Pinned repositories may declare `runtime.type: skills` with a
+`capabilities.descriptor.type: skill_bundle`. The descriptor has exactly these
+fields:
+
+| Field | Contract |
+| --- | --- |
+| `type` | Must be `skill_bundle` |
+| `format` | `agent_skill` or `codex_plugin` |
+| `include` | Non-empty, unique list of reviewed skill IDs |
+
+For `agent_skill`, `runtime.entrypoint` names one repository-relative
+`SKILL.md`, and `include` contains exactly its validated skill ID. For
+`codex_plugin`, the entry point names a repository-relative JSON plugin
+descriptor whose `skills` field names one repository-relative skill directory;
+only immediate child directories containing `SKILL.md` are candidates.
+`include` selects the admitted subset, and an unknown requested ID fails closed.
+This is the partial-admission boundary; the adapter never admits every plugin
+skill implicitly.
+
+The adapter MUST:
+
+1. validate the immutable checkout, descriptor, selected paths, non-symlinked
+   files, bounded text assets, strict supported skill frontmatter, unique skill
+   IDs, and owner-scoped name collisions before activation;
+2. reuse Odysseus's existing `SkillsManager` storage, parsing, discovery,
+   invocation, enablement, and owner scope rather than introducing another
+   skill root, registry, installer, or invocation path;
+3. copy only each reviewed skill directory into the native owner-scoped skill
+   store, mark it as an approved installed skill, and retain extension ID plus
+   pinned source revision as provenance;
+4. install a multi-skill admission atomically: a malformed skill, collision,
+   unsafe path, or write failure leaves the previously active skill set intact;
+5. record only manifest/provenance, requested permissions, data boundaries,
+   and admitted skill metadata in the extension registry, never skill bodies;
+6. remove the managed native skill entries on disable or uninstall, reinstall
+   only the pinned reviewed entries on enable, and atomically replace them on
+   upgrade or rollback; and
+7. preserve project artifacts and every skill not owned by that extension.
+
+Installed skills remain untrusted instructions, not executable authority. Their
+native `requires_toolsets` and platform gates still apply. The manifest's
+requested permission modes and read/write/network boundaries travel with the
+existing P4 action, P5 decision, P7 evidence, registry diagnostics, and P2
+extension/skill context records. No skill can grant itself a tool, widen a
+project boundary, or claim a successful action. The exact operator-approved
+install is the manual JOS-P6 admission; source metadata alone never publishes a
+skill.
 
 Live web runtime locations come from the installation-owned
 `ODYSSEUS_EXTENSION_URLS` map keyed by extension ID. They are never inferred
