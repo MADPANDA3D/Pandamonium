@@ -2,9 +2,11 @@
 
 **Protocol ID:** `JOS-P3`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
-**Status:** Baseline contract
+**Status:** Implemented source baseline; deployment acceptance pending
+
+**Runtime record:** [JOS-P3 runtime baseline](../docs/jos-p3-runtime.md)
 
 **Memory owner:** Odysseus
 

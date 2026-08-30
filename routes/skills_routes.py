@@ -674,7 +674,7 @@ def _audit_finalize_status(skills_manager, name: str, owner, verdict: str,
             evaluation = learning_candidates.evaluate(
                 candidate["candidate_id"], cases,
                 evaluator={"id": "odysseus-skill-audit", "kind": "control_plane"},
-                runtime_version="JOS-P6/0.1",
+                runtime_version="JOS-P6/0.2",
                 owner_scope=owner or "local-operator",
             )
             should_promote = (
@@ -778,7 +778,7 @@ def _manual_promote_skill(skills_manager, name: str, owner) -> dict:
         evaluation = learning_candidates.evaluate(
             candidate["candidate_id"], cases,
             evaluator={"id": owner or "local-operator", "kind": "operator"},
-            runtime_version="JOS-P6/0.1",
+            runtime_version="JOS-P6/0.2",
             owner_scope=owner or "local-operator",
         )
     if evaluation.get("verdict") != "pass":

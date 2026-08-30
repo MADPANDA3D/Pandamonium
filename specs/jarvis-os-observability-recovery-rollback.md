@@ -2,9 +2,11 @@
 
 **Protocol ID:** `JOS-P7`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
-**Status:** Baseline contract
+**Status:** Implemented source baseline; deployment acceptance pending
+
+**Runtime record:** [JOS-P7 runtime baseline](../docs/jos-p7-runtime.md)
 
 **Operational state owner:** Odysseus
 

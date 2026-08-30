@@ -2,9 +2,11 @@
 
 **Protocol ID:** `JOS-P6`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
-**Status:** Baseline contract
+**Status:** Implemented source baseline; deployment acceptance pending
+
+**Runtime record:** [JOS-P6 runtime baseline](../docs/jos-p6-runtime.md)
 
 **Promotion owner:** Odysseus under Leo's authority
 

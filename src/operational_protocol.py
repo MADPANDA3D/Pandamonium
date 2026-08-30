@@ -25,12 +25,12 @@ OUTCOME_STATES = frozenset(
 PROTOCOL_VERSIONS = {
     "JOS-P0": "0.1",
     "JOS-P1": "0.1",
-    "JOS-P2": "0.1",
-    "JOS-P3": "0.1",
-    "JOS-P4": "0.1",
-    "JOS-P5": "0.1",
-    "JOS-P6": "0.1",
-    "JOS-P7": "0.1",
+    "JOS-P2": "0.2",
+    "JOS-P3": "0.2",
+    "JOS-P4": "0.2",
+    "JOS-P5": "0.2",
+    "JOS-P6": "0.2",
+    "JOS-P7": "0.2",
     "JOS-EXT-1": "0.1",
 }
 _EVENT_TYPES = frozenset(

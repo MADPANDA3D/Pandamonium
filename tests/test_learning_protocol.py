@@ -50,7 +50,7 @@ def _evaluate(store, candidate, *, original="pass", evidence="native_test", eval
         candidate["candidate_id"],
         cases,
         evaluator={"id": evaluator, "kind": "control_plane"},
-        runtime_version="JOS-P6/0.1",
+        runtime_version="JOS-P6/0.2",
         owner_scope=candidate["owner_scope"],
     )
 

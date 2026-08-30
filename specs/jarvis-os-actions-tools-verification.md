@@ -2,9 +2,11 @@
 
 **Protocol ID:** `JOS-P4`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
-**Status:** Baseline contract
+**Status:** Implemented source baseline; deployment acceptance pending
+
+**Runtime record:** [JOS-P4 runtime baseline](../docs/jos-p4-runtime.md)
 
 **Execution owner:** Odysseus
 
