@@ -35,7 +35,10 @@ worker, diagnostics, settings, backup, and ORACLE paths. It adds protocol
 records and enforcement around those paths rather than a second orchestrator.
 The evidence-backed portability findings and their source resolutions are
 recorded in [the MAD-748 audit](jos-portability-audit.md). Source implementation
-is not a deployment or live-environment acceptance claim.
+is not a deployment or live-environment acceptance claim. The read-only
+[MAD-755 compatibility matrix](jos-extension-compatibility-matrix.md) records
+the four selected repository classes, their native integration surfaces, and
+the generic host gaps that must close before compatibility can be claimed.
 
 ## Integrated verification
 
@@ -67,6 +70,9 @@ is not a deployment or live-environment acceptance claim.
   explicit acceptance. Whole transcripts never become personal memory.
 - ORACLE remains the reference extension and not an agent/model. Vision support
   remains deferred. Packaging/upstream-fork work remains unselected.
+- No candidate repository was cloned, forked, modified, installed, executed,
+  pushed, or deployed during the MAD-755 inventory. Candidate implementation
+  remains in repository-owned child batons after the shared generic adapters.
 - Deployment and live acceptance are separate operator-selected work because
   the production CT103 tree has known source divergence and requires narrow,
   backup-first changes.
