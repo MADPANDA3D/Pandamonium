@@ -31,6 +31,10 @@ the contract grows.
 Engaging an extension changes Jarvis's available domain context and tools. It
 does not change Jarvis's identity, voice, memory, permissions, or engine.
 
+ORACLE is a reference extension ID, not a special extension class. The same
+host contract must accept a differently named compatible extension without core
+code changes.
+
 ## Required extension contract
 
 An extension MUST:
@@ -57,6 +61,28 @@ Odysseus MUST:
 
 The reasoning engine MAY choose and sequence allowed extension tools. It MUST
 NOT decide that an action was authorized, executed, or successful.
+
+## Source installation contract
+
+The intended public installation experience may begin with a Git URL, similar
+to installing a community package. A repository is not compatible merely
+because it can be cloned, and cloning it does not authorize its code or tools.
+
+Before activation, Odysseus MUST:
+
+1. read a versioned extension manifest or supported standard descriptor;
+2. identify the extension ID, source revision, runtime requirements,
+   capabilities, schemas, permissions, health check, and removal procedure;
+3. present declared permissions for operator approval;
+4. pin the accepted source revision rather than tracking a mutable branch;
+5. install outside the Odysseus source tree through a bounded lifecycle;
+6. validate the live capability catalog before exposing tools;
+7. retain the prior working revision for rollback;
+8. remove the catalog, state, and tools cleanly on disable or uninstall.
+
+Tool discovery maps declared manifests, live catalogs, or supported standards
+such as MCP/OpenAPI. It does not guess arbitrary endpoints or execute arbitrary
+repository setup scripts without an explicit adapter and operator approval.
 
 ## Lifecycle
 
@@ -116,6 +142,10 @@ Odysseus route:
 - unknown, malformed, unavailable, and timed-out actions fail closed;
 - Odysseus remains functional with the extension disabled;
 - a clean installation needs no private infrastructure values.
+- a differently named reference fixture passes without an ORACLE-specific core
+  branch;
+- installation, disable, upgrade, rollback, and removal preserve Odysseus when
+  the extension is broken or unavailable.
 
 ## Non-goals
 

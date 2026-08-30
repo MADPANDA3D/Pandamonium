@@ -13,6 +13,10 @@
 Jarvis is the protocol-governed system. A language model is a replaceable
 reasoning engine inside that system.
 
+`Jarvis` is the reference installation and project vocabulary, not a required
+assistant name. A public installation configures its stable agent identity and
+operator-facing name independently from the selected model.
+
 `JOS-P0` defines the boundary between Odysseus and a reasoning engine. A new
 engine is Jarvis-compatible only when it can be installed without transferring
 canonical identity, memory, permissions, tools, or session ownership into the
@@ -29,7 +33,7 @@ In the supercar model:
 
 ### Odysseus MUST own
 
-- the stable `Jarvis` agent identity and operator-facing name;
+- the stable configured agent identity and operator-facing name;
 - authenticated operator, agent, and session identity;
 - canonical conversation and task state;
 - context construction, ordering, compaction, and token budgets;
@@ -96,7 +100,7 @@ An engine receives a bounded `TurnRequest` containing:
 | --- | --- |
 | `protocol_version` | Jarvis engine-contract version |
 | `request_id` | Stable identifier for cancellation, events, and audit |
-| `agent_id` | Stable agent identity, normally `jarvis` |
+| `agent_id` | Stable installation-configured agent identity |
 | `session_id` | Odysseus-owned conversation identifier |
 | `messages` | Ordered context assembled by Odysseus |
 | `allowed_tools` | Schemas for tools allowed on this turn only |
@@ -122,8 +126,8 @@ An engine can enter testing only when its adapter declares capabilities and
 normalizes the canonical turn contract. It can become the active Jarvis engine
 only after all of these pass:
 
-- stable Jarvis identity appears in chat and voice without exposing a backend
-  identity as the agent identity;
+- the configured agent identity appears in chat and voice without exposing a
+  backend identity as the agent identity;
 - deterministic plain-chat response through the real Odysseus route;
 - multi-turn continuity reconstructed from Odysseus-owned state;
 - structured tool proposal, validation, execution, and result round trip;
@@ -189,9 +193,23 @@ a second agent or model; see [Jarvis OS Extension Protocol](jarvis-os-extension-
 ## Definition of success
 
 `JOS-P0` succeeds when replacing GPT-OSS with a compatible test engine changes
-only endpoint configuration and its adapter fitment, while Jarvis keeps the same
-identity, memories, sessions, tools, permissions, workers, GUI, and rollback
-path.
+only endpoint configuration and its adapter fitment, while the configured agent
+keeps the same identity, memories, sessions, tools, permissions, workers, GUI,
+and rollback path.
+
+## Open-source implementation constraints
+
+- Protocol code extends existing Odysseus paths; it does not duplicate them in
+  a parallel orchestrator.
+- Core behavior cannot depend on a private name, model label, filesystem path,
+  host, repository, credential, memory set, or optional extension.
+- Agent identity and constitution are installation configuration, not model-name
+  inference.
+- Personal data and infrastructure stay outside distributable source.
+- Generic claims require compatibility evidence with non-reference names and
+  with optional extensions absent.
+- Changes use the smallest existing seam and dependency set that satisfies the
+  contract.
 
 ## Non-goals
 

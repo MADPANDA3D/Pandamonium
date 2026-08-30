@@ -20,6 +20,37 @@ End-users cloning the repo will land on `dev` by default. To run the curated/sta
 - Avoid broad rewrites, formatting-only changes, or moving many files unless the issue is specifically about structure.
 - If you want to work on a large feature, open an issue first and describe the approach.
 
+## Jarvis OS and extension work
+
+Jarvis OS work extends Odysseus; it does not create a second orchestrator beside
+it. Protocol enforcement belongs in the smallest existing Odysseus seam that
+all affected requests already use. Extension-native behavior belongs in the
+extension repository.
+
+These are merge gates for protocol and extension changes:
+
+- **Preserve Odysseus.** Reuse its sessions, settings, model transport, tools,
+  memory, diagnostics, and UI before adding code. Do not duplicate a working
+  subsystem or move files only to make the protocol layout look cleaner.
+- **Use the minimum solution.** For agent-assisted work, apply the Ponytail
+  ladder: existing project code, standard library, native platform feature,
+  already-installed dependency, then the smallest new implementation. A new
+  dependency or framework needs an approved issue and evidence that the earlier
+  options do not hold.
+- **Build for a clean public installation.** Core behavior must not depend on a
+  person's name, assistant name, model name, private path, host, repository,
+  credential, memory, or extension. Those values come from authenticated state,
+  configuration, or a versioned extension manifest.
+- **Keep ownership explicit.** Generic protocol, discovery, policy, lifecycle,
+  and enforcement code belongs in Odysseus. Native UI, data, state, and actions
+  belong in the extension's maintained fork. Personal constitutions, memories,
+  documents, and infrastructure remain installation data.
+
+A protocol change is not portable merely because its tests pass with the
+default Jarvis/ORACLE setup. Its acceptance evidence must include a differently
+named agent or extension when that boundary is affected, plus a clean degraded
+state with optional extensions disabled.
+
 ## Setup
 
 Docker is the recommended path for normal testing:
@@ -130,4 +161,3 @@ Issues with only "help", "does not work", or a screenshot without context may be
 Do not post secrets, API keys, private logs, personal documents, or public IPs in issues or pull requests.
 
 For security reports, follow [SECURITY.md](SECURITY.md).
-
