@@ -11,8 +11,10 @@ runners. The implementation does not add a second dispatcher.
 - `src/agent_loop.py` assigns one request ID per Jarvis turn and one call ID per
   action. The call and result are persisted together in the existing tool-event
   history and surfaced on existing SSE diagnostics.
-- Built-in, MCP, UI, worker, and engaged extension tools pass through the same
-  envelope. ORACLE continues to execute through its existing native executor.
+- Built-in, MCP, UI, worker, and engaged extension tools invoked through the
+  agent loop pass through the same envelope. ORACLE continues to execute through
+  its existing native executor. Direct voice broker dispatch remains a native-
+  gated path awaiting convergence in `MAD-750`.
 - Unknown, conflicting, malformed, oversized, disabled, and policy-blocked
   actions fail closed before dispatch.
 - Results retain `succeeded`, `failed`, `denied`, `cancelled`, `timed_out`, and

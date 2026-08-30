@@ -13,7 +13,9 @@ validation and native execution.
   basis, and expiry. The decision ID becomes the P4 call's `authority_ref`.
 - Existing owner/public restrictions, guide-only policy, staged email approval,
   worker write gates, and engaged ORACLE scope remain the native enforcement
-  mechanisms; the authority layer records and composes them.
+  mechanisms. The authority layer records agent-loop decisions; direct broker
+  dispatch still relies on its native gate, and extension policy remains
+  ORACLE-specific until `MAD-750`.
 - External and destructive operations without an existing native staged gate
   return `authority_approval_required` before dispatch.
 - `routes/authority_routes.py` lets the authenticated operator inspect pending

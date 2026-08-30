@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Implemented source baseline; deployment acceptance pending
+**Status:** Agent-loop source baseline implemented; generic extension policy pending
 
 **Runtime record:** [JOS-P5 runtime baseline](../docs/jos-p5-runtime.md)
 

@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Implemented source baseline; deployment acceptance pending
+**Status:** Agent-loop source baseline implemented; broker convergence pending
 
 **Runtime record:** [JOS-P4 runtime baseline](../docs/jos-p4-runtime.md)
 

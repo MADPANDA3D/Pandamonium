@@ -1,7 +1,9 @@
 # JOS-P7 Runtime Baseline
 
-Odysseus now has one request-level operational trace over its existing metrics,
-health probes, durable sessions/tasks, backup tooling, and recovery mechanisms.
+Odysseus now has one request-level operational trace for the agent loop and
+learning lifecycle over its existing metrics, health probes, durable
+sessions/tasks, backup tooling, and recovery mechanisms. Plain chat and direct
+voice broker paths await convergence in `MAD-750`.
 
 ## Runtime contract
 

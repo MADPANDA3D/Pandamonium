@@ -7,13 +7,13 @@ This record describes the source state on branch
 | --- | --- | --- |
 | `JOS-P0` | Canonical engine contract | Odysseus mounts Jarvis around a replaceable engine |
 | `JOS-P1` | Canonical contract; runtime convergence still separate | Odysseus-owned identity and constitution |
-| `JOS-P2` | Implemented | Context manifest, trust, omissions, compaction, class budgets, schema budgets |
-| `JOS-P3` | Implemented | Canonical memory provenance, review/migration, optional Qdrant projections |
-| `JOS-P4` | Implemented | One action/result envelope across built-in, MCP, worker, UI, and extension tools |
-| `JOS-P5` | Implemented | Owner-bound decisions and exact, scoped, revocable approval receipts |
-| `JOS-P6` | Implemented | Candidate normalization, evaluation, promotion, monitoring, demotion, rollback |
-| `JOS-P7` | Implemented | Correlated events, health/outcome status, backup evidence, component rollback |
-| `JOS-EXT-1` | Canonical contract with ORACLE reference implementation | Live extension discovery and Odysseus enforcement |
+| `JOS-P2` | Agent/chat source baseline; portability pending | Context manifest, trust, omissions, compaction, and budgets work; `oracle_state` must become generic in `MAD-750` |
+| `JOS-P3` | Source baseline; provider portability pending | Canonical memory provenance, review/migration, and optional projections work; private provider defaults/docs remain `MAD-750` |
+| `JOS-P4` | Agent-loop baseline; broker convergence pending | Agent-loop tools share the envelope; direct voice worker dispatch does not yet (`MAD-750`) |
+| `JOS-P5` | Agent-loop baseline; generic extension policy pending | Receipts work in the agent loop; extension authority is ORACLE-specific and broker paths use native gates (`MAD-750`) |
+| `JOS-P6` | Source baseline; configured identity matching pending | Promotion lifecycle works; safety matching still contains reference names (`MAD-750`) |
+| `JOS-P7` | Agent-loop/learning baseline; request convergence pending | Correlated agent events and rollback evidence work; plain chat/direct broker traces remain `MAD-750` |
+| `JOS-EXT-1` | Canonical contract with an ORACLE reference adapter | Generic manifest, registry, installer, and host proof remain `MAD-751` through `MAD-754` |
 
 ## Implementation chain
 
@@ -31,6 +31,9 @@ The dependency order was completed as planned:
 The implementation reuses Odysseus's native session, memory, skill, tool,
 worker, diagnostics, settings, backup, and ORACLE paths. It adds protocol
 records and enforcement around those paths rather than a second orchestrator.
+The evidence-backed portability and path-coverage limits are recorded in
+[the MAD-748 audit](jos-portability-audit.md); "source baseline" is not a claim
+that every compatible route is already reference-neutral or trace-enveloped.
 
 ## Integrated verification
 
@@ -57,4 +60,3 @@ records and enforcement around those paths rather than a second orchestrator.
 - Deployment and live acceptance are separate operator-selected work because
   the production CT103 tree has known source divergence and requires narrow,
   backup-first changes.
-

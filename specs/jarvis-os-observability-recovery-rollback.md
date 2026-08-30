@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Implemented source baseline; deployment acceptance pending
+**Status:** Agent-loop/learning baseline implemented; request convergence pending
 
 **Runtime record:** [JOS-P7 runtime baseline](../docs/jos-p7-runtime.md)
 
