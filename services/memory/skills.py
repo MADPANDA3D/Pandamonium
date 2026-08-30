@@ -591,28 +591,18 @@ class SkillsManager:
         """Return the `[{name, description, category, status}]` list the
         agent sees in its system prompt.
 
-        Includes:
-          - All published skills.
-          - Drafts written by the teacher-escalation loop
-            (`source == "teacher-escalation"`). The whole point of
-            the teacher loop is for the student to find the new
-            procedure on the very next turn — waiting for a manual
-            publish click defeats the loop.
-
-        Excludes user-created drafts (status=draft, source != teacher-
-        escalation) — those are work-in-progress and pollute the
-        prompt with half-finished procedures.
+        Only published skills (plus pre-status legacy records) are executable.
+        Draft teacher/agent artifacts remain visible in the management UI, but
+        JOS-P6 treats them as untrusted candidates until evaluation and an
+        authorized promotion record exist.
         """
         out = []
         for s in self.load(owner=owner):
             status = s.get("status")
-            # Published + None (pre-status legacy) always included.
-            # Drafts only if the teacher wrote them.
+            # Published + None (pre-status legacy) always included. Every
+            # explicit draft is review-only, regardless of who produced it.
             if status not in ("published", None):
-                if status == "draft" and s.get("source") == "teacher-escalation":
-                    pass  # let it through
-                else:
-                    continue
+                continue
             # Platform gating
             if platform and s.get("platforms") and platform not in s["platforms"]:
                 continue
@@ -654,37 +644,9 @@ class SkillsManager:
             skills = self.load_all()
         if not skills or not query.strip():
             return []
-        # Consider published AND draft skills for relevance retrieval.
-        # The teacher-escalation loop writes new skills as drafts; the
-        # whole point is for the student to find them on the next try
-        # without a manual publish click. The UI flags teacher-written
-        # entries with a 🎓 badge so users can demote / delete bad
-        # ones when they spot them.
-        skills = [s for s in skills if s.get("status") in ("published", "draft")]
-        # Confidence gate (used by prompt-injection, NOT by search): a DRAFT
-        # skill must clear the bar to be injected. Published skills are already
-        # vetted, so they always qualify. Missing confidence = treat as 1.0
-        # (legacy skills shouldn't silently vanish). 0 disables the gate.
-        if min_confidence > 0:
-            def _passes(s):
-                if s.get("status") == "published":
-                    return True
-                # Teacher-escalation drafts are auto-written from a (possibly
-                # untrusted) trace and injected as authoritative guidance, so they
-                # must EARN injection with an explicit, parseable confidence that
-                # clears the bar — fail closed on a missing/garbage value instead
-                # of treating it as 1.0. Hand-authored legacy drafts keep the
-                # lenient "unset → keep" behavior so they don't silently vanish.
-                if s.get("source") == "teacher-escalation":
-                    c = s.get("confidence")
-                    if c is None:
-                        return False
-                    return _to_float(c, 0.0) >= min_confidence  # unparseable → fail closed
-                c = s.get("confidence")
-                if c is None:
-                    return True  # unset → don't filter (legacy)
-                return _to_float(c, 1.0) >= min_confidence  # unparseable → pass
-            skills = [s for s in skills if _passes(s)]
+        # JOS-P6 invariant: confidence is producer metadata, not promotion
+        # evidence. It cannot make a draft discoverable or executable.
+        skills = [s for s in skills if s.get("status") in ("published", None)]
         if not skills:
             return []
 

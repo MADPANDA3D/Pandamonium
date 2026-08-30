@@ -175,10 +175,11 @@ DEFAULT_SETTINGS = {
     "teacher_model": "",
     "teacher_enabled": False,
     "teacher_tier2_enabled": False,
-    # Skills: minimum self-reported confidence for an auto-written (LLM-authored)
-    # DRAFT skill to be injected into the agent prompt. Published skills always
-    # qualify. Keeps low-confidence auto-skills out of context until they're
-    # vetted/published. 0 disables the gate.
+    # JOS-P6 master gate for proposing/evaluating/promoting learned artifacts.
+    # Turning it off does not disable already-published, operator-approved skills.
+    "learning_enabled": True,
+    # Compatibility preference retained for the Skills UI/audit threshold.
+    # Confidence never makes a draft executable; promotion evidence does.
     "skill_autosave_min_confidence": 0.85,
     # Max relevant skills injected into the prompt for one request. The skills
     # library can grow beyond this; cleanup/retirement is an explicit review flow.

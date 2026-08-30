@@ -102,35 +102,75 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
             proc = args.get("steps") or []
         if not proc and not args.get("body_extra") and not args.get("solution"):
             return {"error": "procedure (or solution body) is required", "exit_code": 1}
-        # Same auto-publish gate as the extractor path — when the user
-        # has auto_approve_skills on and the caller didn't pin an explicit
-        # status, publish immediately. Audit later demotes/removes on fail.
-        _status_arg = args.get("status")
-        if not _status_arg:
-            try:
-                from routes.prefs_routes import _load_for_user as _load_prefs
-                _prefs = _load_prefs(owner) or {}
-                _status_arg = "published" if _prefs.get("auto_approve_skills", True) else "draft"
-            except Exception:
-                _status_arg = "draft"
+        try:
+            from src.settings import get_setting
+            if not get_setting("learning_enabled", True):
+                return {"error": "Learning is disabled; no skill candidate was created.", "exit_code": 1}
+        except Exception:
+            pass
+        # A model/tool producer can only propose a candidate. Confidence and a
+        # caller-supplied status never publish it (JOS-P6).
+        _status_arg = "draft"
+        artifact = {
+            "name": args.get("name"),
+            "description": (args.get("description") or args.get("title") or "").strip(),
+            "category": args.get("category") or "general",
+            "tags": args.get("tags") or [],
+            "platforms": args.get("platforms") or [],
+            "requires_toolsets": args.get("requires_toolsets") or [],
+            "fallback_for_toolsets": args.get("fallback_for_toolsets") or [],
+            "when_to_use": (args.get("when_to_use") if args.get("when_to_use") is not None else args.get("problem", "")),
+            "procedure": proc,
+            "pitfalls": args.get("pitfalls") or [],
+            "verification": args.get("verification") or [],
+            "status": "draft",
+            "version": args.get("version") or "1.0.0",
+            "confidence": args.get("confidence", 0.8),
+            "source": args.get("source", "learned"),
+            "teacher_model": args.get("teacher_model"),
+        }
+        try:
+            from src.learning_protocol import learning_candidates
+            candidate = learning_candidates.create_candidate(
+                candidate_type="skill",
+                owner_scope=owner or "local-operator",
+                artifact=artifact,
+                source_refs=[{"kind": "skill_proposal", "name": args.get("name")}],
+                producer={
+                    "id": args.get("teacher_model") or "jarvis",
+                    "kind": "teacher" if args.get("source") == "teacher-escalation" else "agent",
+                },
+                capabilities=artifact["requires_toolsets"],
+                confidence=args.get("confidence", 0.8),
+                version=artifact["version"],
+            )
+            if candidate.get("conflicts"):
+                return {
+                    "error": "Skill candidate rejected by learning policy.",
+                    "candidate_id": candidate["candidate_id"],
+                    "conflicts": candidate["conflicts"],
+                    "exit_code": 1,
+                }
+            artifact = candidate["artifact"]
+        except Exception as e:
+            return {"error": f"Could not create learning candidate: {e}", "exit_code": 1}
         entry = sm.add_skill(
-            name=args.get("name"),
-            description=(args.get("description") or args.get("title") or "").strip(),
-            category=args.get("category") or "general",
-            tags=args.get("tags") or [],
-            platforms=args.get("platforms") or [],
-            requires_toolsets=args.get("requires_toolsets") or [],
-            fallback_for_toolsets=args.get("fallback_for_toolsets") or [],
-            when_to_use=(args.get("when_to_use") if args.get("when_to_use") is not None
-                         else args.get("problem", "")),
-            procedure=proc,
-            pitfalls=args.get("pitfalls") or [],
-            verification=args.get("verification") or [],
+            name=artifact.get("name"),
+            description=artifact.get("description", ""),
+            category=artifact.get("category") or "general",
+            tags=artifact.get("tags") or [],
+            platforms=artifact.get("platforms") or [],
+            requires_toolsets=artifact.get("requires_toolsets") or [],
+            fallback_for_toolsets=artifact.get("fallback_for_toolsets") or [],
+            when_to_use=artifact.get("when_to_use", ""),
+            procedure=artifact.get("procedure") or [],
+            pitfalls=artifact.get("pitfalls") or [],
+            verification=artifact.get("verification") or [],
             status=_status_arg,
-            version=args.get("version") or "1.0.0",
-            confidence=args.get("confidence", 0.8),
-            source=args.get("source", "learned"),
-            teacher_model=args.get("teacher_model"),
+            version=artifact.get("version") or "1.0.0",
+            confidence=artifact.get("confidence", 0.8),
+            source=artifact.get("source", "learned"),
+            teacher_model=artifact.get("teacher_model"),
             owner=owner,
             title=args.get("title", ""),
             problem=args.get("problem", ""),
@@ -153,7 +193,11 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
                 "\n\nThis skill is a DRAFT. Run through the procedure once to verify, "
                 f"then publish with action='publish', name='{entry['name']}'."
             )
-        return {"results": f"Created skill `{entry['name']}` — {entry.get('description','')}{verify_hint}"}
+        return {
+            "results": f"Created skill `{entry['name']}` — {entry.get('description','')}{verify_hint}",
+            "candidate_id": candidate["candidate_id"],
+            "status": "draft",
+        }
 
     if action == "edit":
         if not name:
@@ -206,11 +250,20 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
         match = next((s for s in all_skills if s.get("name") == name), None)
         if not match:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}
-        updates = {"status": "published"}
-        if args.get("confidence") is not None:
-            updates["confidence"] = max(0.0, min(1.0, float(args["confidence"])))
-        sm.update_skill(name, updates, owner=owner)
-        return {"results": f"✅ Published `{name}`. It now appears in the skills index for future turns."}
+        from src.learning_protocol import learning_candidates
+        candidate = learning_candidates.latest_for_artifact(
+            owner_scope=owner or "local-operator", candidate_type="skill", artifact_name=name
+        )
+        if not candidate or (candidate.get("evaluation") or {}).get("verdict") != "pass":
+            return {
+                "error": "This skill is still a draft. A passing JOS-P6 evaluation is required before promotion.",
+                "exit_code": 1,
+            }
+        return {
+            "error": "Model tools cannot approve their own learning candidates; an operator promotion is required.",
+            "candidate_id": candidate["candidate_id"],
+            "exit_code": 1,
+        }
 
     if action == "delete":
         if not name:

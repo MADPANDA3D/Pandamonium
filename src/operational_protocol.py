@@ -29,6 +29,7 @@ PROTOCOL_VERSIONS = {
     "JOS-P3": "0.1",
     "JOS-P4": "0.1",
     "JOS-P5": "0.1",
+    "JOS-P6": "0.1",
     "JOS-P7": "0.1",
     "JOS-EXT-1": "0.1",
 }
@@ -305,12 +306,25 @@ def backup_status(repo_root: Path | None = None) -> dict[str, Any]:
 
 def protocol_status(rollback_registry: RollbackRegistry | None = None) -> dict[str, Any]:
     registry = rollback_registry or rollbacks
+    try:
+        from src.learning_protocol import learning_candidates
+        learning_state = learning_candidates.snapshot()
+        learning = {
+            "candidates": len(learning_state.get("candidates") or {}),
+            "active_promotions": sum(
+                1 for row in (learning_state.get("promotions") or []) if row.get("status") == "active"
+            ),
+            "monitored_candidates": len(learning_state.get("monitoring") or {}),
+        }
+    except Exception:
+        learning = {"status": "unavailable"}
     return {
         "protocol_versions": dict(PROTOCOL_VERSIONS),
         "outcome_taxonomy": sorted(OUTCOME_STATES),
         "rollback_units": registry.snapshot().get("components", {}),
         "backup": backup_status(),
         "unresolved_unknown_actions": len(events.unresolved_unknowns()),
+        "learning": learning,
         "canonical_recovery": {
             "sessions": True,
             "worker_tasks": True,

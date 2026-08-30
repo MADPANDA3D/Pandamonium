@@ -657,12 +657,159 @@ def _audit_finalize_status(skills_manager, name: str, owner, verdict: str,
     if duplicate_of:
         necessary = False
     c = float(confidence or 0.0)
-    status = "published" if (auto_publish and necessary and verdict == "pass" and c >= min_conf) else "draft"
+    status = "draft"
+    try:
+        candidate = _ensure_skill_candidate(skills_manager, name, owner)
+        if candidate:
+            from src.learning_protocol import learning_candidates, structural_evaluation_cases
+            original = "pass" if verdict == "pass" else (
+                verdict if verdict in {"unknown", "inconclusive", "unavailable", "evaluator_failure"} else "fail"
+            )
+            cases = structural_evaluation_cases(
+                candidate.get("artifact") or {},
+                original_verdict=original,
+                original_evidence_kind="native_test",
+                evaluator_id="odysseus-skill-audit",
+            )
+            evaluation = learning_candidates.evaluate(
+                candidate["candidate_id"], cases,
+                evaluator={"id": "odysseus-skill-audit", "kind": "control_plane"},
+                runtime_version="JOS-P6/0.1",
+                owner_scope=owner or "local-operator",
+            )
+            should_promote = (
+                auto_publish and necessary and verdict == "pass" and c >= min_conf
+                and evaluation.get("verdict") == "pass"
+            )
+            if should_promote:
+                promotion = learning_candidates.promote(
+                    candidate["candidate_id"],
+                    operator_id=owner or "local-operator",
+                    owner_scope=owner or "local-operator",
+                    automatic=True,
+                    policy={"minimum_cases": 3, "minimum_pass_rate": 1.0},
+                )
+                _activate_skill_promotion(skills_manager, name, owner, promotion)
+                status = "published"
+            elif verdict != "pass":
+                learning_candidates.demote(
+                    candidate["candidate_id"],
+                    operator_id=owner or "local-operator",
+                    owner_scope=owner or "local-operator",
+                    reason=f"Audit verdict: {verdict}",
+                )
+    except Exception as e:
+        # Promotion fails closed; the existing audit job remains available and
+        # its verdict is still surfaced to the UI for operator review.
+        logger.info("JOS-P6 kept %s as draft: %s", name, e)
     try:
         skills_manager.update_skill(name, {"status": status}, owner=owner)
     except Exception:
         pass
     return status
+
+
+def _skill_artifact(skill: dict) -> dict:
+    """Bound the fields allowed into the learning/promotion record."""
+    return {
+        key: skill.get(key)
+        for key in (
+            "name", "description", "version", "category", "tags", "platforms",
+            "requires_toolsets", "fallback_for_toolsets", "when_to_use",
+            "procedure", "pitfalls", "verification", "body_extra", "confidence",
+            "source", "teacher_model",
+        )
+    }
+
+
+def _ensure_skill_candidate(skills_manager, name: str, owner) -> Optional[dict]:
+    from src.learning_protocol import learning_candidates, normalize_artifact
+
+    skill = next((s for s in skills_manager.load(owner=owner) if s.get("name") == name), None)
+    if not skill:
+        return None
+    owner_scope = owner or "local-operator"
+    artifact = normalize_artifact(_skill_artifact(skill))
+    latest = learning_candidates.latest_for_artifact(
+        owner_scope=owner_scope, candidate_type="skill", artifact_name=name
+    )
+    if latest and latest.get("artifact") == artifact:
+        return latest
+    source = str(skill.get("source") or "learned")
+    if source == "user":
+        producer = {"id": owner_scope, "kind": "operator"}
+    elif source == "teacher-escalation":
+        producer = {"id": skill.get("teacher_model") or "teacher", "kind": "teacher"}
+    else:
+        producer = {"id": "jarvis", "kind": "agent"}
+    return learning_candidates.create_candidate(
+        candidate_type="skill",
+        owner_scope=owner_scope,
+        artifact=artifact,
+        source_refs=[{"kind": "skill", "name": name}],
+        producer=producer,
+        capabilities=skill.get("requires_toolsets") or [],
+        confidence=skill.get("confidence"),
+        version=str(skill.get("version") or "1.0.0"),
+        parent_candidate_id=(latest or {}).get("candidate_id"),
+    )
+
+
+def _manual_promote_skill(skills_manager, name: str, owner) -> dict:
+    """Record an explicit operator review and promote a safe candidate.
+
+    For action-capable candidates, structural operator review is intentionally
+    insufficient: LearningCandidateStore requires a native/integration original
+    case, which must come from the audit path before this helper can promote it.
+    """
+    from src.learning_protocol import learning_candidates, structural_evaluation_cases
+
+    candidate = _ensure_skill_candidate(skills_manager, name, owner)
+    if not candidate:
+        raise ValueError("candidate_not_found")
+    evaluation = candidate.get("evaluation") or {}
+    if evaluation.get("verdict") != "pass":
+        cases = structural_evaluation_cases(
+            candidate.get("artifact") or {},
+            original_verdict="pass",
+            original_evidence_kind="operator_review",
+            evaluator_id=owner or "local-operator",
+        )
+        evaluation = learning_candidates.evaluate(
+            candidate["candidate_id"], cases,
+            evaluator={"id": owner or "local-operator", "kind": "operator"},
+            runtime_version="JOS-P6/0.1",
+            owner_scope=owner or "local-operator",
+        )
+    if evaluation.get("verdict") != "pass":
+        raise ValueError("native_evaluation_required")
+    return learning_candidates.promote(
+        candidate["candidate_id"],
+        operator_id=owner or "local-operator",
+        owner_scope=owner or "local-operator",
+        automatic=False,
+        policy={"minimum_cases": 3, "minimum_pass_rate": 1.0},
+    )
+
+
+def _activate_skill_promotion(skills_manager, name: str, owner, promotion: dict) -> None:
+    """Materialize the normalized promoted snapshot, compensating on failure."""
+    from src.learning_protocol import learning_candidates
+
+    updates = dict(promotion.get("artifact") or {})
+    updates["status"] = "published"
+    if skills_manager.update_skill(name, updates, owner=owner):
+        return
+    try:
+        learning_candidates.demote(
+            promotion["candidate_id"],
+            operator_id=owner or "local-operator",
+            owner_scope=owner or "local-operator",
+            reason="Promotion activation failed; ledger compensated",
+        )
+    except Exception:
+        pass
+    raise RuntimeError("promotion_activation_failed")
 
 
 def _apply_skill_md(skills_manager, name: str, md: str, owner) -> bool:
@@ -1123,6 +1270,13 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         idx = skills_manager.index_for(owner=user)
         return {"index": idx, "count": len(idx)}
 
+    @router.get("/promotion-ledger")
+    async def get_promotion_ledger(request: Request):
+        """Owner-scoped JOS-P6 candidates, evidence, promotions, and metrics."""
+        from src.learning_protocol import learning_candidates
+        user = _owner(request)
+        return learning_candidates.snapshot(owner_scope=user or "local-operator")
+
     @router.get("/slash-catalog")
     async def get_slash_catalog(request: Request):
         """Return skills that are available as slash commands.
@@ -1285,6 +1439,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
     @router.post("/add")
     async def add_skill(request: Request, body: SkillAddRequest):
         user = _owner(request)
+        requested_published = body.status == "published"
         entry = skills_manager.add_skill(
             # New shape
             name=body.name,
@@ -1298,7 +1453,10 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             procedure=body.procedure,
             pitfalls=body.pitfalls,
             verification=body.verification,
-            status=body.status,
+            # Persist as review-only until the JOS-P6 promotion record is
+            # committed. A low-risk, human-authored explicit publish request is
+            # promoted immediately below; action-capable candidates need audit.
+            status="draft",
             version=body.version,
             confidence=body.confidence,
             source=body.source,
@@ -1313,7 +1471,20 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         )
         if not entry.get("_deduped"):
             _fire_skill_added(user)
-        return {"ok": True, "deduped": bool(entry.get("_deduped")), "skill": entry}
+        promotion = None
+        if requested_published and not entry.get("_deduped"):
+            try:
+                promotion = _manual_promote_skill(skills_manager, entry.get("name"), user)
+                _activate_skill_promotion(skills_manager, entry.get("name"), user, promotion)
+                entry["status"] = "published"
+            except Exception as e:
+                raise HTTPException(409, f"Skill remains draft: {e}") from e
+        return {
+            "ok": True,
+            "deduped": bool(entry.get("_deduped")),
+            "skill": entry,
+            "promotion_id": (promotion or {}).get("promotion_id"),
+        }
 
     @router.post("/{skill_id}/invoke")
     async def invoke_skill(request: Request, skill_id: str):
@@ -1587,6 +1758,8 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         sk.name = match.get("name")
         if not sk.owner:
             sk.owner = match.get("owner") or user
+        requested_published = sk.status == "published"
+        sk.status = "draft"
         ok = skills_manager.update_skill(match.get("name"), {
             "name": sk.name,
             "description": sk.description,
@@ -1609,6 +1782,13 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         }, owner=user)
         if not ok:
             raise HTTPException(500, "Update failed")
+        if requested_published:
+            try:
+                promotion = _manual_promote_skill(skills_manager, sk.name, user)
+                _activate_skill_promotion(skills_manager, sk.name, user, promotion)
+                sk.status = "published"
+            except Exception as e:
+                raise HTTPException(409, f"Skill remains draft: {e}") from e
         # Manual markdown edits can create or substantially rewrite a draft
         # skill without going through /add. Treat unaudited saves as new audit
         # candidates so the event-driven Skills Audit pipeline still runs.
@@ -1628,12 +1808,103 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         updates = body.dict(exclude_none=True)
         if not updates:
             return {"ok": True}
+        requested_published = updates.get("status") == "published"
+        if requested_published:
+            updates["status"] = "draft"
         ok = skills_manager.update_skill(match.get("name"), updates, owner=user)
         if not ok:
             raise HTTPException(404, "Skill not found")
+        if requested_published:
+            try:
+                promotion = _manual_promote_skill(skills_manager, match.get("name"), user)
+                _activate_skill_promotion(skills_manager, match.get("name"), user, promotion)
+            except Exception as e:
+                raise HTTPException(409, f"Skill remains draft: {e}") from e
         if not match.get("audit_verdict"):
             _fire_skill_added(user)
         return {"ok": True}
+
+    @router.post("/{skill_id}/promote")
+    async def promote_skill(request: Request, skill_id: str):
+        user = _owner(request)
+        skill = next((s for s in skills_manager.load(owner=user) if s.get("name") == skill_id), None)
+        if not skill:
+            raise HTTPException(404, "Skill not found")
+        _verify_owner(skill, user)
+        try:
+            promotion = _manual_promote_skill(skills_manager, skill_id, user)
+        except Exception as e:
+            raise HTTPException(409, f"Promotion refused: {e}") from e
+        _activate_skill_promotion(skills_manager, skill_id, user, promotion)
+        return {"ok": True, "promotion": promotion}
+
+    @router.post("/{skill_id}/demote")
+    async def demote_skill(request: Request, skill_id: str):
+        from src.learning_protocol import learning_candidates
+        user = _owner(request)
+        skill = next((s for s in skills_manager.load(owner=user) if s.get("name") == skill_id), None)
+        if not skill:
+            raise HTTPException(404, "Skill not found")
+        _verify_owner(skill, user)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        candidate = learning_candidates.latest_for_artifact(
+            owner_scope=user or "local-operator", candidate_type="skill", artifact_name=skill_id
+        )
+        if candidate:
+            learning_candidates.demote(
+                candidate["candidate_id"],
+                operator_id=user or "local-operator",
+                owner_scope=user or "local-operator",
+                reason=str((body or {}).get("reason") or "Operator demotion"),
+            )
+        skills_manager.update_skill(skill_id, {"status": "draft"}, owner=user)
+        return {"ok": True, "status": "draft", "candidate_id": (candidate or {}).get("candidate_id")}
+
+    @router.post("/{skill_id}/rollback")
+    async def rollback_skill(request: Request, skill_id: str):
+        from src.learning_protocol import learning_candidates
+        user = _owner(request)
+        skill = next((s for s in skills_manager.load(owner=user) if s.get("name") == skill_id), None)
+        if not skill:
+            raise HTTPException(404, "Skill not found")
+        _verify_owner(skill, user)
+        body = await request.json()
+        target = str((body or {}).get("target_promotion_id") or "")
+        if not target:
+            raise HTTPException(400, "target_promotion_id is required")
+        state = learning_candidates.snapshot(owner_scope=user or "local-operator")
+        target_record = next(
+            (
+                row for row in state.get("promotions") or []
+                if row.get("promotion_id") == target
+                and row.get("artifact_type") == "skill"
+                and row.get("artifact_name") == skill_id
+            ),
+            None,
+        )
+        if not target_record:
+            raise HTTPException(404, "rollback_target_not_found")
+        previous = _skill_artifact(skill)
+        previous["status"] = skill.get("status") or "draft"
+        restored_artifact = dict(target_record.get("artifact") or {})
+        restored_artifact["status"] = "published"
+        if not skills_manager.update_skill(skill_id, restored_artifact, owner=user):
+            raise HTTPException(500, "Skill restore failed; rollback was not committed")
+        try:
+            restored = learning_candidates.rollback(
+                owner_scope=user or "local-operator",
+                artifact_type="skill",
+                artifact_name=skill_id,
+                target_promotion_id=target,
+                operator_id=user or "local-operator",
+            )
+        except KeyError as e:
+            skills_manager.update_skill(skill_id, previous, owner=user)
+            raise HTTPException(404, str(e)) from e
+        return {"ok": True, "promotion": restored}
 
     @router.delete("/{skill_id}")
     async def delete_skill(request: Request, skill_id: str):
