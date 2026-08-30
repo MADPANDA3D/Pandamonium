@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -99,6 +100,44 @@ def test_voice_routes_reject_bearer_api_token_identity(monkeypatch, tmp_path):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "API tokens must use a scope-aware API route"
+
+
+def test_generic_extension_result_route_correlates_owner_extension_and_tool(monkeypatch, tmp_path):
+    manager = FakeSessionManager()
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    client = _client(manager)
+    created = client.post(
+        "/api/voice/sessions",
+        headers={"X-Test-Owner": "alice"},
+        json={"mode": "jarvis_call"},
+    )
+    session_id = created.json()["id"]
+    loop = asyncio.new_event_loop()
+    future = loop.create_future()
+    key = (session_id, "atlas", "extension-call-1")
+    voice_routes._EXTENSION_TOOL_CALLS[key] = {
+        "future": future,
+        "owner": "alice",
+        "tool": "create_mesh",
+    }
+    try:
+        wrong_extension = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/oracle/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"ok": True}},
+        )
+        accepted = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"ok": True}},
+        )
+    finally:
+        voice_routes._EXTENSION_TOOL_CALLS.pop(key, None)
+        loop.close()
+
+    assert wrong_extension.status_code == 404
+    assert accepted.status_code == 200
+    assert future.result() == {"ok": True}
 
 
 def test_legacy_voice_session_backfills_only_from_linked_chat_owner(monkeypatch, tmp_path):

@@ -102,6 +102,7 @@ const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
   'oracle_protocol_engage',
   'oracle_protocol_shutdown',
   'oracle_protocol_command',
+  'extension_protocol_command',
 ]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
@@ -624,7 +625,21 @@ function mediaVoiceCommand(text) {
 function voiceRequestPayload(text) {
   const clientState = collectClientState();
   const oracle = voiceOracleClientState();
-  if (oracle) clientState.oracle = oracle;
+  if (oracle) {
+    clientState.oracle = oracle;
+    clientState.extensions = {
+      oracle: {
+        ready: oracle.ready,
+        updated_at_ms: oracle.updated_at_ms,
+        state: {
+          style: oracle.style,
+          camera: oracle.camera,
+          layers: oracle.layers,
+        },
+        capabilities: oracle.capabilities,
+      },
+    };
+  }
   const payload = { text, client_state: clientState };
   if (mediaVoiceCommand(text) === 'camera_describe' && voiceOrbMedia.getState().cameraOpen) {
     try {
@@ -777,7 +792,8 @@ function oracleProtocolResultMessage(pending, result = {}) {
 
 function submitOracleProtocolResult(callId, pending, result) {
   if (!pending?.voiceSessionId) return Promise.resolve(false);
-  return fetchJson(`/api/voice/sessions/${encodeURIComponent(pending.voiceSessionId)}/oracle-results`, {
+  const extensionId = String(pending.extensionId || 'oracle');
+  return fetchJson(`/api/voice/sessions/${encodeURIComponent(pending.voiceSessionId)}/extensions/${encodeURIComponent(extensionId)}/results`, {
     method: 'POST',
     body: JSON.stringify({ call_id: callId, tool: pending.tool, result }),
   }).then(() => true).catch(error => {
@@ -809,6 +825,7 @@ function postOracleProtocolCommand(frame, origin, message) {
     }
   }, ORACLE_COMMAND_TIMEOUT_MS);
   oracleProtocolPendingResults.set(message.id, {
+    extensionId: message.extensionId || 'oracle',
     tool: message.tool,
     arguments: message.arguments,
     voiceSessionId: message.voiceSessionId || '',
@@ -830,6 +847,7 @@ function sendOracleProtocolCommand(tool, args = {}, options = {}) {
     arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
     voiceSessionId: options.voiceSessionId || '',
     serverManaged: Boolean(options.serverManaged),
+    extensionId: options.extensionId || 'oracle',
   };
   if (!oracleProtocolReady) {
     oracleProtocolPendingCommands = [...oracleProtocolPendingCommands.slice(-7), message];
@@ -916,6 +934,8 @@ function applyOracleProtocolControl(event) {
   if (control === 'oracle_protocol_engage') engageOracleProtocol();
   else if (control === 'oracle_protocol_shutdown') shutdownOracleProtocol();
   else {
+    const extensionId = String(event.extension_id || 'oracle');
+    if (extensionId !== 'oracle') return false;
     engageOracleProtocol();
     const tool = String(event.tool || '');
     const callId = String(event.call_id || '');
@@ -925,6 +945,7 @@ function applyOracleProtocolControl(event) {
       messageId: callId,
       voiceSessionId,
       serverManaged,
+      extensionId,
     });
     if (!sent && serverManaged && callId && voiceSessionId) {
       submitOracleProtocolResult(callId, { tool, voiceSessionId }, {

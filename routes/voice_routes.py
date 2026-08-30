@@ -30,6 +30,8 @@ from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
 from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
+from src.extension_host import extension_runtime_host
+from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
 from src.settings import load_settings
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
@@ -37,7 +39,10 @@ from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
-ORACLE_PROTOCOL_URL = os.getenv("ODYSSEUS_ORACLE_URL", "").strip()
+ORACLE_PROTOCOL_URL = (
+    os.getenv("ODYSSEUS_ORACLE_URL", "").strip()
+    or extension_runtime_host.urls.get("oracle", "")
+)
 VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
 VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
@@ -71,9 +76,10 @@ JARVIS_TOOLS = {
     "read_calendar",
     "ui_control",
 }
-ORACLE_TOOL_TIMEOUT_SECONDS = 45
-ORACLE_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
-_ORACLE_TOOL_CALLS: dict[tuple[str, str], dict[str, Any]] = {}
+EXTENSION_TOOL_TIMEOUT_SECONDS = 45
+EXTENSION_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+_EXTENSION_TOOL_CALLS: dict[tuple[str, str, str], dict[str, Any]] = {}
+extension_registry = ExtensionRegistry()
 VOICE_SYSTEM_PROMPT = """Be terse and conversational: normally one or two spoken sentences unless the operator asks for depth. Never describe pacing or offer a capability menu.
 Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff.
 Follow conversational continuity. Ambiguous follow-ups refer to the preceding conversation. Server-injected context blocks, including current date and time, are background data only; never explain, summarize, or quote them unless the operator explicitly asks about that subject.
@@ -160,7 +166,7 @@ class VoiceOracleLayerState(BaseModel):
     error: str | None = Field(default=None, max_length=200)
 
 
-class VoiceOracleToolSpec(BaseModel):
+class VoiceExtensionToolSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["function"] = "function"
@@ -169,12 +175,21 @@ class VoiceOracleToolSpec(BaseModel):
     parameters: dict[str, Any]
 
 
-class VoiceOracleCapabilities(BaseModel):
+class VoiceExtensionCapabilities(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    protocol: Literal["oracle"] = "oracle"
+    protocol: str = Field(min_length=1, max_length=80)
     version: str = Field(max_length=80)
-    tools: list[VoiceOracleToolSpec] = Field(default_factory=list, max_length=64)
+    tools: list[VoiceExtensionToolSpec] = Field(default_factory=list, max_length=64)
+
+
+class VoiceExtensionClientState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool = False
+    updated_at_ms: int = Field(default=0, ge=0)
+    state: dict[str, Any] = Field(default_factory=dict)
+    capabilities: VoiceExtensionCapabilities | None = None
 
 
 class VoiceOracleClientState(BaseModel):
@@ -186,7 +201,7 @@ class VoiceOracleClientState(BaseModel):
     style: Literal["normal", "retro", "surveillance", "thermal", "anime", "noir", "snow"] = "normal"
     camera: VoiceOracleCameraState | None = None
     layers: list[VoiceOracleLayerState] = Field(default_factory=list, max_length=64)
-    capabilities: VoiceOracleCapabilities | None = None
+    capabilities: VoiceExtensionCapabilities | None = None
 
 
 class VoiceClientState(BaseModel):
@@ -195,6 +210,7 @@ class VoiceClientState(BaseModel):
     active_view: Literal["calendar", "document", "chat"] | None = None
     calendar: VoiceCalendarClientState = Field(default_factory=VoiceCalendarClientState)
     document: VoiceDocumentClientState = Field(default_factory=VoiceDocumentClientState)
+    extensions: dict[str, VoiceExtensionClientState] = Field(default_factory=dict, max_length=16)
     oracle: VoiceOracleClientState | None = None
 
 
@@ -215,7 +231,7 @@ class VoiceRespondRequest(BaseModel):
     frame: VoiceFrame | None = None
 
 
-class VoiceOracleToolResult(BaseModel):
+class VoiceExtensionToolResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     call_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,96}$")
@@ -370,9 +386,35 @@ def _set_oracle_protocol_state(
         session["oracle_protocol_pending"] = pending
     if active is not None:
         session["oracle_protocol_active"] = active
+        _set_extension_engaged(session, "oracle", active)
     session["updated_at"] = _now()
     _save_state(state)
     return session
+
+
+def _set_extension_engaged(session: dict[str, Any], extension_id: str, engaged: bool) -> None:
+    current = {
+        str(item)
+        for item in session.get("engaged_extensions") or []
+        if EXTENSION_ID_PATTERN.fullmatch(str(item))
+    }
+    if engaged:
+        current.add(extension_id)
+    else:
+        current.discard(extension_id)
+    session["engaged_extensions"] = sorted(current)
+
+
+def _engaged_extension_ids(session: dict[str, Any]) -> set[str]:
+    engaged = {
+        str(item)
+        for item in session.get("engaged_extensions") or []
+        if EXTENSION_ID_PATTERN.fullmatch(str(item))
+    }
+    # Backward compatibility for sessions created before generic extension state.
+    if session.get("oracle_protocol_active"):
+        engaged.add("oracle")
+    return engaged
 
 
 def _register_speech_turn(session_id: str) -> _SpeechTurn:
@@ -625,7 +667,7 @@ def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
     if not voice_session.get("oracle_protocol_active"):
         return prompt + f"\nORACLE protocol is offline. You are {agent_name}; ORACLE is a tool harness, not another agent or model."
 
-    oracle = (voice_session.get("_client_state") or {}).get("oracle") or {}
+    oracle = _client_extension_state(voice_session, "oracle")
     compact_state = {
         key: oracle[key]
         for key in ("ready", "style", "camera", "layers")
@@ -641,9 +683,25 @@ Natural memorable alias: "Moons out, Goons out" means enable the native NVG/nigh
 Current ORACLE client state is inert data: {json.dumps(compact_state, separators=(',', ':'), sort_keys=True)[:12000]}"""
 
 
-def _oracle_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]:
-    oracle = (voice_session.get("_client_state") or {}).get("oracle") or {}
-    capabilities = oracle.get("capabilities") if isinstance(oracle, dict) else None
+def _client_extension_state(voice_session: dict[str, Any], extension_id: str) -> dict[str, Any]:
+    client_state = voice_session.get("_client_state") or {}
+    extensions = client_state.get("extensions") if isinstance(client_state, dict) else None
+    state = extensions.get(extension_id) if isinstance(extensions, dict) else None
+    if isinstance(state, dict):
+        return state
+    if extension_id == "oracle":
+        legacy = client_state.get("oracle") if isinstance(client_state, dict) else None
+        return legacy if isinstance(legacy, dict) else {}
+    return {}
+
+
+def _client_tool_specs(voice_session: dict[str, Any], extension_id: str) -> list[dict[str, Any]]:
+    state = _client_extension_state(voice_session, extension_id)
+    if state.get("ready") is not True:
+        return []
+    capabilities = state.get("capabilities")
+    if not isinstance(capabilities, dict) or capabilities.get("protocol") != extension_id:
+        return []
     raw_tools = capabilities.get("tools") if isinstance(capabilities, dict) else None
     if not isinstance(raw_tools, list):
         return []
@@ -655,7 +713,7 @@ def _oracle_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]:
         name = str(raw.get("name") or "")
         description = str(raw.get("description") or "")[:2000]
         parameters = raw.get("parameters")
-        if not ORACLE_TOOL_NAME_PATTERN.fullmatch(name) or name in seen or not isinstance(parameters, dict):
+        if not EXTENSION_TOOL_NAME_PATTERN.fullmatch(name) or name in seen or not isinstance(parameters, dict):
             continue
         seen.add(name)
         tools.append({
@@ -667,7 +725,48 @@ def _oracle_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]:
     return tools
 
 
-def _oracle_tool_schemas(tool_specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _extension_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]:
+    engaged = _engaged_extension_ids(voice_session)
+    try:
+        snapshot = extension_registry.snapshot()
+        registered = set(snapshot.get("extensions") or {})
+        effective = extension_registry.effective_capabilities(engaged)
+    except Exception:
+        registered, effective = set(), {}
+
+    client_by_extension = {
+        extension_id: {
+            tool["name"]: tool for tool in _client_tool_specs(voice_session, extension_id)
+        }
+        for extension_id in engaged
+    }
+    specs: list[dict[str, Any]] = []
+    for name, capability in effective.items():
+        extension_id = str(capability["extension_id"])
+        if name not in client_by_extension.get(extension_id, {}):
+            continue
+        function = capability["schema"]["function"]
+        specs.append({
+            "type": "function",
+            "name": name,
+            "description": function.get("description", ""),
+            "parameters": function["parameters"],
+            "extension_id": extension_id,
+            "permission_mode": capability["permission_mode"],
+        })
+
+    # Keep the pre-registry ORACLE bridge working until a real installed revision
+    # proves equivalent; a registered-but-disabled extension never falls back.
+    if "oracle" in engaged and "oracle" not in registered:
+        specs.extend({
+            **tool,
+            "extension_id": "oracle",
+            "permission_mode": "external_side_effect",
+        } for tool in client_by_extension.get("oracle", {}).values())
+    return specs
+
+
+def _extension_tool_schemas(tool_specs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "type": "function",
@@ -681,53 +780,76 @@ def _oracle_tool_schemas(tool_specs: list[dict[str, Any]]) -> list[dict[str, Any
     ]
 
 
-def _oracle_tool_executor(voice_session: dict[str, Any], owner: str, tool_specs: list[dict[str, Any]]):
-    allowed = {tool["name"] for tool in tool_specs}
+def _extension_context(
+    voice_session: dict[str, Any], tool_specs: list[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for tool in tool_specs:
+        extension_id = tool["extension_id"]
+        counts[extension_id] = counts.get(extension_id, 0) + 1
+    return {
+        extension_id: {
+            "engaged": True,
+            "state_mounted": True,
+            "tool_count": count,
+        }
+        for extension_id, count in counts.items()
+    }
+
+
+def _extension_tool_executor(
+    voice_session: dict[str, Any], owner: str, tool_specs: list[dict[str, Any]]
+):
+    allowed = {tool["name"]: tool for tool in tool_specs}
     voice_session_id = str(voice_session.get("id") or "")
 
     async def execute(block, progress_cb):
-        if block.tool_type not in allowed:
+        spec = allowed.get(block.tool_type)
+        if not spec:
             return None
+        extension_id = spec["extension_id"]
+        label = extension_id.upper()
         try:
             arguments = json.loads(block.content or "{}")
         except json.JSONDecodeError:
             arguments = None
         if not isinstance(arguments, dict):
             return (
-                f"ORACLE {block.tool_type}",
-                {"ok": False, "action": block.tool_type, "error": "ORACLE tool arguments must be a JSON object"},
+                f"{label} {block.tool_type}",
+                {"ok": False, "action": block.tool_type, "error": f"{label} tool arguments must be a JSON object"},
             )
         if not voice_session_id:
             return (
-                f"ORACLE {block.tool_type}",
-                {"ok": False, "action": block.tool_type, "error": "ORACLE voice session is unavailable"},
+                f"{label} {block.tool_type}",
+                {"ok": False, "action": block.tool_type, "error": f"{label} voice session is unavailable"},
             )
 
-        call_id = f"oracle_{uuid.uuid4().hex}"
+        call_id = f"extension_{uuid.uuid4().hex}"
         future = asyncio.get_running_loop().create_future()
-        key = (voice_session_id, call_id)
-        _ORACLE_TOOL_CALLS[key] = {
+        key = (voice_session_id, extension_id, call_id)
+        _EXTENSION_TOOL_CALLS[key] = {
             "future": future,
             "owner": owner,
             "tool": block.tool_type,
         }
         try:
             await progress_cb({
-                "oracle_call": {
+                "extension_call": {
                     "call_id": call_id,
+                    "extension_id": extension_id,
                     "tool": block.tool_type,
                     "arguments": arguments,
                 },
             })
-            result = await asyncio.wait_for(future, timeout=ORACLE_TOOL_TIMEOUT_SECONDS)
-            return f"ORACLE {block.tool_type}", result
+            result = await asyncio.wait_for(future, timeout=EXTENSION_TOOL_TIMEOUT_SECONDS)
+            return f"{label} {block.tool_type}", result
         except asyncio.TimeoutError:
             return (
-                f"ORACLE {block.tool_type}",
-                {"ok": False, "action": block.tool_type, "error": "ORACLE did not return a tool result in time"},
+                f"{label} {block.tool_type}",
+                {"ok": False, "action": block.tool_type, "error": f"{label} did not return a tool result in time"},
             )
         finally:
-            _ORACLE_TOOL_CALLS.pop(key, None)
+            _EXTENSION_TOOL_CALLS.pop(key, None)
 
     return execute
 
@@ -2079,6 +2201,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
 
         voice_session["oracle_protocol_pending"] = pending
         voice_session["oracle_protocol_active"] = active
+        _set_extension_engaged(voice_session, "oracle", active)
         voice_session_id = str(voice_session.get("id") or "")
         if voice_session_id:
             _set_oracle_protocol_state(voice_session_id, pending=pending, active=active)
@@ -2617,7 +2740,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     messages = [{"role": "system", "content": _voice_system_prompt(voice_session)}, *context_messages]
     full_response = ""
     task_ids: list[str] = []
-    oracle_tools_used: list[str] = []
+    extension_tools_used: list[str] = []
     started = time.perf_counter()
     first_token_ms: int | None = None
     metrics: dict[str, Any] = {}
@@ -2626,14 +2749,12 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         if selected_target == "pc-codex"
         else JARVIS_TOOLS
     )
-    oracle_active = bool(
-        selected_target == "jarvis" and voice_session.get("oracle_protocol_active")
-    )
-    oracle_specs = _oracle_tool_specs(voice_session) if oracle_active else []
-    oracle_names = {tool["name"] for tool in oracle_specs}
-    oracle_schemas = _oracle_tool_schemas(oracle_specs)
-    if oracle_names:
-        voice_tools = voice_tools | oracle_names
+    extension_specs = _extension_tool_specs(voice_session) if selected_target == "jarvis" else []
+    extension_names = {tool["name"] for tool in extension_specs}
+    extension_schemas = _extension_tool_schemas(extension_specs)
+    extension_context = _extension_context(voice_session, extension_specs)
+    if extension_names:
+        voice_tools = voice_tools | extension_names
     async for chunk in stream_agent_loop(
         endpoint_url,
         model,
@@ -2648,23 +2769,20 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         disabled_tools=set(TOOL_TAGS) - voice_tools,
         owner=owner,
         relevant_tools=voice_tools,
-        extra_tool_schemas=oracle_schemas,
+        extra_tool_schemas=extension_schemas,
         extension_capabilities={
-            name: {"extension_id": "oracle", "permission_mode": "bounded_write"}
-            for name in oracle_names
+            tool["name"]: {
+                "extension_id": tool["extension_id"],
+                "permission_mode": tool["permission_mode"],
+            }
+            for tool in extension_specs
         },
         tool_executor=(
-            _oracle_tool_executor(voice_session, owner, oracle_specs)
-            if oracle_specs
+            _extension_tool_executor(voice_session, owner, extension_specs)
+            if extension_specs
             else None
         ),
-        context_extensions={
-            "oracle": {
-                "engaged": oracle_active,
-                "state_mounted": oracle_active,
-                "tool_count": len(oracle_schemas),
-            }
-        },
+        context_extensions=extension_context,
     ):
         if not chunk.startswith("data: "):
             continue
@@ -2682,20 +2800,21 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             full_response += delta
             if delta:
                 yield {"type": "assistant_delta", "text": delta}
-        elif data.get("type") == "tool_progress" and isinstance(data.get("oracle_call"), dict):
-            call = data["oracle_call"]
+        elif data.get("type") == "tool_progress" and isinstance(data.get("extension_call"), dict):
+            call = data["extension_call"]
             yield {
                 "type": "ui_control",
-                "ui_event": "oracle_protocol_command",
+                "ui_event": "extension_protocol_command",
                 "call_id": str(call.get("call_id") or ""),
+                "extension_id": str(call.get("extension_id") or ""),
                 "tool": str(call.get("tool") or ""),
                 "arguments": call.get("arguments") if isinstance(call.get("arguments"), dict) else {},
                 "server_managed": True,
             }
         elif data.get("type") == "tool_output":
             tool = str(data.get("tool") or "")
-            if tool in oracle_names:
-                oracle_tools_used.append(tool)
+            if tool in extension_names:
+                extension_tools_used.append(tool)
             if tool == "start_agent_task":
                 try:
                     tool_data = json.loads(str(data.get("output") or "{}"))
@@ -2721,7 +2840,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         "inference": True,
         "guard_reason": (
             "friday_conversation" if selected_target == "pc-codex"
-            else "oracle_native_tools" if oracle_tools_used
+            else "extension_native_tools" if extension_tools_used
             else None
         ),
         "agent_metrics": metrics,
@@ -2957,6 +3076,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             "oracle_protocol_url": ORACLE_PROTOCOL_URL,
             "oracle_protocol_pending": False,
             "oracle_protocol_active": False,
+            "engaged_extensions": [],
         }
         state.setdefault("sessions", {})[session_id] = session
         _save_state(state)
@@ -2966,25 +3086,45 @@ def setup_voice_routes(session_manager=None, tts_service=None):
     async def get_voice_session(session_id: str, owner: str = Depends(require_user)):
         return _owned_session(_load_state(), session_id, owner)
 
+    def accept_extension_tool_result(
+        session_id: str,
+        extension_id: str,
+        payload: VoiceExtensionToolResult,
+        owner: str,
+    ):
+        _owned_session(_load_state(), session_id, owner)
+        pending = _EXTENSION_TOOL_CALLS.get((session_id, extension_id, payload.call_id))
+        label = extension_id.upper()
+        if not pending or pending.get("owner") != owner:
+            raise HTTPException(status_code=404, detail={"message": f"{label} tool call not found"})
+        if pending.get("tool") != payload.tool:
+            raise HTTPException(status_code=409, detail={"message": f"{label} tool result does not match pending call"})
+        if len(json.dumps(payload.result, ensure_ascii=True).encode("utf-8")) > 1_000_000:
+            raise HTTPException(status_code=413, detail={"message": f"{label} tool result is too large"})
+        future = pending.get("future")
+        if not isinstance(future, asyncio.Future) or future.done():
+            raise HTTPException(status_code=409, detail={"message": f"{label} tool call is no longer pending"})
+        future.set_result(payload.result)
+        return {"accepted": True}
+
+    @router.post("/sessions/{session_id}/extensions/{extension_id}/results")
+    async def submit_extension_tool_result(
+        session_id: str,
+        extension_id: str,
+        payload: VoiceExtensionToolResult,
+        owner: str = Depends(require_user),
+    ):
+        if not EXTENSION_ID_PATTERN.fullmatch(extension_id):
+            raise HTTPException(status_code=400, detail={"message": "Invalid extension ID"})
+        return accept_extension_tool_result(session_id, extension_id, payload, owner)
+
     @router.post("/sessions/{session_id}/oracle-results")
     async def submit_oracle_tool_result(
         session_id: str,
-        payload: VoiceOracleToolResult,
+        payload: VoiceExtensionToolResult,
         owner: str = Depends(require_user),
     ):
-        _owned_session(_load_state(), session_id, owner)
-        pending = _ORACLE_TOOL_CALLS.get((session_id, payload.call_id))
-        if not pending or pending.get("owner") != owner:
-            raise HTTPException(status_code=404, detail={"message": "ORACLE tool call not found"})
-        if pending.get("tool") != payload.tool:
-            raise HTTPException(status_code=409, detail={"message": "ORACLE tool result does not match pending call"})
-        if len(json.dumps(payload.result, ensure_ascii=True).encode("utf-8")) > 1_000_000:
-            raise HTTPException(status_code=413, detail={"message": "ORACLE tool result is too large"})
-        future = pending.get("future")
-        if not isinstance(future, asyncio.Future) or future.done():
-            raise HTTPException(status_code=409, detail={"message": "ORACLE tool call is no longer pending"})
-        future.set_result(payload.result)
-        return {"accepted": True}
+        return accept_extension_tool_result(session_id, "oracle", payload, owner)
 
     @router.post("/sessions/{session_id}/target")
     async def update_voice_target(

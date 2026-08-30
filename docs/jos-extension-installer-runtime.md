@@ -43,9 +43,10 @@ staging paths.
 
 ## Lifecycle and recovery
 
-The only built-in adapter accepts a static web entry point with inline schemas
-and empty install/start/stop/remove vectors. Every other runtime stops with a
-clear adapter requirement. An adapter is trusted Odysseus code; manifest text
+The built-in adapters accept either a static web entry point with inline
+schemas or a configured external web runtime with a bounded live catalog; both
+require empty install/start/stop/remove vectors. Every other runtime stops with
+a clear adapter requirement. An adapter is trusted Odysseus code; manifest text
 cannot make itself executable.
 
 Catalog registration happens only after pinned checkout, manifest validation,

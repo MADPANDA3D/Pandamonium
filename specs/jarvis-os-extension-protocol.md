@@ -4,7 +4,7 @@
 
 **Version:** `0.1`
 
-**Status:** Manifest, registry, and pinned installer source implementation; generic host pending
+**Status:** Manifest, registry, pinned installer, and generic live-catalog host source implementation
 
 **Reference extension:** ORACLE
 
@@ -131,10 +131,16 @@ Disabled extensions expose neither tools nor context metadata.
 `src/extension_installer.py` owns pinned source checkout and reversible package
 state outside the Odysseus source tree. It reuses P4 action validation, P5 exact
 approval receipts, P7 events, atomic JSON state, and the extension registry.
-Its built-in adapter supports only static web extensions with inline schemas
-and empty lifecycle vectors. MCP, OpenAPI, service, live-catalog, or command-
-driven runtimes stop with `extension_adapter_required` until an explicit host
-adapter exists.
+Its built-in adapters support static web extensions with inline schemas and
+configured external web runtimes with bounded live catalogs; both require empty
+lifecycle vectors. MCP, OpenAPI, service, or command-driven runtimes stop with
+`extension_adapter_required` until an explicit host adapter exists.
+
+Live web runtime locations come from the installation-owned
+`ODYSSEUS_EXTENSION_URLS` map keyed by extension ID. They are never inferred
+from a reference-extension name or embedded as private source defaults. The
+adapter binds the manifest ID, configured origin, catalog response, pinned
+revision, declared permission modes, and health result before registration.
 
 ## Lifecycle
 

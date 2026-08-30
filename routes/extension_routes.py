@@ -10,7 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.middleware import require_admin
 from src.auth_helpers import require_user
 from src.authority_protocol import operator_identity
-from src.extension_installer import ExtensionLifecycleError, ExtensionLifecycleManager
+from src.extension_host import live_catalog_web_adapter
+from src.extension_installer import (
+    ExtensionLifecycleError,
+    ExtensionLifecycleManager,
+    InlineWebAdapter,
+)
 from src.extension_registry import ExtensionContractError
 
 
@@ -31,7 +36,9 @@ class LifecyclePlanRequest(BaseModel):
 
 
 def setup_extension_routes(manager: ExtensionLifecycleManager | None = None) -> APIRouter:
-    manager = manager or ExtensionLifecycleManager()
+    manager = manager or ExtensionLifecycleManager(
+        adapters=[InlineWebAdapter(), live_catalog_web_adapter]
+    )
     router = APIRouter(
         prefix="/api/extensions",
         tags=["extensions"],

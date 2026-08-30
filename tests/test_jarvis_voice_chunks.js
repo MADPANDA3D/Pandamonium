@@ -25,7 +25,8 @@ assert.match(source, /function oracleProtocolToolNames\(\)[\s\S]*?oracleProtocol
 assert.match(source, /function applyOracleProtocolControl\(event\)[\s\S]*?sendOracleProtocolCommand\(tool, event\.arguments/);
 assert.match(source, /function handleOracleProtocolMessage\(event\)[\s\S]*?event\.origin !== oracleProtocolOrigin\(\)/);
 assert.match(source, /message\.type === 'oracle_capabilities'/);
-assert.match(source, /sessions\/\$\{encodeURIComponent\(pending\.voiceSessionId\)\}\/oracle-results/);
+assert.match(source, /sessions\/\$\{encodeURIComponent\(pending\.voiceSessionId\)\}\/extensions\/\$\{encodeURIComponent\(extensionId\)\}\/results/);
+assert.match(source, /clientState\.extensions = \{[\s\S]*?oracle:/);
 assert.match(source, /function oracleProtocolResultMessage\(pending, result = \{\}\)/);
 assert.match(source, /function voiceRequestPayload\(text\)[\s\S]*?clientState\.oracle = oracle/);
 assert.match(source, /capabilities: oracleProtocolCapabilities/);

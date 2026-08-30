@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +30,7 @@ from routes.voice_routes import (
     VoiceRespondRequest,
 )
 from src.agent_worker_adapters import HermesRunsAdapter, _hermes_instructions, _hermes_run_features
+from src.extension_registry import ExtensionRegistry
 
 
 def test_voice_intent_separates_foreground_switch_from_background_delegation():
@@ -1274,7 +1276,7 @@ def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
         "analyst_query",
         "control_cockpit",
     )
-    specs = voice_routes._oracle_tool_specs(session)
+    specs = voice_routes._extension_tool_specs(session)
     assert [tool["name"] for tool in specs] == [
         "fly_to_location",
         "set_visual_style",
@@ -1282,7 +1284,7 @@ def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
         "analyst_query",
         "control_cockpit",
     ]
-    assert [schema["function"]["name"] for schema in voice_routes._oracle_tool_schemas(specs)] == [
+    assert [schema["function"]["name"] for schema in voice_routes._extension_tool_schemas(specs)] == [
         tool["name"] for tool in specs
     ]
     prompt = voice_routes._voice_system_prompt(session)
@@ -1291,6 +1293,62 @@ def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
     assert "satellite over Tel Aviv and enable CCTV" in prompt
     assert "find a flight heading to Miami" in prompt
     assert "Moons out, Goons out" in prompt
+
+
+def test_registered_extension_catalog_is_authoritative_and_disable_removes_it(tmp_path, monkeypatch):
+    manifest = json.loads((
+        Path(__file__).parent / "fixtures" / "extensions" / "atlas.manifest.json"
+    ).read_text())
+    revision = "a" * 40
+    tool = {
+        "name": "create_mesh",
+        "description": "Create a mesh",
+        "parameters": {
+            "type": "object",
+            "properties": {"prompt": {"type": "string"}},
+            "required": ["prompt"],
+            "additionalProperties": False,
+        },
+    }
+    registry = ExtensionRegistry(tmp_path / "extensions.json")
+    registry.register(
+        manifest,
+        {
+            "protocol_version": "jos-extension.v1",
+            "extension_id": "atlas",
+            "version": "1",
+            "source_revision": revision,
+            "tools": [tool],
+        },
+        source_revision=revision,
+        health_available=True,
+    )
+    monkeypatch.setattr(voice_routes, "extension_registry", registry)
+    session = {
+        "id": "voice-1",
+        "target": "jarvis",
+        "engaged_extensions": ["atlas"],
+        "_client_state": {
+            "extensions": {
+                "atlas": {
+                    "ready": True,
+                    "capabilities": {"protocol": "atlas", "version": "1", "tools": [tool]},
+                },
+            },
+        },
+    }
+
+    specs = voice_routes._extension_tool_specs(session)
+
+    assert [(item["name"], item["extension_id"], item["permission_mode"]) for item in specs] == [
+        ("create_mesh", "atlas", "bounded_write")
+    ]
+    assert voice_routes._extension_context(session, specs) == {
+        "atlas": {"engaged": True, "state_mounted": True, "tool_count": 1}
+    }
+    registry.disable("atlas")
+    assert voice_routes._extension_tool_specs(session) == []
+    assert voice_routes._extension_context(session, []) == {}
 
 
 def test_primary_voice_keeps_configured_identity_across_oracle_lifecycle(monkeypatch):
@@ -1366,17 +1424,17 @@ async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypat
 @pytest.mark.asyncio
 async def test_oracle_native_executor_waits_for_the_real_browser_result():
     session = _oracle_voice_session("set_visual_style")
-    executor = voice_routes._oracle_tool_executor(
+    executor = voice_routes._extension_tool_executor(
         session,
         "leo",
-        voice_routes._oracle_tool_specs(session),
+        voice_routes._extension_tool_specs(session),
     )
     progress = []
 
     async def receive_call(payload):
         progress.append(payload)
-        call_id = payload["oracle_call"]["call_id"]
-        voice_routes._ORACLE_TOOL_CALLS[("voice-1", call_id)]["future"].set_result({
+        call_id = payload["extension_call"]["call_id"]
+        voice_routes._EXTENSION_TOOL_CALLS[("voice-1", "oracle", call_id)]["future"].set_result({
             "ok": True,
             "action": "set_visual_style",
             "style": "surveillance",
@@ -1388,8 +1446,38 @@ async def test_oracle_native_executor_waits_for_the_real_browser_result():
     )
     assert description == "ORACLE set_visual_style"
     assert result["ok"] is True
-    assert progress[0]["oracle_call"]["arguments"] == {"style": "surveillance"}
-    assert voice_routes._ORACLE_TOOL_CALLS == {}
+    assert progress[0]["extension_call"]["arguments"] == {"style": "surveillance"}
+    assert progress[0]["extension_call"]["extension_id"] == "oracle"
+    assert voice_routes._EXTENSION_TOOL_CALLS == {}
+
+
+@pytest.mark.asyncio
+async def test_extension_executor_rejects_bad_input_unknown_tools_and_times_out(monkeypatch):
+    session = _oracle_voice_session("set_visual_style")
+    specs = voice_routes._extension_tool_specs(session)
+    executor = voice_routes._extension_tool_executor(session, "leo", specs)
+
+    assert await executor(SimpleNamespace(tool_type="shell", content="{}"), lambda _payload: None) is None
+    description, malformed = await executor(
+        SimpleNamespace(tool_type="set_visual_style", content="[]"),
+        lambda _payload: None,
+    )
+    assert description == "ORACLE set_visual_style"
+    assert malformed["ok"] is False
+    assert "JSON object" in malformed["error"]
+
+    monkeypatch.setattr(voice_routes, "EXTENSION_TOOL_TIMEOUT_SECONDS", 0.001)
+
+    async def accept(_payload):
+        return None
+
+    description, timed_out = await executor(
+        SimpleNamespace(tool_type="set_visual_style", content='{"style":"thermal"}'),
+        accept,
+    )
+    assert description == "ORACLE set_visual_style"
+    assert "time" in timed_out["error"]
+    assert voice_routes._EXTENSION_TOOL_CALLS == {}
 
 
 @pytest.mark.asyncio
@@ -1398,12 +1486,13 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
 
     async def model_stream(_endpoint_url, _model, messages, **kwargs):
         calls.append({"messages": messages, "kwargs": kwargs})
-        if kwargs["context_extensions"]["oracle"]["engaged"]:
+        if kwargs["context_extensions"].get("oracle", {}).get("engaged"):
             yield "data: " + json.dumps({
                 "type": "tool_progress",
                 "tool": "set_visual_style",
-                "oracle_call": {
+                "extension_call": {
                     "call_id": "oracle_call_1",
+                    "extension_id": "oracle",
                     "tool": "set_visual_style",
                     "arguments": {"style": "surveillance"},
                 },
@@ -1412,6 +1501,21 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
                 "type": "tool_output",
                 "tool": "set_visual_style",
                 "output": '{"ok":true,"style":"surveillance"}',
+            })
+            yield "data: " + json.dumps({
+                "type": "tool_progress",
+                "tool": "fly_to_location",
+                "extension_call": {
+                    "call_id": "oracle_call_2",
+                    "extension_id": "oracle",
+                    "tool": "fly_to_location",
+                    "arguments": {"query": "Tel Aviv"},
+                },
+            })
+            yield "data: " + json.dumps({
+                "type": "tool_output",
+                "tool": "fly_to_location",
+                "output": '{"ok":true,"label":"Tel Aviv"}',
             })
             yield 'data: {"delta":"Night vision is active."}'
         else:
@@ -1446,15 +1550,18 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
 
     assert events[0] == {
         "type": "ui_control",
-        "ui_event": "oracle_protocol_command",
+        "ui_event": "extension_protocol_command",
         "call_id": "oracle_call_1",
+        "extension_id": "oracle",
         "tool": "set_visual_style",
         "arguments": {"style": "surveillance"},
         "server_managed": True,
     }
+    assert events[1]["extension_id"] == "oracle"
+    assert events[1]["tool"] == "fly_to_location"
     assert events[-1]["assistant_text"] == "Night vision is active."
     assert events[-1]["diagnostics"]["inference"] is True
-    assert events[-1]["diagnostics"]["guard_reason"] == "oracle_native_tools"
+    assert events[-1]["diagnostics"]["guard_reason"] == "extension_native_tools"
     assert callable(calls[0]["kwargs"]["tool_executor"])
     assert set(calls[0]["kwargs"]["relevant_tools"]) >= {
         "set_visual_style", "fly_to_location", "control_cctv", "analyst_query", "control_cockpit",
@@ -1477,11 +1584,7 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
     ]
     assert offline_events[-1]["assistant_text"] == "ORACLE is offline."
     assert calls[1]["kwargs"]["extra_tool_schemas"] == []
-    assert calls[1]["kwargs"]["context_extensions"]["oracle"] == {
-        "engaged": False,
-        "state_mounted": False,
-        "tool_count": 0,
-    }
+    assert calls[1]["kwargs"]["context_extensions"] == {}
 
 
 @pytest.mark.asyncio

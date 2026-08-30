@@ -15,10 +15,12 @@ from src.extension_installer import (
     normalize_git_source_url,
     validate_git_ref,
 )
+from src.extension_host import ExtensionRuntimeHost, LiveCatalogWebAdapter, configured_extension_urls
 from src.extension_registry import ExtensionRegistry
 
 
 SOURCE_URL = "https://github.com/example/jos-extension-fixture.git"
+ORACLE_SOURCE_URL = "https://github.com/MADPANDA3D/ORACLE.git"
 
 
 def _run(argv, *, cwd=None):
@@ -84,9 +86,9 @@ def git_fixture(tmp_path):
     return repo, v1, v2
 
 
-def _mapped_git(repo: Path) -> GitSourceClient:
+def _mapped_git(repo: Path, source_url: str = SOURCE_URL) -> GitSourceClient:
     def runner(argv, cwd, timeout, environment):
-        mapped = [str(repo) if item == SOURCE_URL else item for item in argv]
+        mapped = [str(repo) if item == source_url else item for item in argv]
         return subprocess.run(
             mapped,
             cwd=str(cwd) if cwd else None,
@@ -102,14 +104,14 @@ def _mapped_git(repo: Path) -> GitSourceClient:
     return GitSourceClient(runner=runner, check_public_urls=False)
 
 
-def _manager(tmp_path: Path, repo: Path, *, adapters=None):
+def _manager(tmp_path: Path, repo: Path, *, adapters=None, source_url: str = SOURCE_URL):
     authority = AuthorityStore(tmp_path / "authority.json")
     registry = ExtensionRegistry(tmp_path / "registry.json")
     manager = ExtensionLifecycleManager(
         root=tmp_path / "managed",
         registry=registry,
         authority=authority,
-        git_client=_mapped_git(repo),
+        git_client=_mapped_git(repo, source_url),
         adapters=adapters,
     )
     return manager, authority, registry
@@ -122,9 +124,9 @@ def _approve_and_execute(manager, authority, plan, *, operator="operator"):
     return manager.execute_plan(plan["plan_id"], operator_id=operator)
 
 
-def _lifecycle(manager, authority, operation, *, target=None):
+def _lifecycle(manager, authority, operation, *, target=None, extension_id="fixture"):
     plan = manager.preview_lifecycle(
-        operation, "fixture", operator_id="operator", target_revision=target
+        operation, extension_id, operator_id="operator", target_revision=target
     )
     return _approve_and_execute(manager, authority, plan)
 
@@ -297,6 +299,117 @@ def test_unsupported_runtime_requires_adapter_and_never_creates_plan(tmp_path, g
     assert manager.snapshot()["plans"] == {}
     assert registry.snapshot()["extensions"] == {}
     assert list((manager.root / "staging").iterdir()) == []
+
+
+def test_oracle_reference_contract_installs_from_its_live_catalog_without_a_copied_tool_list(
+    tmp_path, git_fixture
+):
+    repo, _v1, _v2 = git_fixture
+    manifest = _manifest("3.0.0", "ignored")
+    manifest.update({"extension_id": "oracle", "name": "ORACLE"})
+    manifest["source"]["url"] = ORACLE_SOURCE_URL
+    manifest["capabilities"] = {
+        "descriptor": {"type": "live_catalog", "endpoint": "/api/oracle/capabilities"}
+    }
+    query_tools = (
+        "analyst_query", "get_current_view_state", "get_entity_context", "next_iss_pass"
+    )
+    manifest["permissions"] = {
+        "default": "external_side_effect",
+        "capabilities": {name: "read_only" for name in query_tools},
+    }
+    revision = _commit(repo, manifest, "live-v3")
+    seen = []
+    host = ExtensionRuntimeHost({"oracle": "https://oracle.example.test/"})
+
+    def fetch_catalog(url, timeout):
+        seen.append((url, timeout))
+        return {
+            "protocol": "oracle",
+            "version": "native-3",
+            "tools": [{
+                "name": name,
+                "description": f"Native {name}",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            } for name in query_tools],
+        }
+
+    adapter = LiveCatalogWebAdapter(host, catalog_fetcher=fetch_catalog)
+    manager, authority, registry = _manager(
+        tmp_path, repo, adapters=[adapter], source_url=ORACLE_SOURCE_URL
+    )
+    result = _approve_and_execute(
+        manager,
+        authority,
+        manager.preview_source("install", ORACLE_SOURCE_URL, "live-v3", operator_id="operator"),
+    )
+
+    assert result["result"]["status"] == "succeeded"
+    assert manager.snapshot()["extensions"]["oracle"]["active_revision"] == revision
+    assert seen == [("https://oracle.example.test/api/oracle/capabilities", 3)]
+    assert set(registry.effective_capabilities()) == set(query_tools)
+    assert all(
+        capability["extension_id"] == "oracle"
+        and capability["permission_mode"] == "read_only"
+        for capability in registry.effective_capabilities().values()
+    )
+    assert host.available("oracle") is True
+    _lifecycle(manager, authority, "disable", extension_id="oracle")
+    assert host.available("oracle") is False
+    assert registry.effective_capabilities() == {}
+
+
+def test_live_catalog_timeout_fails_install_closed(tmp_path, git_fixture):
+    repo, _v1, _v2 = git_fixture
+    manifest = _manifest("3.0.0", "ignored")
+    manifest["capabilities"] = {
+        "descriptor": {"type": "live_catalog", "endpoint": "/capabilities"}
+    }
+    manifest["permissions"]["capabilities"] = {}
+    _commit(repo, manifest, "timeout-v3")
+    host = ExtensionRuntimeHost({"fixture": "https://fixture.example.test/"})
+
+    def timeout(_url, _seconds):
+        raise TimeoutError
+
+    manager, authority, registry = _manager(
+        tmp_path,
+        repo,
+        adapters=[LiveCatalogWebAdapter(host, catalog_fetcher=timeout)],
+    )
+    plan = manager.preview_source("install", SOURCE_URL, "timeout-v3", operator_id="operator")
+    authority.resolve(
+        plan["authority_decision"]["decision_id"],
+        operator_id="operator",
+        choice="approve",
+        scope="once",
+    )
+
+    with pytest.raises(ExtensionLifecycleError, match="extension_catalog_timeout"):
+        manager.execute_plan(plan["plan_id"], operator_id="operator")
+    assert registry.effective_capabilities() == {}
+    assert host.available("fixture") is False
+
+
+def test_extension_runtime_url_map_is_strict_and_reference_neutral():
+    assert configured_extension_urls(
+        '{"atlas":"http://127.0.0.1:4173","map-view":"https://map.example.test/app"}'
+    ) == {
+        "atlas": "http://127.0.0.1:4173/",
+        "map-view": "https://map.example.test/app/",
+    }
+    for value in (
+        '{"Oracle":"https://example.test"}',
+        '{"atlas":"http://example.test"}',
+        '{"atlas":"https://user:secret@example.test"}',
+        '{"atlas":"https://example.test:not-a-port"}',
+    ):
+        with pytest.raises(ExtensionLifecycleError):
+            configured_extension_urls(value)
 
 
 def test_manifest_source_and_revision_mismatch_fail_before_approval(tmp_path, git_fixture):

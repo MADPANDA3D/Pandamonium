@@ -237,13 +237,7 @@ class InlineWebAdapter:
     def validate(
         self, install_path: Path, manifest: Mapping[str, Any], source_revision: str
     ) -> tuple[None, bool]:
-        entrypoint = install_path / str((manifest.get("runtime") or {}).get("entrypoint") or "")
-        if (
-            not entrypoint.resolve().is_relative_to(install_path.resolve())
-            or not entrypoint.is_file()
-            or entrypoint.is_symlink()
-        ):
-            raise ExtensionLifecycleError("extension_entrypoint_unavailable")
+        validate_web_entrypoint(install_path, manifest)
         return None, True
 
     def activate(self, install_path: Path, manifest: Mapping[str, Any]) -> None:
@@ -251,6 +245,17 @@ class InlineWebAdapter:
 
     def deactivate(self, install_path: Path, manifest: Mapping[str, Any]) -> None:
         return None
+
+
+def validate_web_entrypoint(install_path: Path, manifest: Mapping[str, Any]) -> Path:
+    entrypoint = install_path / str((manifest.get("runtime") or {}).get("entrypoint") or "")
+    if (
+        not entrypoint.resolve().is_relative_to(install_path.resolve())
+        or not entrypoint.is_file()
+        or entrypoint.is_symlink()
+    ):
+        raise ExtensionLifecycleError("extension_entrypoint_unavailable")
+    return entrypoint
 
 
 _ACTION_NAMES = {
@@ -676,6 +681,26 @@ class ExtensionLifecycleManager:
             raise ExtensionLifecycleError("extension_source_revision_invalid")
         return self.root / "installed" / extension_id / "revisions" / revision
 
+    def _activate_and_register(
+        self,
+        adapter: ExtensionLifecycleAdapter,
+        path: Path,
+        manifest: Mapping[str, Any],
+        catalog: Mapping[str, Any] | None,
+        revision: str,
+    ) -> dict[str, Any]:
+        adapter.activate(path, manifest)
+        try:
+            return self.registry.register(
+                manifest,
+                catalog,
+                source_revision=revision,
+                health_available=True,
+            )
+        except Exception:
+            adapter.deactivate(path, manifest)
+            raise
+
     def _activate_source_plan(self, plan: Mapping[str, Any]) -> dict[str, Any]:
         extension_id = plan["extension_id"]
         revision = plan["source_revision"]
@@ -701,12 +726,8 @@ class ExtensionLifecycleManager:
         catalog, healthy = adapter.validate(destination, manifest, revision)
         if not healthy:
             raise ExtensionLifecycleError("extension_health_unavailable")
-        adapter.activate(destination, manifest)
-        registry_record = self.registry.register(
-            manifest,
-            catalog,
-            source_revision=revision,
-            health_available=True,
+        registry_record = self._activate_and_register(
+            adapter, destination, manifest, catalog, revision
         )
         with self._lock:
             state = self._read_state()
@@ -745,12 +766,8 @@ class ExtensionLifecycleManager:
             catalog, healthy = adapter.validate(path, manifest, record["active_revision"])
             if not healthy:
                 raise ExtensionLifecycleError("extension_health_unavailable")
-            adapter.activate(path, manifest)
-            self.registry.register(
-                manifest,
-                catalog,
-                source_revision=record["active_revision"],
-                health_available=True,
+            self._activate_and_register(
+                adapter, path, manifest, catalog, record["active_revision"]
             )
             state = self._read_state()
             state["extensions"][extension_id]["enabled"] = True
@@ -793,10 +810,7 @@ class ExtensionLifecycleManager:
             catalog, healthy = adapter.validate(path, manifest, target_revision)
             if not healthy:
                 raise ExtensionLifecycleError("extension_health_unavailable")
-            adapter.activate(path, manifest)
-            self.registry.register(
-                manifest, catalog, source_revision=target_revision, health_available=True
-            )
+            self._activate_and_register(adapter, path, manifest, catalog, target_revision)
             old_revision = current["active_revision"]
             current["history"] = [item for item in current["history"] if item != target_revision]
             current["history"].append(old_revision)

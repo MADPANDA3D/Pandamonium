@@ -13,7 +13,7 @@ This record describes the source state on branch
 | `JOS-P5` | Generic source implementation | Receipts and direct worker decisions work; extension permission comes from declared server metadata and fails closed |
 | `JOS-P6` | Generic source implementation | Promotion lifecycle protects the configured agent and operator identities rather than reference names |
 | `JOS-P7` | Generic request-level source implementation | Agent, plain chat, direct worker, and learning events retain correlated protocol traces |
-| `JOS-EXT-1` | Generic manifest, registry, and pinned-lifecycle source implementation | ORACLE-owned reference manifest and generic host proof remain `MAD-753` and `MAD-754` |
+| `JOS-EXT-1` | Generic manifest, registry, pinned lifecycle, and live-catalog host source implementation | Live deployment/acceptance remains separate; compatibility evaluation continues in `MAD-755` |
 
 ## Implementation chain
 
@@ -28,6 +28,7 @@ The dependency order was completed as planned:
 7. P7 operational traces/rollback — `4c87c531`
 8. P6 learning/promotion — `f06e8a0b`
 9. Generic P2-P7 convergence — `MAD-750` (commit recorded at issue close)
+10. Generic live-catalog extension host — `MAD-754` (commit recorded at issue close)
 
 The implementation reuses Odysseus's native session, memory, skill, tool,
 worker, diagnostics, settings, backup, and ORACLE paths. It adds protocol
@@ -46,6 +47,8 @@ is not a deployment or live-environment acceptance claim.
   4 skipped, 0 failed.
 - Complete repository suite after manifest registry and pinned installer:
   4,994 passed, 4 skipped, 0 failed.
+- Complete repository suite after generic live-catalog host convergence:
+  5,000 passed, 4 skipped, 0 failed.
 - Python compilation and `git diff --check` pass.
 - The four skipped tests remain intentional suite skips; nine warnings are
   existing SQLAlchemy/Starlette/Pydantic deprecations and scheduler test
