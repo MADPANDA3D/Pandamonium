@@ -326,6 +326,11 @@ class TestComputeFinalMetrics:
         assert "tool_events" not in m
         assert "round_texts" not in m
 
+    def test_context_manifest_included(self):
+        manifest = {"version": "jos-p2a.1", "mounted": {"tokens": 12}}
+        m = _compute_final_metrics(**self._base_args(context_manifest=manifest))
+        assert m["context_manifest"] == manifest
+
 
 # ---------------------------------------------------------------------------
 # _append_tool_results — native tool-call message shaping

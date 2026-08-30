@@ -546,6 +546,9 @@ async def test_build_chat_context_uses_api_token_owner_for_compaction_scope(monk
         "preface_owner": "alice",
         "compact_owner": "alice",
     }
+    assert ctx.context_manifest["version"] == "jos-p2a.1"
+    assert ctx.context_manifest["mounted"]["classes"]["operator_intent"]["messages"] == 1
+    assert "memory_disabled" in ctx.context_manifest["omissions"]
 
 
 @pytest.mark.asyncio

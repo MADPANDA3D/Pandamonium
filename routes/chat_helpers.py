@@ -15,7 +15,7 @@ from src.llm_core import normalize_model_id
 from src.agent_identity import jarvis_chat_prompt
 from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
-from src.model_context import estimate_tokens
+from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
 from src.auth_helpers import effective_user
 from src.prompt_security import untrusted_context_message
 from src.attachment_refs import attachment_ref
@@ -107,6 +107,7 @@ class ChatContext:
     context_messages_after_trim: int = 0
     context_tokens_before_trim: int = 0
     context_tokens_after_trim: int = 0
+    context_manifest: dict = field(default_factory=dict)
     # Documents auto-created server-side during preprocess (e.g. when an
     # attached fillable PDF gets rendered into a markdown editor doc).
     # The chat route emits a doc_update SSE event for each before streaming
@@ -716,6 +717,14 @@ async def build_chat_context(
     if incognito or not allow_tool_preprocessing or is_research_spinoff or casual_low_signal:
         use_rag_val = False
 
+    context_omissions = []
+    if not mem_enabled:
+        context_omissions.append("memory_disabled")
+    if not use_rag_val:
+        context_omissions.append("document_retrieval_disabled")
+    if agent_mode and not skills_enabled:
+        context_omissions.append("skills_disabled")
+
     # If pre-fetched search context was provided (compare mode), skip live web search
     skip_web = bool(search_context) or not allow_tool_preprocessing or casual_low_signal
 
@@ -784,13 +793,18 @@ async def build_chat_context(
         except Exception:
             logger.debug("Failed to add current date/time context", exc_info=True)
 
+    messages = annotate_context_messages(messages)
+
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
         sess, sess.endpoint_url, sess.model, messages, sess.headers, owner=user,
     )
+    messages = annotate_context_messages(messages)
+    _before_trim_context = messages
     _before_trim_messages = len(messages)
     _before_trim_tokens = estimate_tokens(messages)
     messages = trim_for_context(messages, context_length)
+    messages = annotate_context_messages(messages)
     _after_trim_messages = len(messages)
     _after_trim_tokens = estimate_tokens(messages)
     _context_trimmed = _after_trim_messages < _before_trim_messages or _after_trim_tokens < _before_trim_tokens
@@ -812,6 +826,13 @@ async def build_chat_context(
         context_messages_after_trim=_after_trim_messages,
         context_tokens_before_trim=_before_trim_tokens,
         context_tokens_after_trim=_after_trim_tokens,
+        context_manifest=build_context_manifest(
+            messages,
+            context_length,
+            before_messages=_before_trim_context,
+            was_compacted=was_compacted,
+            omissions=context_omissions,
+        ),
         auto_opened_docs=auto_opened_docs,
         uploaded_files=uploaded_files,
     )

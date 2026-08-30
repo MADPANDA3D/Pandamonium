@@ -1304,6 +1304,7 @@ async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypat
     ]
     assert engaged[0] == {"type": "ui_control", "ui_event": "oracle_protocol_engage"}
     assert engaged[-1]["diagnostics"]["guard_reason"] == "oracle_protocol_engaged"
+    assert engaged[-1]["diagnostics"]["inference"] is False
     assert session["oracle_protocol_active"] is True
     assert session["oracle_protocol_pending"] is False
 
@@ -1352,21 +1353,24 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
 
     async def model_stream(_endpoint_url, _model, messages, **kwargs):
         calls.append({"messages": messages, "kwargs": kwargs})
-        yield "data: " + json.dumps({
-            "type": "tool_progress",
-            "tool": "set_visual_style",
-            "oracle_call": {
-                "call_id": "oracle_call_1",
+        if kwargs["context_extensions"]["oracle"]["engaged"]:
+            yield "data: " + json.dumps({
+                "type": "tool_progress",
                 "tool": "set_visual_style",
-                "arguments": {"style": "surveillance"},
-            },
-        })
-        yield "data: " + json.dumps({
-            "type": "tool_output",
-            "tool": "set_visual_style",
-            "output": '{"ok":true,"style":"surveillance"}',
-        })
-        yield 'data: {"delta":"Night vision is active."}'
+                "oracle_call": {
+                    "call_id": "oracle_call_1",
+                    "tool": "set_visual_style",
+                    "arguments": {"style": "surveillance"},
+                },
+            })
+            yield "data: " + json.dumps({
+                "type": "tool_output",
+                "tool": "set_visual_style",
+                "output": '{"ok":true,"style":"surveillance"}',
+            })
+            yield 'data: {"delta":"Night vision is active."}'
+        else:
+            yield 'data: {"delta":"ORACLE is offline."}'
         yield 'data: {"type":"metrics","data":{"rounds":2}}'
         yield "data: [DONE]"
 
@@ -1404,6 +1408,7 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
         "server_managed": True,
     }
     assert events[-1]["assistant_text"] == "Night vision is active."
+    assert events[-1]["diagnostics"]["inference"] is True
     assert events[-1]["diagnostics"]["guard_reason"] == "oracle_native_tools"
     assert callable(calls[0]["kwargs"]["tool_executor"])
     assert set(calls[0]["kwargs"]["relevant_tools"]) >= {
@@ -1412,7 +1417,26 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
     assert [schema["function"]["name"] for schema in calls[0]["kwargs"]["extra_tool_schemas"]] == [
         "set_visual_style", "fly_to_location", "control_cctv", "analyst_query", "control_cockpit",
     ]
+    assert calls[0]["kwargs"]["context_extensions"]["oracle"] == {
+        "engaged": True,
+        "state_mounted": True,
+        "tool_count": 5,
+    }
     assert "Moons out, Goons out" in calls[0]["messages"][0]["content"]
+
+    session["oracle_protocol_active"] = False
+    offline_events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Are we still in ORACLE?", "leo", session,
+        )
+    ]
+    assert offline_events[-1]["assistant_text"] == "ORACLE is offline."
+    assert calls[1]["kwargs"]["extra_tool_schemas"] == []
+    assert calls[1]["kwargs"]["context_extensions"]["oracle"] == {
+        "engaged": False,
+        "state_mounted": False,
+        "tool_count": 0,
+    }
 
 
 @pytest.mark.asyncio

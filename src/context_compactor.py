@@ -397,6 +397,15 @@ async def maybe_compact(
     summary_msg = {
         "role": "system",
         "content": f"[Conversation summary — earlier messages were compacted]\n{summary}",
+        "metadata": {
+            "compacted": True,
+            "summarized_count": len(older),
+            "jos_context": {
+                "class": "conversation",
+                "source": "session.compaction_summary",
+                "trust": "derived",
+            },
+        },
     }
 
     compacted = system_msgs + [summary_msg] + recent

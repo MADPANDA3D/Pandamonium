@@ -18,7 +18,7 @@ from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
 from src.agent_loop import stream_agent_loop
 from src import agent_runs
-from src.model_context import estimate_tokens
+from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url, resolve_endpoint_by_id
 from src.session_search import search_session_messages
@@ -135,6 +135,21 @@ def _ensure_current_request_is_latest_user(messages: List[Dict[str, Any]], curre
     repaired = list(messages or [])
     repaired.append({"role": "user", "content": current})
     return repaired
+
+
+def _refresh_context_manifest(ctx, messages: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], dict]:
+    """Measure the exact post-route message list while preserving trim history."""
+    annotated = annotate_context_messages(messages)
+    manifest = build_context_manifest(
+        annotated,
+        ctx.context_length,
+        was_compacted=ctx.was_compacted,
+        omissions=(ctx.context_manifest or {}).get("omissions", []),
+    )
+    for field in ("trimming", "compaction"):
+        if (ctx.context_manifest or {}).get(field):
+            manifest[field] = ctx.context_manifest[field]
+    return annotated, manifest
 
 
 _WEB_FOLLOWUP_RE = re.compile(
@@ -530,6 +545,8 @@ def setup_chat_routes(
             except Exception as e:
                 logger.error(f"Research failed: {e}")
 
+        ctx.messages, ctx.context_manifest = _refresh_context_manifest(ctx, ctx.messages)
+
         reply = await llm_call_async(
             sess.endpoint_url,
             sess.model,
@@ -540,7 +557,10 @@ def setup_chat_routes(
             prompt_type=preset_id,
             session_id=session,
         )
-        _clean_reply, _clean_md = clean_thinking_for_save(reply, {"model": sess.model})
+        _clean_reply, _clean_md = clean_thinking_for_save(
+            reply,
+            {"model": sess.model, "context_manifest": ctx.context_manifest},
+        )
         sess.add_message(ChatMessage("assistant", _clean_reply, metadata=_clean_md))
 
         from core.database import update_session_last_accessed
@@ -1211,6 +1231,7 @@ def setup_chat_routes(
                     len(ctx.messages), raw_history_count, len(messages))
             else:
                 messages = _ensure_current_request_is_latest_user(ctx.messages, message)
+            messages, ctx.context_manifest = _refresh_context_manifest(ctx, messages)
 
             # Auto-compact notification
             if ctx.was_compacted:
@@ -1331,6 +1352,7 @@ def setup_chat_routes(
                                     _reported_model = last_metrics.get("model")
                                     last_metrics["requested_model"] = _requested_model
                                     last_metrics["model"] = _reported_model or _actual_model or _answered_by or _requested_model
+                                    last_metrics.setdefault("context_manifest", ctx.context_manifest)
                                     if ctx.context_trimmed:
                                         last_metrics["context_trimmed"] = True
                                         last_metrics["context_messages_before_trim"] = ctx.context_messages_before_trim
@@ -1382,6 +1404,7 @@ def setup_chat_routes(
                                     "model": _actual_model or _answered_by or _requested_model,
                                     "requested_model": _requested_model,
                                     "usage_source": "estimated",
+                                    "context_manifest": ctx.context_manifest,
                                 }
                                 yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
                             if full_response:
@@ -1480,6 +1503,7 @@ def setup_chat_routes(
                         workspace=workspace or None,
                         forced_tools=_forced_tools,
                         uploaded_files=ctx.uploaded_files,
+                        base_context_manifest=ctx.context_manifest,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1530,6 +1554,7 @@ def setup_chat_routes(
                                     _reported_model = last_metrics.get("model")
                                     last_metrics["requested_model"] = last_metrics.get("requested_model") or _requested_model
                                     last_metrics["model"] = _reported_model or _actual_model or _answered_by or _requested_model
+                                    last_metrics.setdefault("context_manifest", ctx.context_manifest)
                                     if ctx.context_trimmed:
                                         last_metrics["context_trimmed"] = True
                                         last_metrics["context_messages_before_trim"] = ctx.context_messages_before_trim

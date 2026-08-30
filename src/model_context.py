@@ -6,9 +6,10 @@ Provides token estimation for context usage tracking.
 """
 
 import ipaddress
+import json
 import logging
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from urllib.parse import urlparse
 
@@ -518,3 +519,233 @@ def estimate_tokens(messages: List[Dict]) -> int:
                 total += 4  # per tool-call overhead (id, type, wrapper)
                 total += int((len(str(name)) + len(args)) * 0.3)
     return total
+
+
+_UNTRUSTED_SOURCE_CLASSES = (
+    (("saved memory",), "recalled_memory"),
+    (("active editor", "active email", "uploaded files"), "working_state"),
+    (("tool execution results", "tool result"), "tool_result"),
+    (("mcp tools", "integrations", "skills", "available skills"), "tool_catalog"),
+    (("oracle",), "oracle_state"),
+)
+
+_SAFE_SOURCE_PREFIXES = (
+    ("saved memory: pinned", "memory.pinned"),
+    ("saved memory: retrieved", "memory.recalled"),
+    ("retrieved documents", "documents.rag"),
+    ("web search results", "web.search"),
+    ("web page:", "web.page"),
+    ("prefetched search context", "web.prefetched"),
+    ("youtube transcript", "youtube.transcript"),
+    ("research context", "research.context"),
+    ("injected research context", "research.context"),
+    ("active editor document", "working_state.document"),
+    ("active email reader", "working_state.email"),
+    ("current chat uploaded files", "working_state.uploads"),
+    ("tool execution results", "tool.execution_result"),
+    ("available skills index", "skills.catalog"),
+    ("skills", "skills.context"),
+    ("integrations", "integrations.catalog"),
+    ("mcp tools", "mcp.catalog"),
+)
+
+
+def _safe_source_name(source: str, fallback: str) -> str:
+    lowered = source.strip().lower()
+    for prefix, safe_name in _SAFE_SOURCE_PREFIXES:
+        if lowered.startswith(prefix):
+            return safe_name
+    return fallback
+
+
+def _context_tag(message: Dict[str, Any]) -> Dict[str, str]:
+    """Return the server-owned JOS context tag for one internal message."""
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    explicit = metadata.get("jos_context") if isinstance(metadata.get("jos_context"), dict) else {}
+    if explicit.get("class"):
+        return {
+            "class": str(explicit["class"]),
+            "source": str(explicit.get("source") or metadata.get("source") or "unknown"),
+            "trust": str(explicit.get("trust") or "unknown"),
+        }
+
+    source = str(metadata.get("source") or "").strip()
+    source_lower = source.lower()
+    if metadata.get("trusted") is False:
+        context_class = "retrieved_knowledge"
+        for prefixes, candidate in _UNTRUSTED_SOURCE_CLASSES:
+            if source_lower.startswith(prefixes):
+                context_class = candidate
+                break
+        return {
+            "class": context_class,
+            "source": _safe_source_name(source, "external.data"),
+            "trust": "untrusted_data",
+        }
+
+    role = str(message.get("role") or "")
+    content = message.get("content")
+    if metadata.get("compacted") or (
+        isinstance(content, str) and content.startswith("[Conversation summary")
+    ):
+        return {
+            "class": "conversation",
+            "source": "session.compaction_summary",
+            "trust": "derived",
+        }
+    if role == "tool":
+        return {
+            "class": "tool_result",
+            "source": source or "tool.execution_result",
+            "trust": "untrusted_data",
+        }
+    if role == "system":
+        return {
+            "class": "identity_policy",
+            "source": source or "odysseus.system",
+            "trust": "system_authority",
+        }
+    return {
+        "class": "conversation",
+        "source": "session.history",
+        "trust": "canonical_history",
+    }
+
+
+def annotate_context_messages(messages: List[Dict]) -> List[Dict]:
+    """Copy messages and add internal JOS tags without touching provider content."""
+    copied = [dict(message) for message in messages or [] if isinstance(message, dict)]
+    latest_operator = None
+    for index in range(len(copied) - 1, -1, -1):
+        message = copied[index]
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if message.get("role") == "user" and metadata.get("trusted") is not False:
+            explicit = metadata.get("jos_context") if isinstance(metadata.get("jos_context"), dict) else {}
+            if explicit.get("class") not in {
+                "time", "working_state", "retrieved_knowledge",
+                "recalled_memory", "tool_catalog",
+            }:
+                latest_operator = index
+                break
+
+    for index, message in enumerate(copied):
+        metadata = dict(message.get("metadata") or {})
+        if not isinstance(metadata.get("jos_context"), dict):
+            tag = _context_tag(message)
+            if index == latest_operator and tag["class"] == "conversation":
+                tag = {
+                    "class": "operator_intent",
+                    "source": "operator.current_turn",
+                    "trust": "operator_authority",
+                }
+            metadata["jos_context"] = tag
+        message["metadata"] = metadata
+    return copied
+
+
+def _summarize_context(messages: List[Dict]) -> Dict[str, Any]:
+    classes: Dict[str, Dict[str, int]] = {}
+    trust: Dict[str, Dict[str, int]] = {}
+    sources: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    annotated = annotate_context_messages(messages)
+    for message in annotated:
+        tag = message["metadata"]["jos_context"]
+        tokens = estimate_tokens([message])
+        class_row = classes.setdefault(tag["class"], {"messages": 0, "tokens": 0})
+        class_row["messages"] += 1
+        class_row["tokens"] += tokens
+        trust_row = trust.setdefault(tag["trust"], {"messages": 0, "tokens": 0})
+        trust_row["messages"] += 1
+        trust_row["tokens"] += tokens
+        key = (tag["class"], tag["source"], tag["trust"])
+        source_row = sources.setdefault(key, {
+            "class": tag["class"],
+            "source": tag["source"],
+            "trust": tag["trust"],
+            "messages": 0,
+            "tokens": 0,
+        })
+        source_row["messages"] += 1
+        source_row["tokens"] += tokens
+    return {
+        "messages": len(annotated),
+        "tokens": estimate_tokens(annotated),
+        "classes": dict(sorted(classes.items())),
+        "trust": dict(sorted(trust.items())),
+        "sources": sorted(sources.values(), key=lambda row: (row["class"], row["source"])),
+    }
+
+
+def _tool_catalog_report(tool_catalog: Optional[Dict[str, List[Dict]]]) -> Dict[str, Any]:
+    report: Dict[str, Any] = {"schema_tokens": 0, "total": 0}
+    for source, schemas in sorted((tool_catalog or {}).items()):
+        valid = [schema for schema in schemas or [] if isinstance(schema, dict)]
+        names = sorted({
+            str((schema.get("function") or {}).get("name") or schema.get("name") or "")
+            for schema in valid
+            if (schema.get("function") or {}).get("name") or schema.get("name")
+        })
+        report[source] = {"count": len(names), "names": names}
+        report["total"] += len(names)
+        report["schema_tokens"] += int(len(json.dumps(valid, sort_keys=True, default=str)) * 0.3)
+    return report
+
+
+def build_context_manifest(
+    messages: List[Dict],
+    context_length: int,
+    *,
+    before_messages: Optional[List[Dict]] = None,
+    was_compacted: bool = False,
+    omissions: Optional[List[str]] = None,
+    tool_catalog: Optional[Dict[str, List[Dict]]] = None,
+    extensions: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Build a content-free JOS-P2A report for the exact mounted context."""
+    mounted = _summarize_context(messages)
+    before = _summarize_context(before_messages if before_messages is not None else messages)
+    dropped: Dict[str, Dict[str, int]] = {}
+    for name, row in before["classes"].items():
+        after_row = mounted["classes"].get(name, {})
+        message_delta = max(row["messages"] - int(after_row.get("messages", 0)), 0)
+        token_delta = max(row["tokens"] - int(after_row.get("tokens", 0)), 0)
+        if message_delta or token_delta:
+            dropped[name] = {"messages": message_delta, "tokens": token_delta}
+
+    summaries = [
+        message for message in annotate_context_messages(messages)
+        if message["metadata"]["jos_context"]["source"] == "session.compaction_summary"
+    ]
+    safe_extensions = {
+        str(name): {
+            "engaged": bool((state or {}).get("engaged")),
+            "state_mounted": bool((state or {}).get("state_mounted")),
+            "tool_count": max(int((state or {}).get("tool_count") or 0), 0),
+        }
+        for name, state in sorted((extensions or {}).items())
+        if isinstance(state, dict)
+    }
+    return {
+        "version": "jos-p2a.1",
+        "context_window": max(int(context_length or 0), 0),
+        "mounted": mounted,
+        "trimming": {
+            "ran": before["messages"] != mounted["messages"] or before["tokens"] != mounted["tokens"],
+            "before_messages": before["messages"],
+            "after_messages": mounted["messages"],
+            "before_tokens": before["tokens"],
+            "after_tokens": mounted["tokens"],
+            "dropped_by_class": dropped,
+        },
+        "compaction": {
+            "ran": bool(was_compacted),
+            "summary_messages": len(summaries),
+            "summarized_messages": sum(
+                int((message.get("metadata") or {}).get("summarized_count") or 0)
+                for message in summaries
+            ),
+        },
+        "omissions": sorted({str(reason) for reason in omissions or [] if reason}),
+        "tools": _tool_catalog_report(tool_catalog),
+        "extensions": safe_extensions,
+    }

@@ -1797,6 +1797,7 @@ def _server_final_event(text: str, reply: str, guard_reason: str, task_ids: list
             "brain_first_token_ms": 0,
             "num_ctx": VOICE_CONTEXT_LENGTH,
             "num_predict": 0,
+            "inference": False,
             "guard_reason": guard_reason,
             "task_ids": task_ids,
             **extra,
@@ -2547,11 +2548,10 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         if selected_target == "pc-codex"
         else JARVIS_TOOLS
     )
-    oracle_specs = (
-        _oracle_tool_specs(voice_session)
-        if selected_target == "jarvis" and voice_session.get("oracle_protocol_active")
-        else []
+    oracle_active = bool(
+        selected_target == "jarvis" and voice_session.get("oracle_protocol_active")
     )
+    oracle_specs = _oracle_tool_specs(voice_session) if oracle_active else []
     oracle_names = {tool["name"] for tool in oracle_specs}
     oracle_schemas = _oracle_tool_schemas(oracle_specs)
     if oracle_names:
@@ -2576,6 +2576,13 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             if oracle_specs
             else None
         ),
+        context_extensions={
+            "oracle": {
+                "engaged": oracle_active,
+                "state_mounted": oracle_active,
+                "tool_count": len(oracle_schemas),
+            }
+        },
     ):
         if not chunk.startswith("data: "):
             continue
@@ -2629,6 +2636,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         "brain_first_token_ms": first_token_ms,
         "num_ctx": VOICE_CONTEXT_LENGTH,
         "num_predict": _num_predict_for_text(text),
+        "inference": True,
         "guard_reason": (
             "friday_conversation" if selected_target == "pc-codex"
             else "oracle_native_tools" if oracle_tools_used

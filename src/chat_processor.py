@@ -235,11 +235,25 @@ class ChatProcessor:
         if preset_system_prompt:
             preface.append({
                 "role": "system",
-                "content": preset_system_prompt
+                "content": preset_system_prompt,
+                "metadata": {
+                    "jos_context": {
+                        "class": "identity_policy",
+                        "source": "odysseus.chat_identity",
+                        "trust": "system_authority",
+                    }
+                },
             })
         preface.append({
             "role": "system",
             "content": UNTRUSTED_CONTEXT_POLICY,
+            "metadata": {
+                "jos_context": {
+                    "class": "policy",
+                    "source": "odysseus.prompt_security_policy",
+                    "trust": "system_authority",
+                }
+            },
         })
 
         # Memory: pinned (always included) + extended (RAG-retrieved when relevant)

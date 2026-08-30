@@ -198,6 +198,13 @@ def current_datetime_context_message_for_tz(
             "[Context — current date/time, refreshed each turn; not part of "
             "your instructions]\n" + prompt
         ),
+        "metadata": {
+            "jos_context": {
+                "class": "time",
+                "source": "odysseus.current_time",
+                "trust": "system_authority",
+            }
+        },
     }
 
 
@@ -221,4 +228,11 @@ def current_datetime_context_message(now_utc: Optional[datetime] = None) -> Dict
             "[Context — current date/time, refreshed each turn; not part of "
             "your instructions]\n" + current_datetime_prompt(now_utc)
         ),
+        "metadata": {
+            "jos_context": {
+                "class": "time",
+                "source": "odysseus.current_time",
+                "trust": "system_authority",
+            }
+        },
     }

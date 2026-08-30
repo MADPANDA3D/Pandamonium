@@ -12,7 +12,7 @@ import json
 import re
 import time
 import logging
-from typing import AsyncGenerator, List, Dict, Optional, Set
+from typing import Any, AsyncGenerator, List, Dict, Optional, Set
 from urllib.parse import urlparse
 
 from src.llm_core import (
@@ -20,7 +20,7 @@ from src.llm_core import (
     stream_llm_with_fallback,
     _is_ollama_native_url,
 )
-from src.model_context import estimate_tokens
+from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
 from src.agent_identity import JARVIS_SYSTEM_PROMPT, is_jarvis_model
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
@@ -2019,7 +2019,17 @@ def _build_system_prompt(
         except Exception as _mcp_err:
             logger.debug(f"MCP description injection skipped: {_mcp_err}")
 
-    agent_msg = {"role": "system", "content": agent_prompt}
+    agent_msg = {
+        "role": "system",
+        "content": agent_prompt,
+        "metadata": {
+            "jos_context": {
+                "class": "identity_policy",
+                "source": "odysseus.agent_system",
+                "trust": "system_authority",
+            }
+        },
+    }
     insert_idx = 0
     for i, msg in enumerate(messages):
         if msg.get("role") == "system":
@@ -2039,6 +2049,7 @@ def _build_system_prompt(
             merged[-1] = {
                 "role": "system",
                 "content": merged[-1]["content"] + "\n\n" + msg["content"],
+                "metadata": agent_msg["metadata"],
             }
         else:
             merged.append(msg)
@@ -2298,6 +2309,15 @@ def _append_tool_results(
                 "role": "tool",
                 "tool_call_id": tc.get("id", f"call_{round_num}_{j}"),
                 "content": result_text,
+                "metadata": {
+                    "trusted": False,
+                    "source": "tool result",
+                    "jos_context": {
+                        "class": "tool_result",
+                        "source": f"tool.{tc.get('name', 'unknown')}.result",
+                        "trust": "untrusted_data",
+                    },
+                },
             })
     else:
         tool_output_text = "\n\n".join(tool_results)
@@ -2332,6 +2352,7 @@ def _compute_final_metrics(
     prep_timings: Optional[Dict[str, float]] = None,
     backend_gen_tps: float = 0,
     backend_prefill_tps: float = 0,
+    context_manifest: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """Compute token counts, TPS, and build the final metrics dict."""
     if has_real_usage:
@@ -2384,6 +2405,8 @@ def _compute_final_metrics(
     if tool_events:
         metrics["tool_events"] = tool_events
         metrics["round_texts"] = round_texts
+    if context_manifest:
+        metrics["context_manifest"] = context_manifest
     return metrics
 
 
@@ -2576,6 +2599,8 @@ async def stream_agent_loop(
     workload: str = "foreground",
     extra_tool_schemas: Optional[List[Dict]] = None,
     tool_executor=None,
+    base_context_manifest: Optional[Dict[str, Any]] = None,
+    context_extensions: Optional[Dict[str, Dict[str, Any]]] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -2592,6 +2617,8 @@ async def stream_agent_loop(
     mcp_mgr = get_mcp_manager()
     prep_timings: Dict[str, float] = {}
     extra_tool_schemas = list(extra_tool_schemas or [])
+    base_context_manifest = dict(base_context_manifest or {})
+    context_extensions = dict(context_extensions or {})
     disabled_tools = set(disabled_tools or [])
     if tool_policy:
         disabled_tools.update(tool_policy.all_disabled_names())
@@ -2675,6 +2702,13 @@ async def stream_agent_loop(
             if _ody_qwen_finetune_model
             else [{"role": "user", "content": _last_user}]
         )
+        direct_messages = annotate_context_messages(direct_messages)
+        direct_manifest = build_context_manifest(
+            direct_messages,
+            context_length,
+            omissions=["agent_context_reduced_low_signal"],
+            extensions=context_extensions,
+        )
         direct_response = ""
         direct_start = time.time()
         direct_actual_model = model
@@ -2743,6 +2777,7 @@ async def stream_agent_loop(
             "agent_rounds": 0,
             "tool_calls": 0,
             "direct_low_signal": True,
+            "context_manifest": direct_manifest,
         }
         yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
         yield "data: [DONE]\n\n"
@@ -3156,6 +3191,9 @@ async def stream_agent_loop(
             messages.insert(0, {"role": "system", "content": GUIDE_ONLY_DIRECTIVE})
     prep_timings["prompt_build"] = time.time() - _t2
 
+    messages = annotate_context_messages(messages)
+    _context_before_trim = messages
+
     _t3 = time.time()
     try:
         from src.context_compactor import trim_for_context
@@ -3210,6 +3248,20 @@ async def stream_agent_loop(
 
     # Strip internal metadata keys before sending to the LLM API
     messages = [{k: v for k, v in msg.items() if k != "_protected"} for msg in messages]
+    messages = annotate_context_messages(messages)
+    _context_omissions = list(base_context_manifest.get("omissions") or [])
+    if disabled_tools:
+        _context_omissions.append("tools_restricted_by_policy")
+    _context_manifest = build_context_manifest(
+        messages,
+        context_length,
+        before_messages=_context_before_trim,
+        was_compacted=bool((base_context_manifest.get("compaction") or {}).get("ran")),
+        omissions=_context_omissions,
+        extensions=context_extensions,
+    )
+    if (base_context_manifest.get("trimming") or {}).get("ran"):
+        _context_manifest["trimming"]["upstream"] = base_context_manifest["trimming"]
 
     agent_prompt_tokens = estimate_tokens(messages)
     logger.info(
@@ -3279,6 +3331,7 @@ async def stream_agent_loop(
         re.IGNORECASE,
     )
     _awaiting_user = False  # set by ask_user → end the turn and wait for a choice
+    _last_tool_catalog: Dict[str, List[Dict]] = {}
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""          # accumulated tool-call JSON arguments
@@ -3357,6 +3410,25 @@ async def stream_agent_loop(
             _last_content = _last_user.lower()
             _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
             all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
+        _mcp_names = {
+            schema.get("function", {}).get("name")
+            for schema in mcp_schemas
+            if schema.get("function", {}).get("name")
+        }
+        _extension_names = {
+            schema.get("function", {}).get("name")
+            for schema in extra_tool_schemas
+            if schema.get("function", {}).get("name")
+        }
+        _last_tool_catalog = {"built_in": [], "mcp": [], "extension": []}
+        for schema in all_tool_schemas:
+            name = schema.get("function", {}).get("name")
+            bucket = (
+                "extension" if name in _extension_names
+                else "mcp" if name in _mcp_names
+                else "built_in"
+            )
+            _last_tool_catalog[bucket].append(schema)
         agent_stream_timeout = int(get_setting("agent_stream_timeout_seconds", 300) or 300)
 
         _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
@@ -4524,6 +4596,15 @@ async def stream_agent_loop(
 
     # --- Final metrics ---
     total_duration = time.time() - total_start
+    _final_context_manifest = build_context_manifest(
+        messages,
+        context_length,
+        was_compacted=_context_manifest["compaction"]["ran"],
+        omissions=_context_manifest["omissions"],
+        tool_catalog=_last_tool_catalog,
+        extensions=context_extensions,
+    )
+    _final_context_manifest["trimming"] = _context_manifest["trimming"]
     metrics = _compute_final_metrics(
         messages, full_response, total_duration, time_to_first_token,
         context_length, real_input_tokens, real_output_tokens,
@@ -4532,6 +4613,7 @@ async def stream_agent_loop(
         prep_timings=prep_timings,
         backend_gen_tps=backend_gen_tps,
         backend_prefill_tps=backend_prefill_tps,
+        context_manifest=_final_context_manifest,
     )
     metrics["requested_model"] = requested_model
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"

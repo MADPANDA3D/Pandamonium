@@ -183,6 +183,9 @@ class TestMaybeCompactFourthMessage:
             m.get("role") == "system" and "compact summary text" in (m.get("content") or "")
             for m in compacted_messages
         )
+        summary = next(m for m in compacted_messages if "compact summary text" in (m.get("content") or ""))
+        assert summary["metadata"]["jos_context"]["source"] == "session.compaction_summary"
+        assert summary["metadata"]["summarized_count"] > 0
 
     def test_handles_multimodal_list_content(self):
         messages = self._four_turn_history_with_tool_call()
