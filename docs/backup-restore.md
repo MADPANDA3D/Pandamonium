@@ -38,6 +38,13 @@ The script depends only on the Python standard library, so any `python3` on your
 
 Every command prints a JSON result. Add `--pretty` for indented output.
 
+Every new snapshot embeds a `jos-p7.backup.v1` manifest with its scope, source
+version, exclusions, external-vector treatment, and restoration procedure. The
+snapshot result includes a SHA-256 digest but remains untrusted until `verify`
+succeeds. Verification writes an atomic `<archive>.verified.json` proof beside
+the tarball; Odysseus diagnostics use that proof when reporting rollback
+availability.
+
 ## Commands
 
 ### `snapshot`

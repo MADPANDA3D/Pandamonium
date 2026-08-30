@@ -29,6 +29,29 @@ def setup_diagnostics_routes(
         from src.service_health import collect_service_health
         return await collect_service_health(rag_manager, memory_vector)
 
+    @router.get("/api/diagnostics/protocol")
+    async def get_protocol_status(request: Request) -> Dict[str, Any]:
+        require_admin(request)
+        from src.operational_protocol import protocol_status
+        return protocol_status()
+
+    @router.get("/api/diagnostics/protocol/events")
+    async def get_protocol_events(
+        request: Request,
+        request_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        require_admin(request)
+        from src.operational_protocol import events
+        return {
+            "events": events.query(
+                request_id=request_id,
+                session_id=session_id,
+                limit=limit,
+            )
+        }
+
     @router.get("/api/diagnostics/logs")
     async def get_diagnostics_logs(request: Request, limit: int = 200) -> Dict[str, Any]:
         require_admin(request)

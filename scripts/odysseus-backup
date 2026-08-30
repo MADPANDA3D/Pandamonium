@@ -24,12 +24,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_lib"))
 from cli import quiet_logs, emit, fail, common_parser, run, REPO_ROOT as _REPO_ROOT
 quiet_logs()
 
-import argparse, json, logging, os, shutil, sqlite3, subprocess, sys, tarfile, tempfile
-from datetime import datetime
+import argparse, hashlib, io, json, logging, os, shutil, sqlite3, subprocess, sys, tarfile, tempfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 _DATA_DIR = _REPO_ROOT / "data"
 _BACKUP_DIR = _REPO_ROOT / "backups"
+_MANIFEST_NAME = "data/.odysseus-backup-manifest.json"
 
 # Stuff inside data/ that we explicitly skip — anything we can re-derive
 # from the SQLite DB + JSON state. Keeps the tarball small.
@@ -66,6 +67,77 @@ def _reject_output_inside_data(out_path: Path) -> None:
     fail("backup output path must be outside data/")
 
 
+def _source_version() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT,
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        return result.stdout.strip()[:80] if result.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _backup_manifest(args) -> dict:
+    exclusions = []
+    if not args.include_research:
+        exclusions.append("data/deep_research")
+    if not args.include_attachments:
+        exclusions.append("data/mail-attachments")
+    return {
+        "schema": "jos-p7.backup.v1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_version": _source_version(),
+        "scope": "odysseus canonical data directory",
+        "exclusions": exclusions,
+        "external_vectors": {
+            "docker_chromadb": "separate volume; back up separately or rebuild from canonical sources",
+            "qdrant": "external projection; back up separately or rebuild from canonical memories/documents",
+        },
+        "integrity": {"algorithm": "sha256", "verified": False},
+        "restoration_procedure": "scripts/odysseus-backup restore <archive> --yes",
+    }
+
+
+def _read_manifest(tar, members) -> dict:
+    member = next((item for item in members if item.name == _MANIFEST_NAME), None)
+    if not member:
+        return {"schema": "legacy", "scope": "data", "exclusions": "unknown"}
+    source = tar.extractfile(member)
+    if source is None or member.size > 1024 * 1024:
+        fail("backup manifest is unreadable or oversized")
+    try:
+        value = json.loads(source.read().decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        fail(f"backup manifest is invalid: {exc}")
+    if not isinstance(value, dict):
+        fail("backup manifest must be a JSON object")
+    return value
+
+
+def _write_verification_sidecar(path: Path, proof: dict) -> bool:
+    sidecar = Path(str(path) + ".verified.json")
+    tmp = Path(str(sidecar) + f".tmp.{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(proof, indent=2), encoding="utf-8")
+        os.replace(tmp, sidecar)
+        return True
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
 def cmd_snapshot(args):
     """Write a tar.gz of the entire data/ directory.
 
@@ -85,6 +157,7 @@ def cmd_snapshot(args):
     files_added = 0
     total_bytes = 0
 
+    manifest = _backup_manifest(args)
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         # Snapshot SQLite DBs to the temp dir first.
@@ -97,10 +170,19 @@ def cmd_snapshot(args):
             db_map[db] = staged
 
         with tarfile.open(out_path, "w:gz") as tar:
+            manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+            manifest_info = tarfile.TarInfo(_MANIFEST_NAME)
+            manifest_info.size = len(manifest_bytes)
+            manifest_info.mtime = int(datetime.now(timezone.utc).timestamp())
+            tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
+            files_added += 1
+            total_bytes += len(manifest_bytes)
             for p in sorted(_DATA_DIR.rglob("*")):
                 if not p.is_file() or p.is_symlink():
                     continue
                 rel = p.relative_to(_DATA_DIR.parent)
+                if str(rel) == _MANIFEST_NAME:
+                    continue
                 # Skip user-asked-to-skip categories
                 if not args.include_research and "deep_research" in rel.parts:
                     continue
@@ -115,15 +197,23 @@ def cmd_snapshot(args):
                 except Exception:
                     pass
 
+    digest = _sha256(out_path)
     emit({
         "ok": True,
+        "schema": manifest["schema"],
         "path": str(out_path),
+        "created_at": manifest["created_at"],
+        "source_version": manifest["source_version"],
+        "scope": manifest["scope"],
+        "exclusions": manifest["exclusions"],
         "files": files_added,
         "uncompressed_bytes": total_bytes,
         "compressed_bytes": out_path.stat().st_size,
         "ratio": round(out_path.stat().st_size / max(total_bytes, 1), 4),
         "included_research": bool(args.include_research),
         "included_attachments": bool(args.include_attachments),
+        "integrity": {"algorithm": "sha256", "sha256": digest, "verified": False},
+        "restoration_procedure": manifest["restoration_procedure"],
     }, args)
 
 
@@ -169,15 +259,21 @@ def cmd_verify(args):
         with tarfile.open(path, "r:gz") as tar:
             members = tar.getmembers()
             _validate_restore_members(members)
+            manifest = _read_manifest(tar, members)
     except (tarfile.TarError, OSError) as e:
         fail(f"tarball is corrupt: {e}")
-    emit({
+    proof = {
         "ok": True,
         "path": str(path),
+        "sha256": _sha256(path),
+        "verified_at": datetime.now(timezone.utc).isoformat(),
         "members": len(members),
         "first": members[0].name if members else None,
         "last": members[-1].name if members else None,
-    }, args)
+        "manifest": manifest,
+    }
+    proof["proof_recorded"] = _write_verification_sidecar(path, proof)
+    emit(proof, args)
 
 
 def _validate_restore_members(members):
@@ -223,6 +319,7 @@ def cmd_restore(args):
     with tarfile.open(path, "r:gz") as tar:
         members = tar.getmembers()
         _validate_restore_members(members)
+        manifest = _read_manifest(tar, members)
         # Save a safety copy of current data/ before extracting.
         if _DATA_DIR.exists() or _DATA_DIR.is_symlink():
             stash = _REPO_ROOT / f"data.before-restore-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -235,6 +332,12 @@ def cmd_restore(args):
         "ok": True,
         "restored_from": str(path),
         "previous_data_stashed_at": str(stash) if stash else None,
+        "manifest": manifest,
+        "acceptance": {
+            "data_directory_present": _DATA_DIR.is_dir(),
+            "manifest_readable": bool(manifest),
+            "previous_state_recoverable": bool(stash),
+        },
     }, args)
 
 

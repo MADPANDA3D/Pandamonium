@@ -45,6 +45,7 @@ from src.authority_protocol import (
     redact_secret_text,
     redact_secrets,
 )
+from src.operational_protocol import record_operational_event
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
@@ -2640,6 +2641,8 @@ async def stream_agent_loop(
     mcp_mgr = get_mcp_manager()
     prep_timings: Dict[str, float] = {}
     extra_tool_schemas = list(extra_tool_schemas or [])
+    _action_request_id = str(uuid.uuid4())
+    _request_trace_started = time.monotonic()
     base_context_manifest = dict(base_context_manifest or {})
     context_extensions = dict(context_extensions or {})
     disabled_tools = set(disabled_tools or [])
@@ -2670,6 +2673,16 @@ async def stream_agent_loop(
     _t0 = time.time()
     _needs_admin = _detect_admin_intent(messages)
     _last_user = _extract_last_user_message(messages)
+    record_operational_event(
+        request_id=_action_request_id,
+        session_id=session_id,
+        operator_id=operator_identity(owner),
+        actor=f"engine:{model}",
+        component="engine",
+        event_type="started",
+        status="running",
+        metadata={"workload": workload},
+    )
     _ody_qwen_finetune_model = (model or "").lower().startswith("odysseus-qwen3")
     _ody_memory_identity_turn = _looks_like_memory_identity_turn(_last_user)
     _intent = _classify_agent_request(messages, _last_user)
@@ -2804,6 +2817,17 @@ async def stream_agent_loop(
             "context_manifest": direct_manifest,
         }
         yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
+        record_operational_event(
+            request_id=_action_request_id,
+            session_id=session_id,
+            operator_id=operator_identity(owner),
+            actor=f"engine:{direct_actual_model}",
+            component="engine",
+            event_type="response",
+            status="succeeded",
+            duration=time.monotonic() - _request_trace_started,
+            usage={"input_tokens": metrics["input_tokens"], "output_tokens": metrics["output_tokens"], "tool_rounds": 0},
+        )
         yield "data: [DONE]\n\n"
         return
 
@@ -3305,7 +3329,6 @@ async def stream_agent_loop(
     time_to_first_token = None
     first_token_received = False
     tool_events = []   # Persist tool executions for history reload
-    _action_request_id = str(uuid.uuid4())
     round_texts = []   # Cleaned text per round for history reload
     # Completion-verifier state (mechanism 3a). _effectful_used flips on when
     # a tool that produces a checkable artifact runs; the verifier only fires
@@ -4253,6 +4276,7 @@ async def stream_agent_loop(
                 },
             )
             _action_started_at = utc_now()
+            _action_started_monotonic = time.monotonic()
             _validation_error = validate_action_call(_action_call, _action_catalog)
             _authority_decision = None
             if not _validation_error:
@@ -4271,6 +4295,23 @@ async def stream_agent_loop(
                     ),
                 )
                 _action_call["authority_ref"] = _authority_decision["decision_id"]
+                record_operational_event(
+                    request_id=_action_request_id,
+                    session_id=session_id,
+                    call_id=_action_call["call_id"],
+                    operator_id=operator_identity(owner),
+                    actor="odysseus:authority",
+                    component="control_plane",
+                    event_type="approval",
+                    status={"allow": "succeeded", "deny": "denied"}.get(
+                        _authority_decision["decision"], "approval_required"
+                    ),
+                    evidence_refs=[{"decision_id": _authority_decision["decision_id"]}],
+                    metadata={
+                        "permission_mode": _authority_decision["permission_mode"],
+                        "policy_basis": _authority_decision["policy_basis"],
+                    },
+                )
 
             if _validation_error:
                 desc = f"{block.tool_type}: DENIED"
@@ -4676,6 +4717,26 @@ async def stream_agent_loop(
                 yield 'data: ' + json.dumps({"delta": _anchor}) + '\n\n'
 
             # Save for history persistence
+            _operational_event = record_operational_event(
+                request_id=_action_request_id,
+                session_id=session_id,
+                task_id=str(result.get("task_id") or "") or None,
+                call_id=_action_call["call_id"],
+                operator_id=operator_identity(owner),
+                actor=_action_call["actor"],
+                component=_action_call["target"],
+                event_type="result",
+                status=_action_result["status"],
+                duration=time.monotonic() - _action_started_monotonic,
+                evidence_refs=[_action_result["evidence"]],
+                error=_action_result["error"],
+                metadata={
+                    "capability": _action_call["name"],
+                    "capability_version": _action_call["capability_version"],
+                    "authority_ref": _action_call.get("authority_ref"),
+                    "retry_safe": _action_result["retry_safe"],
+                },
+            )
             tool_event = {
                 "round": round_num,
                 "tool": block.tool_type,
@@ -4687,6 +4748,8 @@ async def stream_agent_loop(
             }
             if _authority_decision:
                 tool_event["authority_decision"] = _authority_decision
+            if _operational_event:
+                tool_event["operational_event_id"] = _operational_event["event_id"]
             if result.get("image_url"):
                 for ik in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
                     if result.get(ik):
@@ -4839,6 +4902,32 @@ async def stream_agent_loop(
         context_manifest=_final_context_manifest,
     )
     metrics["requested_model"] = requested_model
+    _request_status = "succeeded"
+    if _exhausted_rounds:
+        _request_status = "degraded"
+    for _event in tool_events:
+        _status = (_event.get("action_result") or {}).get("status")
+        if _status in {"unknown", "timed_out", "cancelled", "denied", "failed"}:
+            _request_status = _status
+            break
+    record_operational_event(
+        request_id=_action_request_id,
+        session_id=session_id,
+        operator_id=operator_identity(owner),
+        actor=f"engine:{actual_model}",
+        component="control_plane",
+        event_type="response",
+        status=_request_status,
+        duration=time.monotonic() - _request_trace_started,
+        usage={
+            "input_tokens": metrics.get("input_tokens"),
+            "output_tokens": metrics.get("output_tokens"),
+            "tool_rounds": metrics.get("agent_rounds"),
+            "tool_calls": metrics.get("tool_calls"),
+        },
+        evidence_refs=[{"tool_event_ids": [event.get("operational_event_id") for event in tool_events if event.get("operational_event_id")]}],
+        error=None if _request_status == "succeeded" else {"category": _request_status, "detail": "request did not complete normally"},
+    )
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 
     # Teacher-escalation: inline takeover visible in the chat stream.

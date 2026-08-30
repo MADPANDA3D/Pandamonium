@@ -1,4 +1,5 @@
 import io
+import json
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -164,3 +165,38 @@ def test_restore_extracts_regular_files_without_extractall(tmp_path, monkeypatch
     assert (repo / "data" / "nested" / "new.txt").read_text(encoding="utf-8") == "new"
     assert not (repo / "data" / "old.txt").exists()
     assert list(repo.glob("data.before-restore-*"))
+
+
+def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(tmp_path, monkeypatch):
+    backup = _load_backup_cli()
+    repo = tmp_path / "repo"
+    data = repo / "data"
+    data.mkdir(parents=True)
+    (data / "state.json").write_text('{"ok": true}', encoding="utf-8")
+    _patch_repo(backup, monkeypatch, repo)
+    archive = tmp_path / "snapshot.tar.gz"
+    emitted = []
+    monkeypatch.setattr(backup, "emit", lambda payload, args: emitted.append(payload))
+    args = SimpleNamespace(
+        out=str(archive),
+        include_research=False,
+        include_attachments=False,
+        pretty=False,
+    )
+
+    backup.cmd_snapshot(args)
+    snapshot = emitted.pop()
+    assert snapshot["schema"] == "jos-p7.backup.v1"
+    assert snapshot["integrity"]["verified"] is False
+    assert snapshot["integrity"]["sha256"]
+    with tarfile.open(archive, "r:gz") as tar:
+        manifest = json.loads(tar.extractfile("data/.odysseus-backup-manifest.json").read())
+    assert manifest["scope"] == "odysseus canonical data directory"
+    assert "data/deep_research" in manifest["exclusions"]
+    assert "qdrant" in manifest["external_vectors"]
+
+    backup.cmd_verify(_verify_args(archive))
+    proof = emitted.pop()
+    assert proof["ok"] is True
+    assert proof["proof_recorded"] is True
+    assert Path(str(archive) + ".verified.json").exists()
