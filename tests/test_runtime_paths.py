@@ -2,7 +2,7 @@ import os
 import sys
 from unittest import mock
 import pytest
-from src.runtime_paths import get_app_root, get_default_data_dir
+from src.runtime_paths import get_app_root, get_default_data_dir, get_default_extensions_dir
 
 
 def test_get_app_root_normal_run():
@@ -48,3 +48,17 @@ def test_get_default_data_dir_frozen():
         res = get_default_data_dir()
         expected = os.path.join(os.path.expanduser("~"), ".odysseus", "data")
         assert res == expected
+
+
+def test_extension_checkout_default_moves_outside_source(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    result = get_default_extensions_dir(os.path.join(get_app_root(), "data"))
+
+    assert result == str(tmp_path / "xdg" / "odysseus" / "extensions")
+
+
+def test_extension_checkout_default_reuses_external_data_root(tmp_path):
+    data_root = tmp_path / "odysseus-data"
+
+    assert get_default_extensions_dir(str(data_root)) == str(data_root / "extensions")

@@ -772,6 +772,9 @@ app.include_router(setup_agent_task_routes(session_manager))
 from routes.authority_routes import setup_authority_routes
 app.include_router(setup_authority_routes())
 
+from routes.extension_routes import setup_extension_routes
+app.include_router(setup_extension_routes())
+
 from routes.voice_routes import setup_voice_routes
 app.include_router(setup_voice_routes(session_manager, tts_service))
 

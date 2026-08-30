@@ -4,7 +4,7 @@
 
 **Version:** `0.1`
 
-**Status:** Manifest and metadata-registry source implementation; installer and host pending
+**Status:** Manifest, registry, and pinned installer source implementation; generic host pending
 
 **Reference extension:** ORACLE
 
@@ -84,6 +84,13 @@ Tool discovery maps declared manifests, live catalogs, or supported standards
 such as MCP/OpenAPI. It does not guess arbitrary endpoints or execute arbitrary
 repository setup scripts without an explicit adapter and operator approval.
 
+The source installer accepts canonical HTTPS repositories from its supported
+public Git hosts and resolves `HEAD`, a named branch/tag, or an advertised full
+commit to one immutable revision. Preview uses a bounded Git checkout under the
+managed extension root, returns the manifest permissions and lifecycle vectors,
+and creates an exact P5 approval decision. Approval never authorizes undeclared
+setup scripts: only an installed Odysseus adapter may implement a runtime.
+
 ## Manifest v1
 
 The normative schema is
@@ -93,7 +100,7 @@ manifest declares:
 | Area | Required declaration |
 | --- | --- |
 | Identity | Protocol version, extension ID, display name, extension version |
-| Source | HTTPS repository URL and full pinned Git revision |
+| Source | HTTPS repository URL and full pinned Git revision, or `self` for installer binding |
 | Runtime | Runtime type and repository-relative entry point |
 | Capabilities | Inline schema or reference to an MCP, OpenAPI, or live catalog descriptor |
 | Authority | Default requested permission plus per-capability overrides |
@@ -108,12 +115,26 @@ resolves that descriptor and passes its schemas, health result, and observed
 source revision to the registry. Inline schemas are reserved for extensions
 that have no supported external descriptor.
 
+An in-repository manifest uses `source.revision: self` because a file cannot
+contain the hash of the commit that contains itself. The installer resolves the
+requested ref first, checks out that exact full revision, and replaces `self`
+with the observed immutable revision before registry admission. An explicit
+hash in the manifest must match exactly.
+
 `src/extension_registry.py` validates and atomically stores only normalized
 manifest metadata and effective capability schemas. It does not fetch an
 endpoint, clone a repository, execute lifecycle vectors, or dispatch a tool.
 Unknown security-relevant fields, malformed or duplicate schemas, unhealthy
 catalogs, revision mismatches, and cross-extension name conflicts fail closed.
 Disabled extensions expose neither tools nor context metadata.
+
+`src/extension_installer.py` owns pinned source checkout and reversible package
+state outside the Odysseus source tree. It reuses P4 action validation, P5 exact
+approval receipts, P7 events, atomic JSON state, and the extension registry.
+Its built-in adapter supports only static web extensions with inline schemas
+and empty lifecycle vectors. MCP, OpenAPI, service, live-catalog, or command-
+driven runtimes stop with `extension_adapter_required` until an explicit host
+adapter exists.
 
 ## Lifecycle
 

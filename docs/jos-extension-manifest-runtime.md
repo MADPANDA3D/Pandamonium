@@ -9,7 +9,8 @@ extension metadata before any Git installer or generic lifecycle host exists.
 
 - `specs/schemas/jos-extension-v1.schema.json` defines the strict
   `jos-extension.v1` manifest shared by ORACLE and differently named fixtures.
-- The manifest pins source identity and revision, declares runtime and data
+- The manifest declares source identity plus an exact revision or the `self`
+  binding that the installer replaces with its observed full commit; it declares runtime and data
   boundaries, requests permission modes, references or embeds a capability
   descriptor, and records bounded health/lifecycle/removal/rollback metadata.
 - MCP, OpenAPI, and live catalogs stay authoritative. Their schemas are

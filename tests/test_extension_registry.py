@@ -56,6 +56,19 @@ def test_one_schema_validates_oracle_and_differently_named_fixture():
     assert not any("oracle" in field.lower() for field in schema["properties"])
 
 
+def test_self_revision_binds_to_observed_immutable_revision():
+    manifest = _manifest("atlas")
+    revision = "1" * 40
+    catalog = _catalog(manifest, [_tool("create_mesh")])
+    catalog["source_revision"] = revision
+
+    reconciled = reconcile_extension_catalog(
+        manifest, catalog, source_revision=revision, health_available=True
+    )
+
+    assert reconciled["manifest"]["source"]["revision"] == revision
+
+
 def test_standard_and_live_descriptors_are_references_not_copied_schemas():
     oracle = validate_extension_manifest(_manifest("oracle"))
     atlas = validate_extension_manifest(_manifest("atlas"))
@@ -126,8 +139,8 @@ def test_registry_stores_metadata_only_and_disable_removes_tools_and_context(tmp
     )
     registry.register(
         atlas,
-        _catalog(atlas, [_tool("create_mesh")]),
-        source_revision=atlas["source"]["revision"],
+        {**_catalog(atlas, [_tool("create_mesh")]), "source_revision": "1" * 40},
+        source_revision="1" * 40,
         health_available=True,
     )
 
@@ -142,6 +155,8 @@ def test_registry_stores_metadata_only_and_disable_removes_tools_and_context(tmp
     assert set(registry.effective_capabilities({"oracle", "atlas"})) == {"create_mesh"}
     assert set(registry.context_extensions({"oracle", "atlas"})) == {"atlas"}
     assert registry.snapshot()["extensions"]["oracle"]["effective_capabilities"] == []
+    assert registry.unregister("oracle") is True
+    assert registry.unregister("oracle") is False
 
 
 def test_cross_extension_duplicate_capability_fails_before_registry_write(tmp_path):
@@ -157,8 +172,8 @@ def test_cross_extension_duplicate_capability_fails_before_registry_write(tmp_pa
 
     with pytest.raises(ExtensionContractError, match="extension_registry_capability_conflict"):
         registry.register(
-            atlas, _catalog(atlas, [_tool("shared_tool")]),
-            source_revision=atlas["source"]["revision"], health_available=True,
+            atlas, {**_catalog(atlas, [_tool("shared_tool")]), "source_revision": "1" * 40},
+            source_revision="1" * 40, health_available=True,
         )
 
     assert set(registry.snapshot()["extensions"]) == {"oracle"}

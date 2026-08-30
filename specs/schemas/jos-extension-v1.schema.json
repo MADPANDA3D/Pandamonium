@@ -18,7 +18,7 @@
       "type": "object", "additionalProperties": false, "required": ["url", "revision"],
       "properties": {
         "url": {"type": "string", "format": "uri", "pattern": "^https://"},
-        "revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+        "revision": {"type": "string", "pattern": "^(?:self|[0-9a-f]{40}|[0-9a-f]{64})$"}
       }
     },
     "runtime": {

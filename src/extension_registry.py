@@ -23,7 +23,8 @@ REGISTRY_VERSION = "jos-extension-registry.v1"
 REGISTRY_FILE = Path(DATA_DIR) / "extensions.json"
 EXTENSION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
-REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+REVISION_PATTERN = re.compile(r"^(?:self|[0-9a-f]{40}|[0-9a-f]{64})$")
+IMMUTABLE_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 PERMISSION_MODES = frozenset(
     {"read_only", "bounded_write", "external_side_effect", "destructive", "controlled_administrative"}
 )
@@ -268,8 +269,12 @@ def reconcile_extension_catalog(
     normalized = validate_extension_manifest(manifest)
     if not health_available:
         raise ExtensionContractError("extension_health_unavailable")
-    if source_revision != normalized["source"]["revision"]:
+    if not IMMUTABLE_REVISION_PATTERN.fullmatch(source_revision):
+        raise ExtensionContractError("extension_source_revision_invalid")
+    declared_revision = normalized["source"]["revision"]
+    if declared_revision not in {"self", source_revision}:
         raise ExtensionContractError("extension_source_revision_mismatch")
+    normalized["source"]["revision"] = source_revision
 
     descriptor_type = normalized["capabilities"]["descriptor"]["type"]
     if descriptor_type == "inline":
@@ -408,6 +413,15 @@ class ExtensionRegistry:
                 return False
             record["enabled"] = False
             record["effective_capabilities"] = []
+            self._write(state)
+            return True
+
+    def unregister(self, extension_id: str) -> bool:
+        with self._lock:
+            state = self._read()
+            if extension_id not in state["extensions"]:
+                return False
+            del state["extensions"][extension_id]
             self._write(state)
             return True
 

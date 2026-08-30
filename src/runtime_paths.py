@@ -28,3 +28,17 @@ def get_default_data_dir() -> str:
     if getattr(sys, "frozen", False):
         return os.path.join(os.path.expanduser("~"), ".odysseus", "data")
     return os.path.join(get_app_root(), "data")
+
+
+def get_default_extensions_dir(data_dir: str) -> str:
+    """Keep managed Git checkouts out of a source tree by default."""
+    app_root = os.path.abspath(get_app_root())
+    resolved_data = os.path.abspath(data_dir)
+    try:
+        data_is_in_source = os.path.commonpath((app_root, resolved_data)) == app_root
+    except ValueError:
+        data_is_in_source = False
+    if not data_is_in_source:
+        return os.path.join(resolved_data, "extensions")
+    xdg_data = os.getenv("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(xdg_data, "odysseus", "extensions")

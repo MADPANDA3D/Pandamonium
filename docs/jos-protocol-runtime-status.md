@@ -13,7 +13,7 @@ This record describes the source state on branch
 | `JOS-P5` | Generic source implementation | Receipts and direct worker decisions work; extension permission comes from declared server metadata and fails closed |
 | `JOS-P6` | Generic source implementation | Promotion lifecycle protects the configured agent and operator identities rather than reference names |
 | `JOS-P7` | Generic request-level source implementation | Agent, plain chat, direct worker, and learning events retain correlated protocol traces |
-| `JOS-EXT-1` | Generic manifest and metadata-registry source implementation | Installer, ORACLE-owned reference manifest, and generic host proof remain `MAD-752` through `MAD-754` |
+| `JOS-EXT-1` | Generic manifest, registry, and pinned-lifecycle source implementation | ORACLE-owned reference manifest and generic host proof remain `MAD-753` and `MAD-754` |
 
 ## Implementation chain
 
@@ -44,6 +44,8 @@ is not a deployment or live-environment acceptance claim.
 - MAD-750 P2-P7 focused selection: 277 passed, 0 failed.
 - Complete repository suite after generic P2-P7 convergence: 4,974 passed,
   4 skipped, 0 failed.
+- Complete repository suite after manifest registry and pinned installer:
+  4,994 passed, 4 skipped, 0 failed.
 - Python compilation and `git diff --check` pass.
 - The four skipped tests remain intentional suite skips; nine warnings are
   existing SQLAlchemy/Starlette/Pydantic deprecations and scheduler test
