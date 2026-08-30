@@ -158,19 +158,29 @@ an explicit compatibility boundary.
 
 ## Protocol registry
 
-`JOS-P0` is specified here. `JOS-P1` and `JOS-EXT-1` are specified in linked
-documents; the remaining identifiers reserve clean ownership boundaries so
-later protocols do not overlap:
+`JOS-P0` is specified here. The remaining protocols are specified in linked
+documents with clean ownership boundaries so they do not overlap:
 
 | ID | Boundary |
 | --- | --- |
 | `JOS-P1` | [Identity and constitution](jarvis-os-identity-constitution.md) |
-| `JOS-P2` | Context and attention |
-| `JOS-P3` | Memory and provenance |
-| `JOS-P4` | Actions, tools, and verification |
-| `JOS-P5` | Authority, approval, and security |
-| `JOS-P6` | Learning, evaluation, and promotion |
-| `JOS-P7` | Observability, recovery, and rollback |
+| `JOS-P2` | [Context and attention](jarvis-os-context-attention.md) |
+| `JOS-P3` | [Memory and provenance](jarvis-os-memory-provenance.md) |
+| `JOS-P4` | [Actions, tools, and verification](jarvis-os-actions-tools-verification.md) |
+| `JOS-P5` | [Authority, approval, and security](jarvis-os-authority-approval-security.md) |
+| `JOS-P6` | [Learning, evaluation, and promotion](jarvis-os-learning-evaluation-promotion.md) |
+| `JOS-P7` | [Observability, recovery, and rollback](jarvis-os-observability-recovery-rollback.md) |
+
+The protocol numbers describe ownership, not implementation order. The current
+dependency order is:
+
+1. `JOS-P2` — make mounted context explicit and bounded;
+2. `JOS-P3` — add governed memory/document provenance and Qdrant projections;
+3. `JOS-P4` — normalize action and result evidence;
+4. `JOS-P5` — unify authority and approval receipts across those actions;
+5. `JOS-P7` — make the resulting system observable, recoverable, and reversible;
+6. `JOS-P6` — enable governed learning only after evidence, authority, and
+   rollback exist.
 
 Extension contracts use a separate namespace. `JOS-EXT-1` defines how an
 independently maintained project becomes a Jarvis capability without becoming
