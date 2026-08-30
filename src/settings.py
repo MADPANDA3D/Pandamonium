@@ -131,6 +131,19 @@ DEFAULT_SETTINGS = {
     # want to actually use (e.g. 900_000 to fill a 1M-context model). See
     # `compute_input_token_budget`.
     "agent_input_token_hard_max": 200_000,
+    # Independent ceilings within the usable input budget. They do not need to
+    # sum to 100; unused room stays available to current intent and active state.
+    "context_class_budget_percent": {
+        "conversation": 45,
+        "working_state": 35,
+        "recalled_memory": 15,
+        "retrieved_knowledge": 25,
+        "derived_knowledge": 10,
+        "tool_catalog": 20,
+        "tool_result": 30,
+        "oracle_state": 20,
+        "time": 5,
+    },
     "agent_stream_timeout_seconds": 300,
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each

@@ -20,7 +20,13 @@ from src.llm_core import (
     stream_llm_with_fallback,
     _is_ollama_native_url,
 )
-from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
+from src.model_context import (
+    annotate_context_messages,
+    build_context_manifest,
+    cap_tool_schemas,
+    estimate_tokens,
+    estimate_tool_schema_tokens,
+)
 from src.agent_identity import JARVIS_SYSTEM_PROMPT, is_jarvis_model
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
@@ -2708,6 +2714,7 @@ async def stream_agent_loop(
             context_length,
             omissions=["agent_context_reduced_low_signal"],
             extensions=context_extensions,
+            input_budget=max(context_length - 512, 64),
         )
         direct_response = ""
         direct_start = time.time()
@@ -3193,6 +3200,7 @@ async def stream_agent_loop(
 
     messages = annotate_context_messages(messages)
     _context_before_trim = messages
+    _effective_input_budget = max(context_length - 512, 64)
 
     _t3 = time.time()
     try:
@@ -3227,6 +3235,7 @@ async def stream_agent_loop(
                 budget_is_explicit,
                 hard_max=hard_max,
             )
+            _effective_input_budget = max(effective_budget - reserve_tokens, 64)
             trimmed_messages = trim_for_context(
                 messages,
                 effective_budget,
@@ -3259,6 +3268,7 @@ async def stream_agent_loop(
         was_compacted=bool((base_context_manifest.get("compaction") or {}).get("ran")),
         omissions=_context_omissions,
         extensions=context_extensions,
+        input_budget=_effective_input_budget,
     )
     if (base_context_manifest.get("trimming") or {}).get("ran"):
         _context_manifest["trimming"]["upstream"] = base_context_manifest["trimming"]
@@ -3332,6 +3342,7 @@ async def stream_agent_loop(
     )
     _awaiting_user = False  # set by ask_user → end the turn and wait for a choice
     _last_tool_catalog: Dict[str, List[Dict]] = {}
+    _tool_catalog_dropped: Set[str] = set()
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""          # accumulated tool-call JSON arguments
@@ -3420,6 +3431,58 @@ async def stream_agent_loop(
             for schema in extra_tool_schemas
             if schema.get("function", {}).get("name")
         }
+        _schema_priority = set(forced_tools or set()) | _extension_names
+        all_tool_schemas, _dropped_schemas = cap_tool_schemas(
+            all_tool_schemas,
+            _effective_input_budget,
+            priority_names=_schema_priority,
+        )
+        if _dropped_schemas:
+            _tool_catalog_dropped.update(_dropped_schemas)
+            logger.info(
+                "[agent-context] tool catalog capped; omitted=%s",
+                sorted(_dropped_schemas),
+            )
+
+        # Native schemas consume the same provider input window as messages.
+        # Leave their measured footprint inside the usable input budget and
+        # re-run the shared class-aware trimmer after every tool-result round.
+        _schema_tokens = estimate_tool_schema_tokens(all_tool_schemas)
+        _message_budget = max(_effective_input_budget - _schema_tokens, 64)
+        _round_before_trim = messages
+        try:
+            from src.context_compactor import trim_for_context
+
+            _round_trimmed = trim_for_context(
+                messages,
+                _message_budget,
+                reserve_tokens=0,
+                class_budget_base=_effective_input_budget,
+            )
+            if estimate_tokens(_round_trimmed) < estimate_tokens(messages):
+                messages = _round_trimmed
+                _round_manifest = build_context_manifest(
+                    messages,
+                    context_length,
+                    before_messages=_round_before_trim,
+                    omissions=_context_manifest["omissions"],
+                    extensions=context_extensions,
+                    input_budget=_effective_input_budget,
+                )
+                _accumulated = _context_manifest["trimming"]["dropped_by_class"]
+                for _class_name, _row in _round_manifest["trimming"]["dropped_by_class"].items():
+                    _total = _accumulated.setdefault(_class_name, {"messages": 0, "tokens": 0})
+                    _total["messages"] += _row["messages"]
+                    _total["tokens"] += _row["tokens"]
+                _context_manifest["trimming"]["ran"] = True
+                _context_manifest["trimming"]["after_messages"] = len(messages)
+                _context_manifest["trimming"]["after_tokens"] = estimate_tokens(messages)
+                _context_manifest["omissions"] = sorted(
+                    set(_context_manifest["omissions"]) | set(_round_manifest["omissions"])
+                )
+        except Exception as _trim_error:
+            logger.warning("[agent-context] round trim skipped: %s", _trim_error)
+
         _last_tool_catalog = {"built_in": [], "mcp": [], "extension": []}
         for schema in all_tool_schemas:
             name = schema.get("function", {}).get("name")
@@ -4596,13 +4659,17 @@ async def stream_agent_loop(
 
     # --- Final metrics ---
     total_duration = time.time() - total_start
+    _final_omissions = list(_context_manifest["omissions"])
+    if _tool_catalog_dropped:
+        _final_omissions.append("tool_catalog_budget_limited")
     _final_context_manifest = build_context_manifest(
         messages,
         context_length,
         was_compacted=_context_manifest["compaction"]["ran"],
-        omissions=_context_manifest["omissions"],
+        omissions=_final_omissions,
         tool_catalog=_last_tool_catalog,
         extensions=context_extensions,
+        input_budget=_effective_input_budget,
     )
     _final_context_manifest["trimming"] = _context_manifest["trimming"]
     metrics = _compute_final_metrics(

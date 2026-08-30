@@ -18,6 +18,8 @@ for mod in [
         sys.modules[mod] = MagicMock()
 
 import src.context_compactor as cc
+from src.model_context import build_context_manifest, estimate_tokens
+from src.prompt_security import untrusted_context_message
 from src.context_compactor import (
     COMPACT_THRESHOLD,
     SELF_SUMMARY_SYSTEM_PROMPT,
@@ -90,6 +92,92 @@ class TestTrimForContext:
         assert trimmed[-1]["role"] == "user"
         assert "pasted message was too large" in trimmed[-1]["content"]
         assert "old-0" not in "\n".join(str(m.get("content", "")) for m in trimmed)
+
+    def test_large_memory_and_derived_wiki_cannot_crowd_current_intent(self):
+        messages = [
+            {"role": "system", "content": "Jarvis identity"},
+            untrusted_context_message(
+                "saved memory: retrieved context", "MEMORY-MARKER " + "m" * 30000,
+            ),
+            untrusted_context_message(
+                "KarpathyWiki", "WIKI-MARKER " + "w" * 30000,
+            ),
+            {"role": "user", "content": "older question " + "x" * 3000},
+            {"role": "assistant", "content": "older answer " + "y" * 3000},
+            {"role": "user", "content": "CURRENT-INTENT-MARKER"},
+        ]
+
+        trimmed = trim_for_context(messages, context_length=4096, reserve_tokens=512)
+        manifest = build_context_manifest(
+            trimmed, 4096, before_messages=messages, input_budget=3584,
+        )
+
+        assert trimmed[0]["content"] == "Jarvis identity"
+        assert any(m.get("content") == "CURRENT-INTENT-MARKER" for m in trimmed)
+        assert estimate_tokens(trimmed) <= 3584
+        assert manifest["mounted"]["classes"]["recalled_memory"]["tokens"] <= 538
+        assert manifest["mounted"]["classes"]["derived_knowledge"]["tokens"] <= 359
+        assert manifest["trimming"]["dropped_by_class"]["recalled_memory"]["tokens"] > 0
+        assert manifest["trimming"]["dropped_by_class"]["derived_knowledge"]["tokens"] > 0
+        assert "recalled_memory_budget_limited" in manifest["omissions"]
+        assert "derived_knowledge_budget_limited" in manifest["omissions"]
+
+    def test_active_working_state_is_kept_but_bounded(self):
+        active_doc = untrusted_context_message(
+            "active editor document", "ACTIVE-DOC-MARKER " + "d" * 30000,
+        )
+        active_doc["_protected"] = True
+        messages = [
+            {"role": "system", "content": "Jarvis identity"},
+            active_doc,
+            {"role": "user", "content": "CURRENT-INTENT-MARKER"},
+        ]
+
+        trimmed = trim_for_context(messages, context_length=2048, reserve_tokens=512)
+        doc = next(m for m in trimmed if "ACTIVE-DOC-MARKER" in str(m.get("content")))
+
+        assert doc["metadata"]["context_trimmed"] is True
+        assert any(m.get("content") == "CURRENT-INTENT-MARKER" for m in trimmed)
+        assert estimate_tokens(trimmed) <= 1536
+        assert estimate_tokens([doc]) <= 538
+
+    def test_current_tool_call_and_result_pair_survive_budget_pressure(self):
+        messages = [
+            {"role": "system", "content": "Jarvis identity"},
+            untrusted_context_message("retrieved documents", "x" * 30000),
+            {"role": "user", "content": "CURRENT-INTENT-MARKER"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path":"a"}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": "RESULT-MARKER " + "r" * 30000},
+        ]
+
+        trimmed = trim_for_context(messages, context_length=2048, reserve_tokens=512)
+        assistant = next(m for m in trimmed if m.get("tool_calls"))
+        tool = next(m for m in trimmed if m.get("role") == "tool")
+
+        assert assistant["tool_calls"][0]["id"] == tool["tool_call_id"] == "call-1"
+        assert "RESULT-MARKER" in tool["content"]
+        assert estimate_tokens(trimmed) <= 1536
+
+    def test_same_budget_produces_same_logical_selection(self):
+        messages = [
+            {"role": "system", "content": "Jarvis identity"},
+            untrusted_context_message("saved memory: retrieved context", "m" * 15000),
+            untrusted_context_message("retrieved documents", "d" * 15000),
+            {"role": "user", "content": "current request"},
+        ]
+
+        first = trim_for_context(messages, context_length=4096, reserve_tokens=512)
+        second = trim_for_context(messages, context_length=4096, reserve_tokens=512)
+
+        assert first == second
 
 
 class TestContentAsText:

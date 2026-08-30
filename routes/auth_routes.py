@@ -677,6 +677,18 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     if agent in allowed_agents and isinstance(voice, str)
                 }
                 val = {**DEFAULT_SETTINGS["tts_agent_voices"], **sanitized}
+            if key == "context_class_budget_percent":
+                if not isinstance(val, dict):
+                    raise HTTPException(400, "context_class_budget_percent must be an object")
+                defaults = DEFAULT_SETTINGS["context_class_budget_percent"]
+                sanitized = {}
+                for class_name, default_percent in defaults.items():
+                    try:
+                        percent = int(val.get(class_name, default_percent))
+                    except (TypeError, ValueError):
+                        raise HTTPException(400, f"Invalid context budget for {class_name}")
+                    sanitized[class_name] = max(1, min(percent, 100))
+                val = sanitized
             current[key] = val
         _save_settings(current)
         return current

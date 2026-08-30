@@ -832,6 +832,7 @@ async def build_chat_context(
             before_messages=_before_trim_context,
             was_compacted=was_compacted,
             omissions=context_omissions,
+            input_budget=max(context_length - 512, 64),
         ),
         auto_opened_docs=auto_opened_docs,
         uploaded_files=uploaded_files,

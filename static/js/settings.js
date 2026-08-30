@@ -199,6 +199,70 @@ function initOpacityToggle() {
   });
 }
 
+/* ── JOS-P2 Context Attention (Agent Tools tab) ── */
+async function initContextBudgetSettings() {
+  var inputs = Array.from(modalEl.querySelectorAll('[data-context-budget-class]'));
+  var msg = el('set-contextBudgetMsg');
+  if (!inputs.length) return;
+
+  var defaults = {
+    conversation: 45,
+    working_state: 35,
+    recalled_memory: 15,
+    retrieved_knowledge: 25,
+    derived_knowledge: 10,
+    tool_catalog: 20,
+    tool_result: 30,
+    oracle_state: 20,
+    time: 5,
+  };
+
+  function clampPercent(raw, fallback) {
+    var value = parseInt(raw, 10);
+    if (isNaN(value)) value = fallback;
+    return Math.max(1, Math.min(value, 100));
+  }
+
+  try {
+    var response = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await response.json();
+    var saved = settings.context_class_budget_percent || {};
+    inputs.forEach(function(input) {
+      var name = input.dataset.contextBudgetClass;
+      input.value = clampPercent(saved[name], defaults[name]);
+    });
+  } catch (_) {
+    inputs.forEach(function(input) {
+      input.value = defaults[input.dataset.contextBudgetClass];
+    });
+  }
+
+  async function save() {
+    var budgets = {};
+    inputs.forEach(function(input) {
+      var name = input.dataset.contextBudgetClass;
+      budgets[name] = clampPercent(input.value, defaults[name]);
+      input.value = budgets[name];
+    });
+    try {
+      var response = await fetch('/api/auth/settings', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context_class_budget_percent: budgets }),
+      });
+      if (!response.ok) throw new Error('Failed to save');
+      msg.textContent = 'Context attention limits saved';
+      msg.style.color = 'var(--fg)';
+    } catch (_) {
+      msg.textContent = 'Failed to save context attention limits';
+      msg.style.color = 'var(--red)';
+    }
+  }
+
+  inputs.forEach(function(input) { input.addEventListener('change', save); });
+}
+
 /* ═══════════════════════════════════════════
    AI TAB
    ═══════════════════════════════════════════ */
@@ -2422,6 +2486,7 @@ function initAll() {
   initResearchSettings();
   initResearchSearchSettings();
   initAgentSettings();
+  initContextBudgetSettings();
   initAppearance();
   initShortcuts();
   initAccount();

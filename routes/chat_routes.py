@@ -145,6 +145,7 @@ def _refresh_context_manifest(ctx, messages: List[Dict[str, Any]]) -> tuple[List
         ctx.context_length,
         was_compacted=ctx.was_compacted,
         omissions=(ctx.context_manifest or {}).get("omissions", []),
+        input_budget=(ctx.context_manifest.get("budget") or {}).get("input_tokens"),
     )
     for field in ("trimming", "compaction"):
         if (ctx.context_manifest or {}).get(field):

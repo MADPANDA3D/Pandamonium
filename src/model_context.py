@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.context_budget import context_class_budget_percent
+
 logger = logging.getLogger(__name__)
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal"}
@@ -521,7 +523,55 @@ def estimate_tokens(messages: List[Dict]) -> int:
     return total
 
 
+def estimate_tool_schema_tokens(schemas: Optional[List[Dict]]) -> int:
+    """Estimate provider-input tokens consumed by native function schemas."""
+    valid = [schema for schema in schemas or [] if isinstance(schema, dict)]
+    return int(len(json.dumps(valid, sort_keys=True, default=str)) * 0.3)
+
+
+def cap_tool_schemas(
+    schemas: Optional[List[Dict]],
+    input_budget: int,
+    *,
+    priority_names: Optional[set[str]] = None,
+) -> Tuple[List[Dict], List[str]]:
+    """Fit whole native tool schemas inside the JOS tool-catalog ceiling.
+
+    Schemas are never truncated because malformed JSON schema is worse than an
+    omitted capability. Explicit/extension names may be ranked first, but the
+    ceiling remains hard so a single pathological schema cannot take the turn.
+    """
+    valid = [schema for schema in schemas or [] if isinstance(schema, dict)]
+    limit = max(
+        int(max(int(input_budget or 0), 0) * context_class_budget_percent()["tool_catalog"] / 100),
+        64,
+    )
+    priority = set(priority_names or set())
+
+    def _name(schema: Dict) -> str:
+        function = schema.get("function") if isinstance(schema.get("function"), dict) else {}
+        return str(function.get("name") or schema.get("name") or "")
+
+    ranked = sorted(
+        enumerate(valid),
+        key=lambda item: (0 if _name(item[1]) in priority else 1, item[0]),
+    )
+    kept_ranked: List[Tuple[int, Dict]] = []
+    dropped: List[str] = []
+    used = 2  # list wrapper overhead
+    for original_index, schema in ranked:
+        schema_tokens = max(int(len(json.dumps(schema, sort_keys=True, default=str)) * 0.3), 1)
+        if used + schema_tokens <= limit:
+            kept_ranked.append((original_index, schema))
+            used += schema_tokens
+        else:
+            dropped.append(_name(schema) or f"schema_{original_index}")
+    kept = [schema for _, schema in sorted(kept_ranked, key=lambda item: item[0])]
+    return kept, dropped
+
+
 _UNTRUSTED_SOURCE_CLASSES = (
+    (("karpathywiki", "derived wiki"), "derived_knowledge"),
     (("saved memory",), "recalled_memory"),
     (("active editor", "active email", "uploaded files"), "working_state"),
     (("tool execution results", "tool result"), "tool_result"),
@@ -530,6 +580,8 @@ _UNTRUSTED_SOURCE_CLASSES = (
 )
 
 _SAFE_SOURCE_PREFIXES = (
+    ("karpathywiki", "wiki.derived"),
+    ("derived wiki", "wiki.derived"),
     ("saved memory: pinned", "memory.pinned"),
     ("saved memory: retrieved", "memory.recalled"),
     ("retrieved documents", "documents.rag"),
@@ -585,6 +637,12 @@ def _context_tag(message: Dict[str, Any]) -> Dict[str, str]:
 
     role = str(message.get("role") or "")
     content = message.get("content")
+    if metadata.get("research_spinoff_from"):
+        return {
+            "class": "retrieved_knowledge",
+            "source": "research.primer",
+            "trust": "untrusted_data",
+        }
     if metadata.get("compacted") or (
         isinstance(content, str) and content.startswith("[Conversation summary")
     ):
@@ -632,11 +690,13 @@ def annotate_context_messages(messages: List[Dict]) -> List[Dict]:
         metadata = dict(message.get("metadata") or {})
         if not isinstance(metadata.get("jos_context"), dict):
             tag = _context_tag(message)
+            tag["inferred"] = True
             if index == latest_operator and tag["class"] == "conversation":
                 tag = {
                     "class": "operator_intent",
                     "source": "operator.current_turn",
                     "trust": "operator_authority",
+                    "inferred": True,
                 }
             metadata["jos_context"] = tag
         message["metadata"] = metadata
@@ -687,7 +747,7 @@ def _tool_catalog_report(tool_catalog: Optional[Dict[str, List[Dict]]]) -> Dict[
         })
         report[source] = {"count": len(names), "names": names}
         report["total"] += len(names)
-        report["schema_tokens"] += int(len(json.dumps(valid, sort_keys=True, default=str)) * 0.3)
+        report["schema_tokens"] += estimate_tool_schema_tokens(valid)
     return report
 
 
@@ -700,6 +760,7 @@ def build_context_manifest(
     omissions: Optional[List[str]] = None,
     tool_catalog: Optional[Dict[str, List[Dict]]] = None,
     extensions: Optional[Dict[str, Dict[str, Any]]] = None,
+    input_budget: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build a content-free JOS-P2A report for the exact mounted context."""
     mounted = _summarize_context(messages)
@@ -725,9 +786,19 @@ def build_context_manifest(
         for name, state in sorted((extensions or {}).items())
         if isinstance(state, dict)
     }
+    class_percent = context_class_budget_percent()
+    effective_budget = max(int(input_budget if input_budget is not None else context_length or 0), 0)
     return {
         "version": "jos-p2a.1",
         "context_window": max(int(context_length or 0), 0),
+        "budget": {
+            "input_tokens": effective_budget,
+            "class_percent": class_percent,
+            "class_token_limits": {
+                name: int(effective_budget * percent / 100)
+                for name, percent in class_percent.items()
+            },
+        },
         "mounted": mounted,
         "trimming": {
             "ran": before["messages"] != mounted["messages"] or before["tokens"] != mounted["tokens"],
@@ -745,7 +816,10 @@ def build_context_manifest(
                 for message in summaries
             ),
         },
-        "omissions": sorted({str(reason) for reason in omissions or [] if reason}),
+        "omissions": sorted(
+            {str(reason) for reason in omissions or [] if reason}
+            | {f"{name}_budget_limited" for name in dropped}
+        ),
         "tools": _tool_catalog_report(tool_catalog),
         "extensions": safe_extensions,
     }

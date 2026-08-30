@@ -16,6 +16,17 @@ exactly (clamped to the window). Pure and side-effect free so it is unit-testabl
 DEFAULT_HARD_MAX = 200_000
 DEFAULT_BUDGET = 6000
 DEFAULT_HEADROOM = 0.85
+DEFAULT_CLASS_BUDGET_PERCENT = {
+    "conversation": 45,
+    "working_state": 35,
+    "recalled_memory": 15,
+    "retrieved_knowledge": 25,
+    "derived_knowledge": 10,
+    "tool_catalog": 20,
+    "tool_result": 30,
+    "oracle_state": 20,
+    "time": 5,
+}
 
 
 def _int_or_zero(value) -> int:
@@ -80,3 +91,23 @@ def budget_is_explicit(configured: int, *, default: int = DEFAULT_BUDGET) -> boo
     """
     configured = int(configured or 0)
     return configured > 0 and configured != default
+
+
+def context_class_budget_percent(value=None) -> dict[str, int]:
+    """Return validated per-class ceilings, merged over safe defaults."""
+    if value is None:
+        try:
+            from src.settings import get_setting
+            value = get_setting("context_class_budget_percent", {})
+        except Exception:
+            value = {}
+    if not isinstance(value, dict):
+        value = {}
+    result = dict(DEFAULT_CLASS_BUDGET_PERCENT)
+    for name in result:
+        try:
+            percent = int(value.get(name, result[name]))
+        except (TypeError, ValueError):
+            continue
+        result[name] = max(1, min(percent, 100))
+    return result

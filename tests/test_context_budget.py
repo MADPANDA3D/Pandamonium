@@ -88,6 +88,38 @@ def test_default_settings_registers_hard_max_key():
     assert DEFAULT_SETTINGS["agent_input_token_hard_max"] == DEFAULT_HARD_MAX
 
 
+def test_context_class_budgets_merge_and_clamp_overrides():
+    from src.context_budget import context_class_budget_percent
+
+    budgets = context_class_budget_percent({
+        "recalled_memory": 7,
+        "retrieved_knowledge": 500,
+        "conversation": "bad",
+        "unknown": 1,
+    })
+
+    assert budgets["recalled_memory"] == 7
+    assert budgets["retrieved_knowledge"] == 100
+    assert budgets["conversation"] == 45
+    assert "unknown" not in budgets
+
+
+def test_context_class_budgets_are_exposed_in_existing_agent_tools_settings():
+    from pathlib import Path
+
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/settings.js").read_text(encoding="utf-8")
+
+    for class_name in (
+        "conversation", "working_state", "recalled_memory",
+        "retrieved_knowledge", "derived_knowledge", "tool_catalog",
+        "tool_result", "oracle_state", "time",
+    ):
+        assert f'data-context-budget-class="{class_name}"' in html
+    assert "initContextBudgetSettings();" in javascript
+    assert "context_class_budget_percent: budgets" in javascript
+
+
 def test_alias_map_registers_friendly_names():
     """`manage_settings` should accept 'hard max' and friends."""
     from pathlib import Path

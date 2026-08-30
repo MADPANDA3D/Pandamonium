@@ -6,7 +6,12 @@ import pytest
 
 from src import agent_loop
 from src.llm_core import _sanitize_llm_messages
-from src.model_context import annotate_context_messages, build_context_manifest
+from src.model_context import (
+    annotate_context_messages,
+    build_context_manifest,
+    cap_tool_schemas,
+    estimate_tool_schema_tokens,
+)
 from src.prompt_security import untrusted_context_message
 
 
@@ -96,6 +101,35 @@ def test_internal_tags_do_not_change_provider_payload():
     assert all("metadata" not in message for message in _sanitize_llm_messages(annotated))
 
 
+def test_native_tool_catalog_is_whole_schema_capped_with_extension_priority():
+    schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": marker * 450,
+                "parameters": {"type": "object"},
+            },
+        }
+        for name, marker in (
+            ("built_in_one", "a"),
+            ("built_in_two", "b"),
+            ("oracle_native", "o"),
+        )
+    ]
+
+    kept, dropped = cap_tool_schemas(
+        schemas,
+        2048,
+        priority_names={"oracle_native"},
+    )
+    kept_names = [schema["function"]["name"] for schema in kept]
+
+    assert "oracle_native" in kept_names
+    assert dropped
+    assert estimate_tool_schema_tokens(kept) <= int(2048 * 0.20)
+
+
 @pytest.mark.asyncio
 async def test_agent_metrics_carry_manifest_on_direct_path(monkeypatch):
     async def fake_stream(*args, **kwargs):
@@ -120,3 +154,59 @@ async def test_agent_metrics_carry_manifest_on_direct_path(monkeypatch):
     manifest = metrics["context_manifest"]
     assert manifest["mounted"]["classes"]["operator_intent"]["messages"] == 1
     assert manifest["omissions"] == ["agent_context_reduced_low_signal"]
+
+
+@pytest.mark.asyncio
+async def test_agent_caps_native_schemas_and_reports_the_omission(monkeypatch):
+    captured = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"Handled."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    def fake_setting(key, default=None):
+        if key == "agent_input_token_budget":
+            return 4096
+        return default
+
+    schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": f"oracle_native_{index}",
+                "description": str(index) * 900,
+                "parameters": {"type": "object"},
+            },
+        }
+        for index in range(4)
+    ]
+    relevant = {schema["function"]["name"] for schema in schemas}
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "get_setting", fake_setting)
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    events = []
+    async for chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Use the ORACLE native capability."}],
+        context_length=4096,
+        max_tokens=1024,
+        relevant_tools=relevant,
+        extra_tool_schemas=schemas,
+    ):
+        if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+            events.append(json.loads(chunk[6:]))
+
+    metrics = next(event["data"] for event in events if event.get("type") == "metrics")
+    manifest = metrics["context_manifest"]
+    mounted_schema_tokens = estimate_tool_schema_tokens(captured["tools"])
+
+    assert 0 < len(captured["tools"]) < len(schemas)
+    assert mounted_schema_tokens <= manifest["budget"]["class_token_limits"]["tool_catalog"]
+    assert metrics["input_tokens"] + mounted_schema_tokens <= manifest["budget"]["input_tokens"]
+    assert "tool_catalog_budget_limited" in manifest["omissions"]

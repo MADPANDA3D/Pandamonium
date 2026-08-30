@@ -9,7 +9,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.model_context import get_context_length, estimate_tokens
+from src.context_budget import context_class_budget_percent
+from src.model_context import annotate_context_messages, get_context_length, estimate_tokens
 from src.llm_core import llm_call_async
 from src.endpoint_resolver import resolve_endpoint
 from core.models import ChatMessage
@@ -212,100 +213,167 @@ def _truncate_message_to_token_budget(msg: Dict[str, Any], token_budget: int) ->
     return _truncate_tool_call_args(out, token_budget)
 
 
-def trim_for_context(messages: List[Dict], context_length: int, reserve_tokens: int = 512) -> List[Dict]:
-    """Trim system messages to fit within context_length.
+_DROP_PRIORITY = {
+    "derived_knowledge": 0,
+    "retrieved_knowledge": 10,
+    "recalled_memory": 20,
+    "tool_catalog": 30,
+    "conversation": 40,
+    "time": 50,
+    "working_state": 60,
+    "oracle_state": 70,
+    "tool_result": 80,
+}
 
-    For small-context models, progressively strips:
-    1. RAG/memory system messages (keep preset system prompt)
-    2. Older conversation turns
-    Reserves space for the response.
-    """
-    budget = context_length - reserve_tokens
-    used = estimate_tokens(messages)
-    if used <= budget:
-        return messages
 
-    logger.info(f"Trimming messages: {used} tokens > {budget} budget (ctx={context_length})")
+def _message_context_class(message: Dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    tag = metadata.get("jos_context") if isinstance(metadata.get("jos_context"), dict) else {}
+    return str(tag.get("class") or "unknown")
 
-    # Separate system messages from conversation.
-    # Messages marked _protected (e.g. active document) are never trimmed.
-    system_msgs = []
-    protected_msgs = []
-    convo_msgs = []
-    for msg in messages:
-        if msg.get("_protected"):
-            protected_msgs.append(msg)
-        elif msg.get("role") == "system":
-            system_msgs.append(msg)
-        else:
-            convo_msgs.append(msg)
 
-    # Protected messages count toward budget but are never dropped
-    protected_tokens = estimate_tokens(protected_msgs)
-    budget -= protected_tokens
+def _truncate_context_message(
+    message: Dict[str, Any], token_budget: int, *, source_notice: bool = True,
+) -> Dict[str, Any]:
+    out = _truncate_message_to_token_budget(message, token_budget)
+    content = out.get("content")
+    if source_notice and isinstance(content, str):
+        content = content.replace(
+            "[Current user message omitted: it exceeded the model context window.]",
+            "[Context source omitted: it exceeded its attention budget.]",
+        ).replace(
+            "[Notice: the pasted message was too large for this model's context window, "
+            "so Odysseus kept the beginning and end.]",
+            "[Notice: this context source exceeded its attention budget, so Odysseus "
+            "kept the beginning and end.]",
+        )
+        out["content"] = content
+    metadata = dict(out.get("metadata") or {})
+    metadata["context_trimmed"] = True
+    metadata["original_tokens"] = estimate_tokens([message])
+    out["metadata"] = metadata
+    return out
 
-    # Priority: keep first system msg (preset prompt), drop others (memory, RAG, memo).
-    # Exception: a research-spinoff primer (the seeded report that grounds a
-    # "Discuss" chat) must never be dropped — it is the conversation's whole
-    # knowledge base. Treat any system message carrying research_spinoff_from
-    # metadata as essential alongside the leading system prompt.
-    def _is_research_primer(m):
-        return bool((m.get("metadata") or {}).get("research_spinoff_from"))
-    _primers = [m for m in system_msgs if _is_research_primer(m)]
-    _non_primer = [m for m in system_msgs if not _is_research_primer(m)]
-    essential_system = (_non_primer[:1] if _non_primer else []) + _primers
-    extra_system = _non_primer[1:]
 
-    # Try dropping extra system messages one by one (from the end)
-    trimmed = essential_system + convo_msgs
-    if estimate_tokens(trimmed) <= budget:
-        # Dropping extras was enough — try adding back some
-        result = list(essential_system)
-        for msg in extra_system:
-            candidate = result + [msg] + convo_msgs
-            if estimate_tokens(candidate) <= budget:
-                result.append(msg)
+def _apply_class_budgets(
+    messages: List[Dict], budget: int, *, class_budget_base: Optional[int] = None,
+) -> List[Dict]:
+    """Keep the newest relevant data in each bounded JOS context class."""
+    percentages = context_class_budget_percent()
+    result = list(messages)
+    keep = set(range(len(result)))
+    by_class: Dict[str, List[int]] = {}
+    for index, message in enumerate(result):
+        context_class = _message_context_class(message)
+        if context_class in percentages:
+            by_class.setdefault(context_class, []).append(index)
+
+    class_base = max(int(class_budget_base if class_budget_base is not None else budget), 0)
+    for context_class, indices in by_class.items():
+        remaining = max(64, int(class_base * percentages[context_class] / 100))
+        for index in reversed(indices):
+            tokens = estimate_tokens([result[index]])
+            if tokens <= remaining:
+                remaining -= tokens
+            elif remaining >= 64:
+                result[index] = _truncate_context_message(result[index], remaining)
+                remaining = 0
             else:
+                keep.discard(index)
+    return [message for index, message in enumerate(result) if index in keep]
+
+
+def _active_tool_pair_indices(messages: List[Dict]) -> set[int]:
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") != "assistant" or not messages[index].get("tool_calls"):
+            continue
+        active = {index}
+        cursor = index + 1
+        while cursor < len(messages) and messages[cursor].get("role") == "tool":
+            active.add(cursor)
+            cursor += 1
+        return active
+    return set()
+
+
+def trim_for_context(
+    messages: List[Dict],
+    context_length: int,
+    reserve_tokens: int = 512,
+    *,
+    class_budget_base: Optional[int] = None,
+) -> List[Dict]:
+    """Apply JOS-P2 class ceilings, then drop lowest-priority context first."""
+    budget = max(int(context_length or 0) - max(int(reserve_tokens or 0), 0), 64)
+    annotated = annotate_context_messages(messages)
+    result = _apply_class_budgets(
+        annotated,
+        budget,
+        class_budget_base=class_budget_base,
+    )
+    used = estimate_tokens(result)
+    if used <= budget:
+        return _sanitize_tool_messages(result)
+
+    logger.info("Trimming messages: %s tokens > %s budget (ctx=%s)", used, budget, context_length)
+    active_tool_pair = _active_tool_pair_indices(result)
+    protected = set(active_tool_pair)
+    first_system_index = next(
+        (index for index, message in enumerate(result) if message.get("role") == "system"),
+        None,
+    )
+    for index, message in enumerate(result):
+        context_class = _message_context_class(message)
+        metadata = message.get("metadata") or {}
+        tag = metadata.get("jos_context") or {}
+        if (
+            context_class in {"policy", "operator_intent", "presentation"}
+            or (
+                context_class == "identity_policy"
+                and (not tag.get("inferred") or index == first_system_index)
+            )
+            or message.get("_protected")
+            or metadata.get("research_spinoff_from")
+        ):
+            protected.add(index)
+
+    candidates = sorted(
+        (index for index in range(len(result)) if index not in protected),
+        key=lambda index: (_DROP_PRIORITY.get(_message_context_class(result[index]), 5), index),
+    )
+    keep = set(range(len(result)))
+    for index in candidates:
+        if estimate_tokens([result[item] for item in sorted(keep)]) <= budget:
+            break
+        keep.discard(index)
+    result = [message for index, message in enumerate(result) if index in keep]
+    result = _sanitize_tool_messages(result)
+
+    # Protected means the message remains mounted, not that one huge source can
+    # consume the turn. Shrink dynamic state/results first, then trusted prompt
+    # tails only if the protected set itself cannot fit. Current intent is last.
+    shrink_order = (
+        "working_state", "retrieved_knowledge", "derived_knowledge",
+        "recalled_memory", "tool_result", "oracle_state", "time",
+        "policy", "identity_policy", "operator_intent",
+    )
+    for context_class in shrink_order:
+        for index in range(len(result) - 1, -1, -1):
+            if estimate_tokens(result) <= budget:
                 break
-        return _sanitize_tool_messages(result + protected_msgs + convo_msgs)
+            if _message_context_class(result[index]) != context_class:
+                continue
+            current_tokens = estimate_tokens([result[index]])
+            excess = estimate_tokens(result) - budget
+            target = max(64, current_tokens - excess)
+            result[index] = _truncate_context_message(
+                result[index],
+                target,
+                source_notice=context_class != "operator_intent",
+            )
 
-    # Still too big — truncate the first system message (but keep more than 500 chars)
-    if essential_system:
-        sys_text = essential_system[0].get("content", "")
-        if len(sys_text) > 2000:
-            essential_system[0] = {"role": "system", "content": sys_text[:2000] + "\n[System prompt truncated for context limits]"}
-            trimmed = essential_system + convo_msgs
-            if estimate_tokens(trimmed) <= budget:
-                return _sanitize_tool_messages(essential_system + protected_msgs + convo_msgs)
-
-    # Still too big — drop older conversation turns BUT always keep the current
-    # user turn. If a pasted message alone exceeds the model context, truncate
-    # that message with a visible notice instead of dropping it; otherwise the
-    # model appears to "ignore" large pastes because it never receives them.
-    # Hermes-style: recent context matters more than old context.
-    PROTECT_RECENT = 10
-    current_msg = convo_msgs[-1:] if convo_msgs else []
-    prior_convo = convo_msgs[:-1] if convo_msgs else []
-    if len(prior_convo) >= PROTECT_RECENT:
-        old_msgs = prior_convo[:-(PROTECT_RECENT - 1)]
-        recent_msgs = prior_convo[-(PROTECT_RECENT - 1):] + current_msg
-        while old_msgs and estimate_tokens(essential_system + old_msgs + recent_msgs) > budget:
-            old_msgs.pop(0)
-        convo_msgs = old_msgs + recent_msgs
-    else:
-        convo_msgs = prior_convo + current_msg
-        while prior_convo and estimate_tokens(essential_system + prior_convo + current_msg) > budget:
-            prior_convo.pop(0)
-        convo_msgs = prior_convo + current_msg
-
-    # If the current message itself is too large, shrink only that message.
-    if current_msg and estimate_tokens(essential_system + protected_msgs + convo_msgs) > budget:
-        prefix = essential_system + protected_msgs + convo_msgs[:-1]
-        available_for_current = max(64, budget - estimate_tokens(prefix))
-        convo_msgs[-1] = _truncate_message_to_token_budget(convo_msgs[-1], available_for_current)
-
-    result = _sanitize_tool_messages(essential_system + protected_msgs + convo_msgs)
-    logger.info(f"Trimmed to {estimate_tokens(result)} tokens ({len(result)} messages)")
+    result = _sanitize_tool_messages(result)
+    logger.info("Trimmed to %s tokens (%s messages)", estimate_tokens(result), len(result))
     return result
 
 
