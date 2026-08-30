@@ -90,7 +90,13 @@ class ChatProcessor:
     # Minimum similarity score for RAG results to be injected
     RAG_SIMILARITY_THRESHOLD = 0.35
 
-    def _hybrid_retrieve(self, message: str, mem_entries: list, k: int = 5) -> list:
+    def _hybrid_retrieve(
+        self,
+        message: str,
+        mem_entries: list,
+        k: int = 5,
+        owner: str | None = None,
+    ) -> list:
         """Retrieve memories relevant to the message.
 
         Uses BM25-style keyword scoring + optional vector similarity.
@@ -142,7 +148,11 @@ class ChatProcessor:
         vector_scores = {}
 
         if has_vector:
-            results = self.memory_vector.search(message, k=min(k * 3, 20))
+            results = self.memory_vector.search(
+                message,
+                k=min(k * 3, 20),
+                owner=owner,
+            )
             mem_by_id = {m["id"]: m for m in mem_entries}
             for r in results:
                 if r["memory_id"] in mem_by_id:
@@ -277,7 +287,7 @@ class ChatProcessor:
                         _used_ids.append(m["id"])
 
             if extended:
-                relevant = self._hybrid_retrieve(message, extended, k=3)
+                relevant = self._hybrid_retrieve(message, extended, k=3, owner=owner)
                 if relevant:
                     ext_text = "\n".join([f"- {m['text']}" for m in relevant])
                     preface.append(untrusted_context_message(

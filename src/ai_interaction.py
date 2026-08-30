@@ -18,7 +18,6 @@ import asyncio
 import json
 import logging
 import uuid
-import time
 from typing import Dict, Optional, Tuple
 
 from src.constants import GENERATED_IMAGES_DIR
@@ -350,7 +349,7 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
         # Update vector index if available
         if _memory_vector and hasattr(_memory_vector, 'healthy') and _memory_vector.healthy:
             try:
-                _memory_vector.add(entry["id"], text)
+                _memory_vector.add_record(entry)
             except Exception:
                 pass
         try:
@@ -371,30 +370,36 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
             return {"error": "New text cannot be empty"}
 
         memories = _memory_manager.load_all()
-        found = False
+        full_id = None
         for m in memories:
             if m.get("id", "").startswith(memory_id):
                 # Verify ownership
                 if owner and m.get("owner") != owner:
                     return {"error": f"Memory '{memory_id}' not found"}
-                m["text"] = new_text
-                m["timestamp"] = int(time.time())
-                found = True
                 full_id = m["id"]
                 break
-        if not found:
+        if full_id is None:
             return {"error": f"Memory '{memory_id}' not found"}
-        _memory_manager.save(memories)
+        replacement = _memory_manager.replace_entry(
+            full_id,
+            new_text,
+            owner=owner,
+            admitted_by="jarvis.manage_memory",
+        )
+        if replacement is None:
+            return {"error": f"Memory '{memory_id}' is not eligible for correction"}
 
         # Update vector index
         if _memory_vector and hasattr(_memory_vector, 'healthy') and _memory_vector.healthy:
             try:
-                _memory_vector.add(full_id, new_text)
+                _memory_vector.remove(full_id)
+                _memory_vector.add_record(replacement)
             except Exception:
                 pass
 
-        return {"action": "edit", "memory_id": memory_id,
-                "results": f"Memory updated: {new_text}"}
+        return {"action": "edit", "memory_id": replacement["id"],
+                "supersedes": full_id,
+                "results": f"Memory corrected: {new_text}"}
 
     elif action == "delete":
         if len(lines) < 2:
@@ -402,21 +407,22 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
         memory_id = lines[1].strip()
 
         memories = _memory_manager.load_all()
-        original_len = len(memories)
         full_id = None
-        delete_id = None
         for m in memories:
             if m.get("id", "").startswith(memory_id):
                 # Verify ownership
                 if owner and m.get("owner") != owner:
                     return {"error": f"Memory '{memory_id}' not found"}
                 full_id = m["id"]
-                delete_id = m["id"]
                 break
-        memories = [m for m in memories if m.get("id") != delete_id]
-        if len(memories) == original_len:
+        if full_id is None:
             return {"error": f"Memory '{memory_id}' not found"}
-        _memory_manager.save(memories)
+        if not _memory_manager.delete_entry(
+            full_id,
+            owner=owner,
+            deleted_by="jarvis.manage_memory",
+        ):
+            return {"error": f"Memory '{memory_id}' is already deleted"}
 
         # Remove from vector index
         if _memory_vector and full_id and hasattr(_memory_vector, 'healthy') and _memory_vector.healthy:

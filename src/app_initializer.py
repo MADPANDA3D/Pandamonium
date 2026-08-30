@@ -63,12 +63,16 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
         embedding_model = getattr(rag_manager, '_model', None) if rag_manager else None
         memory_vector = MemoryVectorStore(DATA_DIR, embedding_model=embedding_model)
         if memory_vector.healthy:
-            # Rebuild index from existing memories if empty
-            if memory_vector.count() == 0:
+            # Rebuild empty or pre-P3 projections so owner/status filtering is
+            # enforced before semantic ranking.
+            if memory_vector.count() == 0 or memory_vector.needs_provenance_rebuild():
                 existing = memory_manager.load()
                 if existing:
                     memory_vector.rebuild(existing)
-                    logger.info(f"Rebuilt memory vector index from {len(existing)} existing entries")
+                    logger.info(
+                        "Rebuilt provenance-aware memory vector index from %d existing entries",
+                        len(existing),
+                    )
             logger.info("MemoryVectorStore initialized")
         else:
             # Keep the unhealthy object (do NOT reset to None): consumers gate on

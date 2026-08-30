@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -387,7 +388,12 @@ async def extract_and_store(
         # Get owner from session
         _owner = getattr(session, 'owner', None)
 
-        existing = memory_manager.load_all()
+        stored_entries = memory_manager.load_all()
+        existing = [
+            entry for entry in stored_entries
+            if entry.get("status", "approved") == "approved"
+            and (_owner is None or entry.get("owner") == _owner)
+        ]
         added = 0
 
         for fact in facts:
@@ -411,18 +417,20 @@ async def extract_and_store(
             # it does not catch failures that develop later.)
             if memory_vector and memory_vector.healthy:
                 try:
-                    existing_id = memory_vector.find_similar(fact_text, threshold=0.72)
+                    try:
+                        existing_id = memory_vector.find_similar(
+                            fact_text,
+                            threshold=0.72,
+                            owner=_owner,
+                        )
+                    except TypeError:
+                        existing_id = memory_vector.find_similar(fact_text, threshold=0.72)
                 except Exception as e:
                     logger.warning(f"Memory dedup (vector) unavailable, using text fallback: {e}")
                     existing_id = None
                 if existing_id:
-                    # The vector store is a single shared collection with no
-                    # owner metadata, so find_similar can return ANOTHER
-                    # tenant's memory. Only treat it as a duplicate when the
-                    # match is this user's own (or a legacy unowned) memory —
-                    # otherwise the user's freshly-extracted fact would be
-                    # silently dropped. Mirror the owner predicate used by the
-                    # text dedup below; cross-tenant/stale matches fall through.
+                    # Keep a canonical check even though the P3 projection is
+                    # owner-filtered before ranking; JSON remains authoritative.
                     _match = next((e for e in existing if e.get("id") == existing_id), None)
                     if _match is not None and (_match.get("owner") == _owner or _match.get("owner") is None):
                         logger.debug(f"Memory dedup (vector): '{fact_text[:50]}' matches {existing_id}")
@@ -447,20 +455,24 @@ async def extract_and_store(
                 entry["session_id"] = session.name
 
             existing.append(entry)
+            stored_entries.append(entry)
 
             # Add to vector index. The JSON store (saved below) is the source of
             # truth and the keyword path can still retrieve this entry, so a vector
             # write failure must not drop the fact or abort the remaining batch.
             if memory_vector and memory_vector.healthy:
                 try:
-                    memory_vector.add(entry["id"], fact_text)
+                    if hasattr(memory_vector, "add_record"):
+                        memory_vector.add_record(entry)
+                    else:
+                        memory_vector.add(entry["id"], fact_text)
                 except Exception as e:
                     logger.warning(f"Memory vector add failed for {entry['id']}: {e}")
 
             added += 1
 
         if added > 0:
-            memory_manager.save(existing)
+            memory_manager.save(stored_entries)
             try:
                 from src.event_bus import fire_event
                 for _ in range(added):
@@ -589,6 +601,9 @@ async def audit_memories(
         originals = {m["id"]: m for m in existing}
 
         final_entries = []
+        replacements = []
+        transitions = {}
+        returned_ids = set()
         for item in cleaned:
             if not isinstance(item, dict):
                 continue
@@ -598,11 +613,26 @@ async def audit_memories(
                 continue
 
             if mid in originals:
-                # Preserve original metadata, update text + category
-                entry = originals[mid].copy()
-                entry["text"] = new_text
-                if item.get("category"):
-                    entry["category"] = item["category"]
+                returned_ids.add(mid)
+                original = originals[mid]
+                new_category = item.get("category") or original.get("category", "fact")
+                if new_text != original.get("text") or new_category != original.get("category", "fact"):
+                    entry = memory_manager.add_entry(
+                        new_text,
+                        source="memory_audit",
+                        category=new_category,
+                        owner=original.get("owner"),
+                        source_ref=f"memory:{mid}",
+                        admitted_by="policy:auto_memory_audit",
+                        supersedes=mid,
+                    )
+                    for inherited in ("session_id", "pinned", "metadata"):
+                        if inherited in original:
+                            entry[inherited] = original[inherited]
+                    replacements.append(entry)
+                    transitions[mid] = ("superseded", entry["id"])
+                else:
+                    entry = original
             else:
                 # ID not found — skip to avoid inventing entries
                 logger.debug(f"Audit returned unknown id {mid}, skipping")
@@ -624,18 +654,26 @@ async def audit_memories(
             )
             return {"before": before_count, "after": before_count, "error": "unsafe_removal"}
 
-        # Merge audited entries back with other users' entries
-        if owner:
-            all_entries = memory_manager.load_all()
-            audited_ids = {e["id"] for e in final_entries}
-            other_entries = [e for e in all_entries if e.get("owner") != owner and (e.get("owner") is not None)]
-            # Also keep legacy entries that weren't part of this audit
-            for e in all_entries:
-                if e.get("owner") is None and e["id"] not in audited_ids and e["id"] not in {o["id"] for o in other_entries}:
-                    other_entries.append(e)
-            saved_entries = final_entries + other_entries
-        else:
-            saved_entries = final_entries
+        # Preserve the canonical ledger. Consolidated records become rejected
+        # tombstones; rewritten records are new, provenance-linked replacements.
+        now = int(time.time())
+        for missing_id in set(originals) - returned_ids:
+            transitions[missing_id] = ("rejected", None)
+        saved_entries = memory_manager.load_all()
+        for entry in saved_entries:
+            transition = transitions.get(entry.get("id"))
+            if transition is None:
+                continue
+            status, replacement_id = transition
+            entry["status"] = status
+            if status == "superseded":
+                entry["superseded_by"] = replacement_id
+                entry["superseded_at"] = now
+            else:
+                entry["rejected_at"] = now
+                entry["rejected_by"] = "policy:auto_memory_audit"
+                entry["rejection_reason"] = "memory_audit_consolidation"
+        saved_entries.extend(replacements)
         memory_manager.save(saved_entries)
         logger.info(
             f"Memory audit complete: {before_count} -> {after_count} entries "

@@ -48,7 +48,7 @@ class FakeCollection:
             selected = [
                 (row_id, row)
                 for row_id, row in selected
-                if all(row["metadata"].get(k) == v for k, v in where.items())
+                if self._matches_where(row["metadata"], where)
             ]
         if limit is not None:
             selected = selected[:limit]
@@ -58,6 +58,16 @@ class FakeCollection:
             "metadatas": [row["metadata"] for _, row in selected],
             "embeddings": [row["embedding"] for _, row in selected],
         }
+
+    @classmethod
+    def _matches_where(cls, metadata, where):
+        if "$and" in where:
+            return all(cls._matches_where(metadata, clause) for clause in where["$and"])
+        for key, expected in where.items():
+            value = expected.get("$eq") if isinstance(expected, dict) else expected
+            if metadata.get(key) != value:
+                return False
+        return True
 
     def query(self, query_embeddings, n_results, where=None, include=None):
         self._check_dim(query_embeddings)

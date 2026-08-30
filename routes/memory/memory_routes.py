@@ -5,7 +5,6 @@ import json
 import os
 import re
 import tempfile
-import time
 from datetime import datetime
 import logging
 
@@ -121,7 +120,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         memory_manager.save(all_mem)
         # Sync vector index
         if memory_vector and memory_vector.healthy:
-            memory_vector.add(new_entry["id"], text)
+            memory_vector.add_record(new_entry)
         try:
             from src.event_bus import fire_event
             fire_event("memory_added", user)
@@ -483,6 +482,73 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
             logger.error(f"Memory import extraction failed: {e}")
             raise HTTPException(502, f"LLM extraction failed: {str(e)}")
 
+    @router.post("/migration/preview")
+    def preview_memory_migration(request: Request, manifest: Dict[str, Any]):
+        """Dry-run an agent-migration.v1 manifest without writing state."""
+        from src.auth_helpers import require_privilege
+        from src.memory_import import preview_manifest
+
+        require_privilege(request, "can_manage_memory")
+        try:
+            return preview_manifest(
+                manifest,
+                memory_manager=memory_manager,
+                owner=_owner(request),
+                memory_vector=memory_vector,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/migration/stage")
+    def stage_memory_migration(request: Request, manifest: Dict[str, Any]):
+        """Stage safe migration memories as non-recallable candidates."""
+        from src.auth_helpers import require_privilege
+        from src.memory_import import stage_manifest
+
+        require_privilege(request, "can_manage_memory")
+        try:
+            return stage_manifest(
+                manifest,
+                memory_manager=memory_manager,
+                owner=_owner(request),
+                memory_vector=memory_vector,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/migration/candidates")
+    def list_memory_migration_candidates(request: Request):
+        from src.auth_helpers import require_privilege
+
+        require_privilege(request, "can_manage_memory")
+        return {
+            "candidates": memory_manager.load(
+                owner=_owner(request),
+                statuses=("candidate",),
+            )
+        }
+
+    @router.post("/migration/candidates/{memory_id}/{decision}")
+    def decide_memory_migration_candidate(request: Request, memory_id: str, decision: str):
+        from src.auth_helpers import require_privilege
+        from src.memory_import import decide_candidate
+
+        require_privilege(request, "can_manage_memory")
+        if decision not in {"approve", "reject"}:
+            raise HTTPException(400, "decision must be approve or reject")
+        record = decide_candidate(
+            memory_manager,
+            memory_id,
+            owner=_owner(request),
+            approve=decision == "approve",
+            decided_by="operator",
+        )
+        if record is None:
+            raise HTTPException(404, "Memory candidate not found")
+        if decision == "approve" and memory_vector and memory_vector.healthy:
+            memory_vector.add_record(record)
+        return {"ok": True, "memory": record}
+
     @router.post("/{memory_id}/pin")
     def pin_memory(request: Request, memory_id: str, pinned: bool = Form(True)):
         """Pin or unpin a memory. Pinned memories are always included in context."""
@@ -510,25 +576,33 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
 
     @router.put("/{memory_id}")
     def update_memory(request: Request, memory_id: str, text: str = Form(...), category: str = Form(None)):
-        """Update an existing memory item with new text and optional category."""
+        """Correct a memory by superseding it with a provenance-linked record."""
         user = _owner(request)
+        if not text.strip():
+            raise HTTPException(400, "empty memory")
         all_mem = memory_manager.load_all()
-        for i, memory in enumerate(all_mem):
-            if memory["id"] == memory_id:
-                _verify_memory_owner(memory, user)
-                all_mem[i]["text"] = text.strip()
-                if category:
-                    all_mem[i]["category"] = category
-                all_mem[i]["timestamp"] = int(time.time())
-
-                memory_manager.save(all_mem)
-                # Sync vector index (remove old, add updated)
-                if memory_vector and memory_vector.healthy:
-                    memory_vector.remove(memory_id)
-                    memory_vector.add(memory_id, text.strip())
-                return {"ok": True, "message": "Memory updated successfully"}
-
-        raise HTTPException(404, f"Memory item {memory_id} not found")
+        original = next((memory for memory in all_mem if memory.get("id") == memory_id), None)
+        if original is None:
+            raise HTTPException(404, f"Memory item {memory_id} not found")
+        _verify_memory_owner(original, user)
+        replacement = memory_manager.replace_entry(
+            memory_id,
+            text.strip(),
+            owner=user,
+            category=category,
+            admitted_by="operator",
+        )
+        if replacement is None:
+            raise HTTPException(409, "Memory is not eligible for correction")
+        if memory_vector and memory_vector.healthy:
+            memory_vector.remove(memory_id)
+            memory_vector.add_record(replacement)
+        return {
+            "ok": True,
+            "memory_id": replacement["id"],
+            "supersedes": memory_id,
+            "message": "Memory corrected successfully",
+        }
 
     @router.delete("/{memory_id}")
     def delete_memory(request: Request, memory_id: str):
@@ -542,8 +616,8 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
             raise HTTPException(404, f"Memory item {memory_id} not found")
         _verify_memory_owner(target, user)
 
-        all_mem = [m for m in all_mem if m["id"] != memory_id]
-        memory_manager.save(all_mem)
+        if not memory_manager.delete_entry(memory_id, owner=user, deleted_by="operator"):
+            raise HTTPException(409, "Memory is already deleted")
         # Sync vector index
         if memory_vector and memory_vector.healthy:
             memory_vector.remove(memory_id)

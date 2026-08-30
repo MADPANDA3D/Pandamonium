@@ -34,6 +34,49 @@ def test_memory_vector_store_writes_both_lanes_and_prefers_custom(monkeypatch):
     assert results[0]["embedding_lane"] == LANE_CUSTOM
 
 
+def test_memory_vector_owner_filter_applies_before_ranking(monkeypatch):
+    fake = FakeChroma()
+    patch_chroma(monkeypatch, fake)
+
+    import src.embedding_lanes as lanes
+
+    monkeypatch.setattr(lanes, "_build_custom_client", lambda: None)
+    monkeypatch.setattr(lanes, "_build_fastembed_client", lambda: FakeEmbedder(384, "mini", "local://fastembed"))
+
+    from src.memory_vector import MemoryVectorStore
+
+    store = MemoryVectorStore("data")
+    store.add("alice-memory", "shared topic", owner="alice")
+    store.add("leo-memory", "shared topic", owner="leo")
+
+    results = store.search("shared topic", owner="leo", k=5)
+
+    assert [result["memory_id"] for result in results] == ["leo-memory"]
+
+
+def test_memory_rebuild_projects_only_approved_records(monkeypatch):
+    fake = FakeChroma()
+    patch_chroma(monkeypatch, fake)
+
+    import src.embedding_lanes as lanes
+
+    monkeypatch.setattr(lanes, "_build_custom_client", lambda: None)
+    monkeypatch.setattr(lanes, "_build_fastembed_client", lambda: FakeEmbedder(384, "mini", "local://fastembed"))
+
+    from src.memory_vector import MemoryVectorStore
+
+    store = MemoryVectorStore("data")
+    store.rebuild([
+        {"id": "approved", "text": "safe", "status": "approved", "owner": "leo"},
+        {"id": "candidate", "text": "review me", "status": "candidate", "owner": "leo"},
+    ])
+
+    rows = fake.collections["odysseus_memories_fastembed"].get()
+    assert rows["ids"] == ["approved"]
+    assert rows["metadatas"][0]["projection_schema"] == "jos-p3.1"
+    assert rows["metadatas"][0]["owner"] == "leo"
+
+
 def test_memory_search_merges_fallback_only_results_before_limit():
     custom_collection = FakeCollection("odysseus_memories_custom", metadata={"embedding_lane": "custom"})
     fast_collection = FakeCollection("odysseus_memories_fastembed", metadata={"embedding_lane": "fastembed"})
@@ -89,6 +132,49 @@ def test_memory_search_merges_fallback_only_results_before_limit():
     results = store.search("fallback relevant", k=2)
 
     assert [row["memory_id"] for row in results] == ["fallback-only", "old-1"]
+
+
+def test_qdrant_outage_falls_back_to_chroma_recall():
+    collection = FakeCollection("odysseus_memories_fastembed")
+    collection.add(
+        ids=["memory-1"],
+        embeddings=[[0.0] * 384],
+        documents=["canonical memory"],
+        metadatas=[{
+            "source": "memory",
+            "projection_schema": "jos-p3.1",
+            "owner": "leo",
+            "status": "approved",
+            "source_ref": "session:one",
+        }],
+    )
+    lane = EmbeddingLane(
+        name=LANE_FASTEMBED,
+        client=FakeEmbedder(384, "mini", "local://fastembed"),
+        collection=collection,
+        collection_name="odysseus_memories_fastembed",
+        model="mini",
+        url="local://fastembed",
+        dimension=384,
+        fingerprint="fast",
+    )
+
+    class FailedQdrant:
+        read_enabled = True
+
+        def search(self, *_args, **_kwargs):
+            raise RuntimeError("qdrant unavailable")
+
+    from src.memory_vector import MemoryVectorStore
+
+    store = MemoryVectorStore.__new__(MemoryVectorStore)
+    store._lanes = [lane]
+    store._healthy = True
+    store._qdrant = FailedQdrant()
+
+    results = store.search("canonical", owner="leo", k=3)
+
+    assert [row["memory_id"] for row in results] == ["memory-1"]
 
 
 def test_memory_rebuild_does_not_reimport_legacy_collection(monkeypatch):

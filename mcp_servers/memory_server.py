@@ -8,7 +8,6 @@ Imports MemoryManager and MemoryVectorStore from the Odysseus codebase.
 import asyncio
 import os
 import sys
-import time
 from pathlib import Path
 
 from mcp.server import Server
@@ -67,6 +66,7 @@ def _scope_entries() -> tuple[str | None, list[dict], list[dict], str | None]:
             entry for entry in entries
             if isinstance(entry, dict) and _entry_owner(entry) == owner
         ]
+    visible = [entry for entry in visible if entry.get("status", "approved") == "approved"]
     return owner, entries, visible, None
 
 
@@ -169,7 +169,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         _memory_manager.save(memories)
         if _memory_vector and _memory_vector.healthy:
             try:
-                _memory_vector.add(entry["id"], text)
+                if hasattr(_memory_vector, "add_record"):
+                    _memory_vector.add_record(entry)
+                else:
+                    _memory_vector.add(entry["id"], text)
             except Exception:
                 pass
         return _text_result(f"Memory added: [{category}] {text} (id: {entry['id'][:8]})")
@@ -189,19 +192,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 break
         if not full_id:
             return _text_result(f"Error: Memory '{memory_id}' not found")
-        for m in memories:
-            if m.get("id") == full_id:
-                m["text"] = new_text
-                m["timestamp"] = int(time.time())
-                break
-        _memory_manager.save(memories)
+        replacement = _memory_manager.replace_entry(
+            full_id,
+            new_text,
+            owner=_owner,
+            admitted_by="jarvis.mcp_memory",
+        )
+        if replacement is None:
+            return _text_result(f"Error: Memory '{memory_id}' is not eligible for correction")
         if _memory_vector and _memory_vector.healthy and full_id:
             try:
                 _memory_vector.remove(full_id)
-                _memory_vector.add(full_id, new_text)
+                if hasattr(_memory_vector, "add_record"):
+                    _memory_vector.add_record(replacement)
+                else:
+                    _memory_vector.add(replacement["id"], new_text)
             except Exception:
                 pass
-        return _text_result(f"Memory updated: {new_text}")
+        return _text_result(
+            f"Memory updated: {new_text} (new id: {replacement['id'][:8]})"
+        )
 
     elif action == "delete":
         memory_id = arguments.get("memory_id", "")
@@ -221,8 +231,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 break
         if not full_id:
             return _text_result(f"Error: Memory '{memory_id}' not found")
-        memories = [m for m in memories if m.get("id") != full_id]
-        _memory_manager.save(memories)
+        if not _memory_manager.delete_entry(
+            full_id,
+            owner=_owner,
+            deleted_by="jarvis.mcp_memory",
+        ):
+            return _text_result(f"Error: Memory '{memory_id}' is already deleted")
         if _memory_vector and _memory_vector.healthy and full_id:
             try:
                 _memory_vector.remove(full_id)

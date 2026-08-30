@@ -433,6 +433,12 @@ Key settings:
 | `CHROMADB_HOST` | `localhost` | ChromaDB host for vector memory. Docker overrides this to `chromadb`. |
 | `CHROMADB_PORT` | `8100` | ChromaDB port for manual host runs. Docker overrides this to `8000`. |
 | `EMBEDDING_URL` | -- | OpenAI-compatible embeddings endpoint |
+| `QDRANT_URL` | -- | Optional Qdrant projection endpoint; unset keeps the projection disabled |
+| `QDRANT_API_KEY` | -- | Optional Qdrant API key |
+| `JARVIS_QDRANT_MEMORY_COLLECTION` | `jarvis_memory_personal` | Approved personal-memory projection |
+| `JARVIS_QDRANT_DOCUMENT_COLLECTION` | `jarvis_documents` | Canonical-document projection |
+| `JARVIS_QDRANT_WIKI_COLLECTION` | `jarvis_wiki` | Generated-wiki projection |
+| `JARVIS_QDRANT_READS_ENABLED` | `false` | Promote Qdrant reads only after live parity checks |
 | `ODYSSEUS_CHAT_UPLOAD_MAX_BYTES` | `10485760` | Chat/agent attachment cap in bytes. Raise for larger local PDFs or text documents. |
 | `ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES` | `104857600` | Gallery image upload cap in bytes (100 MB). |
 | `ODYSSEUS_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES` | `26214400` | Gallery transform input cap in bytes (25 MB). |

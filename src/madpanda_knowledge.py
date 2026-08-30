@@ -18,10 +18,14 @@ from typing import Any
 from src.chroma_client import get_chroma_client
 from src.embeddings import FastEmbedClient
 from src.rag_vector import VectorRAG
+from src.qdrant_projection import QdrantProjection
+from src.knowledge_source_policy import validate_wiki_ingest
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "madpanda_knowledge_v1_fastembed"
+QDRANT_DOCUMENT_COLLECTION = os.getenv("JARVIS_QDRANT_DOCUMENT_COLLECTION", "jarvis_documents")
+QDRANT_WIKI_COLLECTION = os.getenv("JARVIS_QDRANT_WIKI_COLLECTION", "jarvis_wiki")
 KNOWLEDGE_EMBEDDING_MODEL = os.getenv(
     "ODYSSEUS_KNOWLEDGE_EMBEDDING_MODEL",
     "BAAI/bge-small-en-v1.5",
@@ -102,6 +106,8 @@ def _audit(agent: Agent, action: str, **details: Any) -> None:
 class KnowledgeStore:
     def __init__(self) -> None:
         self.embedder = None
+        self.qdrant_documents = QdrantProjection(collection=QDRANT_DOCUMENT_COLLECTION)
+        self.qdrant_wiki = QdrantProjection(collection=QDRANT_WIKI_COLLECTION)
         self.collection = get_chroma_client().get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={
@@ -143,7 +149,21 @@ class KnowledgeStore:
         ids = self._ids_for_source(source_id)
         if ids:
             self.collection.delete(ids=ids)
+            self._remove_projected_ids(ids)
         return len(ids)
+
+    def _remove_projected_ids(self, ids: list[str]) -> None:
+        for projection in (
+            getattr(self, "qdrant_documents", None),
+            getattr(self, "qdrant_wiki", None),
+        ):
+            if not projection or not projection.enabled:
+                continue
+            for row_id in ids:
+                try:
+                    projection.remove(row_id)
+                except Exception as exc:
+                    logger.warning("Qdrant document cleanup failed for %s: %s", row_id, exc)
 
     def _upsert_source(self, doc: dict[str, Any], index_version: str) -> int:
         chunks = self._split(str(doc["text"]))
@@ -169,6 +189,8 @@ class KnowledgeStore:
                 "content_hash": digest,
                 "index_version": index_version,
                 "chunk_id": number,
+                "generation_version": str(doc.get("generation_version") or ""),
+                "source_links_json": json.dumps(doc.get("source_links") or [], separators=(",", ":")),
             })
         for start in range(0, len(chunks), 25):
             batch_chunks = chunks[start:start + 25]
@@ -181,9 +203,41 @@ class KnowledgeStore:
                 metadatas=metadata[start:start + 25],
                 embeddings=embeddings,
             )
+            projection = (
+                getattr(self, "qdrant_wiki", None)
+                if str(doc.get("authority") or "primary") == "secondary" or str(doc.get("domain") or "") == "wiki"
+                else getattr(self, "qdrant_documents", None)
+            )
+            if projection and projection.enabled:
+                records = []
+                for row_id, chunk, meta in zip(
+                    ids[start:start + 25],
+                    batch_chunks,
+                    metadata[start:start + 25],
+                ):
+                    records.append({
+                        "id": row_id,
+                        "text": chunk,
+                        "status": "approved",
+                        "source_ref": f"document:{source_id}",
+                        "payload": {
+                            **meta,
+                            "document_class": (
+                                "generated_wiki"
+                                if meta.get("authority") == "secondary" or meta.get("domain") == "wiki"
+                                else "canonical_document"
+                            ),
+                            "document_status": meta.get("status", "active"),
+                        },
+                    })
+                try:
+                    projection.upsert_many(records, embeddings)
+                except Exception as exc:
+                    logger.warning("Qdrant document projection failed for %s: %s", source_id, exc)
         stale = [row_id for row_id in self._ids_for_source(source_id) if row_id not in set(ids)]
         if stale:
             self.collection.delete(ids=stale)
+            self._remove_projected_ids(stale)
         return len(ids)
 
     def sync_batch(
@@ -219,6 +273,7 @@ class KnowledgeStore:
             seen = set(state.get("seen", []))
             sources = dict(state.get("sources", {}))
             for doc in documents:
+                validate_wiki_ingest(doc)
                 source_id = str(doc.get("source_id") or "")
                 source = str(doc.get("source") or "")
                 text = str(doc.get("text") or "").strip()
@@ -229,7 +284,17 @@ class KnowledgeStore:
                 previous_hash = str(previous.get("content_hash") or self._source_hash(source_id))
                 sources[source_id] = {
                     key: doc.get(key)
-                    for key in ("source", "content_hash", "mtime", "domain", "client", "authority", "sensitivity")
+                    for key in (
+                        "source",
+                        "content_hash",
+                        "mtime",
+                        "domain",
+                        "client",
+                        "authority",
+                        "sensitivity",
+                        "source_links",
+                        "generation_version",
+                    )
                 }
                 if previous_hash == doc.get("content_hash"):
                     state["unchanged"] = int(state.get("unchanged", 0)) + 1

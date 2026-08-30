@@ -47,6 +47,23 @@ def test_agent_scope_blocks_client_without_client_name():
         store._domains(agent, "business_client", None)
 
 
+def test_canonical_knowledge_precedes_higher_scoring_generated_wiki(monkeypatch):
+    store = knowledge.KnowledgeStore.__new__(knowledge.KnowledgeStore)
+    agent = knowledge.Agent("jarvis", ("home_lab", "wiki"), ())
+    monkeypatch.setattr(knowledge, "_audit", lambda *_args, **_kwargs: None)
+
+    def query(_query, domain, _client, _limit, authority):
+        if authority == "primary":
+            return [{"source_id": "canonical", "chunk_id": 0, "score": 0.5}]
+        return [{"source_id": "wiki", "chunk_id": 0, "score": 0.99}]
+
+    store._query_domain = query
+
+    result = store.search(agent, "architecture", limit=2, include_secondary=True)
+
+    assert [row["source_id"] for row in result["results"]] == ["canonical", "wiki"]
+
+
 def test_auth_uses_hashes(tmp_path: Path, monkeypatch):
     registry = tmp_path / "agents.json"
     registry.write_text(
@@ -88,6 +105,61 @@ def test_large_source_embeddings_are_batched():
     }, "v1")
     assert count == 205
     assert store.embedder.calls == [25, 25, 25, 25, 25, 25, 25, 25, 5]
+
+
+def test_knowledge_projects_primary_and_wiki_into_separate_qdrant_collections():
+    class Embedder:
+        def encode(self, texts, normalize_embeddings=True):
+            return [[0.0, 1.0] for _ in texts]
+
+    class Collection:
+        def __init__(self):
+            self.ids = []
+
+        def upsert(self, ids, documents, metadatas, embeddings):
+            self.ids = list(ids)
+
+        def get(self, where=None, include=None):
+            return {"ids": list(self.ids)}
+
+        def delete(self, ids):
+            pass
+
+    class Projection:
+        enabled = True
+
+        def __init__(self):
+            self.rows = []
+
+        def upsert_many(self, records, embeddings):
+            self.rows.extend(records)
+
+    store = knowledge.KnowledgeStore.__new__(knowledge.KnowledgeStore)
+    store.embedder = Embedder()
+    store.collection = Collection()
+    store.qdrant_documents = Projection()
+    store.qdrant_wiki = Projection()
+    store._split = lambda text: [text]
+
+    store._upsert_source({
+        "source_id": "primary",
+        "source": "architecture.md",
+        "domain": "home_lab",
+        "authority": "primary",
+        "content_hash": "hash-primary",
+        "text": "canonical",
+    }, "v1")
+    store._upsert_source({
+        "source_id": "wiki",
+        "source": "wiki/concept.md",
+        "domain": "wiki",
+        "authority": "secondary",
+        "content_hash": "hash-wiki",
+        "text": "derived",
+    }, "v1")
+
+    assert store.qdrant_documents.rows[0]["payload"]["document_class"] == "canonical_document"
+    assert store.qdrant_wiki.rows[0]["payload"]["document_class"] == "generated_wiki"
 
 
 def test_knowledge_embedder_is_isolated_from_generic_rag(monkeypatch):

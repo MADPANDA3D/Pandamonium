@@ -110,17 +110,13 @@ class MemoryService:
 
     def get_all(self, limit: int = 100) -> List[Memory]:
         """Get all memories."""
-        records = self.manager.load_all()[:limit]
+        records = self.manager.load()[:limit]
         return [self._to_memory(m) for m in records]
 
     def delete(self, memory_id: str) -> bool:
         """Delete a memory by ID."""
-        memories = self.manager.load_all()
-        remaining = [m for m in memories if m.get("id") != memory_id]
-        if len(remaining) == len(memories):
+        if not self.manager.delete_entry(memory_id, deleted_by="memory_service"):
             return False
-
-        self.manager.save(remaining)
         if self.vector_store and self.vector_store.healthy:
             self.vector_store.remove(memory_id)
         return True

@@ -5,10 +5,23 @@ import os
 import time
 import uuid
 import re
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+MEMORY_STATUSES = {"candidate", "approved", "rejected", "superseded", "deleted"}
+
+
+def _default_admitted_by(source: str) -> str:
+    """Return the existing policy/operator boundary for a memory source."""
+    if source == "auto":
+        return "policy:auto_memory"
+    if source in {"ai_agent", "jarvis"}:
+        return "jarvis.tool"
+    if source == "legacy":
+        return "legacy"
+    return "operator"
 
 def tokenize(text: str) -> List[str]:
     """Simple tokenizer that splits on whitespace and removes punctuation."""
@@ -126,12 +139,20 @@ class MemoryManager:
 
         return []
 
-    def load(self, owner: str = None) -> List[Dict]:
-        """Load memory entries, optionally filtered by owner."""
+    def load(self, owner: str = None, statuses: Optional[Tuple[str, ...]] = ("approved",)) -> List[Dict]:
+        """Load recallable memories, optionally filtered by owner and status.
+
+        ``load_all`` is the review/audit surface. Normal consumers use this
+        method and therefore cannot recall candidates, rejected records,
+        superseded records, or deletion tombstones.
+        """
         entries = self.load_all()
-        if owner is None:
-            return entries
-        return [e for e in entries if e.get("owner") == owner]
+        if statuses is not None:
+            allowed = set(statuses)
+            entries = [e for e in entries if e.get("status") in allowed]
+        if owner is not None:
+            entries = [e for e in entries if e.get("owner") == owner]
+        return entries
 
     def claim_ownerless(self, owner: str):
         """Assign all ownerless memory entries to the given owner."""
@@ -141,6 +162,7 @@ class MemoryManager:
         for entry in entries:
             if not entry.get("owner"):
                 entry["owner"] = owner
+                entry["owner_id"] = owner
                 changed = True
                 claimed += 1
         if changed:
@@ -148,13 +170,14 @@ class MemoryManager:
             logger.info("Claimed %d ownerless memories for %s", claimed, owner)
     
     def _validate_entries(self, entries: List[Dict]) -> List[Dict]:
-        """Ensure all entries have required fields."""
+        """Normalize legacy records into the JOS P3 provenance envelope."""
         validated = []
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
             if "id" not in entry:
                 entry["id"] = str(uuid.uuid4())
+            entry["memory_id"] = entry["id"]
             if "timestamp" not in entry:
                 entry["timestamp"] = int(time.time())
             if "source" not in entry:
@@ -163,8 +186,23 @@ class MemoryManager:
                 entry["category"] = "fact"
             if "uses" not in entry:
                 entry["uses"] = 0
+            status = entry.get("status", "approved")
+            entry["status"] = status if status in MEMORY_STATUSES else "candidate"
+            entry.setdefault("source_ref", self._default_source_ref(entry))
+            entry.setdefault("source_time", entry["timestamp"])
+            entry.setdefault("admitted_at", entry["timestamp"])
+            entry.setdefault("admitted_by", "legacy")
+            entry.setdefault("supersedes", None)
+            entry["owner_id"] = entry.get("owner")
             validated.append(entry)
         return validated
+
+    @staticmethod
+    def _default_source_ref(entry: Dict) -> str:
+        session_id = entry.get("session_id")
+        if session_id:
+            return f"session:{session_id}"
+        return f"{entry.get('source', 'unknown')}:{entry.get('id', 'unknown')}"
     
     def _migrate_from_legacy(self) -> List[Dict]:
         """Migrate from old text format to JSON if needed."""
@@ -195,16 +233,7 @@ class MemoryManager:
     
     def save(self, entries: List[Dict]):
         """Save memory entries to JSON file."""
-        # Validate entries before saving
-        for entry in entries:
-            if "id" not in entry:
-                entry["id"] = str(uuid.uuid4())
-            if "timestamp" not in entry:
-                entry["timestamp"] = int(time.time())
-            if "source" not in entry:
-                entry["source"] = "user"
-            if "category" not in entry:
-                entry["category"] = "fact"
+        entries = self._validate_entries(entries)
         
         # Use atomic write
         tmp_file = self.memory_file + ".tmp"
@@ -212,22 +241,103 @@ class MemoryManager:
             json.dump(entries, f, ensure_ascii=False, indent=2)
         os.replace(tmp_file, self.memory_file)
     
-    def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None) -> Dict:
-        """Add a new memory entry."""
+    def add_entry(
+        self,
+        text: str,
+        source: str = "user",
+        category: str = "fact",
+        owner: str = None,
+        *,
+        status: str = "approved",
+        source_ref: Optional[str] = None,
+        source_time: Optional[int] = None,
+        admitted_by: Optional[str] = None,
+        supersedes: Optional[str] = None,
+    ) -> Dict:
+        """Create a provenance-complete memory record without saving it."""
         if not text.strip():
             raise ValueError("Memory text cannot be empty")
+        if status not in MEMORY_STATUSES:
+            raise ValueError(f"Invalid memory status: {status}")
 
+        now = int(time.time())
+        memory_id = str(uuid.uuid4())
         entry = {
-            "id": str(uuid.uuid4()),
+            "id": memory_id,
+            "memory_id": memory_id,
             "text": text.strip(),
-            "timestamp": int(time.time()),
+            "timestamp": now,
             "source": source,
             "category": category,
             "uses": 0,
+            "status": status,
+            "source_ref": source_ref or f"{source}:{memory_id}",
+            "source_time": source_time or now,
+            "admitted_at": now,
+            "admitted_by": admitted_by or _default_admitted_by(source),
+            "supersedes": supersedes,
+            "owner_id": owner,
         }
         if owner:
             entry["owner"] = owner
         return entry
+
+    def replace_entry(
+        self,
+        memory_id: str,
+        text: str,
+        *,
+        owner: Optional[str] = None,
+        category: Optional[str] = None,
+        admitted_by: str = "operator",
+    ) -> Optional[Dict]:
+        """Supersede an approved memory with a new immutable record."""
+        entries = self.load_all()
+        original = next((entry for entry in entries if entry.get("id") == memory_id), None)
+        if original is None or original.get("status") != "approved":
+            return None
+        if owner is not None and original.get("owner") != owner:
+            return None
+
+        replacement = self.add_entry(
+            text,
+            source="correction",
+            category=category or original.get("category", "fact"),
+            owner=original.get("owner"),
+            source_ref=f"memory:{memory_id}",
+            source_time=int(time.time()),
+            admitted_by=admitted_by,
+            supersedes=memory_id,
+        )
+        for inherited in ("session_id", "pinned", "metadata"):
+            if inherited in original:
+                replacement[inherited] = original[inherited]
+        original["status"] = "superseded"
+        original["superseded_by"] = replacement["id"]
+        original["superseded_at"] = replacement["admitted_at"]
+        entries.append(replacement)
+        self.save(entries)
+        return replacement
+
+    def delete_entry(
+        self,
+        memory_id: str,
+        *,
+        owner: Optional[str] = None,
+        deleted_by: str = "operator",
+    ) -> bool:
+        """Tombstone a memory so provenance remains auditable but recall stops."""
+        entries = self.load_all()
+        target = next((entry for entry in entries if entry.get("id") == memory_id), None)
+        if target is None or target.get("status") == "deleted":
+            return False
+        if owner is not None and target.get("owner") != owner:
+            return False
+        target["status"] = "deleted"
+        target["deleted_at"] = int(time.time())
+        target["deleted_by"] = deleted_by
+        self.save(entries)
+        return True
 
     def increment_uses(self, ids: List[str]) -> None:
         """Bump the uses counter for each memory id. Called after a memory has
@@ -250,7 +360,11 @@ class MemoryManager:
             entries = self.load()
             
         text_lower = text.strip().lower()
-        return [entry for entry in entries if entry["text"].lower() == text_lower]
+        return [
+            entry for entry in entries
+            if entry.get("status", "approved") == "approved"
+            and entry["text"].lower() == text_lower
+        ]
             
     def categorize_memory_by_relevance(self, message: str, memories: list):
         """Categorize memories by type and relevance"""
@@ -290,6 +404,7 @@ class MemoryManager:
 
     def get_relevant_memories(self, query: str, memories: list, threshold: float = 0.05, max_items: int = 8):
         """Get memories that are relevant to the query based on text similarity and semantic keyword matching."""
+        memories = [m for m in memories if m.get("status", "approved") == "approved"]
         if not memories or not query.strip():
             return []
             

@@ -17,7 +17,7 @@ class FakeVectorStore:
     def remove(self, memory_id):
         self.removed.append(memory_id)
 
-    def search(self, query, k=5):
+    def search(self, query, k=5, owner=None):
         return self.results[:k]
 
 

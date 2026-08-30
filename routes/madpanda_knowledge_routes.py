@@ -46,6 +46,8 @@ class SyncDocument(BaseModel):
     status: str
     mtime: int
     content_hash: str
+    source_links: list[str] = Field(default_factory=list, max_length=100)
+    generation_version: str = Field(default="", max_length=100)
     text: str = Field(min_length=1, max_length=2_000_000)
 
 

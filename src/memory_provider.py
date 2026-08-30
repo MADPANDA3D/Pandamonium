@@ -18,6 +18,12 @@ class MemoryRecord:
     source: str = "unknown"
     owner: Optional[str] = None
     session_id: Optional[str] = None
+    status: str = "approved"
+    source_ref: str = ""
+    source_time: int = 0
+    admitted_at: int = 0
+    admitted_by: str = "unknown"
+    supersedes: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -108,6 +114,12 @@ class NativeMemoryProvider(MemoryProvider):
         "uses",
         "owner",
         "session_id",
+        "status",
+        "source_ref",
+        "source_time",
+        "admitted_at",
+        "admitted_by",
+        "supersedes",
         "metadata",
     }
 
@@ -133,6 +145,12 @@ class NativeMemoryProvider(MemoryProvider):
             source=entry.get("source", "unknown"),
             owner=entry.get("owner"),
             session_id=entry.get("session_id"),
+            status=entry.get("status", "approved"),
+            source_ref=entry.get("source_ref", ""),
+            source_time=entry.get("source_time", 0),
+            admitted_at=entry.get("admitted_at", 0),
+            admitted_by=entry.get("admitted_by", "unknown"),
+            supersedes=entry.get("supersedes"),
             metadata=metadata,
         )
 
@@ -162,7 +180,10 @@ class NativeMemoryProvider(MemoryProvider):
         self.memory_manager.save(memories)
 
         if self._vector_available():
-            self.memory_vector.add(entry["id"], entry["text"])
+            if hasattr(self.memory_vector, "add_record"):
+                self.memory_vector.add_record(entry)
+            else:
+                self.memory_vector.add(entry["id"], entry["text"])
 
         return self._to_record(entry)
 
@@ -178,7 +199,11 @@ class NativeMemoryProvider(MemoryProvider):
 
         if self._vector_available():
             hits: List[MemorySearchHit] = []
-            for result in self.memory_vector.search(query, k=top_k):
+            try:
+                vector_results = self.memory_vector.search(query, k=top_k, owner=owner)
+            except TypeError:
+                vector_results = self.memory_vector.search(query, k=top_k)
+            for result in vector_results:
                 if not isinstance(result, dict):
                     continue
                 memory_id = result.get("memory_id")
@@ -223,25 +248,14 @@ class NativeMemoryProvider(MemoryProvider):
         ]
 
     async def delete(self, memory_id: str, *, owner: Optional[str] = None) -> bool:
-        memories = self.memory_manager.load_all()
-        remaining = []
-        deleted_id = None
-
-        for entry in memories:
-            if entry.get("id") != memory_id:
-                remaining.append(entry)
-                continue
-            if owner is not None and entry.get("owner") != owner:
-                remaining.append(entry)
-                continue
-            deleted_id = entry.get("id")
-
-        if deleted_id is None:
+        if not self.memory_manager.delete_entry(
+            memory_id,
+            owner=owner,
+            deleted_by="memory_provider",
+        ):
             return False
-
-        self.memory_manager.save(remaining)
         if self._vector_available():
-            self.memory_vector.remove(deleted_id)
+            self.memory_vector.remove(memory_id)
         return True
 
     def _vector_available(self) -> bool:

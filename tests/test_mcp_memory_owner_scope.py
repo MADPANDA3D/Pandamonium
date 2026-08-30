@@ -138,13 +138,21 @@ def test_mcp_memory_preserves_ownerless_local_behavior(monkeypatch, tmp_path):
     )
     assert "owner" not in added
 
-    assert _tool_text({
+    edit_text = _tool_text({
         "action": "edit",
         "memory_id": legacy["id"][:8],
         "text": "Updated local memory",
-    }) == "Memory updated: Updated local memory"
-    assert any(entry["text"] == "Updated local memory" for entry in manager.load_all())
+    })
+    assert edit_text.startswith("Memory updated: Updated local memory")
+    replacement = next(
+        entry for entry in manager.load()
+        if entry["text"] == "Updated local memory"
+    )
+    assert replacement["supersedes"] == legacy["id"]
 
-    delete_text = _tool_text({"action": "delete", "memory_id": legacy["id"][:8]})
+    delete_text = _tool_text({"action": "delete", "memory_id": replacement["id"][:8]})
     assert delete_text.startswith("Memory deleted:")
-    assert all(entry["id"] != legacy["id"] for entry in manager.load_all())
+    assert all(entry["id"] != replacement["id"] for entry in manager.load())
+    records = {entry["id"]: entry for entry in manager.load_all()}
+    assert records[legacy["id"]]["status"] == "superseded"
+    assert records[replacement["id"]]["status"] == "deleted"
