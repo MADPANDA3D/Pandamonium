@@ -2,9 +2,9 @@
 
 **Protocol ID:** `JOS-EXT-1`
 
-**Version:** `0.2`
+**Version:** `0.3`
 
-**Status:** Manifest, registry, pinned installer, generic live-catalog host, and native skill-bundle adapter
+**Status:** Manifest, registry, pinned installer, generic live-catalog and browser-surface host, and native skill-bundle adapter
 
 **Reference extension:** ORACLE
 
@@ -192,6 +192,40 @@ Live web runtime locations come from the installation-owned
 from a reference-extension name or embedded as private source defaults. The
 adapter binds the manifest ID, configured origin, catalog response, pinned
 revision, declared permission modes, and health result before registration.
+
+### Browser-surface mount and result bridge
+
+An enabled `web` extension may expose its installed `runtime.entrypoint` at the
+configured runtime origin. Odysseus mounts at most one engaged surface in the
+shared browser host; it does not copy the candidate UI or create another
+session or action bus. A disabled, uninstalled, unconfigured, malformed, or
+disengaged extension has no mounted frame and receives no calls.
+
+The browser host MUST:
+
+1. resolve the surface from the enabled registry record, manifest extension
+   ID and entry point, and exact configured runtime origin;
+2. accept messages only from the mounted frame window and that exact origin;
+3. require the extension ID, tool name, call ID, and result object to match one
+   pending call before forwarding the result through the existing authenticated
+   voice-session result route;
+4. bound result size before forwarding, time out missing or malformed results,
+   and tear down pending calls on disengage, disable, uninstall, or frame loss;
+5. treat browser state and capabilities as untrusted availability data that can
+   narrow, but never add to, the registry catalog or permission policy; and
+6. leave camera and media permissions browser-scoped and explicit. Engaging an
+   extension never requests or implies camera, microphone, capture, or other
+   media permission.
+
+The result route remains authoritative for authenticated session ownership,
+extension ID, call ID, tool, enabled/engaged state, pending status, and the
+server result-size ceiling. A browser result cannot authorize its own action or
+prove success without passing that correlation.
+
+The existing ORACLE iframe bridge remains a compatibility adapter. It may
+normalize its legacy message names into this envelope, but it is not removed
+until generic-source equivalence and the separately authorized deployed
+equivalence gate both pass.
 
 ## Lifecycle
 
