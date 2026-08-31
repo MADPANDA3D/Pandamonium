@@ -2,14 +2,15 @@
 
 **Linear:** `MAD-755`
 
-This is a read-only compatibility inventory. No candidate repository was
-cloned, forked, modified, installed, executed, pushed, or deployed while
-producing it. Candidate names and URLs are planning/install data; none belongs
-in Odysseus core dispatch.
+This matrix distinguishes inventory-only candidates from source-proven local
+candidates. Candidate source, manifests, catalogs, and native actions stay in
+their maintained candidate repositories; candidate names and URLs do not
+belong in Odysseus core dispatch. No candidate has been pushed, deployed,
+published, released, or persistently installed by these batons.
 
 ## Current host boundary
 
-The source host at Odysseus commit `fa6cf682` supports:
+The source host at Odysseus commit `dfe098be` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
@@ -37,7 +38,7 @@ retained until source and deployed equivalence are separately proven.
 | Candidate | Pinned revision | License | Native surface to reuse | Compatibility decision | Child baton |
 | --- | --- | --- | --- | --- | --- |
 | [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Conditional: use a generic skill-bundle adapter; do not flatten its scripts into core tools | `MAD-757` |
-| [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0 | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Conditional: candidate-owned live catalog/bridge plus generic web-surface mount; browser camera remains client-side | `MAD-758` |
+| [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0-or-later | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Source-proven locally: candidate-owned manifest/catalog/bridge reuses the generic web surface; browser camera remains client-side. Not pushed, published, deployed, or persistently installed | `MAD-758` |
 | [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Conditional: candidate-owned narrow MCP server plus generic MCP adapter; never automate Streamlit | `MAD-760` |
 | [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Conditional: admit native plugin/skill metadata through the same generic skill-bundle adapter; start with `cad` and `cad-viewer` only | `MAD-759` |
 
@@ -56,15 +57,30 @@ retained until source and deployed equivalence are separately proven.
 
 ### barehands
 
-- `server.py` binds `127.0.0.1`, exposes existing state/config/note/media and
-  board-command endpoints, caps request bodies, jails note/media paths, and
-  validates commands against its native allowlist.
+- The maintained candidate branch starts from pinned upstream revision
+  `c6106cac49ecc6a6182c55746a95095888281f73`. Contract, runtime, focused
+  boundary tests, and lifecycle proof are commits `d013959`, `6d1e932`,
+  `1836226`, and `bcddc23`; readiness documentation is `0ef7c9a`.
+- Its strict JOS manifest uses the generic live-catalog web runtime and exposes
+  only `read_board_state` and `present`; the broader native command allowlist
+  is not copied into Odysseus.
+- `server.py` enforces loopback binding, caps request bodies, keeps notes
+  read-only, and routes every source-bearing native command through the same
+  configured media jail and stageable-suffix check.
 - The configured note root may be an Obsidian vault. That makes it a useful UI
   surface, not a new memory authority or unrestricted filesystem reader.
-- Webcam tracking and MediaPipe stay in the browser. A gesture is user intent,
-  never an approval receipt.
-- AGPL-3.0 obligations must be resolved before distributing or offering a
-  modified networked fork.
+- Browser mocks prove the JOS bridge never requests the camera or serializes a
+  frame. Webcam tracking and MediaPipe stay in the browser; a gesture is user
+  intent, never an approval receipt.
+- Candidate-owned checks prove catalog/config, exact parent origin, bounded
+  board-state read, one correlated present action, malformed/unknown/timeout
+  failure, traversal and non-media rejection, read-only notes, client-side
+  frames, clean install, disable/enable, upgrade, rollback, server-loss
+  isolation, uninstall, and reinstall. A differently named reference surface
+  remains registered throughout the lifecycle proof.
+- `docs/JOS_EXTENSION.md` records AGPL-3.0-or-later conveyance and section 13
+  network-source obligations before any publication or release. No release
+  action occurred.
 
 ### Robin
 
@@ -141,3 +157,15 @@ passed with 5,014 tests, 4 intentional skips, and zero failures in 119.75
 seconds. No real candidate repository, persistent install, dependency, second
 MCP client, daemon, registry, approval layer, deployment, or ORACLE change
 occurred.
+
+MAD-758 verification: 3 candidate server boundary checks, the candidate browser
+bridge harness, and the candidate-owned generic lifecycle integration check
+passed. The real pinned candidate revisions completed clean install,
+disable/enable, upgrade, rollback, server-loss isolation, uninstall, and
+reinstall while a differently named reference surface remained healthy. The
+existing Odysseus extension/ownership regression set passed 34 Python checks,
+and its generic browser-surface harness passed. The complete Odysseus gate then
+passed with 5,014 tests, 4 intentional skips, and zero failures in 182.67
+seconds. Candidate syntax/manifest checks also passed. No Odysseus core,
+ORACLE, dependency, persistent install, push, deployment, publication, or
+release change occurred.
