@@ -9,7 +9,7 @@ in Odysseus core dispatch.
 
 ## Current host boundary
 
-The source host at Odysseus commit `13fb3209` supports:
+The source host at Odysseus commit `fa6cf682` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
@@ -23,11 +23,14 @@ The source host at Odysseus commit `13fb3209` supports:
   disable, and unavailable behavior after a tool reaches the model loop; and
 - an extension-ID-keyed browser surface resolved from the installed manifest
   entry point and configured runtime origin, with exact frame/origin/call/tool/
-  owner correlation and explicit browser-only media permissions.
+  owner correlation and explicit browser-only media permissions; and
+- a reference-neutral MCP lifecycle adapter over the existing native MCP
+  manager, with pinned stdio entrypoints or configured loopback transport,
+  identity/catalog reconciliation, bounded calls, restart restoration, and
+  fail-closed ordinary-catalog isolation.
 
-It does not yet provide an MCP runtime adapter. ORACLE's legacy message
-normalizer and unregistered fallback are deliberately retained until source and
-deployed equivalence are separately proven.
+ORACLE's legacy message normalizer and unregistered fallback are deliberately
+retained until source and deployed equivalence are separately proven.
 
 ## Candidate decisions
 
@@ -109,8 +112,11 @@ Three reference-neutral host gaps were separated from candidate-native work:
    multi-action results, unavailable/malformed/timeout behavior, disable,
    uninstall, restart recovery, and explicit browser-only media permission.
    ORACLE compatibility remains pending separate source/deployed equivalence.
-3. `MAD-763` — generic MCP runtime adapter using the existing Odysseus MCP
-   subsystem; blocks `MAD-760`.
+3. `MAD-763` — source-complete generic MCP runtime adapter using the existing
+   Odysseus MCP subsystem. The reference-neutral Quartz fixture proves pinned
+   stdio lifecycle/action routing, identity/catalog/duplicate/unavailable
+   failure isolation, bounded malformed/late/oversized results, disable,
+   upgrade, rollback, removal, reinstall, restart, and secret boundaries.
 
 Any JOS-EXT-1 schema change is written and tested first in its shared baton.
 Candidate manifests, catalogs, shims, UI, data, state, and native tools remain
@@ -128,3 +134,10 @@ plus the browser harness and syntax gates, passed. The complete Odysseus gate
 then passed with 5,005 tests, 4 intentional skips, and zero failures. No real
 candidate repository, persistent install, dependency, daemon, deployment, or
 ORACLE change occurred.
+
+MAD-763 verification: 9 reference-neutral MCP adapter checks and 153 focused
+extension/MCP/voice regression checks passed. The complete Odysseus gate then
+passed with 5,014 tests, 4 intentional skips, and zero failures in 119.75
+seconds. No real candidate repository, persistent install, dependency, second
+MCP client, daemon, registry, approval layer, deployment, or ORACLE change
+occurred.
