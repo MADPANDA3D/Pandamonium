@@ -40550,7 +40550,7 @@ body.theme-frosted .modal {
   border-color: color-mix(in srgb, #c06cff 42%, var(--input-border, #3d2b4a));
   box-shadow: 0 0 0 1px rgba(180, 102, 255, 0.15), 0 14px 44px rgba(0, 0, 0, 0.34);
 }
-.oracle-protocol-panel {
+.extension-surface-panel {
   position: fixed;
   inset: 0;
   z-index: 10001;
@@ -40561,20 +40561,20 @@ body.theme-frosted .modal {
   transition: opacity 200ms ease, transform 200ms ease;
   pointer-events: none;
 }
-.oracle-protocol-panel.is-open {
+.extension-surface-panel.is-open {
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
 }
-html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
+html.jarvis-voice-minimized .extension-surface-panel.is-open {
   opacity: 0;
   transform: translateX(100%);
   pointer-events: none;
 }
-.oracle-protocol-panel[hidden] {
+.extension-surface-panel[hidden] {
   display: none;
 }
-.oracle-protocol-status {
+.extension-surface-status {
   position: absolute;
   top: 18px;
   left: 18px;
@@ -40594,19 +40594,19 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
   pointer-events: none;
   backdrop-filter: blur(10px);
 }
-.oracle-protocol-status small {
+.extension-surface-status small {
   color: rgba(179, 233, 239, 0.58);
   font-size: 8px;
   letter-spacing: 0.1em;
 }
-.oracle-protocol-mark {
+.extension-surface-mark {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: #70edf5;
   box-shadow: 0 0 10px rgba(112, 237, 245, 0.72);
 }
-.oracle-protocol-frame {
+.extension-surface-frame {
   width: 100%;
   height: 100%;
   display: block;
@@ -41221,7 +41221,7 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
   display: none;
 }
 @media (min-width: 721px) {
-  html.oracle-protocol-active .jarvis-call-panel {
+  html.extension-surface-active .jarvis-call-panel {
     top: 58%;
     right: auto;
     bottom: auto;
@@ -41232,22 +41232,22 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
     overflow: visible;
     transform: translate(-140%, -50%);
   }
-  html.oracle-protocol-active .jarvis-call-panel.is-open {
+  html.extension-surface-active .jarvis-call-panel.is-open {
     transform: translate(0, -50%);
   }
-  html.oracle-protocol-active .jarvis-agent-workspace,
-  html.oracle-protocol-active .jarvis-activity-rail,
-  html.oracle-protocol-active .jarvis-call-copy,
-  html.oracle-protocol-active .jarvis-call-actions {
+  html.extension-surface-active .jarvis-agent-workspace,
+  html.extension-surface-active .jarvis-activity-rail,
+  html.extension-surface-active .jarvis-call-copy,
+  html.extension-surface-active .jarvis-call-actions {
     display: none !important;
   }
-  html.oracle-protocol-active .jarvis-call-orb,
-  html.oracle-protocol-active .jarvis-call-panel.has-agent-task .jarvis-call-orb {
+  html.extension-surface-active .jarvis-call-orb,
+  html.extension-surface-active .jarvis-call-panel.has-agent-task .jarvis-call-orb {
     inset: 0;
     width: 100%;
     height: 100%;
   }
-  html.oracle-protocol-active .toast {
+  html.extension-surface-active .toast {
     top: calc(58% + clamp(94px, 7vw, 126px));
     right: auto;
     left: clamp(24px, 4vw, 72px);
@@ -41258,7 +41258,7 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
   body.jarvis-voice-active .chat-container {
     margin-right: 34vw;
   }
-  body.jarvis-voice-active.oracle-protocol-active .chat-container {
+  body.jarvis-voice-active.extension-surface-active .chat-container {
     margin-right: 0;
   }
   body.jarvis-voice-active .msg .body {
@@ -41325,7 +41325,7 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
     height: 44px;
     flex-basis: 44px;
   }
-  .oracle-protocol-panel {
+  .extension-surface-panel {
     inset: 0;
   }
   .jarvis-sphere-core {
@@ -41403,7 +41403,7 @@ html.jarvis-voice-minimized .oracle-protocol-panel.is-open {
   .jarvis-call-panel {
     transition: none;
   }
-  .oracle-protocol-panel {
+  .extension-surface-panel {
     transition: none;
   }
   .jarvis-task-indicator,

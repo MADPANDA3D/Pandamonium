@@ -37,7 +37,7 @@ export function handleUIControl(uiData) {
 
   try {
     if (String(uiEvent).startsWith('oracle_protocol_')) {
-      window.jarvisVoice?.applyOracleProtocolControl?.(uiData);
+      window.jarvisVoice?.applyExtensionSurfaceControl?.(uiData);
 
     } else if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {
       var toggleMap = {

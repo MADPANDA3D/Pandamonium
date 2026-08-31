@@ -58,14 +58,15 @@ let activeAudioTurnId = null;
 let captureAudioContext = null;
 let captureVoicedMs = 0;
 let voiceCallGeneration = 0;
-let oracleProtocolUrl = '';
-let oracleProtocolHideTimer = null;
-let oracleProtocolState = null;
-let oracleProtocolReady = false;
-let oracleProtocolCapabilities = null;
-let oracleProtocolCommandSequence = 0;
-let oracleProtocolPendingCommands = [];
-const oracleProtocolPendingResults = new Map();
+let extensionSurfaceConfigs = new Map();
+let extensionSurfaceId = '';
+let extensionSurfaceHideTimer = null;
+let extensionSurfaceState = null;
+let extensionSurfaceReady = false;
+let extensionSurfaceCapabilities = null;
+let extensionSurfaceCommandSequence = 0;
+let extensionSurfacePendingCommands = [];
+const extensionSurfacePendingResults = new Map();
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -83,7 +84,8 @@ const MIN_VOICED_MS = 280;
 const VOICE_CUE_GAIN = 0.12;
 const VOICE_PREWARM_TIMEOUT_MS = 2500;
 const CALL_PANEL_TRANSITION_MS = 280;
-const ORACLE_COMMAND_TIMEOUT_MS = 40000;
+const EXTENSION_COMMAND_TIMEOUT_MS = 40000;
+const EXTENSION_RESULT_MAX_BYTES = 1000000;
 const SPOKEN_WORKER_EVENTS = new Set(['progress', 'question', 'approval_required', 'result', 'error']);
 const DURABLE_SPEECH_TYPES = new Set(['question', 'approval_required', 'error']);
 const WORKER_SPEECH_MAX_CHARS = 700;
@@ -102,6 +104,8 @@ const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
   'oracle_protocol_engage',
   'oracle_protocol_shutdown',
   'oracle_protocol_command',
+  'extension_protocol_engage',
+  'extension_protocol_disengage',
   'extension_protocol_command',
 ]);
 const WORKER_LABELS = {
@@ -624,21 +628,19 @@ function mediaVoiceCommand(text) {
 
 function voiceRequestPayload(text) {
   const clientState = collectClientState();
-  const oracle = voiceOracleClientState();
-  if (oracle) {
-    clientState.oracle = oracle;
+  const surface = extensionSurfaceClientState();
+  if (surface) {
     clientState.extensions = {
-      oracle: {
-        ready: oracle.ready,
-        updated_at_ms: oracle.updated_at_ms,
-        state: {
-          style: oracle.style,
-          camera: oracle.camera,
-          layers: oracle.layers,
-        },
-        capabilities: oracle.capabilities,
+      ...(clientState.extensions || {}),
+      [surface.extension_id]: {
+        ready: surface.ready,
+        updated_at_ms: surface.updated_at_ms,
+        state: surface.state,
+        capabilities: surface.capabilities,
       },
     };
+    const oracle = voiceOracleClientState();
+    if (oracle) clientState.oracle = oracle;
   }
   const payload = { text, client_state: clientState };
   if (mediaVoiceCommand(text) === 'camera_describe' && voiceOrbMedia.getState().cameraOpen) {
@@ -651,51 +653,95 @@ function voiceRequestPayload(text) {
   return payload;
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function jsonByteLength(value) {
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength; }
+  catch (_) { return Infinity; }
+}
+
+function configureExtensionSurfaces(values = []) {
+  const active = extensionSurfaceConfigs.get(extensionSurfaceId);
+  const next = new Map();
+  for (const raw of Array.isArray(values) ? values.slice(0, 32) : []) {
+    const extensionId = String(raw?.extension_id || '');
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(extensionId)) continue;
+    try {
+      const target = new URL(String(raw.url || ''), window.location.origin);
+      const origin = String(raw.origin || '');
+      const loopback = target.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
+      if (target.origin !== origin || (target.protocol !== 'https:' && target.origin !== window.location.origin && !loopback)) continue;
+      next.set(extensionId, {
+        extensionId,
+        name: String(raw.name || extensionId).slice(0, 200),
+        url: target.href,
+        origin,
+        compatibility: '',
+      });
+    } catch (_) {}
+  }
+  extensionSurfaceConfigs = next;
+  const current = next.get(extensionSurfaceId);
+  if (
+    extensionSurfaceId
+    && (!current || current.url !== active?.url || current.origin !== active?.origin)
+  ) disengageExtensionSurface(extensionSurfaceId, true);
+}
+
+// Compatibility-only configuration until ORACLE source and deployment equivalence pass.
 function configureOracleProtocol(url) {
+  if (extensionSurfaceConfigs.has('oracle') && extensionSurfaceConfigs.get('oracle')?.compatibility !== 'oracle-v1') return;
   const configured = String(url || '').trim();
   if (!configured) {
-    oracleProtocolUrl = '';
-    oracleProtocolReady = false;
-    oracleProtocolState = null;
-    oracleProtocolCapabilities = null;
-    oracleProtocolPendingCommands = [];
-    clearOracleProtocolPendingResults();
+    extensionSurfaceConfigs.delete('oracle');
+    if (extensionSurfaceId === 'oracle') disengageExtensionSurface('oracle', true);
     return;
   }
   try {
     const target = new URL(configured, window.location.origin);
-    const sameOrigin = target.origin === window.location.origin;
-    const nextUrl = (target.protocol === 'https:' || sameOrigin) ? target.href : '';
-    if (nextUrl !== oracleProtocolUrl) {
-      oracleProtocolReady = false;
-      oracleProtocolState = null;
-      oracleProtocolCapabilities = null;
-      oracleProtocolPendingCommands = [];
-      clearOracleProtocolPendingResults();
+    if (target.protocol !== 'https:' && target.origin !== window.location.origin) {
+      extensionSurfaceConfigs.delete('oracle');
+      if (extensionSurfaceId === 'oracle') disengageExtensionSurface('oracle', true);
+      return;
     }
-    oracleProtocolUrl = nextUrl;
+    extensionSurfaceConfigs.set('oracle', {
+      extensionId: 'oracle',
+      name: 'ORACLE',
+      url: target.href,
+      origin: target.origin,
+      compatibility: 'oracle-v1',
+    });
   } catch (_) {
-    oracleProtocolUrl = '';
-    oracleProtocolReady = false;
-    oracleProtocolState = null;
-    oracleProtocolCapabilities = null;
+    extensionSurfaceConfigs.delete('oracle');
+    if (extensionSurfaceId === 'oracle') disengageExtensionSurface('oracle', true);
   }
 }
 
-function oracleProtocolOrigin() {
-  try { return oracleProtocolUrl ? new URL(oracleProtocolUrl).origin : ''; }
-  catch (_) { return ''; }
+function extensionSurfaceClientState() {
+  if (!extensionSurfaceId || ((!extensionSurfaceState || extensionSurfaceState.ok === false) && !extensionSurfaceCapabilities)) return null;
+  const state = isPlainObject(extensionSurfaceState) && jsonByteLength(extensionSurfaceState) <= 65536
+    ? extensionSurfaceState : {};
+  return {
+    extension_id: extensionSurfaceId,
+    ready: extensionSurfaceReady,
+    updated_at_ms: Date.now(),
+    state,
+    capabilities: extensionSurfaceCapabilities,
+  };
 }
 
 function voiceOracleClientState() {
-  if ((!oracleProtocolState || oracleProtocolState.ok === false) && !oracleProtocolCapabilities) return null;
-  const panel = $('oracle-protocol-panel');
-  const camera = oracleProtocolState?.camera || {};
+  if (extensionSurfaceId !== 'oracle') return null;
+  const surface = extensionSurfaceClientState();
+  if (!surface) return null;
+  const camera = surface.state?.camera || {};
   const validCamera = [camera.latitude, camera.longitude, camera.heightM].every(Number.isFinite)
     ? { latitude: camera.latitude, longitude: camera.longitude, heightM: camera.heightM }
     : null;
-  const layers = Array.isArray(oracleProtocolState?.layers)
-    ? oracleProtocolState.layers.slice(0, 64).map(layer => ({
+  const layers = Array.isArray(surface.state?.layers)
+    ? surface.state.layers.slice(0, 64).map(layer => ({
       id: String(layer?.id || '').slice(0, 80),
       name: String(layer?.name || '').slice(0, 120),
       enabled: Boolean(layer?.enabled),
@@ -704,19 +750,19 @@ function voiceOracleClientState() {
     })).filter(layer => layer.id && layer.name)
     : [];
   return {
-    ready: oracleProtocolReady,
-    panel_open: Boolean(panel && !panel.hidden),
-    updated_at_ms: Date.now(),
-    style: ['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow'].includes(oracleProtocolState?.style)
-      ? oracleProtocolState.style : 'normal',
+    ready: surface.ready,
+    panel_open: Boolean($('extension-surface-panel') && !$('extension-surface-panel').hidden),
+    updated_at_ms: surface.updated_at_ms,
+    style: ['normal', 'retro', 'surveillance', 'thermal', 'anime', 'noir', 'snow'].includes(surface.state?.style)
+      ? surface.state.style : 'normal',
     camera: validCamera,
     layers,
-    capabilities: oracleProtocolCapabilities,
+    capabilities: surface.capabilities,
   };
 }
 
-function sanitizeOracleProtocolCapabilities(value) {
-  if (!value || value.protocol !== 'oracle' || !Array.isArray(value.tools)) return null;
+function sanitizeExtensionCapabilities(value, extensionId) {
+  if (!value || value.protocol !== extensionId || !Array.isArray(value.tools)) return null;
   const tools = value.tools.slice(0, 64).map(tool => {
     const name = String(tool?.name || '');
     if (!/^[a-z][a-z0-9_]{0,79}$/.test(name)) return null;
@@ -731,38 +777,40 @@ function sanitizeOracleProtocolCapabilities(value) {
   }).filter(Boolean);
   if (!tools.length) return null;
   return {
-    protocol: 'oracle',
+    protocol: extensionId,
     version: String(value.version || '1').slice(0, 80),
     tools,
   };
 }
 
-function oracleProtocolToolNames() {
-  return new Set((oracleProtocolCapabilities?.tools || []).map(tool => tool.name));
+function extensionSurfaceToolNames() {
+  return new Set((extensionSurfaceCapabilities?.tools || []).map(tool => tool.name));
 }
 
-function flushOracleProtocolCommands() {
-  if (!oracleProtocolReady) return;
-  const frame = $('oracle-protocol-frame');
-  const origin = oracleProtocolOrigin();
-  if (!frame?.contentWindow || !origin) return;
-  const queued = oracleProtocolPendingCommands;
-  oracleProtocolPendingCommands = [];
-  queued.forEach(message => postOracleProtocolCommand(frame, origin, message));
+function flushExtensionSurfaceCommands() {
+  if (!extensionSurfaceReady) return;
+  const frame = $('extension-surface-frame');
+  const config = extensionSurfaceConfigs.get(extensionSurfaceId);
+  if (!frame?.contentWindow || !config) return;
+  const queued = extensionSurfacePendingCommands;
+  extensionSurfacePendingCommands = [];
+  queued.forEach(message => {
+    if (extensionSurfacePendingResults.has(message.callId)) postExtensionSurfaceCommand(frame, config, message);
+  });
 }
 
-function clearOracleProtocolPendingResults() {
-  oracleProtocolPendingResults.forEach((pending, callId) => {
+function clearExtensionSurfacePendingResults(reason = 'Extension surface closed before the tool finished') {
+  [...extensionSurfacePendingResults.entries()].forEach(([callId, pending]) => {
     window.clearTimeout(pending.timeoutId);
+    extensionSurfacePendingResults.delete(callId);
     if (pending.serverManaged) {
-      submitOracleProtocolResult(callId, pending, {
+      submitExtensionSurfaceResult(callId, pending, {
         ok: false,
         action: pending.tool,
-        error: 'ORACLE protocol closed before the tool finished',
+        error: reason,
       });
     }
   });
-  oracleProtocolPendingResults.clear();
 }
 
 function oracleProtocolCommandLabel(tool, args = {}) {
@@ -790,42 +838,60 @@ function oracleProtocolResultMessage(pending, result = {}) {
   return `ORACLE confirmed: ${label}.`;
 }
 
-function submitOracleProtocolResult(callId, pending, result) {
-  if (!pending?.voiceSessionId) return Promise.resolve(false);
-  const extensionId = String(pending.extensionId || 'oracle');
+function extensionSurfaceResultMessage(pending, result = {}) {
+  const config = extensionSurfaceConfigs.get(pending?.extensionId);
+  if (config?.compatibility === 'oracle-v1') return oracleProtocolResultMessage(pending, result);
+  const label = String(config?.name || pending?.extensionId || 'Extension');
+  return result?.ok === false
+    ? `${label} rejected ${String(pending?.tool || 'action').replaceAll('_', ' ')}: ${result.error || 'command failed'}`
+    : `${label} confirmed: ${String(pending?.tool || 'action').replaceAll('_', ' ')}.`;
+}
+
+function boundedExtensionResult(result, pending) {
+  if (!isPlainObject(result)) {
+    return { ok: false, action: pending.tool, error: 'Extension returned a malformed tool result' };
+  }
+  if (result.action && result.action !== pending.tool) {
+    return { ok: false, action: pending.tool, error: 'Extension result action did not match the pending tool' };
+  }
+  if (jsonByteLength(result) > EXTENSION_RESULT_MAX_BYTES) {
+    return { ok: false, action: pending.tool, error: 'Extension tool result exceeded the size limit' };
+  }
+  return result;
+}
+
+function submitExtensionSurfaceResult(callId, pending, result) {
+  if (!pending?.voiceSessionId || !pending?.extensionId) return Promise.resolve(false);
+  const extensionId = String(pending.extensionId);
   return fetchJson(`/api/voice/sessions/${encodeURIComponent(pending.voiceSessionId)}/extensions/${encodeURIComponent(extensionId)}/results`, {
     method: 'POST',
     body: JSON.stringify({ call_id: callId, tool: pending.tool, result }),
   }).then(() => true).catch(error => {
-    console.warn('Could not return ORACLE tool result to Jarvis:', error?.message || String(error));
+    console.warn('Could not return extension tool result to Jarvis:', error?.message || String(error));
     return false;
   });
 }
 
-function postOracleProtocolCommand(frame, origin, message) {
-  frame.contentWindow.postMessage({
-    source: 'odysseus',
-    type: 'oracle_command',
-    id: message.id,
-    tool: message.tool,
-    arguments: message.arguments,
-  }, origin);
+function settleExtensionSurfaceResult(callId, pending, result) {
+  window.clearTimeout(pending.timeoutId);
+  extensionSurfacePendingResults.delete(callId);
+  const bounded = boundedExtensionResult(result, pending);
+  if (pending.serverManaged) submitExtensionSurfaceResult(callId, pending, bounded);
+  else showToast(extensionSurfaceResultMessage(pending, bounded), bounded.ok === false ? 5200 : 3200);
+}
+
+function trackExtensionSurfaceCommand(message) {
   const timeoutId = window.setTimeout(() => {
-    const pending = oracleProtocolPendingResults.get(message.id);
+    const pending = extensionSurfacePendingResults.get(message.callId);
     if (!pending) return;
-    oracleProtocolPendingResults.delete(message.id);
-    if (pending.serverManaged) {
-      submitOracleProtocolResult(message.id, pending, {
-        ok: false,
-        action: message.tool,
-        error: 'ORACLE did not return a tool result in time',
-      });
-    } else {
-      showToast(`ORACLE did not confirm: ${oracleProtocolCommandLabel(message.tool, message.arguments)}.`, 4200);
-    }
-  }, ORACLE_COMMAND_TIMEOUT_MS);
-  oracleProtocolPendingResults.set(message.id, {
-    extensionId: message.extensionId || 'oracle',
+    settleExtensionSurfaceResult(message.callId, pending, {
+      ok: false,
+      action: message.tool,
+      error: 'Extension did not return a tool result in time',
+    });
+  }, EXTENSION_COMMAND_TIMEOUT_MS);
+  extensionSurfacePendingResults.set(message.callId, {
+    extensionId: message.extensionId,
     tool: message.tool,
     arguments: message.arguments,
     voiceSessionId: message.voiceSessionId || '',
@@ -834,124 +900,175 @@ function postOracleProtocolCommand(frame, origin, message) {
   });
 }
 
-function sendOracleProtocolCommand(tool, args = {}, options = {}) {
-  if (!oracleProtocolToolNames().has(tool)) {
-    console.warn('Ignored unsupported ORACLE tool:', tool);
+function postExtensionSurfaceCommand(frame, config, message) {
+  try {
+    frame.contentWindow.postMessage(config.compatibility === 'oracle-v1' ? {
+      source: 'odysseus',
+      type: 'oracle_command',
+      id: message.callId,
+      tool: message.tool,
+      arguments: message.arguments,
+    } : {
+      source: 'odysseus',
+      type: 'extension_action',
+      extension_id: message.extensionId,
+      call_id: message.callId,
+      tool: message.tool,
+      arguments: message.arguments,
+    }, config.origin);
+  } catch (_) {
+    const pending = extensionSurfacePendingResults.get(message.callId);
+    if (pending) settleExtensionSurfaceResult(message.callId, pending, {
+      ok: false,
+      action: message.tool,
+      error: 'Extension frame is unavailable',
+    });
+  }
+}
+
+function sendExtensionSurfaceCommand(extensionId, tool, args = {}, options = {}) {
+  if (extensionId !== extensionSurfaceId || !extensionSurfaceToolNames().has(tool)) {
+    console.warn('Ignored unsupported extension tool:', extensionId, tool);
     return false;
   }
+  const callId = String(options.messageId || `extension-${Date.now()}-${++extensionSurfaceCommandSequence}`);
+  if (!/^[A-Za-z0-9_-]{1,96}$/.test(callId)) return false;
   const message = {
-    source: 'odysseus',
-    type: 'oracle_command',
-    id: options.messageId || `oracle-${Date.now()}-${++oracleProtocolCommandSequence}`,
+    callId,
     tool,
     arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
     voiceSessionId: options.voiceSessionId || '',
     serverManaged: Boolean(options.serverManaged),
-    extensionId: options.extensionId || 'oracle',
+    extensionId,
   };
-  if (!oracleProtocolReady) {
-    oracleProtocolPendingCommands = [...oracleProtocolPendingCommands.slice(-7), message];
+  const frame = $('extension-surface-frame');
+  const config = extensionSurfaceConfigs.get(extensionId);
+  if (!frame?.contentWindow || !config) return false;
+  trackExtensionSurfaceCommand(message);
+  if (!extensionSurfaceReady) {
+    extensionSurfacePendingCommands = [...extensionSurfacePendingCommands.slice(-7), message];
     return true;
   }
-  const frame = $('oracle-protocol-frame');
-  const origin = oracleProtocolOrigin();
-  if (!frame?.contentWindow || !origin) return false;
-  postOracleProtocolCommand(frame, origin, message);
+  postExtensionSurfaceCommand(frame, config, message);
   return true;
 }
 
-function handleOracleProtocolMessage(event) {
-  const frame = $('oracle-protocol-frame');
-  if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== oracleProtocolOrigin()) return;
+function handleExtensionSurfaceMessage(event) {
+  const frame = $('extension-surface-frame');
+  const config = extensionSurfaceConfigs.get(extensionSurfaceId);
+  if (!frame?.contentWindow || !config || event.source !== frame.contentWindow || event.origin !== config.origin) return;
   const message = event.data;
-  if (!message || message.source !== 'oracle') return;
-  if (message.type === 'oracle_capabilities') {
-    oracleProtocolCapabilities = sanitizeOracleProtocolCapabilities(message.capabilities);
+  const legacy = config.compatibility === 'oracle-v1';
+  if (!isPlainObject(message) || (legacy ? message.source !== 'oracle' : message.source !== 'jos-extension')) return;
+  if (!legacy && message.extension_id !== extensionSurfaceId) return;
+  if (message.type === (legacy ? 'oracle_capabilities' : 'extension_capabilities')) {
+    extensionSurfaceCapabilities = sanitizeExtensionCapabilities(message.capabilities, extensionSurfaceId);
   }
-  if (message.type === 'oracle_result') {
-    const pending = oracleProtocolPendingResults.get(message.id);
-    if (pending) {
-      window.clearTimeout(pending.timeoutId);
-      oracleProtocolPendingResults.delete(message.id);
-      if (pending.serverManaged) {
-        submitOracleProtocolResult(message.id, pending, message.result || {
-          ok: false,
-          action: pending.tool,
-          error: 'ORACLE returned an empty tool result',
-        });
-      } else {
-        showToast(oracleProtocolResultMessage(pending, message.result), message.result?.ok === false ? 5200 : 3200);
-      }
+  if (message.type === (legacy ? 'oracle_result' : 'extension_result')) {
+    const callId = String(legacy ? message.id || '' : message.call_id || '');
+    const pending = extensionSurfacePendingResults.get(callId);
+    if (
+      pending
+      && (legacy || (message.extension_id === pending.extensionId && message.tool === pending.tool))
+    ) {
+      settleExtensionSurfaceResult(callId, pending, message.result);
     }
   }
-  const state = message.type === 'oracle_state'
+  const state = message.type === (legacy ? 'oracle_state' : 'extension_state')
     ? message.state
-    : (message.type === 'oracle_result' && message.result?.action === 'get_current_view_state' ? message.result : null);
-  if (state && typeof state === 'object') {
-    oracleProtocolState = state;
-    oracleProtocolReady = state.ok !== false;
-    flushOracleProtocolCommands();
+    : (legacy && message.type === 'oracle_result' && message.result?.action === 'get_current_view_state' ? message.result : null);
+  if (isPlainObject(state)) {
+    extensionSurfaceState = jsonByteLength(state) <= 65536 ? state : {};
+    extensionSurfaceReady = state.ok !== false;
+    flushExtensionSurfaceCommands();
+  }
+  if (!legacy && message.type === 'extension_ready' && message.ready === true) {
+    extensionSurfaceReady = true;
+    if (isPlainObject(message.state) && jsonByteLength(message.state) <= 65536) extensionSurfaceState = message.state;
+    if (message.capabilities) extensionSurfaceCapabilities = sanitizeExtensionCapabilities(message.capabilities, extensionSurfaceId);
+    flushExtensionSurfaceCommands();
   }
 }
 
-function engageOracleProtocol() {
-  const panel = $('oracle-protocol-panel');
-  const frame = $('oracle-protocol-frame');
-  if (!panel || !frame || !oracleProtocolUrl) {
-    showToast('ORACLE is not configured on this Odysseus host.');
-    return;
+function engageExtensionSurface(extensionId) {
+  const config = extensionSurfaceConfigs.get(extensionId);
+  const panel = $('extension-surface-panel');
+  const frame = $('extension-surface-frame');
+  if (!panel || !frame || !config) {
+    showToast(`${extensionId || 'Extension'} is not configured on this Odysseus host.`);
+    return false;
   }
-  if (oracleProtocolHideTimer) window.clearTimeout(oracleProtocolHideTimer);
-  if (!frame.getAttribute('src')) frame.setAttribute('src', oracleProtocolUrl);
+  if (extensionSurfaceId && extensionSurfaceId !== extensionId) disengageExtensionSurface(extensionSurfaceId, true);
+  if (extensionSurfaceHideTimer) window.clearTimeout(extensionSurfaceHideTimer);
+  if (extensionSurfaceId !== extensionId || frame.getAttribute('src') !== config.url) {
+    clearExtensionSurfacePendingResults();
+    extensionSurfaceState = null;
+    extensionSurfaceReady = false;
+    extensionSurfaceCapabilities = null;
+    extensionSurfacePendingCommands = [];
+    frame.setAttribute('src', config.url);
+  }
+  extensionSurfaceId = extensionId;
+  const name = $('extension-surface-name');
+  if (name) name.textContent = config.name;
+  frame.setAttribute('title', `${config.name} extension surface`);
   panel.hidden = false;
   panel.setAttribute('aria-hidden', 'false');
-  document.body?.classList.add('oracle-protocol-active');
-  document.documentElement?.classList.add('oracle-protocol-active');
+  document.body?.classList.add('extension-surface-active');
+  document.documentElement?.classList.add('extension-surface-active');
   window.requestAnimationFrame(() => panel.classList.add('is-open'));
+  return true;
 }
 
-function shutdownOracleProtocol(immediate = false) {
-  const panel = $('oracle-protocol-panel');
-  if (!panel) return;
-  if (oracleProtocolHideTimer) window.clearTimeout(oracleProtocolHideTimer);
+function disengageExtensionSurface(extensionId = extensionSurfaceId, immediate = false) {
+  if (extensionId && extensionSurfaceId && extensionId !== extensionSurfaceId) return false;
+  const panel = $('extension-surface-panel');
+  const frame = $('extension-surface-frame');
+  if (!panel) return false;
+  if (extensionSurfaceHideTimer) window.clearTimeout(extensionSurfaceHideTimer);
   panel.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
-  oracleProtocolPendingCommands = [];
-  clearOracleProtocolPendingResults();
+  extensionSurfacePendingCommands = [];
+  clearExtensionSurfacePendingResults();
+  extensionSurfaceId = '';
+  extensionSurfaceState = null;
+  extensionSurfaceReady = false;
+  extensionSurfaceCapabilities = null;
+  frame?.removeAttribute('src');
   const finish = () => {
     panel.hidden = true;
-    document.body?.classList.remove('oracle-protocol-active');
-    document.documentElement?.classList.remove('oracle-protocol-active');
-    oracleProtocolHideTimer = null;
+    document.body?.classList.remove('extension-surface-active');
+    document.documentElement?.classList.remove('extension-surface-active');
+    extensionSurfaceHideTimer = null;
   };
   if (immediate || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) finish();
-  else oracleProtocolHideTimer = window.setTimeout(finish, 200);
+  else extensionSurfaceHideTimer = window.setTimeout(finish, 200);
+  return true;
 }
 
-function applyOracleProtocolControl(event) {
+function applyExtensionSurfaceControl(event) {
   const control = String(event?.ui_event || '');
   if (!VOICE_PROTOCOL_CONTROL_ALLOWLIST.has(control)) return false;
-  if (control === 'oracle_protocol_engage') engageOracleProtocol();
-  else if (control === 'oracle_protocol_shutdown') shutdownOracleProtocol();
+  if (control === 'oracle_protocol_engage') engageExtensionSurface('oracle');
+  else if (control === 'oracle_protocol_shutdown') disengageExtensionSurface('oracle');
+  else if (control === 'extension_protocol_engage') engageExtensionSurface(String(event.extension_id || ''));
+  else if (control === 'extension_protocol_disengage') disengageExtensionSurface(String(event.extension_id || ''));
   else {
-    const extensionId = String(event.extension_id || 'oracle');
-    if (extensionId !== 'oracle') return false;
-    engageOracleProtocol();
+    const extensionId = String(event.extension_id || (control === 'oracle_protocol_command' ? 'oracle' : ''));
     const tool = String(event.tool || '');
     const callId = String(event.call_id || '');
     const voiceSessionId = String(event.voice_session_id || sessionId || '');
     const serverManaged = Boolean(event.server_managed);
-    const sent = sendOracleProtocolCommand(tool, event.arguments || {}, {
+    const sent = engageExtensionSurface(extensionId) && sendExtensionSurfaceCommand(extensionId, tool, event.arguments || {}, {
       messageId: callId,
       voiceSessionId,
       serverManaged,
-      extensionId,
     });
     if (!sent && serverManaged && callId && voiceSessionId) {
-      submitOracleProtocolResult(callId, { tool, voiceSessionId }, {
+      submitExtensionSurfaceResult(callId, { extensionId, tool, voiceSessionId }, {
         ok: false,
         action: tool,
-        error: 'ORACLE native tool is not available in the current interface',
+        error: 'Extension native tool is not available in the current interface',
       });
     }
   }
@@ -961,7 +1078,7 @@ function applyOracleProtocolControl(event) {
 function applyVoiceUIControl(event) {
   const protocolControl = String(event.ui_event || '');
   if (VOICE_PROTOCOL_CONTROL_ALLOWLIST.has(protocolControl)) {
-    applyOracleProtocolControl(event);
+    applyExtensionSurfaceControl(event);
     return;
   }
 
@@ -2053,6 +2170,7 @@ async function createSession(callGeneration = voiceCallGeneration) {
   }
   sessionId = session.id;
   chatSessionId = session.chat_session_id || null;
+  configureExtensionSurfaces(session.extension_surfaces);
   configureOracleProtocol(session.oracle_protocol_url);
   const savedTarget = session.target || 'jarvis';
   const savedWorkspace = session.workspace || 'home-lab';
@@ -2766,7 +2884,7 @@ function endCall() {
   stopTracks();
   setAudioSessionType('auto');
   voiceOrbMedia.stopMedia();
-  shutdownOracleProtocol(true);
+  disengageExtensionSurface(extensionSurfaceId, true);
   setStatus('idle');
   const panel = $('jarvis-call-panel');
   const closingGeneration = voiceCallGeneration;
@@ -2920,9 +3038,12 @@ function bind() {
   });
 
   window.addEventListener('message', handleSphereMessage);
-  window.addEventListener('message', handleOracleProtocolMessage);
+  window.addEventListener('message', handleExtensionSurfaceMessage);
   fetchJson('/api/voice/oracle-config')
-    .then(config => configureOracleProtocol(config.oracle_protocol_url))
+    .then(config => {
+      configureExtensionSurfaces(config.extension_surfaces);
+      configureOracleProtocol(config.oracle_protocol_url);
+    })
     .catch(() => {});
   setVoiceTarget('jarvis', false);
   loadWorkerCatalog().catch(() => {});
@@ -2943,5 +3064,5 @@ window.jarvisVoice = {
   interrupt,
   isActive: isCallActive,
   restoreSessionTasks,
-  applyOracleProtocolControl,
+  applyExtensionSurfaceControl,
 };

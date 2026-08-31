@@ -101,6 +101,26 @@ class ExtensionRuntimeHost:
             raise ExtensionLifecycleError("extension_catalog_origin_mismatch")
         return target
 
+    def surface_url(self, manifest: Mapping[str, Any]) -> str:
+        """Resolve one installed web entry point on its configured exact origin."""
+        extension_id = str(manifest.get("extension_id") or "")
+        base = self.urls.get(extension_id)
+        if not base:
+            raise ExtensionLifecycleError("extension_runtime_url_unconfigured")
+        target = urljoin(
+            base,
+            str((manifest.get("runtime") or {}).get("entrypoint") or ""),
+        )
+        target_url = urlparse(target)
+        base_url = urlparse(base)
+        if (target_url.scheme, target_url.hostname, target_url.port) != (
+            base_url.scheme,
+            base_url.hostname,
+            base_url.port,
+        ):
+            raise ExtensionLifecycleError("extension_surface_origin_mismatch")
+        return target
+
     def activate(self, extension_id: str) -> None:
         with self._lock:
             self._available.add(extension_id)

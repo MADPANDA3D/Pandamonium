@@ -411,6 +411,11 @@ def test_extension_runtime_url_map_is_strict_and_reference_neutral():
         with pytest.raises(ExtensionLifecycleError):
             configured_extension_urls(value)
 
+    manifest = _manifest("1.0.0", "inspect_fixture")
+    manifest["runtime"]["entrypoint"] = "ui/index.html"
+    host = ExtensionRuntimeHost({"fixture": "https://fixture.example.test/runtime/"})
+    assert host.surface_url(manifest) == "https://fixture.example.test/runtime/ui/index.html"
+
 
 def test_manifest_source_and_revision_mismatch_fail_before_approval(tmp_path, git_fixture):
     repo, _v1, _v2 = git_fixture

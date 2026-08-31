@@ -1422,7 +1422,8 @@ async def test_oracle_protocol_confirmation_engages_and_shutdown_hides(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_oracle_native_executor_waits_for_the_real_browser_result():
+async def test_oracle_native_executor_waits_for_the_real_browser_result(monkeypatch):
+    monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
     session = _oracle_voice_session("set_visual_style")
     executor = voice_routes._extension_tool_executor(
         session,
@@ -1453,6 +1454,7 @@ async def test_oracle_native_executor_waits_for_the_real_browser_result():
 
 @pytest.mark.asyncio
 async def test_extension_executor_rejects_bad_input_unknown_tools_and_times_out(monkeypatch):
+    monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
     session = _oracle_voice_session("set_visual_style")
     specs = voice_routes._extension_tool_specs(session)
     executor = voice_routes._extension_tool_executor(session, "leo", specs)

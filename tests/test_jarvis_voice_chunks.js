@@ -12,25 +12,29 @@ const index = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf
 const style = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
 const serviceWorker = fs.readFileSync(path.join(__dirname, '../static/sw.js'), 'utf8');
 const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_worker_adapters.py'), 'utf8');
+const chatStreamSource = fs.readFileSync(path.join(__dirname, '../static/js/chatStream.js'), 'utf8');
 
-assert.match(index, /id="oracle-protocol-panel"[\s\S]*?id="oracle-protocol-frame"/);
-assert.match(style, /\.oracle-protocol-panel[\s\S]*?inset: 0;[\s\S]*?z-index: 10001;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
+assert.match(index, /id="extension-surface-panel"[\s\S]*?id="extension-surface-frame"[\s\S]*?camera 'none'; microphone 'none'; display-capture 'none'/);
+assert.match(style, /\.extension-surface-panel[\s\S]*?inset: 0;[\s\S]*?z-index: 10001;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
 assert.match(style, /\.jarvis-call-panel[\s\S]*?z-index: 10002;/);
-assert.match(style, /html\.oracle-protocol-active \.jarvis-call-panel[\s\S]*?left: clamp\(24px, 4vw, 72px\)[\s\S]*?width: clamp\(170px, 12vw, 220px\)/);
-assert.match(style, /html\.oracle-protocol-active \.jarvis-call-actions[\s\S]*?display: none !important/);
-assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'oracle_protocol_engage'[\s\S]*?'oracle_protocol_shutdown'[\s\S]*?'oracle_protocol_command'/);
+assert.match(style, /html\.extension-surface-active \.jarvis-call-panel[\s\S]*?left: clamp\(24px, 4vw, 72px\)[\s\S]*?width: clamp\(170px, 12vw, 220px\)/);
+assert.match(style, /html\.extension-surface-active \.jarvis-call-actions[\s\S]*?display: none !important/);
+assert.match(source, /VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set\(\[[\s\S]*?'extension_protocol_engage'[\s\S]*?'extension_protocol_disengage'[\s\S]*?'extension_protocol_command'/);
 assert.doesNotMatch(source, /ORACLE_TOOL_ALLOWLIST/);
-assert.match(source, /function sanitizeOracleProtocolCapabilities\(value\)/);
-assert.match(source, /function oracleProtocolToolNames\(\)[\s\S]*?oracleProtocolCapabilities\?\.tools/);
-assert.match(source, /function applyOracleProtocolControl\(event\)[\s\S]*?sendOracleProtocolCommand\(tool, event\.arguments/);
-assert.match(source, /function handleOracleProtocolMessage\(event\)[\s\S]*?event\.origin !== oracleProtocolOrigin\(\)/);
-assert.match(source, /message\.type === 'oracle_capabilities'/);
+assert.match(source, /function sanitizeExtensionCapabilities\(value, extensionId\)/);
+assert.match(source, /function extensionSurfaceToolNames\(\)[\s\S]*?extensionSurfaceCapabilities\?\.tools/);
+assert.match(source, /function applyExtensionSurfaceControl\(event\)[\s\S]*?sendExtensionSurfaceCommand\(extensionId, tool, event\.arguments/);
+assert.match(source, /function handleExtensionSurfaceMessage\(event\)[\s\S]*?event\.origin !== config\.origin/);
+assert.match(source, /type: 'extension_action'[\s\S]*?extension_id: message\.extensionId[\s\S]*?call_id: message\.callId/);
 assert.match(source, /sessions\/\$\{encodeURIComponent\(pending\.voiceSessionId\)\}\/extensions\/\$\{encodeURIComponent\(extensionId\)\}\/results/);
-assert.match(source, /clientState\.extensions = \{[\s\S]*?oracle:/);
+assert.match(source, /clientState\.extensions = \{[\s\S]*?\[surface\.extension_id\]/);
 assert.match(source, /function oracleProtocolResultMessage\(pending, result = \{\}\)/);
 assert.match(source, /function voiceRequestPayload\(text\)[\s\S]*?clientState\.oracle = oracle/);
-assert.match(source, /capabilities: oracleProtocolCapabilities/);
+assert.match(source, /configureExtensionSurfaces\(config\.extension_surfaces\)/);
+assert.match(source, /compatibility: 'oracle-v1'/);
+assert.match(source, /type: 'oracle_command'/);
 assert.match(source, /fetchJson\('\/api\/voice\/oracle-config'\)/);
+assert.match(chatStreamSource, /jarvisVoice\?\.applyExtensionSurfaceControl\?\.\(uiData\)/);
 assert.match(source, /turns\/\$\{encodeURIComponent\(turnId\)\}\/audio/);
 assert.match(source, /playPcmAudioStream/);
 assert.match(source, /response\.body\.getReader\(\)/);
@@ -397,6 +401,24 @@ const inputSphere = {
   focus(options) { this.focusOptions = options; },
   setAttribute(name, value) { this.attributes[name] = value; },
 };
+const extensionPosts = [];
+const extensionFrameWindow = {
+  postMessage(message, origin) { extensionPosts.push({ message, origin }); },
+};
+const extensionFrame = {
+  attributes: {},
+  contentWindow: extensionFrameWindow,
+  setAttribute(name, value) { this.attributes[name] = value; },
+  getAttribute(name) { return this.attributes[name] || null; },
+  removeAttribute(name) { delete this.attributes[name]; },
+};
+const extensionPanel = {
+  hidden: true,
+  attributes: {},
+  classList: makeClassList(),
+  setAttribute(name, value) { this.attributes[name] = value; },
+};
+const extensionName = { textContent: '' };
 const fakeDocument = {
   readyState: 'loading',
   documentElement: { dataset: {}, classList: makeClassList() },
@@ -410,6 +432,9 @@ const fakeDocument = {
     if (exposeVoiceIdentity && id === 'jarvis-call-detail') return callDetail;
     if (exposeVoiceIdentity && id === 'jarvis-call-talk') return callTalk;
     if (exposeVoiceIdentity && id === 'jarvis-input-sphere') return inputSphere;
+    if (id === 'extension-surface-panel') return extensionPanel;
+    if (id === 'extension-surface-frame') return extensionFrame;
+    if (id === 'extension-surface-name') return extensionName;
     return null;
   },
   querySelector() { return null; },
@@ -432,6 +457,7 @@ const sandboxConsole = {
   },
 };
 let selectedModel = null;
+const extensionFetches = [];
 const sandbox = {
   console: sandboxConsole,
   document: fakeDocument,
@@ -441,7 +467,15 @@ const sandbox = {
   clearTimeout,
   setInterval,
   clearInterval,
-  fetch: () => Promise.resolve({ ok: true }),
+  TextEncoder,
+  URL,
+  location: { origin: 'https://odysseus.example.test' },
+  requestAnimationFrame: callback => callback(),
+  matchMedia: () => ({ matches: false }),
+  fetch: (url, options) => {
+    extensionFetches.push({ url, options });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  },
   sessionModule: { getCurrentModel: () => selectedModel },
   aiTTSManager: { checkAvailability() { throw new Error('availability probe failed'); }, stop() {} },
 };
@@ -458,7 +492,7 @@ const executableSource = source
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
     "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, engageExtensionSurface, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 assert.equal(
@@ -475,6 +509,170 @@ assert.equal(
   ),
   'ORACLE rejected globe view: camera unavailable',
 );
+
+let mediaRequests = 0;
+sandbox.navigator.mediaDevices = { getUserMedia: () => { mediaRequests += 1; } };
+placement.configureExtensionSurfaces([{
+  extension_id: 'atlas',
+  name: 'Atlas Fixture',
+  url: 'https://atlas.example.test/runtime/ui/index.html',
+  origin: 'https://atlas.example.test',
+}]);
+assert.equal(placement.engageExtensionSurface('atlas'), true);
+assert.equal(extensionFrame.attributes.src, 'https://atlas.example.test/runtime/ui/index.html');
+assert.equal(extensionName.textContent, 'Atlas Fixture');
+assert.equal(extensionPanel.hidden, false);
+assert.equal(mediaRequests, 0, 'engaging an extension must not request camera or microphone access');
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://atlas.example.test',
+  data: {
+    source: 'jos-extension',
+    type: 'extension_ready',
+    extension_id: 'atlas',
+    ready: true,
+    state: { view: 'fixture' },
+    capabilities: {
+      protocol: 'atlas',
+      version: '1',
+      tools: [{
+        type: 'function',
+        name: 'create_mesh',
+        description: 'Create a fixture mesh',
+        parameters: { type: 'object', properties: {} },
+      }],
+    },
+  },
+});
+assert.equal(placement.getExtensionSurfaceState().extensionSurfaceReady, true);
+placement.applyExtensionSurfaceControl({
+  ui_event: 'extension_protocol_command',
+  extension_id: 'atlas',
+  call_id: 'atlas-call-1',
+  tool: 'create_mesh',
+  arguments: { prompt: 'one' },
+  voice_session_id: 'voice-fixture',
+  server_managed: true,
+});
+assert.equal(extensionPosts.at(-1).origin, 'https://atlas.example.test');
+assert.equal(JSON.stringify(extensionPosts.at(-1).message), JSON.stringify({
+  source: 'odysseus',
+  type: 'extension_action',
+  extension_id: 'atlas',
+  call_id: 'atlas-call-1',
+  tool: 'create_mesh',
+  arguments: { prompt: 'one' },
+}));
+const fetchCountBeforeWrongOrigin = extensionFetches.length;
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://wrong.example.test',
+  data: {
+    source: 'jos-extension', type: 'extension_result', extension_id: 'atlas',
+    call_id: 'atlas-call-1', tool: 'create_mesh', result: { ok: true },
+  },
+});
+assert.equal(extensionFetches.length, fetchCountBeforeWrongOrigin);
+assert.equal(placement.getExtensionSurfaceState().pending, 1);
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://atlas.example.test',
+  data: {
+    source: 'jos-extension', type: 'extension_result', extension_id: 'other-extension',
+    call_id: 'atlas-call-1', tool: 'create_mesh', result: { ok: true },
+  },
+});
+assert.equal(extensionFetches.length, fetchCountBeforeWrongOrigin);
+assert.equal(placement.getExtensionSurfaceState().pending, 1);
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://atlas.example.test',
+  data: {
+    source: 'jos-extension', type: 'extension_result', extension_id: 'atlas',
+    call_id: 'atlas-call-1', tool: 'create_mesh', result: [],
+  },
+});
+assert.equal(placement.getExtensionSurfaceState().pending, 0);
+assert.match(extensionFetches.at(-1).url, /sessions\/voice-fixture\/extensions\/atlas\/results$/);
+assert.match(extensionFetches.at(-1).options.body, /malformed tool result/);
+
+for (const callId of ['atlas-call-2', 'atlas-call-3']) {
+  placement.applyExtensionSurfaceControl({
+    ui_event: 'extension_protocol_command', extension_id: 'atlas', call_id: callId,
+    tool: 'create_mesh', arguments: { callId }, voice_session_id: 'voice-fixture', server_managed: true,
+  });
+}
+assert.equal(placement.getExtensionSurfaceState().pending, 2);
+for (const callId of ['atlas-call-2', 'atlas-call-3']) {
+  placement.handleExtensionSurfaceMessage({
+    source: extensionFrameWindow,
+    origin: 'https://atlas.example.test',
+    data: {
+      source: 'jos-extension', type: 'extension_result', extension_id: 'atlas',
+      call_id: callId, tool: 'create_mesh', result: { ok: true },
+    },
+  });
+}
+assert.equal(placement.getExtensionSurfaceState().pending, 0);
+
+placement.applyExtensionSurfaceControl({
+  ui_event: 'extension_protocol_command', extension_id: 'atlas', call_id: 'atlas-call-large',
+  tool: 'create_mesh', arguments: {}, voice_session_id: 'voice-fixture', server_managed: true,
+});
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://atlas.example.test',
+  data: {
+    source: 'jos-extension', type: 'extension_result', extension_id: 'atlas',
+    call_id: 'atlas-call-large', tool: 'create_mesh', result: { data: 'x'.repeat(1000001) },
+  },
+});
+assert.match(extensionFetches.at(-1).options.body, /exceeded the size limit/);
+
+extensionFrame.contentWindow = null;
+const unavailableFetches = extensionFetches.length;
+placement.applyExtensionSurfaceControl({
+  ui_event: 'extension_protocol_command', extension_id: 'atlas', call_id: 'atlas-unavailable',
+  tool: 'create_mesh', arguments: {}, voice_session_id: 'voice-fixture', server_managed: true,
+});
+assert.equal(extensionFetches.length, unavailableFetches + 1);
+assert.match(extensionFetches.at(-1).options.body, /not available in the current interface/);
+extensionFrame.contentWindow = extensionFrameWindow;
+placement.configureExtensionSurfaces([]);
+assert.equal(placement.getExtensionSurfaceState().extensionSurfaceId, '');
+assert.equal(extensionFrame.attributes.src, undefined);
+
+placement.configureOracleProtocol('https://oracle.example.test/');
+assert.equal(placement.engageExtensionSurface('oracle'), true);
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://oracle.example.test',
+  data: {
+    source: 'oracle', type: 'oracle_capabilities',
+    capabilities: {
+      protocol: 'oracle', version: '1',
+      tools: [{ type: 'function', name: 'zoom_to_globe', description: 'Zoom out', parameters: { type: 'object', properties: {} } }],
+    },
+  },
+});
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://oracle.example.test',
+  data: { source: 'oracle', type: 'oracle_state', state: { ok: true } },
+});
+placement.applyExtensionSurfaceControl({
+  ui_event: 'oracle_protocol_command', call_id: 'oracle-call-1', tool: 'zoom_to_globe',
+  arguments: {}, voice_session_id: 'voice-fixture', server_managed: true,
+});
+assert.equal(extensionPosts.at(-1).message.type, 'oracle_command');
+placement.handleExtensionSurfaceMessage({
+  source: extensionFrameWindow,
+  origin: 'https://oracle.example.test',
+  data: { source: 'oracle', type: 'oracle_result', id: 'oracle-call-1', result: { ok: true, action: 'zoom_to_globe' } },
+});
+assert.equal(placement.getExtensionSurfaceState().pending, 0);
+placement.disengageExtensionSurface('oracle', true);
+
 assert.equal(placement.setAudioSessionType('playback'), false);
 sandbox.navigator.audioSession = { type: 'auto' };
 assert.equal(placement.setAudioSessionType('play-and-record'), true);

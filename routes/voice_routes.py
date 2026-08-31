@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Literal
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -415,6 +416,48 @@ def _engaged_extension_ids(session: dict[str, Any]) -> set[str]:
     if session.get("oracle_protocol_active"):
         engaged.add("oracle")
     return engaged
+
+
+def _extension_surface_configs() -> list[dict[str, str]]:
+    """Return enabled installed web surfaces; registry state survives host restarts."""
+    try:
+        records = extension_registry.snapshot().get("extensions") or {}
+    except Exception:
+        return []
+    surfaces = []
+    for extension_id, record in records.items():
+        manifest = record.get("manifest") if isinstance(record, dict) else None
+        if (
+            not record.get("enabled")
+            or not isinstance(manifest, dict)
+            or (manifest.get("runtime") or {}).get("type") != "web"
+        ):
+            continue
+        try:
+            url = extension_runtime_host.surface_url(manifest)
+            parsed = urlparse(url)
+        except Exception:
+            continue
+        surfaces.append({
+            "extension_id": extension_id,
+            "name": str(manifest.get("name") or extension_id)[:200],
+            "url": url,
+            "origin": f"{parsed.scheme}://{parsed.netloc}",
+        })
+    return sorted(surfaces, key=lambda item: item["extension_id"])
+
+
+def _extension_browser_available(session: dict[str, Any], extension_id: str) -> bool:
+    if extension_id not in _engaged_extension_ids(session):
+        return False
+    if any(item["extension_id"] == extension_id for item in _extension_surface_configs()):
+        return True
+    # Retain the unregistered ORACLE adapter until deployed equivalence is proven.
+    return bool(
+        extension_id == "oracle"
+        and ORACLE_PROTOCOL_URL
+        and session.get("oracle_protocol_active")
+    )
 
 
 def _register_speech_turn(session_id: str) -> _SpeechTurn:
@@ -822,6 +865,11 @@ def _extension_tool_executor(
             return (
                 f"{label} {block.tool_type}",
                 {"ok": False, "action": block.tool_type, "error": f"{label} voice session is unavailable"},
+            )
+        if not _extension_browser_available(voice_session, extension_id):
+            return (
+                f"{label} {block.tool_type}",
+                {"ok": False, "action": block.tool_type, "error": f"{label} browser surface is unavailable"},
             )
 
         call_id = f"extension_{uuid.uuid4().hex}"
@@ -2945,7 +2993,10 @@ def setup_voice_routes(session_manager=None, tts_service=None):
 
     @router.get("/oracle-config")
     async def oracle_config(_owner: str = Depends(require_user)):
-        return {"oracle_protocol_url": ORACLE_PROTOCOL_URL}
+        return {
+            "oracle_protocol_url": ORACLE_PROTOCOL_URL,
+            "extension_surfaces": _extension_surface_configs(),
+        }
 
     @router.post("/prewarm")
     async def prewarm_voice_brain(_owner: str = Depends(require_user)):
@@ -3080,11 +3131,14 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         }
         state.setdefault("sessions", {})[session_id] = session
         _save_state(state)
-        return session
+        return {**session, "extension_surfaces": _extension_surface_configs()}
 
     @router.get("/sessions/{session_id}")
     async def get_voice_session(session_id: str, owner: str = Depends(require_user)):
-        return _owned_session(_load_state(), session_id, owner)
+        return {
+            **_owned_session(_load_state(), session_id, owner),
+            "extension_surfaces": _extension_surface_configs(),
+        }
 
     def accept_extension_tool_result(
         session_id: str,
@@ -3092,11 +3146,13 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         payload: VoiceExtensionToolResult,
         owner: str,
     ):
-        _owned_session(_load_state(), session_id, owner)
+        session = _owned_session(_load_state(), session_id, owner)
         pending = _EXTENSION_TOOL_CALLS.get((session_id, extension_id, payload.call_id))
         label = extension_id.upper()
         if not pending or pending.get("owner") != owner:
             raise HTTPException(status_code=404, detail={"message": f"{label} tool call not found"})
+        if not _extension_browser_available(session, extension_id):
+            raise HTTPException(status_code=409, detail={"message": f"{label} browser surface is no longer available"})
         if pending.get("tool") != payload.tool:
             raise HTTPException(status_code=409, detail={"message": f"{label} tool result does not match pending call"})
         if len(json.dumps(payload.result, ensure_ascii=True).encode("utf-8")) > 1_000_000:

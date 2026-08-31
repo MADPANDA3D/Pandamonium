@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 import pytest
 
 from routes import voice_routes
+from src.extension_host import ExtensionRuntimeHost
+from src.extension_registry import ExtensionRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -103,15 +105,57 @@ def test_voice_routes_reject_bearer_api_token_identity(monkeypatch, tmp_path):
 
 
 def test_generic_extension_result_route_correlates_owner_extension_and_tool(monkeypatch, tmp_path):
+    revision = "a" * 40
+    manifest = {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "atlas",
+        "name": "Atlas Fixture",
+        "version": "1.0.0",
+        "source": {"url": "https://github.com/example/atlas.git", "revision": revision},
+        "runtime": {"type": "web", "entrypoint": "ui/index.html"},
+        "capabilities": {
+            "descriptor": {"type": "inline"},
+            "schemas": [{
+                "name": "create_mesh",
+                "description": "Create a fixture mesh",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            }],
+        },
+        "permissions": {"default": "bounded_write", "capabilities": {}},
+        "health": {"type": "catalog", "timeout_seconds": 3},
+        "lifecycle": {"install": [], "start": [], "stop": [], "remove": []},
+        "data_boundaries": {"read": [], "write": [], "network": []},
+        "removal": {"remove_paths": [], "preserve_paths": []},
+        "rollback": {"strategy": "pinned_revision", "retain_revisions": 2},
+    }
+    registry = ExtensionRegistry(tmp_path / "extensions.json")
+    registry.register(manifest, source_revision=revision, health_available=True)
+    monkeypatch.setattr(voice_routes, "extension_registry", registry)
+    monkeypatch.setattr(
+        voice_routes,
+        "extension_runtime_host",
+        ExtensionRuntimeHost({"atlas": "https://atlas.example.test/runtime/"}),
+    )
     manager = FakeSessionManager()
-    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    state_file = tmp_path / "voice_sessions.json"
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
     client = _client(manager)
     created = client.post(
         "/api/voice/sessions",
         headers={"X-Test-Owner": "alice"},
         json={"mode": "jarvis_call"},
     )
+    assert created.json()["extension_surfaces"] == [{
+        "extension_id": "atlas",
+        "name": "Atlas Fixture",
+        "url": "https://atlas.example.test/runtime/ui/index.html",
+        "origin": "https://atlas.example.test",
+    }]
+    assert voice_routes.extension_runtime_host.available("atlas") is False
     session_id = created.json()["id"]
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["sessions"][session_id]["engaged_extensions"] = ["atlas"]
+    state_file.write_text(json.dumps(state), encoding="utf-8")
     loop = asyncio.new_event_loop()
     future = loop.create_future()
     key = (session_id, "atlas", "extension-call-1")
@@ -121,11 +165,45 @@ def test_generic_extension_result_route_correlates_owner_extension_and_tool(monk
         "tool": "create_mesh",
     }
     try:
+        wrong_owner = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "bob"},
+            json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"ok": True}},
+        )
+        wrong_call = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-other", "tool": "create_mesh", "result": {"ok": True}},
+        )
         wrong_extension = client.post(
             f"/api/voice/sessions/{session_id}/extensions/oracle/results",
             headers={"X-Test-Owner": "alice"},
             json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"ok": True}},
         )
+        wrong_tool = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-1", "tool": "other_tool", "result": {"ok": True}},
+        )
+        too_large = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"data": "x" * 1_000_001}},
+        )
+        registry.disable("atlas")
+        disabled = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"ok": True}},
+        )
+        registry.register(manifest, source_revision=revision, health_available=True)
+        registry.unregister("atlas")
+        uninstalled = client.post(
+            f"/api/voice/sessions/{session_id}/extensions/atlas/results",
+            headers={"X-Test-Owner": "alice"},
+            json={"call_id": "extension-call-1", "tool": "create_mesh", "result": {"ok": True}},
+        )
+        registry.register(manifest, source_revision=revision, health_available=True)
         accepted = client.post(
             f"/api/voice/sessions/{session_id}/extensions/atlas/results",
             headers={"X-Test-Owner": "alice"},
@@ -135,7 +213,13 @@ def test_generic_extension_result_route_correlates_owner_extension_and_tool(monk
         voice_routes._EXTENSION_TOOL_CALLS.pop(key, None)
         loop.close()
 
+    assert wrong_owner.status_code == 403
+    assert wrong_call.status_code == 404
     assert wrong_extension.status_code == 404
+    assert wrong_tool.status_code == 409
+    assert too_large.status_code == 413
+    assert disabled.status_code == 409
+    assert uninstalled.status_code == 409
     assert accepted.status_code == 200
     assert future.result() == {"ok": True}
 
