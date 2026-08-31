@@ -81,6 +81,7 @@ def test_standard_and_live_descriptors_are_references_not_copied_schemas():
     }
 
     mcp = _manifest("atlas")
+    mcp["runtime"]["type"] = "mcp"
     mcp["capabilities"]["descriptor"] = {"type": "mcp", "reference": "configured-server-id"}
     assert validate_extension_manifest(mcp)["capabilities"]["descriptor"]["type"] == "mcp"
 

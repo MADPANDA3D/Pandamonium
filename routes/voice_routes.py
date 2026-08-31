@@ -32,6 +32,7 @@ from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
 from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
 from src.extension_host import extension_runtime_host
+from src.extension_mcp_adapter import execute_mcp_extension_tool, mcp_extension_tool_specs
 from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
 from src.settings import load_settings
@@ -772,10 +773,11 @@ def _extension_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]
     engaged = _engaged_extension_ids(voice_session)
     try:
         snapshot = extension_registry.snapshot()
-        registered = set(snapshot.get("extensions") or {})
+        records = snapshot.get("extensions") or {}
+        registered = set(records)
         effective = extension_registry.effective_capabilities(engaged)
     except Exception:
-        registered, effective = set(), {}
+        records, registered, effective = {}, set(), {}
 
     client_by_extension = {
         extension_id: {
@@ -784,8 +786,16 @@ def _extension_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]
         for extension_id in engaged
     }
     specs: list[dict[str, Any]] = []
+    for extension_id in engaged:
+        record = records.get(extension_id)
+        descriptor = ((((record or {}).get("manifest") or {}).get("capabilities") or {}).get("descriptor") or {})
+        if descriptor.get("type") == "mcp":
+            specs.extend(mcp_extension_tool_specs(record))
     for name, capability in effective.items():
         extension_id = str(capability["extension_id"])
+        descriptor = ((((records.get(extension_id) or {}).get("manifest") or {}).get("capabilities") or {}).get("descriptor") or {})
+        if descriptor.get("type") == "mcp":
+            continue
         if name not in client_by_extension.get(extension_id, {}):
             continue
         function = capability["schema"]["function"]
@@ -861,6 +871,20 @@ def _extension_tool_executor(
                 f"{label} {block.tool_type}",
                 {"ok": False, "action": block.tool_type, "error": f"{label} tool arguments must be a JSON object"},
             )
+        if spec.get("mcp_qualified_name"):
+            try:
+                record = extension_registry.snapshot()["extensions"].get(extension_id)
+            except Exception:
+                record = None
+            if extension_id not in _engaged_extension_ids(voice_session) or not record:
+                return (
+                    f"{label} {block.tool_type}",
+                    {"error": "extension_mcp_capability_unavailable", "exit_code": 1},
+                )
+            result = await execute_mcp_extension_tool(
+                record, block.tool_type, arguments
+            )
+            return f"{label} {block.tool_type}", result
         if not voice_session_id:
             return (
                 f"{label} {block.tool_type}",

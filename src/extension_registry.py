@@ -196,7 +196,10 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
         descriptor["endpoint"] = _endpoint(descriptor.get("endpoint"), "extension_descriptor_endpoint_invalid")
     if descriptor_type != "inline" and "schemas" in capabilities:
         raise ExtensionContractError("extension_descriptor_schemas_must_be_referenced")
-    if (runtime_type == "skills") != (descriptor_type == "skill_bundle"):
+    if (
+        (runtime_type == "skills") != (descriptor_type == "skill_bundle")
+        or (runtime_type == "mcp") != (descriptor_type == "mcp")
+    ):
         raise ExtensionContractError("extension_runtime_descriptor_mismatch")
     schemas = _normalize_tools(capabilities.get("schemas", [])) if descriptor_type == "inline" else []
 

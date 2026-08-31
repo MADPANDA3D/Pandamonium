@@ -5,6 +5,7 @@ Manages connections to MCP (Model Context Protocol) tool servers.
 Each server exposes tools that are made available to the agent loop.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -31,6 +32,23 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
         )
 
     return raw_error
+
+
+def _mcp_server_info(initialized: Any) -> Dict[str, str]:
+    """Return only the bounded public identity from an MCP initialize result."""
+    raw = getattr(initialized, "serverInfo", None) or getattr(initialized, "server_info", None)
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        name, version = raw.get("name"), raw.get("version")
+    else:
+        name, version = getattr(raw, "name", None), getattr(raw, "version", None)
+    result = {}
+    for key, value in (("name", name), ("version", version)):
+        text = str(value or "").strip()
+        if text and len(text) <= 200 and not any(ord(char) < 32 for char in text):
+            result[key] = text
+    return result
 
 
 # Caps for rendering untrusted MCP tool schemas into the agent prompt (issue #2660).
@@ -146,6 +164,10 @@ class McpManager:
         self._connect_tasks: Dict[str, Any] = {}
         # Tracking updates to tools/connections for RAG indexing / prompt cache
         self._generation = 0
+        # MCP servers owned by installed extensions remain invisible to the
+        # ordinary MCP catalog. Their reconciled schemas are exposed only by
+        # the extension engagement and authority path.
+        self._extension_servers: Set[str] = set()
 
     async def connect_server(
         self,
@@ -156,11 +178,19 @@ class McpManager:
         args: Optional[List[str]] = None,
         env: Optional[Dict[str, str]] = None,
         url: Optional[str] = None,
+        identity_from_env: bool = True,
     ) -> bool:
         """Connect to an MCP server via stdio, SSE, or Streamable HTTP transport."""
         try:
             if transport == "stdio":
-                res = await self._connect_stdio(server_id, name, command, args or [], env or {})
+                res = await self._connect_stdio(
+                    server_id,
+                    name,
+                    command,
+                    args or [],
+                    env or {},
+                    identity_from_env=identity_from_env,
+                )
             elif transport == "sse":
                 res = await self._connect_sse(server_id, name, url)
             elif transport == "http":
@@ -178,7 +208,16 @@ class McpManager:
             self._generation += 1
             return False
 
-    async def _connect_stdio(self, server_id: str, name: str, command: str, args: List[str], env: Dict[str, str]) -> bool:
+    async def _connect_stdio(
+        self,
+        server_id: str,
+        name: str,
+        command: str,
+        args: List[str],
+        env: Dict[str, str],
+        *,
+        identity_from_env: bool = True,
+    ) -> bool:
         """Connect to an MCP server via stdio transport."""
         try:
             from mcp import ClientSession, StdioServerParameters
@@ -197,7 +236,7 @@ class McpManager:
                 read_stream, write_stream = transport
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
 
-                await session.initialize()
+                initialized = await session.initialize()
 
                 # Discover tools
                 tools_result = await session.list_tools()
@@ -223,7 +262,7 @@ class McpManager:
             # so tool descriptions can distinguish between multiple instances of
             # the same MCP server (e.g. two email accounts).
             identity_hints = []
-            for k, v in (env or {}).items():
+            for k, v in (env or {}).items() if identity_from_env else ():
                 k_lower = k.lower()
                 if any(x in k_lower for x in ['email_address', 'account', 'user', 'username']):
                     identity_hints.append(v)
@@ -235,6 +274,7 @@ class McpManager:
                 "transport": "stdio",
                 "tool_count": len(tools),
                 "identity": identity,
+                "server_info": _mcp_server_info(initialized),
             }
 
             logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via stdio")
@@ -258,7 +298,7 @@ class McpManager:
                 read_stream, write_stream = transport
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
 
-                await session.initialize()
+                initialized = await session.initialize()
 
                 # Discover tools
                 tools_result = await session.list_tools()
@@ -285,6 +325,7 @@ class McpManager:
                 "name": name,
                 "transport": "sse",
                 "tool_count": len(tools),
+                "server_info": _mcp_server_info(initialized),
             }
 
             logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via SSE")
@@ -343,7 +384,7 @@ class McpManager:
             transport = await stack.enter_async_context(streamablehttp_client(url, auth=provider))
             read_stream, write_stream, _get_session_id = transport
             session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-            await session.initialize()
+            initialized = await session.initialize()
 
             tools_result = await session.list_tools()
             tools = []
@@ -360,6 +401,7 @@ class McpManager:
             self._connections[server_id] = {
                 "status": "connected", "name": name, "transport": "http",
                 "tool_count": len(tools),
+                "server_info": _mcp_server_info(initialized),
             }
             clear_auth_url(server_id)
             # Tools changed (this can complete after connect_server already
@@ -431,7 +473,14 @@ class McpManager:
         finally:
             db.close()
 
-    async def call_tool(self, qualified_name: str, arguments: Dict) -> Dict:
+    async def call_tool(
+        self,
+        qualified_name: str,
+        arguments: Dict,
+        *,
+        timeout_seconds: Optional[float] = None,
+        max_output_bytes: Optional[int] = None,
+    ) -> Dict:
         """Call an MCP tool by its qualified name (mcp__{server_id}__{tool_name}).
 
         Returns a result dict compatible with agent_tools format.
@@ -448,7 +497,16 @@ class McpManager:
             return {"error": f"MCP server not connected: {server_id}", "exit_code": 1}
 
         try:
-            result = await self._do_call(session, tool_name, arguments)
+            call = self._do_call(
+                session, tool_name, arguments, max_output_bytes=max_output_bytes
+            )
+            result = (
+                await asyncio.wait_for(call, timeout=timeout_seconds)
+                if timeout_seconds is not None
+                else await call
+            )
+        except asyncio.TimeoutError:
+            return {"error": "MCP tool call timed out", "exit_code": 1}
         except Exception as e:
             # Auto-reconnect for builtin servers whose subprocess may have died
             if self.is_builtin(server_id):
@@ -458,7 +516,19 @@ class McpManager:
                     session = self._sessions.get(server_id)
                     if session:
                         try:
-                            result = await self._do_call(session, tool_name, arguments)
+                            retry = self._do_call(
+                                session,
+                                tool_name,
+                                arguments,
+                                max_output_bytes=max_output_bytes,
+                            )
+                            result = (
+                                await asyncio.wait_for(retry, timeout=timeout_seconds)
+                                if timeout_seconds is not None
+                                else await retry
+                            )
+                        except asyncio.TimeoutError:
+                            return {"error": "MCP tool call timed out", "exit_code": 1}
                         except Exception as e2:
                             logger.error(f"MCP tool call failed after reconnect: {qualified_name}: {e2}")
                             return {"error": str(e2), "exit_code": 1}
@@ -473,21 +543,49 @@ class McpManager:
 
         return result
 
-    async def _do_call(self, session, tool_name: str, arguments: Dict) -> Dict:
+    async def _do_call(
+        self,
+        session,
+        tool_name: str,
+        arguments: Dict,
+        *,
+        max_output_bytes: Optional[int] = None,
+    ) -> Dict:
         """Execute a single MCP tool call and return result dict."""
         result = await session.call_tool(tool_name, arguments)
+        content_items = getattr(result, "content", None)
+        if not isinstance(content_items, (list, tuple)):
+            raise ValueError("MCP result malformed")
         output_parts = []
         images = []
-        for content in result.content:
+        total_bytes = 0
+        for content in content_items:
             if hasattr(content, 'text'):
-                output_parts.append(content.text)
+                value = getattr(content, "text", None)
+                if not isinstance(value, str):
+                    raise ValueError("MCP result malformed")
+                total_bytes += len(value.encode("utf-8"))
+                output_parts.append(value)
             elif getattr(content, 'type', '') == 'image' and hasattr(content, 'data'):
                 # Image content (e.g. Playwright screenshots)
                 mime = getattr(content, 'mimeType', 'image/png')
-                images.append({"data": content.data, "mimeType": mime})
+                data = getattr(content, "data", None)
+                if not isinstance(data, str) or not isinstance(mime, str):
+                    raise ValueError("MCP result malformed")
+                total_bytes += len(data.encode("utf-8"))
+                images.append({"data": data, "mimeType": mime})
                 output_parts.append(f"[Screenshot captured ({mime})]")
             elif hasattr(content, 'data'):
-                output_parts.append(str(content.data))
+                data = getattr(content, "data", None)
+                if not isinstance(data, (str, int, float, bool, dict, list)):
+                    raise ValueError("MCP result malformed")
+                value = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+                total_bytes += len(value.encode("utf-8"))
+                output_parts.append(value)
+            else:
+                raise ValueError("MCP result malformed")
+            if max_output_bytes is not None and total_bytes > max_output_bytes:
+                raise ValueError("MCP result too large")
 
         output = "\n".join(output_parts)
         is_error = getattr(result, 'isError', False)
@@ -500,6 +598,22 @@ class McpManager:
         if images:
             result_dict["images"] = images
         return result_dict
+
+    def reserve_extension_server(self, server_id: str) -> None:
+        if server_id not in self._extension_servers:
+            self._extension_servers.add(server_id)
+            self._generation += 1
+
+    def release_extension_server(self, server_id: str) -> None:
+        if server_id in self._extension_servers:
+            self._extension_servers.remove(server_id)
+            self._generation += 1
+
+    def is_extension_server(self, server_id: str) -> bool:
+        return server_id in self._extension_servers
+
+    def get_server_tools(self, server_id: str) -> List[Dict]:
+        return list(self._tools.get(server_id, []))
 
     async def _reconnect_builtin(self, server_id: str) -> bool:
         """Tear down and reconnect a crashed builtin MCP server."""
@@ -540,6 +654,8 @@ class McpManager:
         """
         schemas = []
         for server_id, tools in self._tools.items():
+            if self.is_extension_server(server_id):
+                continue
             # Skip builtin Python servers — they use the code-block tool format
             # But include NPX-based builtins (like browser) which need function calling
             if self.is_builtin(server_id) and server_id != "builtin_browser":
@@ -571,6 +687,8 @@ class McpManager:
         """Return a flat list of all discovered tools with server info."""
         result = []
         for server_id, tools in self._tools.items():
+            if self.is_extension_server(server_id):
+                continue
             conn = self._connections.get(server_id, {})
             disabled = (disabled_map or {}).get(server_id, set())
             for tool in tools:
@@ -597,6 +715,8 @@ class McpManager:
         disabled_map: Dict[str, Set[str]] = {}
         qualified: Set[str] = set()
         for server_id, tools in self._tools.items():
+            if self.is_extension_server(server_id):
+                continue
             for tool in tools:
                 if not mcp_tool_is_readonly(tool):
                     disabled_map.setdefault(server_id, set()).add(tool["name"])

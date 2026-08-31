@@ -493,7 +493,7 @@ class ExtensionLifecycleManager:
                 if existing and existing.get("owner_scope") not in {None, operator_id}:
                     raise ExtensionLifecycleError("extension_owner_scope_mismatch")
                 resolved_catalog = None
-                if (manifest.get("runtime") or {}).get("type") == "skills":
+                if (manifest.get("runtime") or {}).get("type") in {"skills", "mcp"}:
                     resolved_catalog, healthy = self._validate_adapter(
                         adapter, staging, manifest, revision, operator_id
                     )

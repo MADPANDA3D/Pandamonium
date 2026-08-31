@@ -11,6 +11,7 @@ from core.middleware import require_admin
 from src.auth_helpers import require_user
 from src.authority_protocol import operator_identity
 from src.extension_host import live_catalog_web_adapter
+from src.extension_mcp_adapter import mcp_extension_adapter
 from src.extension_installer import (
     ExtensionLifecycleError,
     ExtensionLifecycleManager,
@@ -43,6 +44,7 @@ def setup_extension_routes(
         adapters=[
             InlineWebAdapter(),
             live_catalog_web_adapter,
+            mcp_extension_adapter,
             *([SkillBundleAdapter(skills_manager)] if skills_manager is not None else []),
         ]
     )
@@ -64,6 +66,13 @@ def setup_extension_routes(
             status = 400
         return HTTPException(status, exc.code)
 
+    def _bind_async_adapters() -> None:
+        loop = asyncio.get_running_loop()
+        for adapter in manager.adapters:
+            binder = getattr(adapter, "bind_loop", None)
+            if binder:
+                binder(loop)
+
     @router.get("")
     async def list_extensions(owner: str = Depends(require_user)):
         _operator(owner)
@@ -72,6 +81,7 @@ def setup_extension_routes(
     @router.post("/plans/source")
     async def preview_source_plan(payload: SourcePlanRequest, owner: str = Depends(require_user)):
         try:
+            _bind_async_adapters()
             return await asyncio.to_thread(
                 manager.preview_source,
                 payload.operation,
@@ -85,6 +95,7 @@ def setup_extension_routes(
     @router.post("/plans/lifecycle")
     async def preview_lifecycle_plan(payload: LifecyclePlanRequest, owner: str = Depends(require_user)):
         try:
+            _bind_async_adapters()
             return await asyncio.to_thread(
                 manager.preview_lifecycle,
                 payload.operation,
@@ -98,6 +109,7 @@ def setup_extension_routes(
     @router.post("/plans/{plan_id}/execute")
     async def execute_plan(plan_id: str, owner: str = Depends(require_user)):
         try:
+            _bind_async_adapters()
             return await asyncio.to_thread(
                 manager.execute_plan, plan_id, operator_id=_operator(owner)
             )

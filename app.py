@@ -1093,6 +1093,20 @@ async def _startup_event():
             logger.warning("User MCP startup timed out (non-critical)")
         except BaseException as e:
             logger.warning(f"MCP startup failed (non-critical): {type(e).__name__}: {e}")
+        try:
+            from src.extension_installer import default_extensions_root
+            from src.extension_mcp_adapter import mcp_extension_adapter
+            from src.extension_registry import ExtensionRegistry
+
+            await mcp_extension_adapter.restore_enabled(
+                registry=ExtensionRegistry(), root=default_extensions_root()
+            )
+        except BaseException as e:
+            logger.warning(
+                "MCP extension restore failed closed (non-critical): %s: %s",
+                type(e).__name__,
+                e,
+            )
 
     _startup_tasks.append(asyncio.create_task(_startup_mcp_connections()))
 
