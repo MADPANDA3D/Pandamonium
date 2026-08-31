@@ -277,6 +277,8 @@ _ACTION_PARAMETERS = {
         "target_revision": {"type": "string", "maxLength": 64},
         "permissions": {"type": "object"},
         "lifecycle": {"type": "object"},
+        "data_boundaries": {"type": "object"},
+        "admitted_skills": {"type": "array", "items": {"type": "string", "maxLength": 64}},
     },
     "required": ["plan_id", "operation", "extension_id"],
     "additionalProperties": False,
@@ -351,6 +353,32 @@ class ExtensionLifecycleManager:
         raise ExtensionLifecycleError(f"extension_adapter_required:{runtime}:{descriptor}")
 
     @staticmethod
+    def _validate_adapter(
+        adapter: ExtensionLifecycleAdapter,
+        path: Path,
+        manifest: Mapping[str, Any],
+        revision: str,
+        owner_scope: str,
+    ) -> tuple[Mapping[str, Any] | None, bool]:
+        owner_validator = getattr(adapter, "validate_for_owner", None)
+        if owner_validator:
+            return owner_validator(path, manifest, revision, owner_scope=owner_scope)
+        return adapter.validate(path, manifest, revision)
+
+    @staticmethod
+    def _deactivate_adapter(
+        adapter: ExtensionLifecycleAdapter,
+        path: Path,
+        manifest: Mapping[str, Any],
+        owner_scope: str,
+    ) -> None:
+        owner_deactivator = getattr(adapter, "deactivate_for_owner", None)
+        if owner_deactivator:
+            owner_deactivator(path, manifest, owner_scope=owner_scope)
+        else:
+            adapter.deactivate(path, manifest)
+
+    @staticmethod
     def _load_manifest(checkout: Path) -> dict[str, Any]:
         path = checkout / MANIFEST_NAME
         try:
@@ -389,6 +417,10 @@ class ExtensionLifecycleManager:
         if manifest:
             arguments["permissions"] = manifest.get("permissions") or {}
             arguments["lifecycle"] = manifest.get("lifecycle") or {}
+            arguments["data_boundaries"] = manifest.get("data_boundaries") or {}
+        catalog = plan.get("resolved_catalog") or {}
+        if catalog.get("skills"):
+            arguments["admitted_skills"] = [item["id"] for item in catalog["skills"]]
         call = normalize_action_call(
             request_id=plan["plan_id"],
             call_id=plan["call_id"],
@@ -449,7 +481,7 @@ class ExtensionLifecycleManager:
             self.git.checkout(source, ref, revision, staging)
             manifest = self._load_manifest(staging)
             self._manifest_source_matches(manifest, source, revision)
-            self._adapter_for(manifest)
+            adapter = self._adapter_for(manifest)
             extension_id = manifest["extension_id"]
             with self._lock:
                 state = self._read_state()
@@ -458,6 +490,15 @@ class ExtensionLifecycleManager:
                     raise ExtensionLifecycleError("extension_already_installed_use_upgrade")
                 if operation == "upgrade" and not existing:
                     raise ExtensionLifecycleError("extension_not_installed_use_install")
+                if existing and existing.get("owner_scope") not in {None, operator_id}:
+                    raise ExtensionLifecycleError("extension_owner_scope_mismatch")
+                resolved_catalog = None
+                if (manifest.get("runtime") or {}).get("type") == "skills":
+                    resolved_catalog, healthy = self._validate_adapter(
+                        adapter, staging, manifest, revision, operator_id
+                    )
+                    if not healthy:
+                        raise ExtensionLifecycleError("extension_health_unavailable")
                 plan = {
                     "plan_id": plan_id,
                     "call_id": str(uuid.uuid4()),
@@ -468,6 +509,7 @@ class ExtensionLifecycleManager:
                     "source_revision": revision,
                     "staging_path": str(staging),
                     "manifest": manifest,
+                    "resolved_catalog": resolved_catalog,
                     "operator_id": operator_id,
                     "status": "pending_approval",
                     "created_at": utc_now(),
@@ -526,6 +568,8 @@ class ExtensionLifecycleManager:
                     and target_revision != (existing or {}).get("active_revision")
                 ):
                     raise ExtensionLifecycleError("extension_rollback_revision_unavailable")
+            if existing and existing.get("owner_scope") not in {None, operator_id}:
+                raise ExtensionLifecycleError("extension_owner_scope_mismatch")
             plan = {
                 "plan_id": str(uuid.uuid4()),
                 "call_id": str(uuid.uuid4()),
@@ -533,6 +577,7 @@ class ExtensionLifecycleManager:
                 "extension_id": extension_id,
                 "target_revision": target_revision,
                 "operator_id": operator_id,
+                "owner_scope": (existing or {}).get("owner_scope") or operator_id,
                 "status": "pending_approval",
                 "created_at": utc_now(),
             }
@@ -556,6 +601,18 @@ class ExtensionLifecycleManager:
             result["manifest"] = manifest
             result["requested_permissions"] = manifest.get("permissions") or {}
             result["lifecycle_commands"] = manifest.get("lifecycle") or {}
+        catalog = plan.get("resolved_catalog") or {}
+        if catalog.get("skills"):
+            result["admitted_skills"] = [
+                {
+                    "id": item["id"],
+                    "source_path": item["source_path"],
+                    "owner_scope": item["owner_scope"],
+                    "platforms": item["platforms"],
+                    "requires_toolsets": item["requires_toolsets"],
+                }
+                for item in catalog["skills"]
+            ]
         if decision:
             result["authority_decision"] = dict(decision)
         if plan.get("result"):
@@ -667,12 +724,12 @@ class ExtensionLifecycleManager:
         if operation in {"install", "upgrade"}:
             return self._activate_source_plan(plan)
         if operation == "enable":
-            return self._enable(plan["extension_id"])
+            return self._enable(plan["extension_id"], plan["owner_scope"])
         if operation == "disable":
-            return self._disable(plan["extension_id"])
+            return self._disable(plan["extension_id"], plan["owner_scope"])
         if operation == "rollback":
-            return self._rollback(plan["extension_id"], plan["target_revision"])
-        return self._uninstall(plan["extension_id"])
+            return self._rollback(plan["extension_id"], plan["target_revision"], plan["owner_scope"])
+        return self._uninstall(plan["extension_id"], plan["owner_scope"])
 
     def _revision_path(self, extension_id: str, revision: str) -> Path:
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", extension_id):
@@ -688,18 +745,33 @@ class ExtensionLifecycleManager:
         manifest: Mapping[str, Any],
         catalog: Mapping[str, Any] | None,
         revision: str,
+        owner_scope: str,
     ) -> dict[str, Any]:
-        adapter.activate(path, manifest)
+        owner_activator = getattr(adapter, "activate_for_owner", None)
+        if owner_activator:
+            owner_activator(
+                path, manifest, catalog, revision, owner_scope=owner_scope
+            )
+        else:
+            adapter.activate(path, manifest)
         try:
-            return self.registry.register(
+            record = self.registry.register(
                 manifest,
                 catalog,
                 source_revision=revision,
                 health_available=True,
             )
         except Exception:
-            adapter.deactivate(path, manifest)
+            rollback = getattr(adapter, "rollback_activation", None)
+            if rollback:
+                rollback(manifest)
+            else:
+                self._deactivate_adapter(adapter, path, manifest, owner_scope)
             raise
+        commit = getattr(adapter, "commit_activation", None)
+        if commit:
+            commit(manifest)
+        return record
 
     def _activate_source_plan(self, plan: Mapping[str, Any]) -> dict[str, Any]:
         extension_id = plan["extension_id"]
@@ -723,11 +795,28 @@ class ExtensionLifecycleManager:
         if plan["operation"] == "upgrade" and not previous:
             raise ExtensionLifecycleError("extension_upgrade_previous_revision_missing")
         adapter = self._adapter_for(manifest)
-        catalog, healthy = adapter.validate(destination, manifest, revision)
+        owner_scope = str(previous.get("owner_scope") or plan["operator_id"])
+        if owner_scope != plan["operator_id"]:
+            raise ExtensionLifecycleError("extension_owner_scope_mismatch")
+        if previous:
+            old_path = self._revision_path(extension_id, previous["active_revision"])
+            old_manifest = self._load_manifest(old_path)
+            old_runtime = (old_manifest.get("runtime") or {}).get("type")
+            old_descriptor = ((old_manifest.get("capabilities") or {}).get("descriptor") or {}).get("type")
+            if (
+                old_runtime != (manifest.get("runtime") or {}).get("type")
+                or old_descriptor != ((manifest.get("capabilities") or {}).get("descriptor") or {}).get("type")
+            ):
+                raise ExtensionLifecycleError("extension_adapter_change_unsupported")
+        catalog, healthy = self._validate_adapter(
+            adapter, destination, manifest, revision, owner_scope
+        )
         if not healthy:
             raise ExtensionLifecycleError("extension_health_unavailable")
+        if plan.get("resolved_catalog") is not None and catalog != plan["resolved_catalog"]:
+            raise ExtensionLifecycleError("extension_resolved_catalog_changed")
         registry_record = self._activate_and_register(
-            adapter, destination, manifest, catalog, revision
+            adapter, destination, manifest, catalog, revision, owner_scope
         )
         with self._lock:
             state = self._read_state()
@@ -741,6 +830,10 @@ class ExtensionLifecycleManager:
                 "source_url": plan["source_url"],
                 "active_revision": revision,
                 "enabled": True,
+                "owner_scope": owner_scope,
+                "admitted_skills": [
+                    item["id"] for item in registry_record.get("admitted_skills", [])
+                ],
                 "history": history[-retain:],
                 "installed_at": previous.get("installed_at") or utc_now(),
                 "updated_at": utc_now(),
@@ -757,17 +850,19 @@ class ExtensionLifecycleManager:
         manifest = self._load_manifest(path)
         return record, path, manifest
 
-    def _enable(self, extension_id: str) -> dict[str, Any]:
+    def _enable(self, extension_id: str, owner_scope: str) -> dict[str, Any]:
         with self._lock:
             record, path, manifest = self._active_record(extension_id)
             if record.get("enabled") and extension_id in self.registry.snapshot()["extensions"]:
                 return {"extension_id": extension_id, "enabled": True, "idempotent": True}
             adapter = self._adapter_for(manifest)
-            catalog, healthy = adapter.validate(path, manifest, record["active_revision"])
+            catalog, healthy = self._validate_adapter(
+                adapter, path, manifest, record["active_revision"], owner_scope
+            )
             if not healthy:
                 raise ExtensionLifecycleError("extension_health_unavailable")
             self._activate_and_register(
-                adapter, path, manifest, catalog, record["active_revision"]
+                adapter, path, manifest, catalog, record["active_revision"], owner_scope
             )
             state = self._read_state()
             state["extensions"][extension_id]["enabled"] = True
@@ -775,7 +870,7 @@ class ExtensionLifecycleManager:
             self._write_state(state)
             return {"extension_id": extension_id, "enabled": True}
 
-    def _disable(self, extension_id: str) -> dict[str, Any]:
+    def _disable(self, extension_id: str, owner_scope: str) -> dict[str, Any]:
         with self._lock:
             state = self._read_state()
             record = state["extensions"].get(extension_id)
@@ -786,14 +881,16 @@ class ExtensionLifecycleManager:
                 return {"extension_id": extension_id, "enabled": False, "idempotent": True}
             path = self._revision_path(extension_id, record["active_revision"])
             manifest = self._load_manifest(path)
-            self._adapter_for(manifest).deactivate(path, manifest)
+            self._deactivate_adapter(
+                self._adapter_for(manifest), path, manifest, owner_scope
+            )
             self.registry.disable(extension_id)
             record["enabled"] = False
             record["updated_at"] = utc_now()
             self._write_state(state)
             return {"extension_id": extension_id, "enabled": False}
 
-    def _rollback(self, extension_id: str, target_revision: str) -> dict[str, Any]:
+    def _rollback(self, extension_id: str, target_revision: str, owner_scope: str) -> dict[str, Any]:
         with self._lock:
             state = self._read_state()
             current = state["extensions"].get(extension_id)
@@ -807,20 +904,27 @@ class ExtensionLifecycleManager:
             path = self._revision_path(extension_id, target_revision)
             manifest = self._load_manifest(path)
             adapter = self._adapter_for(manifest)
-            catalog, healthy = adapter.validate(path, manifest, target_revision)
+            catalog, healthy = self._validate_adapter(
+                adapter, path, manifest, target_revision, owner_scope
+            )
             if not healthy:
                 raise ExtensionLifecycleError("extension_health_unavailable")
-            self._activate_and_register(adapter, path, manifest, catalog, target_revision)
+            registry_record = self._activate_and_register(
+                adapter, path, manifest, catalog, target_revision, owner_scope
+            )
             old_revision = current["active_revision"]
             current["history"] = [item for item in current["history"] if item != target_revision]
             current["history"].append(old_revision)
             current["active_revision"] = target_revision
             current["enabled"] = True
+            current["admitted_skills"] = [
+                item["id"] for item in registry_record.get("admitted_skills", [])
+            ]
             current["updated_at"] = utc_now()
             self._write_state(state)
             return {"extension_id": extension_id, "revision": target_revision, "enabled": True}
 
-    def _uninstall(self, extension_id: str) -> dict[str, Any]:
+    def _uninstall(self, extension_id: str, owner_scope: str) -> dict[str, Any]:
         with self._lock:
             state = self._read_state()
             record = state["extensions"].get(extension_id)
@@ -828,10 +932,11 @@ class ExtensionLifecycleManager:
                 self.registry.unregister(extension_id)
                 return {"extension_id": extension_id, "installed": False, "idempotent": True}
             source = self.root / "installed" / extension_id
-            if record.get("enabled"):
-                path = self._revision_path(extension_id, record["active_revision"])
-                manifest = self._load_manifest(path)
-                self._adapter_for(manifest).deactivate(path, manifest)
+            path = self._revision_path(extension_id, record["active_revision"])
+            manifest = self._load_manifest(path)
+            self._deactivate_adapter(
+                self._adapter_for(manifest), path, manifest, owner_scope
+            )
             self.registry.unregister(extension_id)
             if source.exists():
                 destination = self.root / "removed" / extension_id / str(uuid.uuid4())

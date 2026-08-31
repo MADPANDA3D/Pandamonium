@@ -16,6 +16,7 @@ from src.extension_installer import (
     ExtensionLifecycleManager,
     InlineWebAdapter,
 )
+from src.extension_skill_adapter import SkillBundleAdapter
 from src.extension_registry import ExtensionContractError
 
 
@@ -35,9 +36,15 @@ class LifecyclePlanRequest(BaseModel):
     target_revision: str | None = Field(default=None, max_length=64)
 
 
-def setup_extension_routes(manager: ExtensionLifecycleManager | None = None) -> APIRouter:
+def setup_extension_routes(
+    manager: ExtensionLifecycleManager | None = None, *, skills_manager=None
+) -> APIRouter:
     manager = manager or ExtensionLifecycleManager(
-        adapters=[InlineWebAdapter(), live_catalog_web_adapter]
+        adapters=[
+            InlineWebAdapter(),
+            live_catalog_web_adapter,
+            *([SkillBundleAdapter(skills_manager)] if skills_manager is not None else []),
+        ]
     )
     router = APIRouter(
         prefix="/api/extensions",

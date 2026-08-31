@@ -789,6 +789,7 @@ def build_context_manifest(
             "engaged": bool((state or {}).get("engaged")),
             "state_mounted": bool((state or {}).get("state_mounted")),
             "tool_count": max(int((state or {}).get("tool_count") or 0), 0),
+            "skill_count": max(int((state or {}).get("skill_count") or 0), 0),
         }
         for name, state in sorted((extensions or {}).items())
         if isinstance(state, dict)

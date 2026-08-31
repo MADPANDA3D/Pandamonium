@@ -73,6 +73,7 @@ def test_manifest_reports_classes_trust_sources_and_omissions_without_content():
     }
     assert manifest["extensions"]["oracle"] == {
         "engaged": True, "state_mounted": True, "tool_count": 1,
+        "skill_count": 0,
     }
     assert manifest["tools"]["extension"]["names"] == ["fly_to_location"]
     assert manifest["omissions"] == ["skills_disabled"]

@@ -22,13 +22,15 @@ MANIFEST_VERSION = "jos-extension.v1"
 REGISTRY_VERSION = "jos-extension-registry.v1"
 REGISTRY_FILE = Path(DATA_DIR) / "extensions.json"
 EXTENSION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+SKILL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,59}$")
 TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
 REVISION_PATTERN = re.compile(r"^(?:self|[0-9a-f]{40}|[0-9a-f]{64})$")
 IMMUTABLE_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 PERMISSION_MODES = frozenset(
     {"read_only", "bounded_write", "external_side_effect", "destructive", "controlled_administrative"}
 )
-DESCRIPTOR_TYPES = frozenset({"inline", "live_catalog", "mcp", "openapi"})
+DESCRIPTOR_TYPES = frozenset({"inline", "live_catalog", "mcp", "openapi", "skill_bundle"})
+SKILL_BUNDLE_FORMATS = frozenset({"agent_skill", "codex_plugin"})
 
 _TOP_LEVEL_FIELDS = frozenset({
     "protocol_version", "extension_id", "name", "version", "source", "runtime",
@@ -158,7 +160,7 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
     runtime = _object(value.get("runtime"), "extension_runtime_invalid")
     _strict_fields(runtime, {"type", "entrypoint"}, "extension_runtime_unknown_field")
     runtime_type = str(runtime.get("type") or "")
-    if runtime_type not in {"web", "service", "mcp", "openapi"}:
+    if runtime_type not in {"web", "service", "mcp", "openapi", "skills"}:
         raise ExtensionContractError("extension_runtime_type_invalid")
 
     capabilities = _object(value.get("capabilities"), "extension_capabilities_invalid")
@@ -174,11 +176,28 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
         _strict_fields(descriptor, {"type"}, "extension_descriptor_unknown_field")
         if "schemas" not in capabilities:
             raise ExtensionContractError("extension_inline_schemas_required")
+    elif descriptor_type == "skill_bundle":
+        _strict_fields(descriptor, {"type", "format", "include"}, "extension_descriptor_unknown_field")
+        bundle_format = str(descriptor.get("format") or "")
+        if bundle_format not in SKILL_BUNDLE_FORMATS:
+            raise ExtensionContractError("extension_skill_bundle_format_invalid")
+        include = _string_list(
+            descriptor.get("include"), "extension_skill_bundle_include_invalid", maximum=64
+        )
+        if (
+            not include
+            or len(include) != len(set(include))
+            or any(not SKILL_ID_PATTERN.fullmatch(item) for item in include)
+        ):
+            raise ExtensionContractError("extension_skill_bundle_include_invalid")
+        descriptor.update({"format": bundle_format, "include": include})
     else:
         _strict_fields(descriptor, {"type", "endpoint"}, "extension_descriptor_unknown_field")
         descriptor["endpoint"] = _endpoint(descriptor.get("endpoint"), "extension_descriptor_endpoint_invalid")
     if descriptor_type != "inline" and "schemas" in capabilities:
         raise ExtensionContractError("extension_descriptor_schemas_must_be_referenced")
+    if (runtime_type == "skills") != (descriptor_type == "skill_bundle"):
+        raise ExtensionContractError("extension_runtime_descriptor_mismatch")
     schemas = _normalize_tools(capabilities.get("schemas", [])) if descriptor_type == "inline" else []
 
     permissions = _object(value.get("permissions"), "extension_permissions_invalid")
@@ -189,6 +208,11 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
         raise ExtensionContractError("extension_permission_mode_invalid")
     if any(not TOOL_NAME_PATTERN.fullmatch(str(name)) for name in overrides):
         raise ExtensionContractError("extension_permission_capability_invalid")
+    if (
+        descriptor_type == "skill_bundle"
+        and set(overrides) - set(descriptor["include"])
+    ):
+        raise ExtensionContractError("extension_permission_capability_unknown")
 
     health = _object(value.get("health"), "extension_health_invalid")
     health_type = str(health.get("type") or "")
@@ -277,9 +301,61 @@ def reconcile_extension_catalog(
     normalized["source"]["revision"] = source_revision
 
     descriptor_type = normalized["capabilities"]["descriptor"]["type"]
+    admitted_skills: list[dict[str, Any]] = []
     if descriptor_type == "inline":
         tools = normalized["capabilities"]["schemas"]
         catalog_version = normalized["version"]
+    elif descriptor_type == "skill_bundle":
+        catalog = _object(resolved_catalog, "extension_resolved_catalog_required")
+        _strict_fields(
+            catalog,
+            {"protocol_version", "extension_id", "version", "source_revision", "skills"},
+            "extension_catalog_unknown_field",
+        )
+        if catalog.get("protocol_version") != MANIFEST_VERSION:
+            raise ExtensionContractError("extension_catalog_version_unsupported")
+        if catalog.get("extension_id") != normalized["extension_id"]:
+            raise ExtensionContractError("extension_catalog_id_mismatch")
+        if catalog.get("source_revision") != source_revision:
+            raise ExtensionContractError("extension_catalog_revision_mismatch")
+        raw_skills = catalog.get("skills")
+        if not isinstance(raw_skills, list) or not raw_skills or len(raw_skills) > 64:
+            raise ExtensionContractError("extension_skill_catalog_invalid")
+        seen_skills = set()
+        for raw in raw_skills:
+            skill = _object(raw, "extension_skill_catalog_invalid")
+            _strict_fields(
+                skill,
+                {"id", "source_path", "owner_scope", "platforms", "requires_toolsets"},
+                "extension_skill_catalog_unknown_field",
+            )
+            skill_id = _bounded_text(skill.get("id"), "extension_skill_id_invalid", maximum=64)
+            if not SKILL_ID_PATTERN.fullmatch(skill_id) or skill_id in seen_skills:
+                raise ExtensionContractError("extension_skill_id_invalid")
+            seen_skills.add(skill_id)
+            admitted_skills.append({
+                "id": skill_id,
+                "source_path": _safe_relative_path(
+                    skill.get("source_path"), "extension_skill_source_path_invalid"
+                ),
+                "owner_scope": _bounded_text(
+                    skill.get("owner_scope"), "extension_skill_owner_scope_invalid", maximum=200
+                ),
+                "platforms": _string_list(
+                    skill.get("platforms"), "extension_skill_platforms_invalid", maximum=32
+                ),
+                "requires_toolsets": _string_list(
+                    skill.get("requires_toolsets"),
+                    "extension_skill_toolsets_invalid",
+                    maximum=32,
+                ),
+            })
+        if seen_skills != set(normalized["capabilities"]["descriptor"]["include"]):
+            raise ExtensionContractError("extension_skill_catalog_mismatch")
+        tools = []
+        catalog_version = _bounded_text(
+            catalog.get("version"), "extension_catalog_release_invalid", maximum=80
+        )
     else:
         catalog = _object(resolved_catalog, "extension_resolved_catalog_required")
         _strict_fields(
@@ -297,7 +373,11 @@ def reconcile_extension_catalog(
         catalog_version = _bounded_text(catalog.get("version"), "extension_catalog_release_invalid", maximum=80)
 
     overrides = normalized["permissions"]["capabilities"]
-    names = {tool["function"]["name"] for tool in tools}
+    names = (
+        {skill["id"] for skill in admitted_skills}
+        if descriptor_type == "skill_bundle"
+        else {tool["function"]["name"] for tool in tools}
+    )
     if set(overrides) - names:
         raise ExtensionContractError("extension_permission_capability_unknown")
     effective = [
@@ -310,7 +390,18 @@ def reconcile_extension_catalog(
         }
         for tool in tools
     ]
-    return {"manifest": normalized, "catalog_version": catalog_version, "capabilities": effective}
+    return {
+        "manifest": normalized,
+        "catalog_version": catalog_version,
+        "capabilities": effective,
+        "admitted_skills": [
+            {
+                **skill,
+                "permission_mode": overrides.get(skill["id"], normalized["permissions"]["default"]),
+            }
+            for skill in admitted_skills
+        ],
+    }
 
 
 class ExtensionRegistry:
@@ -332,7 +423,7 @@ class ExtensionRegistry:
             try:
                 _strict_fields(
                     record,
-                    {"enabled", "manifest", "catalog_version", "effective_capabilities"},
+                    {"enabled", "manifest", "catalog_version", "effective_capabilities", "admitted_skills"},
                     "extension_registry_record_unknown_field",
                 )
                 manifest = validate_extension_manifest(record["manifest"])
@@ -352,6 +443,53 @@ class ExtensionRegistry:
                         raise ExtensionContractError("extension_registry_capability_invalid")
                     seen.add(name)
                     capabilities.append({"name": name, "schema": schema, "permission_mode": raw["permission_mode"]})
+                admitted_skills = []
+                seen_skills = set()
+                for raw in record.get("admitted_skills", []):
+                    skill = _object(raw, "extension_registry_skill_invalid")
+                    _strict_fields(
+                        skill,
+                        {
+                            "id", "source_path", "owner_scope", "platforms",
+                            "requires_toolsets", "permission_mode",
+                        },
+                        "extension_registry_skill_unknown_field",
+                    )
+                    skill_id = _bounded_text(skill.get("id"), "extension_skill_id_invalid", maximum=64)
+                    if (
+                        not SKILL_ID_PATTERN.fullmatch(skill_id)
+                        or skill_id in seen_skills
+                        or skill.get("permission_mode") not in PERMISSION_MODES
+                    ):
+                        raise ExtensionContractError("extension_registry_skill_invalid")
+                    seen_skills.add(skill_id)
+                    admitted_skills.append({
+                        "id": skill_id,
+                        "source_path": _safe_relative_path(
+                            skill.get("source_path"), "extension_skill_source_path_invalid"
+                        ),
+                        "owner_scope": _bounded_text(
+                            skill.get("owner_scope"), "extension_skill_owner_scope_invalid", maximum=200
+                        ),
+                        "platforms": _string_list(
+                            skill.get("platforms"), "extension_skill_platforms_invalid", maximum=32
+                        ),
+                        "requires_toolsets": _string_list(
+                            skill.get("requires_toolsets"),
+                            "extension_skill_toolsets_invalid",
+                            maximum=32,
+                        ),
+                        "permission_mode": skill["permission_mode"],
+                    })
+                descriptor = manifest["capabilities"]["descriptor"]
+                if descriptor["type"] == "skill_bundle":
+                    if capabilities or (
+                        record["enabled"]
+                        and seen_skills != set(descriptor["include"])
+                    ) or (not record["enabled"] and admitted_skills):
+                        raise ExtensionContractError("extension_registry_skill_invalid")
+                elif admitted_skills:
+                    raise ExtensionContractError("extension_registry_skill_invalid")
                 extensions[extension_id] = {
                     "enabled": record["enabled"],
                     "manifest": manifest,
@@ -361,6 +499,7 @@ class ExtensionRegistry:
                         maximum=80,
                     ),
                     "effective_capabilities": capabilities,
+                    "admitted_skills": admitted_skills,
                 }
             except (ExtensionContractError, KeyError, TypeError):
                 continue
@@ -400,6 +539,7 @@ class ExtensionRegistry:
                 "manifest": reconciled["manifest"],
                 "catalog_version": reconciled["catalog_version"],
                 "effective_capabilities": reconciled["capabilities"],
+                "admitted_skills": reconciled["admitted_skills"],
             }
             state["extensions"][extension_id] = record
             self._write(state)
@@ -413,6 +553,7 @@ class ExtensionRegistry:
                 return False
             record["enabled"] = False
             record["effective_capabilities"] = []
+            record["admitted_skills"] = []
             self._write(state)
             return True
 
@@ -446,6 +587,7 @@ class ExtensionRegistry:
                 "engaged": True,
                 "state_mounted": True,
                 "tool_count": len(record.get("effective_capabilities", [])),
+                "skill_count": len(record.get("admitted_skills", [])),
             }
             for extension_id, record in self._read()["extensions"].items()
             if extension_id in engaged and record.get("enabled")
