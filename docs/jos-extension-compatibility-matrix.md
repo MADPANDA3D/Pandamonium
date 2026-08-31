@@ -10,7 +10,7 @@ published, released, or persistently installed by these batons.
 
 ## Current host boundary
 
-The source host at Odysseus commit `dfe098be` supports:
+The source host at Odysseus commit `879a3463` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
@@ -37,7 +37,7 @@ retained until source and deployed equivalence are separately proven.
 
 | Candidate | Pinned revision | License | Native surface to reuse | Compatibility decision | Child baton |
 | --- | --- | --- | --- | --- | --- |
-| [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Conditional: use a generic skill-bundle adapter; do not flatten its scripts into core tools | `MAD-757` |
+| [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Source-proven locally: candidate-owned strict manifest, small skill package, bounded offline runner, and optional-vision timeout reuse the generic skill-bundle adapter. Fork exists; candidate commits are not pushed or released | `MAD-757` |
 | [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0-or-later | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Source-proven locally: candidate-owned manifest/catalog/bridge reuses the generic web surface; browser camera remains client-side. Not pushed, published, deployed, or persistently installed | `MAD-758` |
 | [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Conditional: candidate-owned narrow MCP server plus generic MCP adapter; never automate Streamlit | `MAD-760` |
 | [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Conditional: admit native plugin/skill metadata through the same generic skill-bundle adapter; start with `cad` and `cad-viewer` only | `MAD-759` |
@@ -46,14 +46,26 @@ retained until source and deployed equivalence are separately proven.
 
 ### img2threejs
 
-- `SKILL.md` is the native router and records its own version, license, state
-  gate, workflow, inputs, outputs, and optional integrations.
-- The normal `forge` path declares no third-party Python dependency. Optional
-  GLB and vision integrations are isolated subprojects and stay disabled in
-  the first compatibility slice.
-- `.img2threejs/state.json` is candidate/project state, not Jarvis memory.
-- Initial permissions are selected-image/project reads plus generated
-  spec/state/TypeScript/review writes. Network remains off by default.
+- The maintained candidate branch starts from pinned upstream revision
+  `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85`. Contract, package/runtime, and
+  upgrade/lifecycle proof are commits `a9e7d15`, `0e05cd1`, and `64163cf`.
+- The strict manifest selects only `jos/img2threejs/SKILL.md`; the whole
+  337-file repository is never copied into native skill storage. The selected
+  package stays below the generic 64-file/2,000,000-byte text-only boundary.
+- The stdlib runner confines reads and writes to fixed paths under one selected
+  project, keeps network empty, bounds every child process, and atomically
+  replaces successful TypeScript/Tier-1 artifacts. Missing, malformed, unsafe,
+  late, unavailable, and failed strict-quality inputs return nonzero.
+- The candidate's shared optional-vision wrapper now owns its internal timeout.
+  Optional vision remains off by default and an unavailable interpreter fails
+  before factory output.
+- Candidate checks prove the offline fixture and failure boundaries. The real
+  candidate revisions completed install, engage, disable/enable, upgrade,
+  rollback, malformed-state isolation, uninstall, and reinstall through the
+  generic lifecycle while a differently named reference extension stayed
+  healthy and project artifacts survived.
+- `.img2threejs/state.json` remains candidate/project state, not Jarvis memory.
+  No generic host gap or img2threejs conditional was found in Odysseus.
 
 ### barehands
 
@@ -168,4 +180,13 @@ and its generic browser-surface harness passed. The complete Odysseus gate then
 passed with 5,014 tests, 4 intentional skips, and zero failures in 182.67
 seconds. Candidate syntax/manifest checks also passed. No Odysseus core,
 ORACLE, dependency, persistent install, push, deployment, publication, or
+release change occurred.
+
+MAD-757 verification: 104 candidate offline/package/boundary checks and one
+real-revision generic lifecycle integration check passed. The current
+skill-bundle/registry/context regression set passed 22 checks. The complete
+Odysseus gate passed with 5,014 tests, 4 intentional skips, and zero failures
+in 120.91 seconds. The public maintained fork exists, but candidate commits
+remain local-only. No Odysseus core, dependency, persistent install, live
+vision traffic, ORACLE/Barehands/CT103/CT104, push, deployment, package, or
 release change occurred.
