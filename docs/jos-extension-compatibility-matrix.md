@@ -9,7 +9,7 @@ in Odysseus core dispatch.
 
 ## Current host boundary
 
-The source host at Odysseus commit `d78a3a2b` supports:
+The source host at Odysseus commit `13fb3209` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
@@ -20,12 +20,14 @@ The source host at Odysseus commit `d78a3a2b` supports:
   subsets of multi-skill Codex plugin repositories through the existing native
   skill manager; and
 - generic P2-P7 metadata, permissions, action envelopes, result correlation,
-  disable, and unavailable behavior after a tool reaches the model loop.
+  disable, and unavailable behavior after a tool reaches the model loop; and
+- an extension-ID-keyed browser surface resolved from the installed manifest
+  entry point and configured runtime origin, with exact frame/origin/call/tool/
+  owner correlation and explicit browser-only media permissions.
 
-It does not yet provide an MCP runtime adapter or a generic browser-surface
-mount. The existing ORACLE iframe is deliberately retained as a compatibility
-UI adapter until the generic browser surface proves source and deployed
-equivalence.
+It does not yet provide an MCP runtime adapter. ORACLE's legacy message
+normalizer and unregistered fallback are deliberately retained until source and
+deployed equivalence are separately proven.
 
 ## Candidate decisions
 
@@ -101,8 +103,12 @@ Three reference-neutral host gaps were separated from candidate-native work:
    collision rejection, unsafe metadata/path rejection, and atomic failure
    recovery. This unlocks `MAD-757` and `MAD-759` without admitting either
    candidate here.
-2. `MAD-762` — generic browser-surface mount and result bridge using the
-   current session/action/result paths; blocks `MAD-758`.
+2. `MAD-762` — source-complete generic browser-surface mount and result bridge
+   using the current session/action/result paths. A differently named fixture
+   proves exact origin/ID/tool/call/owner/size correlation, single and
+   multi-action results, unavailable/malformed/timeout behavior, disable,
+   uninstall, restart recovery, and explicit browser-only media permission.
+   ORACLE compatibility remains pending separate source/deployed equivalence.
 3. `MAD-763` — generic MCP runtime adapter using the existing Odysseus MCP
    subsystem; blocks `MAD-760`.
 
@@ -116,3 +122,9 @@ host lifecycle.
 MAD-761 verification: 33 focused extension/context tests passed, followed by
 the complete Odysseus gate with 5,005 passed, 4 intentional skips, and zero
 failures. No real candidate repository or persistent runtime was used.
+
+MAD-762 verification: 10 contract checks and 127 runtime-focused Python checks,
+plus the browser harness and syntax gates, passed. The complete Odysseus gate
+then passed with 5,005 tests, 4 intentional skips, and zero failures. No real
+candidate repository, persistent install, dependency, daemon, deployment, or
+ORACLE change occurred.

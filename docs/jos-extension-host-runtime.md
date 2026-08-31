@@ -1,6 +1,6 @@
-# JOS Generic Live-Catalog Host
+# JOS Generic Web Runtime Host
 
-**Linear:** `MAD-754`
+**Linear:** `MAD-754`, `MAD-762`
 
 Odysseus now has one reference-neutral adapter for externally managed web
 runtimes that publish a live JOS capability catalog. ORACLE uses this contract;
@@ -48,14 +48,26 @@ tools, non-object arguments, oversized/mismatched results, timeouts, disabled
 extensions, and missing catalogs fail closed. Multi-action turns use the same
 bounded agent loop as native Odysseus tools.
 
+For enabled `web` manifests, the same configured runtime origin resolves the
+installed manifest entry point. The browser mounts at most one engaged surface,
+accepts messages only from that frame and exact origin, and forwards correlated
+results through the route above. Frame loss, config removal, disengagement,
+disable, and uninstall clear the surface and its pending client calls. Host
+restart rebuilds the available surface list from the durable registry rather
+than process-local activation state.
+
+The surface iframe explicitly denies camera, microphone, and display-capture
+permission. Extension engagement does not call a media API or imply media
+approval; browser media remains a separate explicit browser-scoped action.
+
 ## ORACLE compatibility boundary
 
-The existing ORACLE iframe remains the UI adapter for its native browser
-runner. It now receives the generic `extension_protocol_command` envelope and
-returns through the generic result route. ORACLE-specific lifecycle phrases,
-panel markup, and the legacy unregistered-catalog fallback remain until a real
-installed revision and live deployment prove equivalent; they are not treated
-as the public extension framework.
+The ORACLE runner remains supported by a compatibility normalizer inside the
+generic surface. It receives its legacy message names while actions and results
+continue through the generic control/result paths. ORACLE-specific lifecycle
+phrases and the legacy unregistered-catalog fallback remain until a real
+installed revision and live deployment separately prove equivalent; they are
+not treated as the public extension framework.
 
 ## Evidence boundary
 
@@ -67,7 +79,14 @@ temporary managed root; all 28 tools registered and disabling ORACLE removed
 all 28. A differently named extension proves that registry permissions,
 session context, and dispatch are keyed by extension ID rather than ORACLE.
 
+The differently named `atlas` browser fixture additionally proves manifest
+entry-point mounting, exact frame/origin/extension/tool/call correlation,
+single and multi-action results, malformed and oversized result handling,
+unavailable frames, timeout, disable, uninstall, and restart recovery. The
+MAD-762 source gate passed the browser harness and the complete Odysseus suite:
+5,005 passed, 4 intentional skips, and zero failures.
+
 This is source-level host proof only. ORACLE commit `b619e2a` exists locally;
 it has not been pushed, tagged, installed into the persistent managed root, or
-deployed to CT103/CT104. Live acceptance remains a separate operator-selected
-gate.
+deployed to CT103/CT104. ORACLE source and deployed equivalence remain separate
+operator-selected gates.
