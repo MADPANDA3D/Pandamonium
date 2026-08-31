@@ -4,7 +4,7 @@
 
 **Version:** `0.2`
 
-**Status:** Manifest, registry, pinned installer, generic live-catalog host, and native skill-bundle contract
+**Status:** Manifest, registry, pinned installer, generic live-catalog host, and native skill-bundle adapter
 
 **Reference extension:** ORACLE
 
@@ -131,10 +131,11 @@ Disabled extensions expose neither tools nor context metadata.
 `src/extension_installer.py` owns pinned source checkout and reversible package
 state outside the Odysseus source tree. It reuses P4 action validation, P5 exact
 approval receipts, P7 events, atomic JSON state, and the extension registry.
-Its built-in adapters support static web extensions with inline schemas and
-configured external web runtimes with bounded live catalogs; both require empty
-lifecycle vectors. MCP, OpenAPI, service, or command-driven runtimes stop with
-`extension_adapter_required` until an explicit host adapter exists.
+Its built-in adapters support static web extensions with inline schemas,
+configured external web runtimes with bounded live catalogs, and reviewed
+native skill bundles; all require empty lifecycle vectors. MCP, OpenAPI,
+service, or command-driven runtimes stop with `extension_adapter_required`
+until an explicit host adapter exists.
 
 ### Native skill-bundle adapter
 

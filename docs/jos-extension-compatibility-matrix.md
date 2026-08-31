@@ -9,20 +9,23 @@ in Odysseus core dispatch.
 
 ## Current host boundary
 
-The source host at Odysseus commit `a6e8bc8a` supports:
+The source host at Odysseus commit `d78a3a2b` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
 - static web manifests with inline schemas and no lifecycle commands;
 - configured external web runtimes with bounded live catalogs and no
-  lifecycle commands; and
+  lifecycle commands;
+- reviewed single-skill Agent Skill repositories and explicitly selected
+  subsets of multi-skill Codex plugin repositories through the existing native
+  skill manager; and
 - generic P2-P7 metadata, permissions, action envelopes, result correlation,
   disable, and unavailable behavior after a tool reaches the model loop.
 
-It does not yet provide a native skill/plugin-bundle lifecycle adapter, an MCP
-runtime adapter, or a generic browser-surface mount. The existing ORACLE iframe
-is deliberately retained as a compatibility UI adapter until the generic
-browser surface proves source and deployed equivalence.
+It does not yet provide an MCP runtime adapter or a generic browser-surface
+mount. The existing ORACLE iframe is deliberately retained as a compatibility
+UI adapter until the generic browser surface proves source and deployed
+equivalence.
 
 ## Candidate decisions
 
@@ -78,9 +81,10 @@ browser surface proves source and deployed equivalence.
 - The initial slice enables only `cad` and `cad-viewer`; part search, slicing,
   printer upload/start, robotics, and other hardware/network behavior remain
   absent until separately permissioned and tested.
-- The existing installer supports per-skill links and a dry-run. A JOS adapter
-  must delegate to Odysseus's native skill system, never replace a whole global
-  skill root or create a second registry.
+- The generic JOS adapter now delegates explicit reviewed IDs to Odysseus's
+  native skill system without replacing the global skill root or creating a
+  second registry. Candidate-specific admission and action proof remain
+  `MAD-759` work.
 - Leo's preserved ZIP is revision
   `8d7bf1060aac9b4230fe03372c020428aff82e62`, SHA-256
   `3a8affebbc1d119b340bb1e71ea236b4470a3a432668c856072b5ea255bcc624`.
@@ -90,8 +94,13 @@ browser surface proves source and deployed equivalence.
 
 Three reference-neutral host gaps were separated from candidate-native work:
 
-1. `MAD-761` — native skill/plugin-bundle adapter using the existing Odysseus
-   skill manager; blocks `MAD-757` and `MAD-759`.
+1. `MAD-761` — source-complete native skill/plugin-bundle adapter using the
+   existing Odysseus skill manager. A reference-neutral fixture proves direct
+   Agent Skill and partial multi-skill Codex plugin admission, owner/permission
+   boundaries, disable/enable, upgrade, rollback, removal, reinstall inputs,
+   collision rejection, unsafe metadata/path rejection, and atomic failure
+   recovery. This unlocks `MAD-757` and `MAD-759` without admitting either
+   candidate here.
 2. `MAD-762` — generic browser-surface mount and result bridge using the
    current session/action/result paths; blocks `MAD-758`.
 3. `MAD-763` — generic MCP runtime adapter using the existing Odysseus MCP
@@ -103,3 +112,7 @@ in their maintained candidate forks. Compatibility is not claimed until each
 child baton proves clean install, one action, failure isolation, disable,
 upgrade, rollback, removal, reinstall, and coexistence through the same generic
 host lifecycle.
+
+MAD-761 verification: 33 focused extension/context tests passed, followed by
+the complete Odysseus gate with 5,005 passed, 4 intentional skips, and zero
+failures. No real candidate repository or persistent runtime was used.

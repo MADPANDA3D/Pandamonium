@@ -242,6 +242,13 @@ def test_direct_and_partial_plugin_bundles_use_native_skill_lifecycle(tmp_path, 
     assert registry.snapshot()["extensions"] == {}
     assert list((manager.root / "removed" / "skill-fixture").iterdir())
 
+    _execute(
+        manager,
+        authority,
+        manager.preview_source("install", SOURCE_URL, "v2", operator_id="operator"),
+    )
+    assert {row["name"] for row in skills.load("operator")} == {"alpha-skill", "beta-skill"}
+
 
 def test_collision_and_owner_scope_fail_before_mutation(tmp_path, skill_repo):
     repo, _v1, _v2 = skill_repo
