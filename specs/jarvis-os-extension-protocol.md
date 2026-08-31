@@ -2,9 +2,9 @@
 
 **Protocol ID:** `JOS-EXT-1`
 
-**Version:** `0.3`
+**Version:** `0.4`
 
-**Status:** Manifest, registry, pinned installer, generic live-catalog and browser-surface host, and native skill-bundle adapter
+**Status:** Manifest, registry, pinned installer, generic live-catalog/browser/MCP hosts, and native skill-bundle adapter
 
 **Reference extension:** ORACLE
 
@@ -226,6 +226,56 @@ The existing ORACLE iframe bridge remains a compatibility adapter. It may
 normalize its legacy message names into this envelope, but it is not removed
 until generic-source equivalence and the separately authorized deployed
 equivalence gate both pass.
+
+### Native MCP runtime adapter
+
+A pinned extension may declare `runtime.type: mcp` with a
+`capabilities.descriptor.type: mcp`. The descriptor `reference` names one
+existing Odysseus `McpServer` runtime configuration. It is not a URL, command,
+credential, copied tool list, or second registry record. The referenced native
+MCP configuration MUST remain disabled for ordinary MCP exposure; the extension
+adapter alone reserves and connects it after JOS-EXT-1 reconciliation.
+
+The adapter MUST:
+
+1. reuse the process-wide `McpManager` for stdio or an explicitly configured
+   loopback SSE/Streamable HTTP transport, tool discovery, invocation,
+   disconnect, and restart restoration;
+2. require an empty manifest lifecycle and, for stdio, replace exactly one
+   `{entrypoint}` token in the native command/argument vector with the selected
+   immutable checkout's repository-relative `runtime.entrypoint`;
+3. bind MCP initialization `serverInfo.name` to the manifest extension ID and
+   `serverInfo.version` to the full pinned source revision before accepting any
+   tool schema;
+4. reconcile the complete live MCP catalog with manifest permissions and the
+   pinned revision during preview and again before activation, exposure, and
+   every call; duplicate names, catalog drift, identity/revision mismatch, or a
+   malformed schema fail closed;
+5. reserve the referenced server from Odysseus's ordinary MCP prompt/function
+   catalog so its tools are exposed only while that extension is enabled and
+   engaged through the existing P2 context, P4 action/result, P5 authority, and
+   P7 evidence paths;
+6. disconnect and remove all effective tools on disable or uninstall, replace
+   them atomically on upgrade or rollback, and restore only a still-enabled,
+   catalog-equivalent pinned runtime after process restart; and
+7. treat all MCP descriptions, schemas, content, and errors as untrusted
+   extension data. A result cannot authorize itself, mutate policy, or prove
+   success outside the correlated action result.
+
+Native MCP configuration remains the only home for command, arguments,
+environment, URL, OAuth material, and credentials. Registry, lifecycle,
+diagnostic, prompt, and operational-event records store only the descriptor
+reference, sanitized server identity, manifest boundaries, pinned provenance,
+effective schemas, and result state.
+
+The adapter adds no shell runner or child-process supervisor. Stdio children
+remain owned by `McpManager` and inherit the Odysseus service/container process
+and resource envelope. Remote MCP transport is not admitted: SSE/HTTP endpoints
+must resolve to loopback configuration. Each extension call uses the manifest's
+bounded 1-30 second health timeout, a 64 KiB result ceiling, the registry's
+256-tool ceiling, and the agent loop's existing round/call limits. External
+egress declared by an extension remains installation policy and does not widen
+the runtime's OS/container network policy.
 
 ## Lifecycle
 
