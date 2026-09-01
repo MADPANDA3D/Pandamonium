@@ -1640,9 +1640,11 @@ function initEndpointForm() {
   if (discoverBtn) {
     discoverBtn.addEventListener('click', async () => {
       const msg = _endpointMsg('local');
+      const results = el('adm-epDiscoverResults');
       discoverBtn.disabled = true;
       msg.className = 'adm-ep-inline-msg';
       msg.innerHTML = '';
+      if (results) results.replaceChildren();
       try {
         const sp = window.spinnerModule || (await import('./spinner.js')).default;
         const wp = sp.createWhirlpool(20);
@@ -1658,57 +1660,85 @@ function initEndpointForm() {
         discoverBtn._wp = wp;
       } catch(e) { msg.textContent = 'Scanning...'; }
       try {
-        const res = await fetch('/api/discover');
+        const [res, endpointsRes] = await Promise.all([
+          fetch('/api/discover', { credentials: 'same-origin' }),
+          fetch('/api/model-endpoints', { credentials: 'same-origin' }),
+        ]);
+        if (!res.ok) throw new Error(`server returned ${res.status}`);
         const data = await res.json();
+        const endpoints = endpointsRes.ok ? await endpointsRes.json() : [];
+        const existingBases = new Set(endpoints.map(ep => _normalizeBaseUrl(ep.base_url || '')));
         const items = data.items || [];
         if (!items.length) {
           msg.textContent = 'No model servers found. Make sure vLLM, llama.cpp, SGLang, or Ollama is running. Docker users may need Ollama bound to a trusted reachable interface.';
           msg.className = 'admin-error';
         } else {
-          // Auto-add each discovered endpoint. Server dedupes on base_url
-          // and returns `existing: true` for already-registered ones.
-          // Map fingerprinted provider IDs to friendly display names.
           const _PROVIDER_DISPLAY = {
             llamacpp: 'llama.cpp', lmstudio: 'LM Studio', vllm: 'vLLM',
             ollama: 'Ollama',
           };
-          let added = 0;
-          let skipped = 0;
-          for (const item of items) {
-            const base = item.url.replace('/chat/completions', '').replace(/\/$/, '');
-            const providerDisplay = _PROVIDER_DISPLAY[item.provider] || null;
-            const fd = new FormData();
-            fd.append('base_url', base);
-            if (providerDisplay) {
-              // Use "Provider (host:port)" so the endpoint is immediately
-              // identifiable in the list, e.g. "llama.cpp (localhost:8080)".
-              const hostPart = base.replace(/^https?:\/\//, '').split('/')[0];
-              fd.append('name', `${providerDisplay} (${hostPart})`);
-            }
-            fd.append('endpoint_kind', 'local');
-            fd.append('model_refresh_mode', 'auto');
-            fd.append('skip_probe', 'false');
-            const r = await fetch('/api/model-endpoints', { method: 'POST', body: fd });
-            if (r.ok) {
-              try {
-                const dd = await r.json();
-                if (dd && dd.existing) { skipped++; }
-                else { added++; if (dd && dd.id) _recentlyAddedEpId = String(dd.id); }
-              } catch (_) { added++; }
-            }
-          }
           const totalModels = items.reduce((n, i) => n + (i.models ? i.models.length : 0), 0);
-          const serverNames = items.map(i =>
-            (_PROVIDER_DISPLAY[i.provider] || i.url.replace(/^https?:\/\//, '').split('/')[0])
-          );
-          const parts = [
-            `Found ${items.length} server${items.length !== 1 ? 's' : ''} (${serverNames.join(', ')}) with ${totalModels} model${totalModels !== 1 ? 's' : ''}`,
-          ];
-          if (added) parts.push(`added ${added} new`);
-          if (skipped) parts.push(`${skipped} already added`);
-          msg.innerHTML = parts.join(' — ');
+          msg.textContent = `Found ${items.length} server${items.length !== 1 ? 's' : ''} with ${totalModels} model${totalModels !== 1 ? 's' : ''}. Review the results below.`;
           msg.className = 'admin-success';
-          loadEndpoints();
+          items.forEach((item) => {
+            if (!results) return;
+            const base = _normalizeBaseUrl((item.url || '').replace('/chat/completions', ''));
+            const hostPart = base.replace(/^https?:\/\//, '').split('/')[0];
+            const providerDisplay = _PROVIDER_DISPLAY[item.provider] || (Number(item.port) === 1919 ? 'FreeToken' : 'OpenAI-compatible');
+            const models = Array.isArray(item.models_display) && item.models_display.length
+              ? item.models_display
+              : (Array.isArray(item.models) ? item.models : []);
+            const alreadyAdded = existingBases.has(base);
+
+            const row = document.createElement('div');
+            row.className = 'admin-ep-item';
+            row.style.cssText = 'align-items:flex-start;margin-top:6px;';
+            const info = document.createElement('div');
+            info.className = 'admin-ep-info';
+            const name = document.createElement('div');
+            name.className = 'admin-ep-name';
+            name.textContent = `${providerDisplay} — ${hostPart}`;
+            const detail = document.createElement('div');
+            detail.className = 'admin-ep-detail';
+            detail.textContent = models.length
+              ? `${models.length} model${models.length !== 1 ? 's' : ''}: ${models.join(', ')}`
+              : 'No model IDs reported';
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'admin-btn-sm';
+            addBtn.textContent = alreadyAdded ? 'Added' : 'Add';
+            addBtn.disabled = alreadyAdded;
+            addBtn.addEventListener('click', async () => {
+              addBtn.disabled = true;
+              addBtn.textContent = 'Adding...';
+              try {
+                const fd = new FormData();
+                fd.append('base_url', base);
+                fd.append('name', `${providerDisplay} (${hostPart})`);
+                fd.append('endpoint_kind', 'local');
+                fd.append('model_refresh_mode', 'auto');
+                fd.append('skip_probe', 'false');
+                const r = await fetch('/api/model-endpoints', { method: 'POST', body: fd, credentials: 'same-origin' });
+                const dd = await r.json();
+                if (!r.ok) throw new Error(dd.detail || 'registration failed');
+                if (dd.id) _recentlyAddedEpId = String(dd.id);
+                existingBases.add(base);
+                addBtn.textContent = 'Added';
+                await loadEndpoints();
+                await _selectAddedModelInChat(dd);
+                msg.textContent = `${providerDisplay} added with ${(dd.models || []).length} model${(dd.models || []).length !== 1 ? 's' : ''}.`;
+                msg.className = 'admin-success';
+              } catch (e) {
+                addBtn.disabled = false;
+                addBtn.textContent = 'Add';
+                msg.textContent = 'Add failed: ' + (e && e.message ? e.message : 'request failed');
+                msg.className = 'admin-error';
+              }
+            });
+            info.append(name, detail);
+            row.append(info, addBtn);
+            results.appendChild(row);
+          });
         }
       } catch (e) {
         msg.textContent = 'Scan failed: ' + e.message;
@@ -1716,7 +1746,6 @@ function initEndpointForm() {
       }
       if (discoverBtn._wp) { discoverBtn._wp.destroy(); discoverBtn._wp = null; }
       discoverBtn.disabled = false;
-      discoverBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-1px;margin-right:4px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Scan for Servers';
     });
   }
 
