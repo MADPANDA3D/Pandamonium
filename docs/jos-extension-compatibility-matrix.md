@@ -10,7 +10,7 @@ published, released, or persistently installed by these batons.
 
 ## Current host boundary
 
-The source host at Odysseus commit `879a3463` supports:
+The source host at Odysseus commit `89fb97ce` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
@@ -39,7 +39,7 @@ retained until source and deployed equivalence are separately proven.
 | --- | --- | --- | --- | --- | --- |
 | [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Source-proven locally: candidate-owned strict manifest, small skill package, bounded offline runner, and optional-vision timeout reuse the generic skill-bundle adapter. Fork exists; candidate commits are not pushed or released | `MAD-757` |
 | [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0-or-later | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Source-proven locally: candidate-owned manifest/catalog/bridge reuses the generic web surface; browser camera remains client-side. Not pushed, published, deployed, or persistently installed | `MAD-758` |
-| [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Conditional: candidate-owned narrow MCP server plus generic MCP adapter; never automate Streamlit | `MAD-760` |
+| [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Source-proven locally: candidate-owned fixture-only MCP server, strict hostile-data boundary, and bounded receipts reuse the generic MCP adapter; Streamlit and live traffic remain absent. Public fork exists; candidate commits are not pushed or released | `MAD-760` |
 | [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Source-proven locally: candidate-owned strict manifest, two small native skill packages, deterministic offline STEP runner, and bounded loopback viewer handoff reuse the generic skill-bundle adapter. Public fork exists; candidate commits are not pushed or released | `MAD-759` |
 
 ## Evidence and constraints
@@ -96,10 +96,31 @@ retained until source and deployed equivalence are separately proven.
 
 ### Robin
 
+- The public maintained fork starts from pinned upstream revision
+  `575d105e2f0fd61a450d5b4368535d0e83060354`. Contract, fixture-only runtime,
+  provenance upgrade, and real lifecycle proof are candidate commits
+  `ecfcfe5`, `b176f4d`, `a671c94`, and `b104530`.
 - Search uses Tor SOCKS on loopback, concurrent external requests, retries,
   and long network timeouts. Scraping accepts direct HTTP(S) as well as onion
   targets and returns hostile external text.
-- The first proof must use fixtures/mocked network only. Live acceptance needs
+- The admitted MCP surface exposes only `investigate_fixture`. Its standard-
+  library runtime accepts one bounded lawful query, validates reviewed fixture
+  stage/result data, admits only v3 onion provenance, quotes every result, and
+  binds title, URL, engine, and content with SHA-256. It opens no socket and
+  installs no dependency.
+- Candidate checks reject unavailable Tor/search/model stages, malformed query
+  or result, private/clear-web targets, prompt injection, secret-like content,
+  late fixtures, and oversized fixture/result data before receipt creation.
+  Retention is explicit, restrictive, request-correlated, and preserved across
+  lifecycle operations; discard writes nothing.
+- Real candidate revisions completed clean install, engage/disengage, one
+  mocked investigation, disable/enable, upgrade, rollback, failure isolation,
+  uninstall, and reinstall while a differently named reference extension
+  stayed healthy. That proof exposed a reference-neutral stdio context-owner
+  gap; Odysseus commit `89fb97ce` adds the failing Quartz regression and keeps
+  native stdio teardown in its owning asyncio task without a new client or
+  transport.
+- Live acceptance still needs
   lawful-use confirmation, isolation, egress rules, SSRF/content/size/time
   limits, provenance, secret boundaries, and explicit approval.
 - Retrieved text is data. It cannot invoke a capability, alter identity or
@@ -218,3 +239,13 @@ commits remain local-only. No Odysseus core, dependency, persistent install,
 non-loopback viewer, external network, hardware/printer action, ORACLE/
 Barehands/img2threejs/CT103/CT104, push, deployment, package, publication, or
 release change occurred.
+
+MAD-760 verification: 7 candidate contract/fixture/failure/lifecycle checks
+passed, including the real two-revision native MCP lifecycle proof. The
+current focused Odysseus MCP/registry/installer/authority/context/security set
+passed 68 checks. The complete Odysseus gate passed with 5,015 tests, 4
+intentional skips, and zero failures in 135.16 seconds. The public maintained
+fork exists, but candidate commits remain local-only. No dependency, persistent
+install, live network/Tor/onion/model traffic, ORACLE/Barehands/img2threejs/
+text-to-cad/CT103/CT104 change, push, deployment, package, publication, or
+release occurred.
