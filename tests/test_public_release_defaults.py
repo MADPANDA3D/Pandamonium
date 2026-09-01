@@ -134,6 +134,7 @@ def test_public_release_docs_keep_claim_states_and_security_risks_separate():
     root = os.path.dirname(os.path.dirname(__file__))
     matrix = open(os.path.join(root, "docs", "jos-extension-compatibility-matrix.md"), encoding="utf-8").read()
     guide = open(os.path.join(root, "docs", "jos-public-operations.md"), encoding="utf-8").read()
+    release = open(os.path.join(root, "docs", "jos-public-release-v1.0.0.md"), encoding="utf-8").read()
 
     assert "| Component | Exact source-tested revision | Package-installed | Live-accepted |" in matrix
     for risk in (
@@ -145,3 +146,14 @@ def test_public_release_docs_keep_claim_states_and_security_risks_separate():
         "Rollback failure",
     ):
         assert risk in guide
+    for value in (
+        "jarvis-os-v1.0.0",
+        "jos-v0.1.0",
+        "jos-v1.5.1-jos.2",
+        "jos-v0.4.28-jos.2",
+        "jos-v2.8.0-jos.2",
+        "SHA256SUMS",
+        "release-manifest.json",
+    ):
+        assert value in release
+    assert "codex/" not in release
