@@ -107,6 +107,29 @@ def test_voice_workspace_defaults_do_not_materialize_private_profile():
     assert json.loads(result.stdout) == []
 
 
+def test_worker_tool_schema_projects_only_installation_configured_workspaces():
+    env = os.environ.copy()
+    env.pop("ODYSSEUS_WORKER_WORKSPACES_JSON", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json; from src.agent_tools import FUNCTION_TOOL_SCHEMAS; "
+                "schema=next(item for item in FUNCTION_TOOL_SCHEMAS "
+                "if item['function']['name']=='start_agent_task'); "
+                "print(json.dumps(schema['function']['parameters']['properties']['workspace']['enum']))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert json.loads(result.stdout) == []
+
+
 def test_public_release_docs_keep_claim_states_and_security_risks_separate():
     root = os.path.dirname(os.path.dirname(__file__))
     matrix = open(os.path.join(root, "docs", "jos-extension-compatibility-matrix.md"), encoding="utf-8").read()

@@ -1259,7 +1259,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "worker": {"type": "string", "enum": ["pc-codex", "hermes", "vps-codex"]},
                     "workspace": {
                         "type": "string",
-                        "enum": _WORKER_WORKSPACES,
+                        "enum": [],
                         "description": "An installation-configured workspace alias allowed for the selected worker.",
                     },
                     "prompt": {"type": "string", "description": "A self-contained task request with the desired output."},
@@ -1300,6 +1300,14 @@ FUNCTION_TOOL_SCHEMAS = [
         },
     },
 ]
+
+# Keep the schema declaration literal so source-only parity checks can inspect it
+# without importing the application, then project installation-owned workspace
+# aliases into the runtime schema. Public defaults therefore remain empty.
+for _schema in FUNCTION_TOOL_SCHEMAS:
+    if _schema["function"]["name"] == "start_agent_task":
+        _schema["function"]["parameters"]["properties"]["workspace"]["enum"] = _WORKER_WORKSPACES
+        break
 
 
 # ---------------------------------------------------------------------------
