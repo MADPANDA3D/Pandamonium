@@ -10,7 +10,7 @@ published, released, or persistently installed by these batons.
 
 ## Current host boundary
 
-The source host at Odysseus commit `89fb97ce` supports:
+The source host at Odysseus commit `ca3f7177` supports:
 
 - strict manifests and a durable, fail-closed capability registry;
 - pinned Git checkout plus approval-gated reversible lifecycle;
@@ -249,3 +249,17 @@ fork exists, but candidate commits remain local-only. No dependency, persistent
 install, live network/Tor/onion/model traffic, ORACLE/Barehands/img2threejs/
 text-to-cad/CT103/CT104 change, push, deployment, package, publication, or
 release occurred.
+
+MAD-755 combined verification used one temporary `ExtensionLifecycleManager`
+and the existing web, skill-bundle, and MCP adapters to install the exact local
+candidate heads `0ef7c9a`, `54734b5`, `fd444ccf`, and `8d4b410` through the
+same approval-gated pinned Git lifecycle. All four repository classes coexisted
+in one registry and context projection. Robin completed its correlated
+fixture-only action; Barehands then became unavailable and was uninstalled
+through that lifecycle while img2threejs, text-to-cad, Robin, and Odysseus
+remained healthy. The combined proof passed, the focused extension/action/
+authority/context set passed 68 checks, and the complete Odysseus gate passed
+with 5,016 tests, 4 intentional skips, and zero failures in 120.54 seconds. No
+production host change, candidate mutation, dependency installation, persistent
+install, external traffic, push, deployment, package, publication, or release
+occurred.

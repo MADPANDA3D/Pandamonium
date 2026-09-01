@@ -4,13 +4,15 @@
 
 **Decision:** NOT READY — release gate closed
 
-**Assessment basis:** Odysseus `89fb97ce`, ORACLE `b619e2a`, Barehands
-candidate `0ef7c9a`, img2threejs candidate `64163cf`, text-to-cad candidate
-`fd444ccf`, Robin candidate `b104530`
+**Assessment basis:** Odysseus `ca3f7177`, ORACLE `b619e2a`, Barehands
+candidate `0ef7c9a`, img2threejs candidate `54734b5`, text-to-cad candidate
+`fd444ccf`, Robin candidate `8d4b410`
 
 This is a source-state assessment, not authorization to create a distribution
 repository, package, tag, release, push, install, or deployment. `MAD-756`
-remains Backlog and is blocked by the incomplete `MAD-755` compatibility proof.
+remains Backlog with its clean-room, public-default, packaging, and immutable-
+artifact gates still closed. The local source compatibility proof in `MAD-755`
+is complete; it is not a public distribution claim.
 
 ## What is ready
 
@@ -51,7 +53,12 @@ remains Backlog and is blocked by the incomplete `MAD-755` compatibility proof.
 - The proof exposed and fixed one generic stdio context-owner gap at Odysseus
   `89fb97ce`; the reference-neutral Quartz regression proves clean native MCP
   teardown without adding a client, transport, daemon, or dependency.
-- The complete Odysseus suite passes: 5,015 passed, 4 intentional skips, zero
+- One combined temporary-host proof installed Barehands `0ef7c9a`, img2threejs
+  `54734b5`, text-to-cad `fd444ccf`, and Robin `8d4b410` through the same
+  approval-gated pinned Git lifecycle. All four repository classes coexisted;
+  after Barehands became unavailable and was uninstalled, Odysseus and the
+  other three candidates remained healthy.
+- The complete Odysseus suite passes: 5,016 passed, 4 intentional skips, zero
   failures.
 - Source, push, install, deployment, and live-acceptance claims are recorded as
   separate states.
@@ -71,30 +78,26 @@ remains Backlog and is blocked by the incomplete `MAD-755` compatibility proof.
 
 ## Confirmed blockers
 
-1. `MAD-755` still requires its combined coexistence/failure closeout. All four
-   optional candidates now have local temporary lifecycle and action/workflow
-   proofs; their candidate commits remain unpushed and no live Robin network
-   acceptance has occurred.
-2. Public defaults/onboarding still need a path-limited portability pass over
+1. Public defaults/onboarding still need a path-limited portability pass over
    private worker names, direct operator wording, workspace examples, and
    optional topology. These become installation configuration, not deleted
    functionality or public defaults.
-3. Leo must explicitly select the packaging/distribution and release-repository
+2. Leo must explicitly select the packaging/distribution and release-repository
    strategy before repository creation, tagging, publishing, or pushing.
 
 ## Next baton order
 
-`MAD-761`, `MAD-762`, `MAD-763`, `MAD-758`, `MAD-757`, `MAD-759`, and `MAD-760` are
-source-complete. The shared host batons added no daemon, package manager, model,
-dependency, or second registry. Barehands, img2threejs, text-to-cad, and Robin
-remain optional local candidates rather than release artifacts. The next baton
-is the `MAD-755` compatibility closeout.
+`MAD-761`, `MAD-762`, `MAD-763`, `MAD-758`, `MAD-757`, `MAD-759`, `MAD-760`, and
+the combined `MAD-755` compatibility proof are source-complete. The shared host
+batons added no daemon, package manager, model, dependency, or second registry.
+Barehands, img2threejs, text-to-cad, and Robin remain optional local candidates
+rather than release artifacts. The next one-issue baton is `MAD-756`.
 
 Recommended sequence:
 
-1. finish the coexistence/failure matrix and close `MAD-755`;
-2. return to `MAD-756` for public-default sanitation, clean-room acceptance,
-   explicit packaging selection, and only then immutable release artifacts.
+1. run `MAD-756` public-default sanitation and clean-room acceptance;
+2. obtain explicit packaging selection before creating immutable release
+   artifacts.
 
 Until those gates pass, the truthful release state is: strong generic protocol
 source, one reference extension plus four optional candidates proven locally,
