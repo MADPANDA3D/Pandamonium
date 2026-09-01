@@ -36,6 +36,7 @@ let _libSearchHadResults = false;
 let _libSearchInFlight = false;
 let _activeEmailReaderForSelectAll = null;
 let _libAccountsLoadedAt = 0;
+let _portalMailboxSnapshot = null;
 const _LIB_ACCOUNTS_TTL_MS = 5 * 60 * 1000;
 
 function _isEmailTypingTarget(t) {
@@ -1159,6 +1160,175 @@ export function initEmailLibrary(config) {
 
 export function isOpen() { return state._libOpen; }
 
+function _mailboxState(container, title, message, tone = '') {
+  if (!container) return;
+  container.replaceChildren();
+  const stateBox = document.createElement('div');
+  stateBox.className = `portal-mailbox-state${tone ? ` is-${tone}` : ''}`;
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  const detail = document.createElement('span');
+  detail.textContent = message;
+  stateBox.append(heading, detail);
+  container.appendChild(stateBox);
+}
+
+function _mailboxCard(item, provider) {
+  const card = document.createElement('div');
+  card.className = 'portal-mailbox-card';
+
+  const providerMark = document.createElement('span');
+  providerMark.className = 'portal-mailbox-provider';
+  providerMark.textContent = provider === 'Google' ? 'G' : 'A';
+  providerMark.setAttribute('aria-hidden', 'true');
+
+  const identity = document.createElement('div');
+  identity.className = 'portal-mailbox-identity';
+  const label = document.createElement('strong');
+  label.textContent = item.label || item.email || 'Connected inbox';
+  const address = document.createElement('span');
+  address.textContent = item.email || item.id || '';
+  identity.append(label, address);
+
+  const badges = document.createElement('div');
+  badges.className = 'portal-mailbox-badges';
+  const connected = document.createElement('span');
+  connected.textContent = `${provider} via MAD MCP`;
+  badges.appendChild(connected);
+  if (item.default) {
+    const defaultBadge = document.createElement('span');
+    defaultBadge.textContent = 'Default';
+    badges.appendChild(defaultBadge);
+  }
+  if (item.verification && item.verification !== 'unknown') {
+    const verification = document.createElement('span');
+    verification.textContent = item.verification;
+    badges.appendChild(verification);
+  }
+
+  card.append(providerMark, identity, badges);
+  return card;
+}
+
+function _renderPortalMailboxGroup(container, title, items, provider) {
+  container.replaceChildren();
+  const heading = document.createElement('div');
+  heading.className = 'portal-mailbox-heading';
+  const label = document.createElement('strong');
+  label.textContent = title;
+  const count = document.createElement('span');
+  count.textContent = `${items.length} connected`;
+  heading.append(label, count);
+
+  const grid = document.createElement('div');
+  grid.className = 'portal-mailbox-grid';
+  items.forEach(item => grid.appendChild(_mailboxCard(item, provider)));
+  container.append(heading, grid);
+}
+
+function _renderPortalMailboxes(snapshot = _portalMailboxSnapshot) {
+  const myContainer = document.getElementById('email-my-mailboxes');
+  const agentContainer = document.getElementById('email-agent-mailboxes');
+  const myCount = document.getElementById('email-my-mail-count');
+  const agentCount = document.getElementById('email-agent-mail-count');
+  if (!myContainer || !agentContainer) return;
+
+  if (!snapshot) {
+    _mailboxState(myContainer, 'Checking MAD MCP', 'Looking for connected Google accounts…', 'loading');
+    _mailboxState(agentContainer, 'Checking MAD MCP', 'Looking for AgentMail inboxes…', 'loading');
+    return;
+  }
+
+  const google = snapshot.my_email || {};
+  const googleAccounts = Array.isArray(google.accounts) ? google.accounts : [];
+  if (myCount) myCount.textContent = googleAccounts.length ? String(googleAccounts.length) : '';
+  if (!snapshot.configured || snapshot.status !== 'connected') {
+    _mailboxState(myContainer, 'MAD MCP is not connected', 'Connect the Portal from MAD MCP to discover your Google accounts.', 'empty');
+  } else if (!google.configured || google.status === 'not_configured') {
+    _mailboxState(myContainer, 'No Google connection found', 'Connect Google in the MAD MCP Portal to make its accounts appear here.', 'empty');
+  } else if (google.status === 'unavailable') {
+    _mailboxState(myContainer, 'Google accounts unavailable', 'MAD MCP is connected, but Google account discovery could not complete.', 'error');
+  } else if (!googleAccounts.length) {
+    _mailboxState(myContainer, 'No Google accounts found', 'Google is connected in MAD MCP but returned no configured profiles.', 'empty');
+  } else {
+    _renderPortalMailboxGroup(myContainer, 'My Google accounts', googleAccounts, 'Google');
+  }
+
+  const agent = snapshot.agent_mail || {};
+  const agentInboxes = Array.isArray(agent.inboxes) ? agent.inboxes : [];
+  if (agentCount) agentCount.textContent = agentInboxes.length ? String(agentInboxes.length) : '';
+  if (!snapshot.configured || snapshot.status !== 'connected') {
+    _mailboxState(agentContainer, 'MAD MCP is not connected', 'Connect the Portal to discover AgentMail inboxes.', 'empty');
+  } else if (!agent.configured || agent.status === 'not_configured') {
+    _mailboxState(agentContainer, 'No AgentMail connection found', 'Connect AgentMail in the MAD MCP Portal to make agent inboxes appear here.', 'empty');
+  } else if (agent.status === 'unavailable') {
+    const admissionBlocked = agent.error_code === 'provider_not_admitted';
+    _mailboxState(
+      agentContainer,
+      admissionBlocked ? 'AgentMail is awaiting Portal admission' : 'AgentMail inboxes unavailable',
+      admissionBlocked
+        ? 'AgentMail is configured, but MAD MCP has not admitted inbox discovery yet.'
+        : 'MAD MCP is connected, but AgentMail inbox discovery could not complete.',
+      'error',
+    );
+  } else if (!agentInboxes.length) {
+    _mailboxState(agentContainer, 'No AgentMail inboxes found', 'AgentMail is connected but returned no inboxes.', 'empty');
+  } else {
+    _renderPortalMailboxGroup(agentContainer, 'AgentMail inboxes', agentInboxes, 'AgentMail');
+  }
+}
+
+async function _loadPortalMailboxes() {
+  _portalMailboxSnapshot = null;
+  _renderPortalMailboxes();
+  try {
+    const response = await fetch(`${API_BASE}/api/mcp/portal/mailboxes`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`Portal mailbox status ${response.status}`);
+    _portalMailboxSnapshot = await response.json();
+  } catch (_) {
+    _portalMailboxSnapshot = {
+      configured: true,
+      status: 'unavailable',
+      my_email: { configured: true, status: 'unavailable', accounts: [] },
+      agent_mail: { configured: true, status: 'unavailable', inboxes: [] },
+    };
+  }
+  _renderPortalMailboxes();
+}
+
+function _selectMailboxTab(tabName, { focus = false } = {}) {
+  const selected = tabName === 'agent' ? 'agent' : 'my';
+  document.querySelectorAll('#email-lib-modal [role="tab"][data-mailbox-tab]').forEach(tab => {
+    const active = tab.dataset.mailboxTab === selected;
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+    if (active && focus) tab.focus();
+  });
+  const myPanel = document.getElementById('email-my-mail-panel');
+  const agentPanel = document.getElementById('email-agent-mail-panel');
+  if (myPanel) myPanel.hidden = selected !== 'my';
+  if (agentPanel) agentPanel.hidden = selected !== 'agent';
+}
+
+function _wireMailboxTabs() {
+  const tabs = Array.from(document.querySelectorAll('#email-lib-modal [role="tab"][data-mailbox-tab]'));
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => _selectMailboxTab(tab.dataset.mailboxTab));
+    tab.addEventListener('keydown', event => {
+      let nextIndex = null;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = tabs.length - 1;
+      if (nextIndex === null) return;
+      event.preventDefault();
+      _selectMailboxTab(tabs[nextIndex].dataset.mailboxTab, { focus: true });
+    });
+  });
+}
+
 export function openEmailLibrary(opts = {}) {
   // Force-clean any stale state from previous attempts
   const existing = document.getElementById('email-lib-modal');
@@ -1207,7 +1377,7 @@ export function openEmailLibrary(opts = {}) {
   modal.className = 'modal';
   modal.id = 'email-lib-modal';
   modal.innerHTML = `
-    <div class="modal-content doclib-modal-content" style="width:min(720px, 92vw);background:var(--bg);">
+    <div class="modal-content doclib-modal-content" style="width:min(1100px, 94vw);height:min(820px, 88vh);max-height:88vh;background:var(--bg);">
       <div class="modal-header">
         <h4>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;">
@@ -1223,7 +1393,12 @@ export function openEmailLibrary(opts = {}) {
         </div>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;overflow:hidden;">
-        <div class="admin-card" style="flex:1;flex-direction:column;display:flex;overflow:hidden;">
+        <div class="email-mailbox-tabs" role="tablist" aria-label="Email type">
+          <button type="button" id="email-my-mail-tab" role="tab" data-mailbox-tab="my" aria-selected="true" aria-controls="email-my-mail-panel" tabindex="0"><span>My Email</span><span id="email-my-mail-count" class="email-mailbox-tab-count"></span></button>
+          <button type="button" id="email-agent-mail-tab" role="tab" data-mailbox-tab="agent" aria-selected="false" aria-controls="email-agent-mail-panel" tabindex="-1"><span>Agent Mail</span><span id="email-agent-mail-count" class="email-mailbox-tab-count"></span></button>
+        </div>
+        <div id="email-my-mail-panel" class="admin-card" role="tabpanel" aria-labelledby="email-my-mail-tab" style="flex:1;flex-direction:column;display:flex;overflow:hidden;">
+          <div id="email-my-mailboxes" class="portal-mailbox-summary" aria-live="polite"></div>
           <div class="email-accounts-row">
             <div id="email-lib-accounts" style="display:flex;gap:4px;flex:1;min-width:0;"></div>
             <button class="memory-toolbar-btn email-compose-jiggle" id="email-lib-compose-btn">
@@ -1311,6 +1486,9 @@ export function openEmailLibrary(opts = {}) {
             <span class="email-lib-fab-label">New</span>
           </button>
         </div>
+        <div id="email-agent-mail-panel" class="admin-card email-agent-mail-panel" role="tabpanel" aria-labelledby="email-agent-mail-tab" hidden>
+          <div id="email-agent-mailboxes" class="portal-mailbox-summary" aria-live="polite"></div>
+        </div>
       </div>
     </div>
   `;
@@ -1381,12 +1559,12 @@ export function openEmailLibrary(opts = {}) {
       content.style.position = 'fixed';
       content.style.pointerEvents = 'auto';
       // Wait a frame for size to stabilize, then center. Center against the
-      // modal's max-height (85vh) — NOT the live offsetHeight, which is tiny
+      // modal's configured height — NOT the live offsetHeight, which is tiny
       // while the email list is still loading and put the window ~1/3 down
       // (then it grew off the bottom as the list filled in).
       requestAnimationFrame(() => {
         const w = content.offsetWidth;
-        const refH = window.innerHeight * 0.85;
+        const refH = window.innerHeight * 0.88;
         content.style.left = Math.max(20, (window.innerWidth - w) / 2) + 'px';
         content.style.top = Math.max(20, (window.innerHeight - refH) / 2) + 'px';
         content.style.transform = 'none';
@@ -1396,6 +1574,7 @@ export function openEmailLibrary(opts = {}) {
 
   // Wire events
   document.getElementById('email-lib-close').addEventListener('click', closeEmailLibrary);
+  _wireMailboxTabs();
 
   // Clicking the modal header (anywhere except buttons/inputs) collapses
   // any currently-expanded email card and returns to the inbox list view.
@@ -1540,7 +1719,7 @@ export function openEmailLibrary(opts = {}) {
     // mid-refresh. `force: true` adds the cache-buster so the server's
     // 8s list cache is bypassed for an actually-fresh result.
     try {
-      await _loadEmails({ force: true });
+      await Promise.all([_loadEmails({ force: true }), _loadPortalMailboxes()]);
     } finally {
       btn?.classList.remove('email-lib-refreshing');
       // Flash a checkmark for ~900ms so the user gets a clear "done" cue.
@@ -1783,6 +1962,7 @@ export function openEmailLibrary(opts = {}) {
   } else {
     _renderAccountsLoading();
   }
+  _loadPortalMailboxes();
   // Await accounts before loading emails so the list request carries the
   // right account_id from the very first fetch (now that we auto-select
   // an explicit account instead of relying on a 'Default' chip).
@@ -3519,11 +3699,15 @@ function _renderGrid() {
       && !(state._libSearch || '').trim()
     );
     if (_isTrulyEmpty) {
+      const _portalGoogleAccounts = _portalMailboxSnapshot?.my_email?.accounts;
+      const _hasPortalGoogle = Array.isArray(_portalGoogleAccounts) && _portalGoogleAccounts.length > 0;
       grid.innerHTML =
         '<div class="email-loading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;">' +
           '<span>No emails' + _smileyIco + '</span>' +
           '<span style="opacity:0.7;font-size:11px;">' +
-            'Set up at: <a href="#" data-open-settings="integrations" style="color:var(--accent,var(--red));text-decoration:underline;">Settings &rsaquo; Integrations</a>' +
+            (_hasPortalGoogle
+              ? 'Your MAD MCP Google accounts are connected above. Add native IMAP in Settings to read messages here.'
+              : 'Set up at: <a href="#" data-open-settings="integrations" style="color:var(--accent,var(--red));text-decoration:underline;">Settings &rsaquo; Integrations</a>') +
           '</span>' +
         '</div>';
       const _link = grid.querySelector('[data-open-settings]');

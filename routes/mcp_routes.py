@@ -105,6 +105,121 @@ def _public_portal_catalog(payload: dict) -> dict:
     }
 
 
+def _portal_result_payload(result) -> dict | None:
+    """Find a structured Portal result without returning raw transport text."""
+    if not isinstance(result, dict) or result.get("exit_code") != 0:
+        return None
+    candidates = [result.get("structured_content")]
+    stdout = result.get("stdout")
+    if isinstance(stdout, str) and stdout.strip():
+        try:
+            candidates.append(json.loads(stdout))
+        except json.JSONDecodeError:
+            pass
+
+    visited = 0
+    while candidates and visited < 24:
+        visited += 1
+        candidate = candidates.pop(0)
+        if not isinstance(candidate, dict):
+            continue
+        if any(key in candidate for key in ("ok", "items", "error")):
+            return candidate
+        for key in ("data", "result", "structuredContent", "structured_content"):
+            nested = candidate.get(key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+    return None
+
+
+def _portal_payload_items(payload: dict | None) -> list:
+    """Find one bounded item list in a Portal response envelope."""
+    candidates = [payload]
+    visited = 0
+    while candidates and visited < 24:
+        visited += 1
+        candidate = candidates.pop(0)
+        if not isinstance(candidate, dict):
+            continue
+        items = candidate.get("items")
+        if isinstance(items, list):
+            return items[:25]
+        for key in ("data", "result", "response"):
+            nested = candidate.get(key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+    return []
+
+
+def _portal_error_code(payload: dict | None) -> str:
+    if not isinstance(payload, dict):
+        return "portal_unavailable"
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return _bounded_portal_text(error.get("code"), 80) or "portal_unavailable"
+    return "portal_unavailable"
+
+
+def _public_google_mailboxes(payload: dict | None) -> list[dict]:
+    accounts = []
+    for raw in _portal_payload_items(payload):
+        if not isinstance(raw, dict) or raw.get("isConfigured") is False:
+            continue
+        account_id = _bounded_portal_text(raw.get("id"), 160)
+        email_address = _bounded_portal_text(raw.get("email"), 320)
+        if not account_id and not email_address:
+            continue
+        accounts.append({
+            "id": account_id or email_address,
+            "label": (
+                _bounded_portal_text(raw.get("label"), 160)
+                or email_address
+                or account_id
+            ),
+            "email": email_address,
+            "slug": _bounded_portal_text(raw.get("slug"), 160),
+            "default": bool(raw.get("isDefault")),
+            "verification": (
+                _bounded_portal_text(raw.get("verificationStatus"), 80)
+                or _bounded_portal_text(raw.get("identityStatus"), 80)
+                or "unknown"
+            ),
+        })
+    return accounts
+
+
+def _public_agentmail_inboxes(payload: dict | None) -> list[dict]:
+    inboxes = []
+    for raw in _portal_payload_items(payload):
+        if not isinstance(raw, dict):
+            continue
+        inbox_id = _bounded_portal_text(
+            raw.get("inbox_id") or raw.get("inboxId") or raw.get("id"),
+            160,
+        )
+        email_address = _bounded_portal_text(
+            raw.get("email") or raw.get("email_address") or raw.get("address"),
+            320,
+        )
+        if not inbox_id and not email_address:
+            continue
+        inboxes.append({
+            "id": inbox_id or email_address,
+            "label": (
+                _bounded_portal_text(
+                    raw.get("display_name")
+                    or raw.get("displayName")
+                    or raw.get("name"),
+                    160,
+                )
+                or email_address
+                or inbox_id
+            ),
+            "email": email_address,
+        })
+    return inboxes
+
+
 def _mcp_oauth_base_dir() -> Path:
     """Directory that may contain OAuth files managed by Odysseus."""
     return Path(MCP_OAUTH_DIR).resolve(strict=False)
@@ -322,6 +437,95 @@ def setup_mcp_routes(mcp_manager: McpManager):
             catalog = await _read_portal_catalog()
             if catalog:
                 response.update(catalog)
+        return response
+
+    @router.get("/portal/mailboxes")
+    async def portal_mailboxes(request: Request):
+        """Project Portal mailbox identities through the existing MCP session."""
+        require_admin(request)
+        db = SessionLocal()
+        try:
+            srv = db.query(McpServer).filter(McpServer.id == MAD_MCP_PORTAL_ID).first()
+            configured = bool(srv and _static_http_headers(srv.oauth_tokens))
+        finally:
+            db.close()
+
+        portal_status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID).get(
+            "status", "disconnected"
+        )
+        response = {
+            "configured": configured,
+            "status": portal_status,
+            "my_email": {
+                "configured": False,
+                "status": "not_configured",
+                "accounts": [],
+            },
+            "agent_mail": {
+                "configured": False,
+                "status": "not_configured",
+                "inboxes": [],
+            },
+        }
+        if not configured or portal_status != "connected":
+            return response
+
+        catalog = await _read_portal_catalog()
+        if not catalog:
+            response["my_email"]["status"] = "unavailable"
+            response["agent_mail"]["status"] = "unavailable"
+            return response
+        services = {item["id"]: item for item in catalog["services"]}
+
+        google_configured = bool(services.get("google", {}).get("configured"))
+        response["my_email"]["configured"] = google_configured
+        if google_configured:
+            try:
+                google_result = await mcp_manager.call_tool(
+                    f"mcp__{MAD_MCP_PORTAL_ID}__portal.list_service_profiles",
+                    {"serviceId": "google"},
+                    timeout_seconds=20,
+                    max_output_bytes=1_000_000,
+                )
+                google_payload = _portal_result_payload(google_result)
+                if google_payload is None or google_payload.get("ok") is False:
+                    response["my_email"]["status"] = "unavailable"
+                else:
+                    accounts = _public_google_mailboxes(google_payload)
+                    response["my_email"]["accounts"] = accounts
+                    response["my_email"]["status"] = "ready" if accounts else "empty"
+            except Exception as exc:
+                logger.warning("Portal Google mailbox discovery failed: %s", type(exc).__name__)
+                response["my_email"]["status"] = "unavailable"
+
+        agentmail_configured = bool(services.get("agentmail", {}).get("configured"))
+        response["agent_mail"]["configured"] = agentmail_configured
+        if agentmail_configured:
+            try:
+                agentmail_result = await mcp_manager.call_tool(
+                    f"mcp__{MAD_MCP_PORTAL_ID}__portal.call_read_tool",
+                    {
+                        "serviceId": "agentmail",
+                        "toolName": "list_inboxes",
+                        "arguments": {"limit": 25},
+                    },
+                    timeout_seconds=20,
+                    max_output_bytes=1_000_000,
+                )
+                agentmail_payload = _portal_result_payload(agentmail_result)
+                if agentmail_payload is None or agentmail_payload.get("ok") is False:
+                    response["agent_mail"]["status"] = "unavailable"
+                    response["agent_mail"]["error_code"] = _portal_error_code(
+                        agentmail_payload
+                    )
+                else:
+                    inboxes = _public_agentmail_inboxes(agentmail_payload)
+                    response["agent_mail"]["inboxes"] = inboxes
+                    response["agent_mail"]["status"] = "ready" if inboxes else "empty"
+            except Exception as exc:
+                logger.warning("Portal AgentMail discovery failed: %s", type(exc).__name__)
+                response["agent_mail"]["status"] = "unavailable"
+                response["agent_mail"]["error_code"] = "portal_unavailable"
         return response
 
     @router.post("/portal/connect")

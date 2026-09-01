@@ -15664,6 +15664,158 @@ span[id$="-logo"] svg:not([width]) {
 .doclib-modal-content > .modal-header {
   background: var(--bg);
 }
+
+/* Email source switcher: personal/native mail stays separate from agent-owned
+   inboxes while both can surface identities discovered through MAD MCP. */
+.email-mailbox-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  flex: 0 0 auto;
+}
+.email-mailbox-tabs [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.email-mailbox-tabs [role="tab"]:hover,
+.email-mailbox-tabs [role="tab"]:focus-visible {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 48%, transparent);
+  outline: none;
+}
+.email-mailbox-tabs [role="tab"][aria-selected="true"] {
+  color: var(--accent, var(--red));
+  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 13%, transparent);
+}
+.email-mailbox-tab-count:empty { display: none; }
+.email-mailbox-tab-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+.portal-mailbox-summary {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+.portal-mailbox-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--fg);
+}
+.portal-mailbox-heading > span {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.portal-mailbox-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 154px;
+  overflow-y: auto;
+}
+.portal-mailbox-card {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
+}
+.portal-mailbox-provider {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent, var(--red)) 15%, transparent);
+  color: var(--accent, var(--red));
+  font-size: 13px;
+  font-weight: 800;
+}
+.portal-mailbox-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.portal-mailbox-identity strong,
+.portal-mailbox-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.portal-mailbox-identity span {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.portal-mailbox-badges {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.portal-mailbox-badges span {
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 28%, transparent);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 8px;
+  text-transform: capitalize;
+}
+.portal-mailbox-state {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 35px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--fg-muted);
+}
+.portal-mailbox-state strong { color: var(--fg); white-space: nowrap; }
+.portal-mailbox-state.is-error {
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 55%, var(--border));
+}
+.portal-mailbox-state.is-loading { opacity: .72; }
+.email-agent-mail-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.email-agent-mail-panel[hidden] { display: none; }
+
+@media (max-width: 768px) {
+  .email-mailbox-tabs { align-self: stretch; }
+  .email-mailbox-tabs [role="tab"] { flex: 1 1 0; justify-content: center; }
+  .portal-mailbox-grid { grid-template-columns: 1fr; max-height: 122px; }
+  .portal-mailbox-card { grid-template-columns: 28px minmax(0, 1fr); }
+  .portal-mailbox-badges { grid-column: 2; justify-content: flex-start; }
+  .portal-mailbox-state { align-items: flex-start; flex-direction: column; gap: 3px; }
+}
 .doclib-stats {
   font-size: 11px;
   color: var(--fg-muted);
