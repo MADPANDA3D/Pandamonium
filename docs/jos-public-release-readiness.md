@@ -4,15 +4,16 @@
 
 **Decision:** NOT READY — release gate closed
 
-**Assessment basis:** Odysseus `79c506f6`, ORACLE `b619e2a`, Barehands
+**Assessment basis:** Odysseus through `ebe09ab0`, ORACLE `b619e2a`, Barehands
 candidate `0ef7c9a`, img2threejs candidate `54734b5`, text-to-cad candidate
 `fd444ccf`, Robin candidate `8d4b410`
 
 This is a source-state assessment, not authorization to create a distribution
 repository, package, tag, release, push, install, or deployment. `MAD-756`
-remains Backlog with its clean-room, public-default, packaging, and immutable-
-artifact gates still closed. The local source compatibility proof in `MAD-755`
-is complete; it is not a public distribution claim.
+remains In Progress with its package-installed and immutable-artifact gates
+still closed. The local source compatibility proof in `MAD-755` and the
+source-only sanitation proof in `MAD-756` are complete; neither is a public
+distribution claim.
 
 ## What is ready
 
@@ -58,8 +59,8 @@ is complete; it is not a public distribution claim.
   approval-gated pinned Git lifecycle. All four repository classes coexisted;
   after Barehands became unavailable and was uninstalled, Odysseus and the
   other three candidates remained healthy.
-- The complete Odysseus suite passes: 5,016 passed, 4 intentional skips, zero
-  failures.
+- The complete Odysseus suite passes at `ebe09ab0`: 5,024 passed, 5 intentional
+  skips, zero failures in 120.36 seconds.
 - Source, push, install, deployment, and live-acceptance claims are recorded as
   separate states.
 
@@ -83,18 +84,20 @@ is complete; it is not a public distribution claim.
 2. Leo must explicitly select the packaging/distribution and release-repository
    strategy before repository creation, tagging, publishing, or pushing.
 
-## Next baton order
+## Current stop boundary
 
 `MAD-761`, `MAD-762`, `MAD-763`, `MAD-758`, `MAD-757`, `MAD-759`, `MAD-760`, and
 the combined `MAD-755` compatibility proof are source-complete. The shared host
 batons added no daemon, package manager, model, dependency, or second registry.
 Barehands, img2threejs, text-to-cad, and Robin remain optional local candidates
-rather than release artifacts. The next one-issue baton is `MAD-756`.
+rather than release artifacts. `MAD-756` has completed the source-only work
+authorized in this baton and remains open at the operator selection boundary.
 
 Recommended sequence:
 
-1. run `MAD-756` public-default sanitation and clean-room acceptance;
-2. obtain explicit packaging selection before creating immutable release
+1. obtain Leo's explicit packaging/distribution and release-repository
+   selection;
+2. obtain the narrower mutation authority needed before creating immutable release
    artifacts.
 
 Until those gates pass, the truthful release state is: strong generic protocol
