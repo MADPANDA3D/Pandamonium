@@ -160,6 +160,10 @@ class McpManager:
         self._sessions: Dict[str, Any] = {}
         # server_id -> exit stack (for cleanup)
         self._stacks: Dict[str, Any] = {}
+        # stdio MCP context managers must exit in the same asyncio task that
+        # entered them. Keep that owner task alive until disconnect requests
+        # teardown instead of moving its AsyncExitStack across task boundaries.
+        self._stdio_owners: Dict[str, Tuple[asyncio.Task, asyncio.Event]] = {}
         # server_id -> background connect task (HTTP transport / OAuth)
         self._connect_tasks: Dict[str, Any] = {}
         # Tracking updates to tools/connections for RAG indexing / prompt cache
@@ -230,19 +234,54 @@ class McpManager:
                 env={**os.environ, **env} if env else None,
             )
 
-            stack = AsyncExitStack()
+            loop = asyncio.get_running_loop()
+            ready = loop.create_future()
+            stop = asyncio.Event()
+
+            async def own_stdio_context() -> None:
+                stack = AsyncExitStack()
+                try:
+                    transport = await stack.enter_async_context(stdio_client(server_params))
+                    read_stream, write_stream = transport
+                    session = await stack.enter_async_context(
+                        ClientSession(read_stream, write_stream)
+                    )
+                    initialized = await session.initialize()
+                    tools_result = await session.list_tools()
+                    if not ready.done():
+                        ready.set_result((session, initialized, tools_result))
+                    await stop.wait()
+                except asyncio.CancelledError:
+                    if not ready.done():
+                        ready.cancel()
+                    raise
+                except Exception as exc:
+                    if not ready.done():
+                        ready.set_exception(exc)
+                    else:
+                        logger.warning(f"MCP stdio owner failed for {server_id}: {exc}")
+                finally:
+                    try:
+                        await stack.aclose()
+                    except Exception as exc:
+                        logger.warning(f"Error closing MCP server {server_id}: {exc}")
+
+            owner = asyncio.create_task(
+                own_stdio_context(), name=f"mcp-stdio-owner:{server_id}"
+            )
+            self._stdio_owners[server_id] = (owner, stop)
             try:
-                transport = await stack.enter_async_context(stdio_client(server_params))
-                read_stream, write_stream = transport
-                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-
-                initialized = await session.initialize()
-
-                # Discover tools
-                tools_result = await session.list_tools()
-            except Exception:
-                await stack.aclose()
+                session, initialized, tools_result = await ready
+            except BaseException:
+                stop.set()
+                try:
+                    await owner
+                except (Exception, asyncio.CancelledError):
+                    pass
+                if self._stdio_owners.get(server_id, (None, None))[0] is owner:
+                    self._stdio_owners.pop(server_id, None)
                 raise
+
             tools = []
             for tool in tools_result.tools:
                 tools.append({
@@ -256,7 +295,6 @@ class McpManager:
                 })
 
             self._sessions[server_id] = session
-            self._stacks[server_id] = stack
             self._tools[server_id] = tools
             # Extract identity hints from env vars (e.g. email address, API name)
             # so tool descriptions can distinguish between multiple instances of
@@ -431,6 +469,17 @@ class McpManager:
             clear_auth_url(server_id)
         except Exception:
             pass
+
+        stdio_owner = self._stdio_owners.pop(server_id, None)
+        if stdio_owner:
+            owner, stop = stdio_owner
+            stop.set()
+            try:
+                await owner
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"Error closing MCP server {server_id}: {e}")
 
         stack = self._stacks.pop(server_id, None)
         if stack:

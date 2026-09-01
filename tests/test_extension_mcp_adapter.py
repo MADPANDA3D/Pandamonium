@@ -395,6 +395,33 @@ async def test_native_manager_reserves_extension_tools_and_bounds_untrusted_resu
     assert timeout["exit_code"] == 1 and "timed out" in timeout["error"].lower()
 
 
+async def test_native_stdio_connection_teardown_stays_with_owner_task(caplog):
+    manager = McpManager()
+    server = Path(__file__).parent / "fixtures" / "quartz_mcp_server.py"
+    caplog.set_level("WARNING")
+    connected = await asyncio.wait_for(
+        manager.connect_server(
+            server_id="quartz-runtime",
+            name="Quartz runtime",
+            transport="stdio",
+            command=sys.executable,
+            args=[str(server)],
+            env={},
+            identity_from_env=False,
+        ),
+        timeout=3,
+    )
+    assert connected
+    result = await manager.call_tool("mcp__quartz-runtime__inspect_crystal", {})
+    assert result == {"stdout": "quartz-ok", "stderr": "", "exit_code": 0}
+    await manager.disconnect_server("quartz-runtime")
+    assert not [
+        record
+        for record in caplog.records
+        if "different task" in record.getMessage().lower()
+    ]
+
+
 @pytest.mark.parametrize(
     "config",
     [
