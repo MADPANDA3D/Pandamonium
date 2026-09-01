@@ -2,24 +2,27 @@
 
 **Linear:** `MAD-756`
 
-This guide documents source-tested public configuration and extension
-operations. It is not a package, tag, release, publication, or deployment
-claim. Distribution assembly remains closed until the operator selects a
-release repository and packaging strategy.
+This guide documents public configuration and extension operations for the
+published `jarvis-os-v1.0.0` source distribution. It is not a deployment or
+live-provider acceptance claim.
 
 ## Claim vocabulary
 
 - **Source-tested** means a pinned revision passed offline tests or a temporary
   managed lifecycle using local source. It does not imply a published package.
 - **Package-installed** means an immutable published artifact was installed and
-  its digest or exact tag was verified. No current Jarvis OS artifact has this
-  state.
+  its digest or exact tag was verified. `jarvis-os-v1.0.0` and its compatible
+  extension tags have this state.
 - **Live-accepted** means the package-installed revision passed its authorized
   real-provider or hardware acceptance gate. Source fixtures and temporary
   checkouts do not qualify.
 
 Mutable branches are development inputs only. They are never installed-version
 identifiers.
+
+The canonical tag, component revisions, licenses, reproducible archive
+commands, checksums, and clean-install receipt are recorded in
+[`jos-public-release-v1.0.0.md`](jos-public-release-v1.0.0.md).
 
 ## Clean onboarding
 
@@ -98,6 +101,5 @@ extension:
 - source-tested, package-installed, and live-accepted state recorded separately;
 - any source-offer, network-source, copyleft, or redistribution obligation.
 
-The current candidate revisions and license findings are recorded in
+The compatible revisions and license findings are recorded in
 [`jos-extension-compatibility-matrix.md`](jos-extension-compatibility-matrix.md).
-They are not release artifacts.

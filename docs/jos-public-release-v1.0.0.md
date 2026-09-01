@@ -6,6 +6,11 @@
 
 **Odysseus tag:** `jarvis-os-v1.0.0`
 
+**Published release:**
+`https://github.com/MADPANDA3D/odysseus/releases/tag/jarvis-os-v1.0.0`
+
+**Release commit:** `ee470206b669a119b6740a71c98ae9cba8c23237`
+
 This release uses native Git archives plus SHA-256 checksums. It adds no
 packager, installer, dependency, registry, or deployment path. ORACLE and all
 other extensions remain optional; a clean Odysseus install has an empty
@@ -15,7 +20,7 @@ extension registry and no private topology.
 
 | Component | Maintained source | Upstream lineage | License | Compatible commit | Immutable tag | Release archive |
 | --- | --- | --- | --- | --- | --- | --- |
-| Odysseus / Jarvis OS | `MADPANDA3D/odysseus` | `pewdiepie-archdaemon/odysseus` | AGPL-3.0-or-later | Resolved by the release tag and attached manifest | `jarvis-os-v1.0.0` | `jarvis-os-v1.0.0.tar.gz` |
+| Odysseus / Jarvis OS | `MADPANDA3D/odysseus` | `pewdiepie-archdaemon/odysseus` | AGPL-3.0-or-later | `ee470206b669a119b6740a71c98ae9cba8c23237` | `jarvis-os-v1.0.0` | `jarvis-os-v1.0.0.tar.gz` |
 | ORACLE reference | `MADPANDA3D/ORACLE` | `bilawalsidhu/gods-eye-view` | MIT | `b619e2a17015d0e1c044fb273677b00abccdbede` | `jos-v0.1.0` | `oracle-jos-v0.1.0.tar.gz` |
 | Barehands | `MADPANDA3D/barehands` | `jaredrhod/barehands` | AGPL-3.0-or-later | `0ef7c9a2f302f1fefe5b3fd9a56f987f4d8f1cff` | `jos-v0.1.0` | `barehands-jos-v0.1.0.tar.gz` |
 | img2threejs | `MADPANDA3D/img2threejs` | `img2threejs/img2threejs` | Apache-2.0 | `54734b5d307876753d0433f489497be5c8c32428` | `jos-v1.5.1-jos.2` | `img2threejs-jos-v1.5.1-jos.2.tar.gz` |
@@ -48,6 +53,22 @@ The release also attaches `release-manifest.json`, which records each tag's
 resolved full commit, archive filename, SHA-256 digest, license, maintained
 source, and upstream lineage.
 
+## Published artifact receipt
+
+| Asset | SHA-256 |
+| --- | --- |
+| `jarvis-os-v1.0.0.tar.gz` | `5554b189e69b64e3be2e5b6d60093b03261f15be1951ef6d27ae1a86ffbea370` |
+| `oracle-jos-v0.1.0.tar.gz` | `6737993b680293ccc4b2b551e1f95d14a536eab31421f4f611f39e3b7774e7a7` |
+| `barehands-jos-v0.1.0.tar.gz` | `aa4114ff6ef00f019d1f65f4f0aaa44671db6c8c71081569f1a1ef127ebed4e2` |
+| `img2threejs-jos-v1.5.1-jos.2.tar.gz` | `55656c5749bf90f0f0fb9c7cef6cef042713e4d3baecd45d9fabbeb1d9384fcd` |
+| `text-to-cad-jos-v0.4.28-jos.2.tar.gz` | `b9517c17f5f4dd9e3232a4f4944c92820e67c8799f01c7b0aa9e463a61852c39` |
+| `robin-jos-v2.8.0-jos.2.tar.gz` | `bed4fb86ca2b226e85df9e3309dea696a6f419fa4b1dc7b47c8ad31cda8752af` |
+| `release-manifest.json` | `25977d6629fa45d7e9fda6943c4a870453aff9c62fb93c71ac01eae101dabbd6` |
+| `SHA256SUMS` | `5faff172b5b5ea857474b316796e2ee512ac0e1bf0dc558f96ed48743542cce4` |
+
+GitHub's asset digest readback matches every local digest. Rebuilding all six
+archives twice from the immutable tags produced byte-identical files.
+
 ## Clean-install acceptance
 
 Download the assets from the Odysseus `jarvis-os-v1.0.0` release, then:
@@ -66,6 +87,13 @@ The accepted state has no credential in settings, no private path or host, no
 worker workspace, and no installed extension. Optional extensions are installed
 later only by maintained-source URL plus immutable tag through the documented
 approval-gated lifecycle.
+
+The acceptance run downloaded the public assets, verified all checksums,
+extracted a fresh source tree, ran `setup.py` with a generic administrator and
+new data/extension directories, confirmed no installed extension or private
+runtime value, and passed the public-default/schema checks: 11 passed, zero
+failed. The release commit's complete Odysseus gate passed 5,024 tests with 5
+intentional skips and zero failures in 123.84 seconds.
 
 ## Claim boundary
 

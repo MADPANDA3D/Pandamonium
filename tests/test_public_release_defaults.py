@@ -147,6 +147,8 @@ def test_public_release_docs_keep_claim_states_and_security_risks_separate():
     ):
         assert risk in guide
     for value in (
+        "https://github.com/MADPANDA3D/odysseus/releases/tag/jarvis-os-v1.0.0",
+        "ee470206b669a119b6740a71c98ae9cba8c23237",
         "jarvis-os-v1.0.0",
         "jos-v0.1.0",
         "jos-v1.5.1-jos.2",
@@ -154,6 +156,7 @@ def test_public_release_docs_keep_claim_states_and_security_risks_separate():
         "jos-v2.8.0-jos.2",
         "SHA256SUMS",
         "release-manifest.json",
+        "5554b189e69b64e3be2e5b6d60093b03261f15be1951ef6d27ae1a86ffbea370",
     ):
         assert value in release
     assert "codex/" not in release

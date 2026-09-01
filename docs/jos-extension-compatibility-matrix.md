@@ -2,11 +2,11 @@
 
 **Linear:** `MAD-755`
 
-This matrix distinguishes inventory-only candidates from source-proven local
-candidates. Candidate source, manifests, catalogs, and native actions stay in
-their maintained candidate repositories; candidate names and URLs do not
-belong in Odysseus core dispatch. No candidate has been pushed, deployed,
-published, released, or persistently installed by these batons.
+This matrix distinguishes source-tested, package-installed, and live-accepted
+states. Extension source, manifests, catalogs, and native actions stay in their
+maintained repositories; extension names and URLs do not belong in Odysseus
+core dispatch. The compatible revisions are published as immutable tags and
+separate source archives; none has been deployed or persistently installed.
 
 ## Current host boundary
 
@@ -37,10 +37,10 @@ retained until source and deployed equivalence are separately proven.
 
 | Candidate | Pinned revision | License | Native surface to reuse | Compatibility decision | Child baton |
 | --- | --- | --- | --- | --- | --- |
-| [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Source-proven locally: candidate-owned strict manifest, small skill package, bounded offline runner, and optional-vision timeout reuse the generic skill-bundle adapter. Fork exists; candidate commits are not pushed or released | `MAD-757` |
-| [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0-or-later | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Source-proven locally: candidate-owned manifest/catalog/bridge reuses the generic web surface; browser camera remains client-side. Not pushed, published, deployed, or persistently installed | `MAD-758` |
-| [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Source-proven locally: candidate-owned fixture-only MCP server, strict hostile-data boundary, and bounded receipts reuse the generic MCP adapter; Streamlit and live traffic remain absent. Public fork exists; candidate commits are not pushed or released | `MAD-760` |
-| [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Source-proven locally: candidate-owned strict manifest, two small native skill packages, deterministic offline STEP runner, and bounded loopback viewer handoff reuse the generic skill-bundle adapter. Public fork exists; candidate commits are not pushed or released | `MAD-759` |
+| [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Published as maintained tag `jos-v1.5.1-jos.2`; public-tag lifecycle replay passed through the generic skill-bundle adapter | `MAD-757` |
+| [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0-or-later | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Published from maintained fork as tag `jos-v0.1.0`; public-tag lifecycle replay passed through the generic web adapter | `MAD-758` |
+| [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Published as maintained tag `jos-v2.8.0-jos.2`; fixture-only public-tag lifecycle replay passed through the generic MCP adapter | `MAD-760` |
+| [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Published as maintained tag `jos-v0.4.28-jos.2`; public-tag lifecycle replay passed through the generic skill-bundle adapter | `MAD-759` |
 
 ## Distribution claim states
 
@@ -49,16 +49,17 @@ does not count as an immutable published package install or live acceptance.
 
 | Component | Exact source-tested revision | Package-installed | Live-accepted |
 | --- | --- | --- | --- |
-| Odysseus | `ca3f7177` | No artifact selected | No |
-| ORACLE reference | `b619e2a` | No artifact selected | No |
-| Barehands candidate | `0ef7c9a` | No artifact selected | No |
-| img2threejs candidate | `54734b5` | No artifact selected | No |
-| text-to-cad candidate | `fd444ccf` | No artifact selected | No |
-| Robin candidate | `8d4b410` | No artifact selected | No |
+| Odysseus | `ee470206` | `jarvis-os-v1.0.0`; archive/setup/default checks passed | No |
+| ORACLE reference | `b619e2a` | `jos-v0.1.0`; archive/tag and fixture-only native contract passed | No |
+| Barehands candidate | `0ef7c9a` | `jos-v0.1.0`; public-tag lifecycle passed | No |
+| img2threejs candidate | `54734b5` | `jos-v1.5.1-jos.2`; public-tag lifecycle passed | No |
+| text-to-cad candidate | `fd444ccf` | `jos-v0.4.28-jos.2`; public-tag lifecycle passed | No |
+| Robin candidate | `8d4b410` | `jos-v2.8.0-jos.2`; fixture-only public-tag lifecycle passed | No |
 
-The compatible source rows above remain local evidence. Candidate implementation
-commits were not pushed, tagged, packaged, published, deployed, or accepted with
-live providers/hardware.
+The compatible revisions above are public immutable tags and checksummed source
+archives in the central `jarvis-os-v1.0.0` release. Their package-installed
+proof remains temporary and fixture-only; none is deployed or accepted with a
+live provider, external data feed, Tor/onion service, or hardware.
 
 ## Evidence and constraints
 
@@ -244,16 +245,16 @@ MAD-757 verification: 104 candidate offline/package/boundary checks and one
 real-revision generic lifecycle integration check passed. The current
 skill-bundle/registry/context regression set passed 22 checks. The complete
 Odysseus gate passed with 5,014 tests, 4 intentional skips, and zero failures
-in 120.91 seconds. The public maintained fork exists, but candidate commits
-remain local-only. No Odysseus core, dependency, persistent install, live
+in 120.91 seconds. At MAD-757 closeout the candidate commits remained local-
+only. No Odysseus core, dependency, persistent install, live
 vision traffic, ORACLE/Barehands/CT103/CT104, push, deployment, package, or
 release change occurred.
 
 MAD-759 verification: 6 candidate package/offline/failure/lifecycle checks and
 the current 22-check skill-bundle/registry/context regression set passed. The
 complete Odysseus gate passed with 5,014 tests, 4 intentional skips, and zero
-failures in 121.78 seconds. The public maintained fork exists, but candidate
-commits remain local-only. No Odysseus core, dependency, persistent install,
+failures in 121.78 seconds. At MAD-759 closeout the candidate commits remained
+local-only. No Odysseus core, dependency, persistent install,
 non-loopback viewer, external network, hardware/printer action, ORACLE/
 Barehands/img2threejs/CT103/CT104, push, deployment, package, publication, or
 release change occurred.
@@ -262,8 +263,8 @@ MAD-760 verification: 7 candidate contract/fixture/failure/lifecycle checks
 passed, including the real two-revision native MCP lifecycle proof. The
 current focused Odysseus MCP/registry/installer/authority/context/security set
 passed 68 checks. The complete Odysseus gate passed with 5,015 tests, 4
-intentional skips, and zero failures in 135.16 seconds. The public maintained
-fork exists, but candidate commits remain local-only. No dependency, persistent
+intentional skips, and zero failures in 135.16 seconds. At MAD-760 closeout the
+candidate commits remained local-only. No dependency, persistent
 install, live network/Tor/onion/model traffic, ORACLE/Barehands/img2threejs/
 text-to-cad/CT103/CT104 change, push, deployment, package, publication, or
 release occurred.
