@@ -4,8 +4,9 @@
 
 **Decision:** NOT READY — release gate closed
 
-**Assessment basis:** Odysseus `879a3463`, ORACLE `b619e2a`, Barehands
-candidate `0ef7c9a`, img2threejs candidate `64163cf`
+**Assessment basis:** Odysseus `ab42e6a5`, ORACLE `b619e2a`, Barehands
+candidate `0ef7c9a`, img2threejs candidate `64163cf`, text-to-cad candidate
+`fd444ccf`
 
 This is a source-state assessment, not authorization to create a distribution
 repository, package, tag, release, push, install, or deployment. `MAD-756`
@@ -34,6 +35,13 @@ remains Backlog and is blocked by the incomplete `MAD-755` compatibility proof.
   skill lifecycle through candidate commit `64163cf`. Its public fork exists,
   but candidate commits were not pushed, installed persistently, deployed,
   packaged, or released.
+- The local text-to-cad candidate rooted at upstream
+  `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` passed its strict two-skill
+  projection, deterministic offline STEP fixture, correlated loopback viewer
+  handoff, failure boundaries, and temporary generic native skill lifecycle
+  through candidate commit `fd444ccf`. Its public fork exists, but candidate
+  commits were not pushed, installed persistently, deployed, packaged,
+  published, or released.
 - The complete Odysseus suite passes: 5,014 passed, 4 intentional skips, zero
   failures.
 - Source, push, install, deployment, and live-acceptance claims are recorded as
@@ -45,18 +53,18 @@ remains Backlog and is blocked by the incomplete `MAD-755` compatibility proof.
 | --- | --- | --- |
 | Clean installation has no private identity, organization, path, host, credential, memory, or required ORACLE values | Not met | Generic identity defaults exist, but committed runtime/UI paths still contain private worker labels/topology, and `services/pc-codex-bridge/README.md` contains private path examples. Test-only negative fixtures and upstream provenance must be classified separately from install payload. |
 | Onboarding configures identity/constitution and two model endpoints without code changes | Partial | Identity/constitution and model endpoint settings exist and are tested in source. A clean public onboarding run with two differently named compatible endpoints has not been executed. |
-| Extension lifecycle is documented and tested from public sources | Partial | Lifecycle behavior is documented and extensively tested with temporary Git sources, including direct and partial multi-skill native admission; actual ORACLE, Barehands, and img2threejs candidate revisions were proven through temporary managed roots. Clean public-source proofs for text-to-cad and Robin remain. |
-| Attribution, licenses, fork lineage, and compatible revisions are preserved | Partial | Odysseus upstream remote/license, ORACLE fork point/revision, Barehands upstream/candidate lineage, and the Apache-2.0 img2threejs fork base are recorded. Barehands documents AGPL-3.0-or-later obligations; remaining candidate/release obligations stay open. |
-| Compatibility tables distinguish source-tested, installed, and live-accepted states | Partial | The matrix records Barehands and img2threejs as local source-proven while distinguishing public fork creation from unpushed candidate commits and from persistent install/deploy/release. Text-to-cad and Robin lack equivalent proof. |
-| Security review covers repository, lifecycle, credential, capability, drift, and rollback risks | Partial | Manifest/registry/installer/live-catalog/skill-bundle/browser-surface/MCP rules fail closed and are tested. Barehands adds its browser/server boundaries; img2threejs adds fixed project paths, strict-quality/state/result checks, bounded subprocesses, offline default, optional-vision timeout, and failure isolation. Remaining candidate and clean-package reviews remain. |
+| Extension lifecycle is documented and tested from public sources | Partial | Lifecycle behavior is documented and extensively tested with temporary Git sources, including direct and partial multi-skill native admission; actual ORACLE, Barehands, img2threejs, and text-to-cad candidate revisions were proven through temporary managed roots. The clean public-source proof for Robin remains. |
+| Attribution, licenses, fork lineage, and compatible revisions are preserved | Partial | Odysseus upstream remote/license, ORACLE fork point/revision, Barehands upstream/candidate lineage, the Apache-2.0 img2threejs fork base, and the MIT text-to-cad fork base are recorded. Barehands documents AGPL-3.0-or-later obligations; remaining candidate/release obligations stay open. |
+| Compatibility tables distinguish source-tested, installed, and live-accepted states | Partial | The matrix records Barehands, img2threejs, and text-to-cad as local source-proven while distinguishing public fork creation from unpushed candidate commits and from persistent install/deploy/release. Robin lacks equivalent proof. |
+| Security review covers repository, lifecycle, credential, capability, drift, and rollback risks | Partial | Manifest/registry/installer/live-catalog/skill-bundle/browser-surface/MCP rules fail closed and are tested. Barehands adds its browser/server boundaries; img2threejs adds fixed project paths, strict-quality/state/result checks, bounded subprocesses, offline default, optional-vision timeout, and failure isolation; text-to-cad adds selected-project confinement, deterministic STEP/hash validation, bounded viewer output/timeout, loopback-only correlation, and preserved-artifact failure isolation. Remaining candidate and clean-package reviews remain. |
 | Release artifacts are immutable and reproducible | Not met | No distribution repository or packaging strategy has been selected. No compatible release tags/artifacts were created; mutable branches are not accepted as install versions. |
 | Fresh install passes without private infrastructure or optional extensions | Not met | No public clean-room acceptance run has been performed. |
 
 ## Confirmed blockers
 
-1. `MAD-755` still lacks pinned candidate proofs for text-to-cad and Robin,
-   followed by the combined coexistence/failure matrix. Barehands and
-   img2threejs now have local temporary lifecycle and action/workflow proofs.
+1. `MAD-755` still lacks the pinned candidate proof for Robin, followed by the
+   combined coexistence/failure matrix. Barehands, img2threejs, and text-to-cad
+   now have local temporary lifecycle and action/workflow proofs.
 2. Public defaults/onboarding still need a path-limited portability pass over
    private worker names, direct operator wording, workspace examples, and
    optional topology. These become installation configuration, not deleted
@@ -66,19 +74,19 @@ remains Backlog and is blocked by the incomplete `MAD-755` compatibility proof.
 
 ## Next baton order
 
-`MAD-761`, `MAD-762`, `MAD-763`, `MAD-758`, and `MAD-757` are source-complete.
-The shared host batons added no daemon, package manager, model, dependency, or
-second registry. Barehands and img2threejs remain optional local candidates
-rather than release artifacts. The next child proof is `MAD-759`.
+`MAD-761`, `MAD-762`, `MAD-763`, `MAD-758`, `MAD-757`, and `MAD-759` are
+source-complete. The shared host batons added no daemon, package manager, model,
+dependency, or second registry. Barehands, img2threejs, and text-to-cad remain
+optional local candidates rather than release artifacts. The next child proof
+is `MAD-760`.
 
 Recommended sequence:
 
-1. `MAD-759` text-to-cad with only `cad` and `cad-viewer` admitted;
-2. isolated/mock-first `MAD-760` Robin;
-3. finish the coexistence/failure matrix and close `MAD-755`;
-4. return to `MAD-756` for public-default sanitation, clean-room acceptance,
+1. isolated/mock-first `MAD-760` Robin;
+2. finish the coexistence/failure matrix and close `MAD-755`;
+3. return to `MAD-756` for public-default sanitation, clean-room acceptance,
    explicit packaging selection, and only then immutable release artifacts.
 
 Until those gates pass, the truthful release state is: strong generic protocol
-source, one reference extension plus two optional candidates proven locally,
+source, one reference extension plus three optional candidates proven locally,
 and no public distribution claim for candidate changes or Jarvis OS.

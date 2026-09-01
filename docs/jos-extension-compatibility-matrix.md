@@ -40,7 +40,7 @@ retained until source and deployed equivalence are separately proven.
 | [img2threejs](https://github.com/img2threejs/img2threejs/tree/9fbd0ca5bbcc3b13bebe712745d6784d33db0b85) | `9fbd0ca5bbcc3b13bebe712745d6784d33db0b85` | Apache-2.0 | Root Agent Skill, Python 3.10+ stdlib `forge` gates, project state, TypeScript/spec/render artifacts | Source-proven locally: candidate-owned strict manifest, small skill package, bounded offline runner, and optional-vision timeout reuse the generic skill-bundle adapter. Fork exists; candidate commits are not pushed or released | `MAD-757` |
 | [barehands](https://github.com/jaredrhod/barehands/tree/c6106cac49ecc6a6182c55746a95095888281f73) | `c6106cac49ecc6a6182c55746a95095888281f73` | AGPL-3.0-or-later | Existing stdlib loopback server, browser UI, jailed notes/media, state and allowlisted command endpoints | Source-proven locally: candidate-owned manifest/catalog/bridge reuses the generic web surface; browser camera remains client-side. Not pushed, published, deployed, or persistently installed | `MAD-758` |
 | [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Conditional: candidate-owned narrow MCP server plus generic MCP adapter; never automate Streamlit | `MAD-760` |
-| [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Conditional: admit native plugin/skill metadata through the same generic skill-bundle adapter; start with `cad` and `cad-viewer` only | `MAD-759` |
+| [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Source-proven locally: candidate-owned strict manifest, two small native skill packages, deterministic offline STEP runner, and bounded loopback viewer handoff reuse the generic skill-bundle adapter. Public fork exists; candidate commits are not pushed or released | `MAD-759` |
 
 ## Evidence and constraints
 
@@ -108,16 +108,35 @@ retained until source and deployed equivalence are separately proven.
 
 ### text-to-cad
 
-- `.codex-plugin/plugin.json` already declares the native skill directory and
-  plugin metadata. The reviewed revision contains 12 separate skills rather
-  than one monolithic tool.
-- The initial slice enables only `cad` and `cad-viewer`; part search, slicing,
-  printer upload/start, robotics, and other hardware/network behavior remain
-  absent until separately permissioned and tested.
-- The generic JOS adapter now delegates explicit reviewed IDs to Odysseus's
-  native skill system without replacing the global skill root or creating a
-  second registry. Candidate-specific admission and action proof remain
-  `MAD-759` work.
+- The public maintained fork starts from pinned upstream revision
+  `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6`. Contract, implementation,
+  bounded-output upgrade, lifecycle proof, and native missing-runtime check are
+  candidate commits `097987d4`, `c06698cf`, `b822c4c9`, `150c7ecd`, and
+  `fd444ccf`.
+- The native `.codex-plugin/plugin.json` declares 12 separate skills. The
+  candidate-owned strict projection selects only the small text-only `cad` and
+  `cad-viewer` packages, staying below the generic 64-file/2,000,000-byte
+  boundary without changing Odysseus limits or adding a candidate branch.
+- The standard-library CAD runner confines paths to one selected project,
+  accepts only one bounded box request, writes a deterministic STEP artifact
+  atomically after structural validation, and correlates it with a SHA-256
+  manifest. Missing, malformed, unsafe, unsupported, and failed-validation
+  inputs return nonzero while prior artifacts survive.
+- The viewer bridge uses a shell-free bounded subprocess, spools result output
+  outside process memory, enforces a 64 KiB result limit, requires an IP-literal
+  loopback binding and matching HTTP URL, and correlates request ID plus
+  artifact digest before recording untrusted handoff state. Missing runtime,
+  timeout, malformed/negative/oversized output, non-loopback binding, and
+  malformed geometry fail closed. The native viewer launcher also rejects an
+  explicitly unavailable CAD interpreter before startup.
+- Real candidate revisions completed install, engage, offline STEP generation,
+  viewer correlation, disable/enable, upgrade, rollback, geometry-failure
+  isolation, uninstall, and reinstall through the generic lifecycle while a
+  differently named reference extension stayed healthy and project artifacts
+  survived.
+- Part search, slicing, printer upload/start, robotics, package installation,
+  hardware, and external network behavior remain absent. No generic host gap
+  or text-to-cad conditional was found in Odysseus.
 - Leo's preserved ZIP is revision
   `8d7bf1060aac9b4230fe03372c020428aff82e62`, SHA-256
   `3a8affebbc1d119b340bb1e71ea236b4470a3a432668c856072b5ea255bcc624`.
@@ -189,4 +208,13 @@ Odysseus gate passed with 5,014 tests, 4 intentional skips, and zero failures
 in 120.91 seconds. The public maintained fork exists, but candidate commits
 remain local-only. No Odysseus core, dependency, persistent install, live
 vision traffic, ORACLE/Barehands/CT103/CT104, push, deployment, package, or
+release change occurred.
+
+MAD-759 verification: 6 candidate package/offline/failure/lifecycle checks and
+the current 22-check skill-bundle/registry/context regression set passed. The
+complete Odysseus gate passed with 5,014 tests, 4 intentional skips, and zero
+failures in 121.78 seconds. The public maintained fork exists, but candidate
+commits remain local-only. No Odysseus core, dependency, persistent install,
+non-loopback viewer, external network, hardware/printer action, ORACLE/
+Barehands/img2threejs/CT103/CT104, push, deployment, package, publication, or
 release change occurred.
