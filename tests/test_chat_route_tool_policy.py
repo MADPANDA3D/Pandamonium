@@ -109,6 +109,34 @@ def test_hermes_agent_api_bypasses_odysseus_context_preface():
     assert "messages = _ensure_current_request_is_latest_user(ctx.messages, message)" in source
 
 
+def test_non_streaming_chat_has_no_unbound_hermes_flag():
+    """A completed /api/chat call must not fail while scheduling follow-up work."""
+    source = _CHAT_ROUTES.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    chat_endpoint = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "chat_endpoint"
+    )
+
+    hermes_reads = [
+        node
+        for node in ast.walk(chat_endpoint)
+        if isinstance(node, ast.Name)
+        and node.id == "hermes_agent_api"
+        and isinstance(node.ctx, ast.Load)
+    ]
+    hermes_writes = [
+        node
+        for node in ast.walk(chat_endpoint)
+        if isinstance(node, ast.Name)
+        and node.id == "hermes_agent_api"
+        and isinstance(node.ctx, ast.Store)
+    ]
+
+    assert not hermes_reads or hermes_writes
+
+
 # ── Functional tests of the disabled-tools logic ───────────────
 
 

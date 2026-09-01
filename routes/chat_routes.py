@@ -608,7 +608,7 @@ def setup_chat_routes(
             ctx.uprefs, memory_manager, memory_vector, webhook_manager,
             character_name=ctx.preset.character_name,
             owner=ctx.user,
-            allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
+            allow_background_extraction=not tool_policy.block_all_tool_calls,
         )
 
         return {"response": reply}

@@ -1651,7 +1651,7 @@ function initEndpointForm() {
         wrap.style.cssText = 'display:flex;align-items:center;padding:8px 0;';
         wrap.appendChild(wp.element);
         const txt = document.createElement('span');
-        txt.textContent = 'Scanning ports 8000-8020, 8080, 1234, 11434, and 11435 for model servers...';
+        txt.textContent = 'Scanning ports 1919, 8000-8020, 8080, 1234, 11434, and 11435 for model servers...';
         txt.style.cssText = 'font-size:12px;opacity:0.7;';
         wrap.appendChild(txt);
         msg.appendChild(wrap);
