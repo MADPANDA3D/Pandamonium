@@ -1,5 +1,6 @@
 # routes/mcp_routes.py
 """MCP (Model Context Protocol) server management routes."""
+import asyncio
 import json
 import os
 import uuid
@@ -14,11 +15,94 @@ import httpx
 from core.database import McpServer, SessionLocal
 from core.middleware import require_admin
 from src.constants import DATA_DIR, MCP_OAUTH_DIR
-from src.mcp_manager import McpManager
+from src.mcp_manager import McpManager, _static_http_headers
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
+
+MAD_MCP_PORTAL_ID = "mad-mcp-portal"
+MAD_MCP_PORTAL_NAME = "MAD MCP Portal"
+MAD_MCP_PORTAL_URL = "https://portal.madpanda3d.com/api/mcp"
+
+
+def _validate_portal_master_key(value) -> str:
+    """Validate a bearer candidate without interpreting or exposing it."""
+    if not isinstance(value, str):
+        raise HTTPException(400, "A Portal master key is required")
+    token = value.strip()
+    if len(token) < 20 or len(token) > 4096:
+        raise HTTPException(400, "The Portal master key format is invalid")
+    if any(ord(char) < 32 for char in token):
+        raise HTTPException(400, "The Portal master key format is invalid")
+    return token
+
+
+def _portal_catalog_payload(result) -> dict | None:
+    """Find the Portal list-services payload in either MCP result profile."""
+    if not isinstance(result, dict):
+        return None
+    candidates = [result.get("structured_content")]
+    stdout = result.get("stdout")
+    if isinstance(stdout, str) and stdout.strip():
+        try:
+            candidates.append(json.loads(stdout))
+        except json.JSONDecodeError:
+            pass
+
+    while candidates:
+        candidate = candidates.pop(0)
+        if not isinstance(candidate, dict):
+            continue
+        if isinstance(candidate.get("items"), list):
+            return candidate
+        for key in ("data", "result", "structuredContent", "structured_content"):
+            nested = candidate.get(key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+    return None
+
+
+def _bounded_portal_text(value, limit: int = 160) -> str:
+    text = str(value or "").strip()
+    if not text or any(ord(char) < 32 for char in text):
+        return ""
+    return text[:limit]
+
+
+def _bounded_portal_count(value) -> int:
+    try:
+        count = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(count, 100000))
+
+
+def _public_portal_catalog(payload: dict) -> dict:
+    """Return only bounded, non-secret service discovery fields to the UI."""
+    services = []
+    for raw in payload.get("items", [])[:500]:
+        if not isinstance(raw, dict):
+            continue
+        service_id = _bounded_portal_text(raw.get("id"), 120)
+        if not service_id:
+            continue
+        services.append({
+            "id": service_id,
+            "name": _bounded_portal_text(raw.get("name"), 160) or service_id,
+            "state": _bounded_portal_text(raw.get("state"), 60) or "unknown",
+            "configured": bool(raw.get("configured") or raw.get("integrationConfigured")),
+            "tool_count": _bounded_portal_count(raw.get("toolCount")),
+            "agent_ready_tool_count": _bounded_portal_count(
+                raw.get("agentReadyToolCount")
+            ),
+        })
+    return {
+        "services": services,
+        "service_count": len(services),
+        "configured_service_count": sum(1 for item in services if item["configured"]),
+        "catalog_tool_count": sum(item["tool_count"] for item in services),
+    }
 
 
 def _mcp_oauth_base_dir() -> Path:
@@ -116,6 +200,65 @@ def _mcp_oauth_redirect_uri() -> str:
 
 def setup_mcp_routes(mcp_manager: McpManager):
     """Setup MCP routes with the provided manager."""
+    portal_connect_lock = asyncio.Lock()
+
+    async def _connect_saved_server(srv):
+        args = json.loads(srv.args) if srv.args else []
+        env = json.loads(srv.env) if srv.env else {}
+        kwargs = {
+            "server_id": srv.id,
+            "name": srv.name,
+            "transport": srv.transport,
+            "command": srv.command,
+            "args": args,
+            "env": env,
+            "url": srv.url,
+        }
+        headers = _static_http_headers(srv.oauth_tokens)
+        if headers:
+            kwargs["headers"] = headers
+        return await mcp_manager.connect_server(**kwargs)
+
+    async def _read_portal_catalog():
+        result = await mcp_manager.call_tool(
+            f"mcp__{MAD_MCP_PORTAL_ID}__portal.list_services",
+            {},
+            timeout_seconds=20,
+            max_output_bytes=1_000_000,
+        )
+        if result.get("exit_code") != 0:
+            return None
+        payload = _portal_catalog_payload(result)
+        return _public_portal_catalog(payload) if payload is not None else None
+
+    def _portal_server_snapshot(srv):
+        if srv is None:
+            return None
+        return {
+            "id": srv.id,
+            "name": srv.name,
+            "transport": srv.transport,
+            "command": srv.command,
+            "args": json.loads(srv.args) if srv.args else [],
+            "env": json.loads(srv.env) if srv.env else {},
+            "url": srv.url,
+            "is_enabled": bool(srv.is_enabled),
+            "headers": _static_http_headers(srv.oauth_tokens),
+        }
+
+    async def _restore_portal_snapshot(snapshot):
+        if not snapshot or not snapshot["is_enabled"] or not snapshot["headers"]:
+            return
+        await mcp_manager.connect_server(
+            server_id=snapshot["id"],
+            name=snapshot["name"],
+            transport=snapshot["transport"],
+            command=snapshot["command"],
+            args=snapshot["args"],
+            env=snapshot["env"],
+            url=snapshot["url"],
+            headers=snapshot["headers"],
+        )
 
     @router.get("/servers")
     def list_servers(request: Request):
@@ -154,6 +297,133 @@ def setup_mcp_routes(mcp_manager: McpManager):
             return result
         finally:
             db.close()
+
+    @router.get("/portal/status")
+    async def portal_status(request: Request):
+        """Return a secret-free MAD MCP connection and discovery snapshot."""
+        require_admin(request)
+        db = SessionLocal()
+        try:
+            srv = db.query(McpServer).filter(McpServer.id == MAD_MCP_PORTAL_ID).first()
+            configured = bool(srv and _static_http_headers(srv.oauth_tokens))
+        finally:
+            db.close()
+        status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID)
+        response = {
+            "configured": configured,
+            "status": status.get("status", "disconnected"),
+            "tool_count": _bounded_portal_count(status.get("tool_count")),
+            "services": [],
+            "service_count": 0,
+            "configured_service_count": 0,
+            "catalog_tool_count": 0,
+        }
+        if response["status"] == "connected":
+            catalog = await _read_portal_catalog()
+            if catalog:
+                response.update(catalog)
+        return response
+
+    @router.post("/portal/connect")
+    async def connect_portal(request: Request):
+        """Prove a Portal key, then atomically replace the encrypted credential."""
+        require_admin(request)
+        try:
+            body = await request.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, "A JSON request body is required") from exc
+        token = _validate_portal_master_key(
+            body.get("master_key") if isinstance(body, dict) else None
+        )
+
+        async with portal_connect_lock:
+            read_db = SessionLocal()
+            try:
+                existing = read_db.query(McpServer).filter(
+                    McpServer.id == MAD_MCP_PORTAL_ID
+                ).first()
+                snapshot = _portal_server_snapshot(existing)
+            finally:
+                read_db.close()
+
+            try:
+                await mcp_manager.disconnect_server(MAD_MCP_PORTAL_ID)
+                connected = await mcp_manager.connect_server(
+                    server_id=MAD_MCP_PORTAL_ID,
+                    name=MAD_MCP_PORTAL_NAME,
+                    transport="http",
+                    url=MAD_MCP_PORTAL_URL,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                catalog = await _read_portal_catalog() if connected else None
+            except Exception as exc:
+                await mcp_manager.disconnect_server(MAD_MCP_PORTAL_ID)
+                await _restore_portal_snapshot(snapshot)
+                logger.warning("MAD MCP connection or discovery failed: %s", type(exc).__name__)
+                raise HTTPException(
+                    502,
+                    "MAD MCP rejected the key or catalog discovery was unavailable",
+                ) from exc
+            if not connected or catalog is None:
+                await mcp_manager.disconnect_server(MAD_MCP_PORTAL_ID)
+                await _restore_portal_snapshot(snapshot)
+                raise HTTPException(
+                    502,
+                    "MAD MCP rejected the key or catalog discovery was unavailable",
+                )
+
+            write_db = SessionLocal()
+            try:
+                srv = write_db.query(McpServer).filter(
+                    McpServer.id == MAD_MCP_PORTAL_ID
+                ).first()
+                if srv is None:
+                    srv = McpServer(id=MAD_MCP_PORTAL_ID)
+                    write_db.add(srv)
+                srv.name = MAD_MCP_PORTAL_NAME
+                srv.transport = "http"
+                srv.command = None
+                srv.args = "[]"
+                srv.env = "{}"
+                srv.url = MAD_MCP_PORTAL_URL
+                srv.is_enabled = True
+                srv.oauth_config = None
+                srv.oauth_tokens = json.dumps({"static_bearer_token": token})
+                write_db.commit()
+
+                status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID)
+                return {
+                    "configured": True,
+                    "status": status.get("status", "connected"),
+                    "tool_count": _bounded_portal_count(status.get("tool_count")),
+                    **catalog,
+                }
+            except Exception as exc:
+                write_db.rollback()
+                await mcp_manager.disconnect_server(MAD_MCP_PORTAL_ID)
+                await _restore_portal_snapshot(snapshot)
+                logger.exception("MAD MCP connection persistence failed")
+                raise HTTPException(500, "MAD MCP connection could not be saved") from exc
+            finally:
+                write_db.close()
+
+    @router.delete("/portal")
+    async def disconnect_portal(request: Request):
+        """Disconnect MAD MCP and remove its encrypted credential."""
+        require_admin(request)
+        async with portal_connect_lock:
+            await mcp_manager.disconnect_server(MAD_MCP_PORTAL_ID)
+            db = SessionLocal()
+            try:
+                srv = db.query(McpServer).filter(
+                    McpServer.id == MAD_MCP_PORTAL_ID
+                ).first()
+                if srv:
+                    db.delete(srv)
+                    db.commit()
+                return {"configured": False, "status": "disconnected"}
+            finally:
+                db.close()
 
     @router.post("/servers")
     async def add_server(
@@ -296,17 +566,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
             await mcp_manager.disconnect_server(server_id)
 
-            args = json.loads(srv.args) if srv.args else []
-            env = json.loads(srv.env) if srv.env else {}
-            connected = await mcp_manager.connect_server(
-                server_id=server_id,
-                name=srv.name,
-                transport=srv.transport,
-                command=srv.command,
-                args=args,
-                env=env,
-                url=srv.url,
-            )
+            connected = await _connect_saved_server(srv)
 
             status = mcp_manager.get_server_status(server_id)
             return {
@@ -335,17 +595,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
             db.commit()
 
             if enabled:
-                args = json.loads(srv.args) if srv.args else []
-                env = json.loads(srv.env) if srv.env else {}
-                await mcp_manager.connect_server(
-                    server_id=server_id,
-                    name=srv.name,
-                    transport=srv.transport,
-                    command=srv.command,
-                    args=args,
-                    env=env,
-                    url=srv.url,
-                )
+                await _connect_saved_server(srv)
             else:
                 await mcp_manager.disconnect_server(server_id)
 

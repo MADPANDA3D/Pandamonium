@@ -16,6 +16,30 @@ from src.runtime_paths import get_app_root
 
 logger = logging.getLogger(__name__)
 
+
+def _static_http_headers(oauth_tokens: Optional[str]) -> Optional[Dict[str, str]]:
+    """Recover the one supported static HTTP credential from encrypted storage.
+
+    ``McpServer.oauth_tokens`` is encrypted by the database type.  Keeping the
+    parsing here lets startup, UI reconnects, and agent reconnects share one
+    bounded path without ever placing the bearer value in ordinary MCP config.
+    """
+    if not oauth_tokens:
+        return None
+    try:
+        payload = json.loads(oauth_tokens)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    token = payload.get("static_bearer_token")
+    if not isinstance(token, str):
+        return None
+    token = token.strip()
+    if not token or len(token) > 4096 or any(ord(char) < 32 for char in token):
+        return None
+    return {"Authorization": f"Bearer {token}"}
+
 def _format_mcp_connection_error(name: str, command: str = "", args: Optional[List[str]] = None, error: Exception = None) -> str:
     """Return a user-actionable MCP connection error message."""
     args = args or []
@@ -183,6 +207,7 @@ class McpManager:
         env: Optional[Dict[str, str]] = None,
         url: Optional[str] = None,
         identity_from_env: bool = True,
+        headers: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Connect to an MCP server via stdio, SSE, or Streamable HTTP transport."""
         try:
@@ -198,7 +223,15 @@ class McpManager:
             elif transport == "sse":
                 res = await self._connect_sse(server_id, name, url)
             elif transport == "http":
-                res = await self._start_http_connect(server_id, name, url)
+                if headers:
+                    res = await self._start_http_connect(
+                        server_id,
+                        name,
+                        url,
+                        headers=headers,
+                    )
+                else:
+                    res = await self._start_http_connect(server_id, name, url)
             else:
                 logger.error(f"Unknown MCP transport: {transport}")
                 res = False
@@ -374,13 +407,23 @@ class McpManager:
             self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
             return False
 
-    async def _start_http_connect(self, server_id: str, name: str, url: str, wait: float = 8.0) -> bool:
+    async def _start_http_connect(
+        self,
+        server_id: str,
+        name: str,
+        url: str,
+        wait: float = 8.0,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> bool:
         """Begin a Streamable HTTP connect in the background. Returns within
         `wait` seconds: True if it connected (cached-token path), otherwise the
         flow is awaiting browser authorization and status becomes 'needs_auth'."""
         import asyncio
         self._connections[server_id] = {"status": "connecting", "name": name, "transport": "http"}
-        task = asyncio.create_task(self._connect_http(server_id, name, url))
+        task = asyncio.create_task(
+            self._connect_http(server_id, name, url, headers=headers)
+        )
         self._connect_tasks[server_id] = task
         done, _ = await asyncio.wait({task}, timeout=wait)
         if task in done:
@@ -401,13 +444,20 @@ class McpManager:
             }
         return False
 
-    async def _connect_http(self, server_id: str, name: str, url: str) -> bool:
-        """Connect to a Streamable HTTP MCP server (with automatic OAuth)."""
+    async def _connect_http(
+        self,
+        server_id: str,
+        name: str,
+        url: str,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """Connect over Streamable HTTP with static headers or automatic OAuth."""
         try:
             from mcp import ClientSession
             from mcp.client.streamable_http import streamablehttp_client
             from contextlib import AsyncExitStack
-            from src.mcp_oauth import build_provider, clear_auth_url
+            from src.mcp_oauth import clear_auth_url
 
             def _on_redirect(auth_url):
                 # Publish needs_auth the moment the URL is known, independent of
@@ -417,9 +467,15 @@ class McpManager:
                     "auth_url": auth_url,
                 }
 
-            provider = build_provider(server_id, url, on_redirect=_on_redirect)
             stack = AsyncExitStack()
-            transport = await stack.enter_async_context(streamablehttp_client(url, auth=provider))
+            if headers:
+                transport_cm = streamablehttp_client(url, headers=dict(headers))
+            else:
+                from src.mcp_oauth import build_provider
+
+                provider = build_provider(server_id, url, on_redirect=_on_redirect)
+                transport_cm = streamablehttp_client(url, auth=provider)
+            transport = await stack.enter_async_context(transport_cm)
             read_stream, write_stream, _get_session_id = transport
             session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
             initialized = await session.initialize()
@@ -518,6 +574,7 @@ class McpManager:
                     args=args,
                     env=env,
                     url=srv.url,
+                    headers=_static_http_headers(srv.oauth_tokens),
                 )
         finally:
             db.close()
@@ -644,6 +701,18 @@ class McpManager:
             "stderr": output if is_error else "",
             "exit_code": 1 if is_error else 0,
         }
+        structured = getattr(result, "structuredContent", None)
+        if structured is None:
+            structured = getattr(result, "structured_content", None)
+        if hasattr(structured, "model_dump"):
+            structured = structured.model_dump(mode="json")
+        if isinstance(structured, (dict, list, str, int, float, bool)):
+            structured_bytes = len(
+                json.dumps(structured, ensure_ascii=False).encode("utf-8")
+            )
+            if max_output_bytes is not None and total_bytes + structured_bytes > max_output_bytes:
+                raise ValueError("MCP result too large")
+            result_dict["structured_content"] = structured
         if images:
             result_dict["images"] = images
         return result_dict

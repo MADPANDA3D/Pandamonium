@@ -17,11 +17,11 @@
 
 :root {
   /* Core palette */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111;
-  --border: #355a66;
-  --red: #e06c75;
+  --bg: #07080c;
+  --fg: #fff8e7;
+  --panel: #100e14;
+  --border: #ff3347;
+  --red: #ff3347;
   /* Were `var(--green)` / `var(--warn)` — self-referential, so they
      resolved to invalid and every site fell back to its own literal
      (or, for sites with no fallback, painted as transparent/inherit).
@@ -51,13 +51,13 @@
   --color-recording-hover: #d63031;
   --color-muted: #888;
   --color-muted-alt: #6b7280;
-  --color-accent: #00aaff;
+  --color-accent: #fff8e7;
   --color-agent-active: #00ff00;
   --color-brand-blue: #3b82f6;
   --color-blind-orange: #ff9800;
   --color-save-green: var(--color-success);
-  --color-link-hover: #66c7ff;
-  --color-subheader: #6b8a94;
+  --color-link-hover: #fff8e7;
+  --color-subheader: #c9c2b3;
   --select-bg: var(--bg);
   --select-fg: var(--fg);
   --select-option-bg: color-mix(in srgb, var(--panel) 74%, var(--bg));
@@ -594,19 +594,27 @@ body.bg-pattern-sparkles {
     .sidebar-brand {
       display: flex;
       align-items: center;
+      gap: 8px;
       flex-shrink: 0;
       min-height: 24px;
     }
+    .sidebar-brand-logo {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      object-fit: cover;
+      box-shadow: 0 0 18px color-mix(in srgb, var(--red) 30%, transparent);
+    }
     .sidebar-brand-title {
-      font-size: 1rem;
-      font-weight: 600;
+      font-size: 1.08rem;
+      font-weight: 700;
       line-height: 1.35;
       color: var(--brand-color, var(--red));
       white-space: nowrap;
       user-select: none;
       position: relative;
       top: 0;
-      left: -10px;
+      left: -4px;
     }
     .sidebar-sep {
       display: none;
@@ -623,7 +631,7 @@ body.bg-pattern-sparkles {
       margin-top: 1px;
     }
     #tools-section .list-item {
-      padding: 8px 8px;
+      padding: 9px 8px;
     }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-start;
@@ -1172,7 +1180,7 @@ body.bg-pattern-sparkles {
       padding: 8px 8px; margin: 1px 0; border-radius: 4px;
       background: transparent; cursor: pointer;
       transition: background 0.08s;
-      height: 29px;
+      height: 36px;
       box-sizing: border-box;
     }
     .section-header-flex:hover { background: color-mix(in srgb, var(--red) 8%, transparent); }
@@ -1185,7 +1193,7 @@ body.bg-pattern-sparkles {
       flex: 1; cursor: pointer; user-select: none;
       display: flex; align-items: center; gap: 6px;
       margin: 0; padding: 0; border: none;
-      font-size: 10px; font-weight: 400; font-family: inherit;
+      font-size: 15px; font-weight: 500; font-family: inherit;
       /* 1.3 (not 1) so Fira Code's tall glyph box isn't vertically clipped in
          Chromium/Edge — mirrors the .list-item fix. The title is flex-centred
          in a fixed-height (29px) header, so this adds headroom without reflow. */
@@ -1695,7 +1703,7 @@ body.bg-pattern-sparkles {
       border-radius: 4px;
       border: none;
       line-height: 1.3;
-      font-size: 13px;
+      font-size: 15px;
       background: transparent;
       transition: background 0.08s;
       cursor: pointer;
@@ -4375,7 +4383,7 @@ body.bg-pattern-sparkles {
       }
       .section-header-flex h4,
       .section-header-flex .section-title {
-        font-size: 14px !important;
+        font-size: 16px !important;
         gap: 11px !important;
       }
       .section-icon,
@@ -4388,12 +4396,12 @@ body.bg-pattern-sparkles {
       .list-item {
         padding: 12px 10px !important;
         min-height: 48px;
-        font-size: 14px;
+        font-size: 16px;
         border-radius: 8px;
         gap: 10px !important;
       }
       .list-item .grow {
-        font-size: 14px !important;
+        font-size: 16px !important;
       }
       /* Search, New Chat & Assistant */
       #sidebar-search-btn,
@@ -10562,6 +10570,195 @@ details a:hover {
 }
 @media (prefers-reduced-motion: reduce) {
   .memory-modal-content::before { animation: none; opacity: 0.4; }
+}
+
+/* ── Pandamonium shell and MAD MCP Portal ─────────────────────────────── */
+.welcome-panda-logo {
+  width: 56px;
+  height: 56px;
+  margin-right: 14px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 0 34px color-mix(in srgb, var(--red) 38%, transparent);
+  vertical-align: middle;
+}
+
+.mad-mcp-sidebar-status {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fg) 24%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+}
+.mad-mcp-sidebar-status[data-state="connected"] {
+  background: #fff8e7;
+  box-shadow: 0 0 12px #fff8e7;
+}
+.mad-mcp-sidebar-status[data-state="connecting"] { background: var(--red); animation: mad-mcp-pulse 1s ease-in-out infinite; }
+.mad-mcp-sidebar-status[data-state="error"],
+.mad-mcp-sidebar-status[data-state="warning"] { background: var(--red); }
+
+.mad-mcp-modal-content {
+  width: min(900px, 94vw);
+  max-height: min(820px, 92vh);
+  overflow: hidden;
+  padding: 0;
+  background:
+    linear-gradient(140deg, color-mix(in srgb, var(--red) 8%, transparent), transparent 36%),
+    var(--panel);
+  border: 1px solid color-mix(in srgb, var(--red) 72%, var(--border));
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62), 0 0 42px color-mix(in srgb, var(--red) 12%, transparent);
+}
+.mad-mcp-modal-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--red) 34%, var(--border));
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.mad-mcp-title-wrap { display: flex; align-items: center; gap: 12px; }
+.mad-mcp-title-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--red) 38%, transparent);
+}
+.mad-mcp-title-wrap h4 { margin: 0; color: var(--red); font-size: 18px; letter-spacing: 0.03em; }
+.mad-mcp-title-wrap span { display: block; margin-top: 3px; color: var(--fg); opacity: 0.66; font-size: 12px; }
+.mad-mcp-body { display: grid; gap: 14px; padding: 16px; overflow-y: auto; max-height: calc(min(820px, 92vh) - 76px); }
+.mad-mcp-connect-card,
+.mad-mcp-progress-card,
+.mad-mcp-catalog-card {
+  border: 1px solid color-mix(in srgb, var(--fg) 15%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  padding: 16px;
+}
+.mad-mcp-card-heading,
+.mad-mcp-catalog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.mad-mcp-card-heading h5,
+.mad-mcp-progress-copy h5,
+.mad-mcp-catalog-heading h5 { margin: 0; color: var(--fg); font-size: 14px; }
+.mad-mcp-card-heading p,
+.mad-mcp-progress-copy p,
+.mad-mcp-catalog-heading p { margin: 5px 0 0; color: var(--fg); opacity: 0.62; font-size: 11px; line-height: 1.5; }
+.mad-mcp-status-pill {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--fg);
+  font-size: 10px;
+}
+.mad-mcp-status-pill[data-state="connected"] { border-color: #fff8e7; box-shadow: 0 0 14px color-mix(in srgb, #fff8e7 28%, transparent); }
+.mad-mcp-status-pill[data-state="connecting"] { border-color: var(--red); animation: mad-mcp-pulse 1s ease-in-out infinite; }
+.mad-mcp-status-pill[data-state="error"],
+.mad-mcp-status-pill[data-state="warning"] { border-color: var(--red); color: var(--red); }
+.mad-mcp-key-form { margin-top: 14px; }
+.mad-mcp-key-form label { display: block; margin-bottom: 6px; color: var(--fg); font-size: 11px; font-weight: 600; }
+.mad-mcp-key-row { display: flex; gap: 8px; }
+.mad-mcp-key-row input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid color-mix(in srgb, var(--fg) 24%, var(--border));
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  padding: 10px 12px;
+  font: inherit;
+}
+.mad-mcp-key-row input:focus { outline: 1px solid var(--red); border-color: var(--red); }
+.mad-mcp-primary-btn,
+.mad-mcp-secondary-btn {
+  border-radius: 8px;
+  padding: 9px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mad-mcp-primary-btn { border: 1px solid var(--red); background: var(--red); color: #08080c; }
+.mad-mcp-secondary-btn { border: 1px solid color-mix(in srgb, var(--fg) 30%, var(--border)); background: transparent; color: var(--fg); }
+.mad-mcp-primary-btn:disabled,
+.mad-mcp-secondary-btn:disabled { cursor: wait; opacity: 0.55; }
+
+.mad-mcp-progress-card { display: grid; grid-template-columns: 142px 1fr; gap: 18px; align-items: stretch; }
+.mad-mcp-progress-visual {
+  position: relative;
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background:
+    linear-gradient(color-mix(in srgb, var(--red) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--red) 8%, transparent) 1px, transparent 1px),
+    #07080c;
+  background-size: 18px 18px;
+  border: 1px solid color-mix(in srgb, var(--red) 28%, transparent);
+}
+.mad-mcp-progress-logo {
+  width: 92px;
+  height: 92px;
+  object-fit: cover;
+  border-radius: 24px;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--red) 60%, transparent));
+}
+.mad-mcp-scan-line {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, #fff8e7, transparent);
+  box-shadow: 0 0 12px #fff8e7;
+}
+.mad-mcp-progress-card[data-state="working"] .mad-mcp-progress-logo { animation: mad-mcp-breathe 1.4s ease-in-out infinite; }
+.mad-mcp-progress-card[data-state="working"] .mad-mcp-scan-line { opacity: 1; animation: mad-mcp-scan 1.8s linear infinite; }
+.mad-mcp-progress-card[data-state="complete"] .mad-mcp-progress-visual { border-color: #fff8e7; }
+.mad-mcp-progress-card[data-state="error"] .mad-mcp-progress-visual { border-color: var(--red); }
+.mad-mcp-phase-list { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.mad-mcp-phase-list li { display: flex; align-items: center; gap: 8px; color: var(--fg); opacity: 0.54; font-size: 11px; }
+.mad-mcp-phase-list li > span { width: 8px; height: 8px; border-radius: 50%; border: 1px solid currentColor; }
+.mad-mcp-phase-list li[data-state="working"] { opacity: 0.86; }
+.mad-mcp-phase-list li[data-state="working"] > span { background: var(--red); border-color: var(--red); animation: mad-mcp-pulse 1s ease-in-out infinite; }
+.mad-mcp-phase-list li[data-state="complete"] { opacity: 1; }
+.mad-mcp-phase-list li[data-state="complete"] > span { background: #fff8e7; border-color: #fff8e7; box-shadow: 0 0 8px #fff8e7; }
+.mad-mcp-phase-list li[data-state="failed"] { opacity: 1; color: var(--red); }
+
+.mad-mcp-metrics { display: flex; gap: 8px; }
+.mad-mcp-metrics span { border: 1px solid color-mix(in srgb, var(--fg) 18%, var(--border)); border-radius: 8px; padding: 7px 9px; color: var(--fg); font-size: 10px; }
+.mad-mcp-metrics strong { color: #fff8e7; font-size: 13px; }
+.mad-mcp-service-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 14px; }
+.mad-mcp-service-card { display: flex; justify-content: space-between; gap: 10px; border: 1px solid color-mix(in srgb, var(--fg) 13%, var(--border)); border-radius: 9px; padding: 10px; background: color-mix(in srgb, var(--panel) 82%, transparent); }
+.mad-mcp-service-card[data-state="configured"] { border-color: color-mix(in srgb, #fff8e7 55%, var(--border)); }
+.mad-mcp-service-card strong { display: block; color: var(--fg); font-size: 11px; }
+.mad-mcp-service-card div > span { display: block; margin-top: 3px; color: var(--fg); opacity: 0.48; font-size: 9px; }
+.mad-mcp-service-metrics { flex-shrink: 0; text-align: right; }
+.mad-mcp-service-metrics span:first-child { color: var(--red); opacity: 1; }
+
+@keyframes mad-mcp-scan { from { transform: translateY(0); } to { transform: translateY(168px); } }
+@keyframes mad-mcp-breathe { 0%, 100% { transform: scale(0.96); } 50% { transform: scale(1.04); } }
+@keyframes mad-mcp-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+@media (max-width: 680px) {
+  .mad-mcp-modal-content { width: 96vw; max-height: 94vh; }
+  .mad-mcp-body { padding: 10px; }
+  .mad-mcp-progress-card { grid-template-columns: 1fr; }
+  .mad-mcp-progress-visual { min-height: 120px; }
+  .mad-mcp-progress-logo { width: 72px; height: 72px; }
+  .mad-mcp-key-row { flex-wrap: wrap; }
+  .mad-mcp-key-row input { flex-basis: 100%; }
+  .mad-mcp-card-heading,
+  .mad-mcp-catalog-heading { align-items: stretch; flex-direction: column; }
+  .mad-mcp-metrics { justify-content: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mad-mcp-progress-logo,
+  .mad-mcp-scan-line,
+  .mad-mcp-status-pill,
+  .mad-mcp-sidebar-status,
+  .mad-mcp-phase-list li > span { animation: none !important; }
 }
 .memory-modal-content .modal-header h4 {
   font-size: 1rem;

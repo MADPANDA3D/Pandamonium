@@ -15,6 +15,7 @@ export const THEMES = {
   paper:      { bg:'#faf8f5', fg:'#3b3836', panel:'#ffffff', border:'#d5d0c8', red:'#c5ac4a' },
   // Spicy / fun themes
   cyberpunk:  { bg:'#0a0a0f', fg:'#0ff0fc', panel:'#12101a', border:'#9b30ff', red:'#e040fb' },
+  pandamonium:{ bg:'#07080c', fg:'#fff8e7', panel:'#100e14', border:'#ff3347', red:'#ff3347' },
   retrowave:  { bg:'#1a1a2e', fg:'#e94560', panel:'#16213e', border:'#533483', red:'#e94560' },
   forest:     { bg:'#1b2a1b', fg:'#a8d5a2', panel:'#142414', border:'#3d6b3d', red:'#7cb871' },
   ocean:      { bg:'#0b1a2c', fg:'#64d2ff', panel:'#091422', border:'#1e5074', red:'#4facfe' },
@@ -31,7 +32,7 @@ export const THEMES = {
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
 
-const DEFAULT_THEME = 'dark';
+const DEFAULT_THEME = 'pandamonium';
 const LS_KEY = 'odysseus-theme';
 const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
 
@@ -52,6 +53,7 @@ const THEME_DEFAULT_PATTERN = {
   midnight:   'rain',
   paper:      'dots',
   cyberpunk:  'synapse',
+  pandamonium:'synapse',
   retrowave:  'embers',
   forest:     'petals',
   ocean:      'constellations',
@@ -63,6 +65,7 @@ const THEME_DEFAULT_PATTERN = {
 
 // Default effect colors for specific themes (overrides --fg)
 const THEME_DEFAULT_EFFECT_COLOR = {
+  pandamonium:'#fff8e7',
   midnight:   '#ffffff',
   organs:     '#451616',
   cute:       '#ff8cb8',
@@ -184,7 +187,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: 'Pandamonium Logo', group: 'Sidebar' },
   { key: 'brandMixTo',         css: '--brand-mix-to',      label: 'Logo Gradient End', group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
@@ -332,12 +335,26 @@ const _ROUTE_FAVICON_SHAPES = {
 function _updateFavicon(fg) {
   const path = (window.location.pathname || '').toLowerCase();
   const routeShape = _ROUTE_FAVICON_SHAPES[path];
-  let svg;
-  if (routeShape) {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
-  } else {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='${fg}'/><path d='M16 8L16 22L24 22Z' fill='${fg}' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='${fg}' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
+  if (!routeShape) {
+    let rootLink = document.querySelector("link[rel='icon']");
+    if (!rootLink) {
+      rootLink = document.createElement('link');
+      rootLink.rel = 'icon';
+      document.head.appendChild(rootLink);
+    }
+    rootLink.type = 'image/png';
+    rootLink.href = '/static/icons/pandamonium.png';
+    let rootApple = document.querySelector("link[rel='apple-touch-icon']");
+    if (!rootApple) {
+      rootApple = document.createElement('link');
+      rootApple.rel = 'apple-touch-icon';
+      document.head.appendChild(rootApple);
+    }
+    rootApple.href = '/static/icons/pandamonium.png';
+    return;
   }
+  let svg;
+  svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
   const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
   if (!link) {
@@ -458,11 +475,24 @@ export function applyBgPattern(pattern) {
 }
 
 export function getSaved() {
-  const obj = Storage.getJSON(LS_KEY, null);
+  let obj = Storage.getJSON(LS_KEY, null);
   // Migration: 'chatgpt' preset was renamed to 'gpt'
   if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
   // Migration: 'sakura' preset was renamed to 'ume'
   if (obj && obj.name === 'sakura') obj.name = 'ume';
+  // One-time migration from the temporary CT105 preview theme into the
+  // source-owned Pandamonium preset. This also replaces the preview's cyan
+  // foreground with the approved pearl-white palette.
+  if (obj && obj.name === 'madpanda') {
+    obj = {
+      name: 'pandamonium',
+      colors: THEMES.pandamonium,
+      bgPattern: THEME_DEFAULT_PATTERN.pandamonium,
+      bgEffectColor: THEME_DEFAULT_EFFECT_COLOR.pandamonium,
+    };
+    Storage.setJSON(LS_KEY, obj);
+    _syncToServer(obj);
+  }
   return obj;
 }
 
@@ -939,16 +969,18 @@ export function initThemeUI() {
       applyColors(colors);
       syncPickers(colors);
       applyFontDensity(DEFAULT_FONT, DEFAULT_DENSITY);
-      applyBgPattern('none');
+      const defaultPattern = THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none';
+      applyBgEffectColor(THEME_DEFAULT_EFFECT_COLOR[DEFAULT_THEME] || '');
+      applyBgPattern(defaultPattern);
       const fs = document.getElementById('theme-font-select');
       const ds = document.getElementById('theme-density-select');
       const ps = document.getElementById('theme-bg-pattern-select');
       if (fs) fs.value = DEFAULT_FONT;
       if (ds) ds.value = DEFAULT_DENSITY;
-      if (ps) ps.value = 'none';
+      if (ps) ps.value = defaultPattern;
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
-      const darkSwatch = grid.querySelector('[data-theme="dark"]');
-      if (darkSwatch) darkSwatch.classList.add('active');
+      const defaultSwatch = grid.querySelector(`[data-theme="${DEFAULT_THEME}"]`);
+      if (defaultSwatch) defaultSwatch.classList.add('active');
     });
   }
 
@@ -1094,15 +1126,16 @@ export function initThemeUI() {
   // Font, density, background pattern controls
   const _initFont = (saved && saved.font) || DEFAULT_FONT;
   const _initDensity = (saved && saved.density) || DEFAULT_DENSITY;
-  const _initPattern = (saved && saved.bgPattern) || (saved && THEME_DEFAULT_PATTERN[saved.name]) || 'none';
-  const _initEffectColor = (saved && saved.bgEffectColor) || (saved && THEME_DEFAULT_EFFECT_COLOR[saved.name]) || '';
+  const _activeThemeName = (saved && saved.name) || DEFAULT_THEME;
+  const _initPattern = (saved && saved.bgPattern) || THEME_DEFAULT_PATTERN[_activeThemeName] || 'none';
+  const _initEffectColor = (saved && saved.bgEffectColor) || THEME_DEFAULT_EFFECT_COLOR[_activeThemeName] || '';
   const _initEffectIntensity = (saved && saved.bgEffectIntensity !== undefined)
     ? saved.bgEffectIntensity
-    : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
+    : (THEME_DEFAULT_INTENSITY[_activeThemeName] !== undefined ? THEME_DEFAULT_INTENSITY[_activeThemeName] : 1);
   const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
   const _initFrosted = (saved && saved.frosted !== undefined)
     ? !!saved.frosted
-    : (saved && THEME_DEFAULT_FROSTED[saved.name] === true);
+    : (THEME_DEFAULT_FROSTED[_activeThemeName] === true);
   applyFontDensity(_initFont, _initDensity);
   applyBgEffectColor(_initEffectColor);
   applyBgEffectIntensity(_initEffectIntensity);
