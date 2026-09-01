@@ -13,6 +13,8 @@ import httpx
 from src.agent_identity import configured_agent_name
 
 MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
+WORKER_IDS = ("pc-codex", "hermes", "vps-codex")
+_WORKSPACE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 def _enabled(name: str, default: bool = False) -> bool:
@@ -20,6 +22,29 @@ def _enabled(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def configured_worker_workspaces() -> dict[str, list[str]]:
+    """Return installation-owned workspace aliases; public defaults are empty."""
+    raw = os.getenv("ODYSSEUS_WORKER_WORKSPACES_JSON", "").strip()
+    if not raw:
+        return {worker: [] for worker in WORKER_IDS}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("invalid_worker_workspace_configuration") from exc
+    if not isinstance(payload, dict) or any(worker not in WORKER_IDS for worker in payload):
+        raise RuntimeError("invalid_worker_workspace_configuration")
+    configured = {worker: [] for worker in WORKER_IDS}
+    for worker, values in payload.items():
+        if (
+            not isinstance(values, list)
+            or len(values) > 32
+            or any(not isinstance(value, str) or not _WORKSPACE_NAME.fullmatch(value) for value in values)
+        ):
+            raise RuntimeError("invalid_worker_workspace_configuration")
+        configured[worker] = list(dict.fromkeys(values))
+    return configured
 
 
 def _token(path: Path) -> str:
@@ -474,6 +499,7 @@ def adapters() -> dict[str, WorkerAdapter]:
 
 def worker_catalog() -> dict[str, dict[str, Any]]:
     registry = adapters()
+    workspaces = configured_worker_workspaces()
     return {
         "pc-codex": {
             "enabled": registry["pc-codex"].enabled,
@@ -481,17 +507,17 @@ def worker_catalog() -> dict[str, dict[str, Any]]:
             "ready": False,
             "adapter": "codex-bridge",
             "machine": "Local workstation",
-            "capabilities": ["local_files", "madpanda3d", "business", "home_lab", "code", "artifacts"],
-            "workspaces": ["madpanda3d", "business", "home-lab", "project-linux"],
+            "capabilities": ["read_only_inspection", "code", "artifacts"],
+            "workspaces": workspaces["pc-codex"],
         },
         "hermes": {
             "enabled": registry["hermes"].enabled,
             "configured": registry["hermes"].enabled,
             "ready": False,
             "adapter": "hermes-runs",
-            "machine": "Hermes laptop",
+            "machine": "Remote agent",
             "capabilities": ["remote_agent", "approvals", "session_memory"],
-            "workspaces": ["home-lab"],
+            "workspaces": workspaces["hermes"],
         },
         "vps-codex": {
             "enabled": registry["vps-codex"].enabled,
@@ -499,7 +525,7 @@ def worker_catalog() -> dict[str, dict[str, Any]]:
             "ready": False,
             "adapter": "codex-bridge",
             "machine": "Remote server",
-            "capabilities": ["vps_code", "vps_observer", "vps_operations"],
-            "workspaces": ["vps-ops"],
+            "capabilities": ["read_only_inspection"],
+            "workspaces": workspaces["vps-codex"],
         },
     }

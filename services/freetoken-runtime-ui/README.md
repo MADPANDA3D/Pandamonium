@@ -1,7 +1,8 @@
 # FreeToken Runtime UI
 
-Read-only LAN dashboard for the headless FreeToken engine on CT102. It exposes health,
+Read-only dashboard for a headless FreeToken engine. It exposes health,
 model, throughput, cache occupancy, latency, and recent request telemetry. It does not
 proxy generation, cache-resize, stop, or other mutating endpoints.
 
-Production URL: `http://192.168.1.247:1921/`
+The service template binds to `http://127.0.0.1:1921/`. Set an explicit private
+interface address in deployment configuration only when remote access is intended.

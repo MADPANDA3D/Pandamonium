@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=freetoken
 Group=freetoken
-Environment=FREETOKEN_UI_HOST=192.168.1.247
+Environment=FREETOKEN_UI_HOST=127.0.0.1
 Environment=FREETOKEN_UI_PORT=1921
 Environment=FREETOKEN_API_URL=http://127.0.0.1:1919
 ExecStart=/usr/bin/python3 /opt/freetoken-runtime-ui/server.py

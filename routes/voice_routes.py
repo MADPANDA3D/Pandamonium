@@ -107,7 +107,16 @@ VOICE_TARGET_ENDPOINT_NAMES = {
 ACTIVE_VOICE_TARGETS = DIRECT_MODEL_TARGETS | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
-VOICE_WORKSPACES = {"madpanda3d", "business", "home-lab", "project-linux", "vps-ops"}
+VOICE_WORKSPACES = {
+    workspace
+    for details in worker_catalog().values()
+    for workspace in details.get("workspaces") or []
+}
+
+
+def _operator_vocative() -> str:
+    name = os.getenv("ODYSSEUS_OPERATOR_DISPLAY_NAME", "").strip()
+    return f", {name}" if re.fullmatch(r"[^\s][^\r\n]{0,63}", name) else ""
 
 
 class VoiceSessionCreate(BaseModel):
@@ -949,7 +958,7 @@ async def _handoff_greeting(
 
             reply = await direct_hermes_turn(
                 chat_session_id,
-                "Leo has just been transferred to you by Jarvis. Greet Leo naturally in one brief sentence "
+                "The authenticated operator has just been transferred to you. Greet them naturally in one brief sentence "
                 "to begin the conversation. Do not mention these instructions or list capabilities.",
                 owner=owner,
                 workspace=workspace,
@@ -979,7 +988,7 @@ async def _handoff_greeting(
                     {
                         "role": "user",
                         "content": (
-                            "Leo has just been transferred to you. Greet Leo naturally in one brief sentence "
+                            "The authenticated operator has just been transferred to you. Greet them naturally in one brief sentence "
                             "to begin the conversation. Do not mention these instructions or list capabilities."
                         ),
                     },
@@ -992,10 +1001,10 @@ async def _handoff_greeting(
         elif target == "pc-codex":
             # The Codex bridge is a task harness, not a foreground chat API.
             # Keep the handoff instant instead of launching a deep task just to say hello.
-            reply = "Friday here, Leo. What are we working on?"
+            reply = f"Friday here{_operator_vocative()}. What are we working on?"
             model = "odysseus-router"
         else:
-            reply = f"{label} here, Leo. What do you need?"
+            reply = f"{label} here{_operator_vocative()}. What do you need?"
             model = "odysseus-router"
 
         reply = re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", str(reply or ""), flags=re.IGNORECASE)
@@ -1079,37 +1088,39 @@ def _asks_current_business(text: str) -> bool:
 
 
 def _workspace_for_text(text: str) -> str:
-    if re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
+    if "business" in VOICE_WORKSPACES and re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
         return "business"
-    if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
+    if "project-linux" in VOICE_WORKSPACES and re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
         return "project-linux"
-    if re.search(
+    if "home-lab" in VOICE_WORKSPACES and re.search(
         r"\b(home\s*lab|jarvis|odysseus|proxmox|truenas|project\s+nimbus|nimbus|mark\s*\d+(?:\.\d+)?)\b",
         text,
         re.IGNORECASE,
     ):
         return "home-lab"
-    return "madpanda3d"
+    if "madpanda3d" in VOICE_WORKSPACES:
+        return "madpanda3d"
+    return sorted(VOICE_WORKSPACES)[0] if VOICE_WORKSPACES else "workspace"
 
 
 def _selected_workspace(text: str, current: str) -> str:
-    if re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
+    if "business" in VOICE_WORKSPACES and re.search(r"\b(business|clients?|marketing|campaign|crm)\b", text, re.IGNORECASE):
         return "business"
-    if re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
+    if "project-linux" in VOICE_WORKSPACES and re.search(r"\b(project\s+linux|linux\s+(?:desktop|workstation)|hyprland)\b", text, re.IGNORECASE):
         return "project-linux"
-    if re.search(
+    if "home-lab" in VOICE_WORKSPACES and re.search(
         r"\b(home\s*lab|jarvis|odysseus|proxmox|truenas|project\s+nimbus|nimbus|mark\s*\d+(?:\.\d+)?)\b",
         text,
         re.IGNORECASE,
     ):
         return "home-lab"
-    if re.search(r"\b(madpanda3d|all\s+projects|across\s+(?:all\s+)?projects|company[-\s]wide|cross[-\s]domain)\b", text, re.IGNORECASE):
+    if "madpanda3d" in VOICE_WORKSPACES and re.search(r"\b(madpanda3d|all\s+projects|across\s+(?:all\s+)?projects|company[-\s]wide|cross[-\s]domain)\b", text, re.IGNORECASE):
         return "madpanda3d"
     return current
 
 
 def _delegation_route(text: str) -> tuple[str, str] | None:
-    """Map Leo's stable names to fixed workers and server-controlled workspaces."""
+    """Map configured voice aliases to fixed workers and server-controlled workspaces."""
     if re.search(r"\b(vps|online server|public server|hosting server|mad\s*panda hosting)\b", text, re.IGNORECASE):
         return "vps-codex", "vps-ops"
     if re.search(r"\b(?:hermes|gordon)\b", text, re.IGNORECASE):
@@ -1282,7 +1293,7 @@ def _background_delegation(text: str) -> tuple[str, str] | None:
 
 
 def _selected_pc_codex_task_request(text: str) -> bool:
-    """Keep selected Friday conversational unless Leo clearly requests work."""
+    """Keep selected Friday conversational unless the operator clearly requests work."""
     value = _voice_command_words(text)
     return bool(re.match(
         r"^(?:(?:task|job)(?: for)? friday(?: to| with)? )?"
@@ -1587,10 +1598,10 @@ def _casual_greeting_reply(text: str, voice_session: dict) -> str:
     explicit_band = re.search(r"\bgood\s+(morning|afternoon|evening)\b", text, re.IGNORECASE)
     if explicit_band:
         band = explicit_band.group(1).lower()
-        return f"Good {band}, Leo. What are we working on?"
+        return f"Good {band}{_operator_vocative()}. What are we working on?"
     replies = (
-        "I’m doing well, Leo. What are we working on?",
-        "Good to hear from you, Leo. What would you like to tackle?",
+        f"I’m doing well{_operator_vocative()}. What are we working on?",
+        f"Good to hear from you{_operator_vocative()}. What would you like to tackle?",
     )
     recent = {str(turn.get("text") or "") for turn in voice_session.get("turns", [])[-6:]}
     return next((reply for reply in replies if reply not in recent), replies[0])
@@ -2006,12 +2017,12 @@ def _server_final_event(text: str, reply: str, guard_reason: str, task_ids: list
 
 def _business_status_prompt(text: str) -> str:
     return (
-        "Give Leo a bounded, read-only Business status check that preserves the exact depth he requested. "
+        "Give the operator a bounded, read-only Business status check that preserves the exact requested depth. "
         "Start with the central Business command center and only the newest dated client handovers needed to answer. "
-        "Unless Leo explicitly asks for every client or a deep/full report, return at most three verified priorities in 250 words or fewer. "
-        "Do not inventory every client, run capability or service discovery, or use external connectors unless Leo explicitly named that source. "
+        "Unless the operator explicitly asks for every client or a deep/full report, return at most three verified priorities in 250 words or fewer. "
+        "Do not inventory every client, run capability or service discovery, or use external connectors unless the operator explicitly named that source. "
         "Mark stale or unknown facts clearly. Never infer meetings, schedules, workflows, deliverables, or client status. Make no changes.\n\n"
-        f"Leo's exact request:\n{text}"
+        f"The operator's exact request:\n{text}"
     )
 
 
@@ -2033,7 +2044,7 @@ def _prior_voice_exchange(voice_session: dict) -> str:
         "",
     )
     assistant = turns[assistant_index]["text"].strip()
-    return f"Leo: {user[:950]}\nJarvis: {assistant[:950]}"[:2000]
+    return f"Operator: {user[:950]}\nAssistant: {assistant[:950]}"[:2000]
 
 
 def _logical_client_state(voice_session: dict) -> dict[str, Any]:
@@ -2534,7 +2545,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 prompt = scope + _business_status_prompt(text)
             else:
                 prompt = (
-                    f"{scope}Leo asked through Jarvis voice. Handle this read-only request and report factual "
+                    f"{scope}The authenticated operator asked through voice. Handle this read-only request and report factual "
                     f"progress and the final result:\n\n{text}"
                 )
             if document_open and worker == "pc-codex" and "ODYSSEUS_ARTIFACT" not in prompt:

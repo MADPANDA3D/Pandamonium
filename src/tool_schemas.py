@@ -13,10 +13,17 @@ import logging
 from typing import Optional
 
 from src.agent_tools import ToolBlock, TOOL_TAGS
+from src.agent_worker_adapters import configured_worker_workspaces
 from src.tool_parsing import _TOOL_NAME_MAP
 from src.tool_security import BUILTIN_EMAIL_TOOLS
 
 logger = logging.getLogger(__name__)
+
+_WORKER_WORKSPACES = sorted({
+    workspace
+    for workspaces in configured_worker_workspaces().values()
+    for workspace in workspaces
+})
 
 
 _REQUIRED_NATIVE_TOOL_ARGS = {
@@ -1237,7 +1244,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_runtime_status",
-            "description": "Return server-verified Jarvis runtime facts including the actual brain model, architecture, quantization, context allocation, TTS provider, and worker availability. Use this whenever Leo asks what model or runtime is active.",
+            "description": "Return server-verified runtime facts including the actual brain model, architecture, quantization, context allocation, TTS provider, and worker availability. Use this whenever the operator asks what model or runtime is active.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },
@@ -1250,7 +1257,11 @@ FUNCTION_TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "worker": {"type": "string", "enum": ["pc-codex", "hermes", "vps-codex"]},
-                    "workspace": {"type": "string", "enum": ["madpanda3d", "business", "home-lab", "project-linux", "vps-ops"]},
+                    "workspace": {
+                        "type": "string",
+                        "enum": _WORKER_WORKSPACES,
+                        "description": "An installation-configured workspace alias allowed for the selected worker.",
+                    },
                     "prompt": {"type": "string", "description": "A self-contained task request with the desired output."},
                 },
                 "required": ["worker", "workspace", "prompt"],

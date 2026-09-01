@@ -17,7 +17,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:7000")
     parser.add_argument("--session-token-file")
     parser.add_argument("--sessions-file")
-    parser.add_argument("--username", default="leo")
+    parser.add_argument("--username", default=os.getenv("ODYSSEUS_ADMIN_USER", "admin"))
     parser.add_argument("--require-workers", action="store_true")
     return parser.parse_args()
 

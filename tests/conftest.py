@@ -3,6 +3,7 @@ import sys
 import os
 import types
 import importlib.util
+import json
 from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,6 +17,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # This only unblocks collection/import-time init; it does not provide a shared
 # file-backed DB across processes - tests needing that must set DATABASE_URL.
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+os.environ.setdefault(
+    "ODYSSEUS_WORKER_WORKSPACES_JSON",
+    json.dumps({
+        "pc-codex": ["madpanda3d", "business", "home-lab", "project-linux"],
+        "hermes": ["home-lab"],
+        "vps-codex": ["vps-ops"],
+    }),
+)
+os.environ.setdefault("ODYSSEUS_OPERATOR_DISPLAY_NAME", "Leo")
 
 # Pre-import real heavy modules BEFORE any test file's module-level stubs can
 # replace them with MagicMock. Some test files (e.g. test_llm_core_sanitize_*)
