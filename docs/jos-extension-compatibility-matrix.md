@@ -42,6 +42,24 @@ retained until source and deployed equivalence are separately proven.
 | [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Source-proven locally: candidate-owned fixture-only MCP server, strict hostile-data boundary, and bounded receipts reuse the generic MCP adapter; Streamlit and live traffic remain absent. Public fork exists; candidate commits are not pushed or released | `MAD-760` |
 | [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Source-proven locally: candidate-owned strict manifest, two small native skill packages, deterministic offline STEP runner, and bounded loopback viewer handoff reuse the generic skill-bundle adapter. Public fork exists; candidate commits are not pushed or released | `MAD-759` |
 
+## Distribution claim states
+
+Temporary approval-gated lifecycle proof counts as source-tested evidence. It
+does not count as an immutable published package install or live acceptance.
+
+| Component | Exact source-tested revision | Package-installed | Live-accepted |
+| --- | --- | --- | --- |
+| Odysseus | `ca3f7177` | No artifact selected | No |
+| ORACLE reference | `b619e2a` | No artifact selected | No |
+| Barehands candidate | `0ef7c9a` | No artifact selected | No |
+| img2threejs candidate | `54734b5` | No artifact selected | No |
+| text-to-cad candidate | `fd444ccf` | No artifact selected | No |
+| Robin candidate | `8d4b410` | No artifact selected | No |
+
+The compatible source rows above remain local evidence. Candidate implementation
+commits were not pushed, tagged, packaged, published, deployed, or accepted with
+live providers/hardware.
+
 ## Evidence and constraints
 
 ### img2threejs

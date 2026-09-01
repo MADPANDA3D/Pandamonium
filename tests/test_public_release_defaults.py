@@ -105,3 +105,20 @@ def test_voice_workspace_defaults_do_not_materialize_private_profile():
     )
 
     assert json.loads(result.stdout) == []
+
+
+def test_public_release_docs_keep_claim_states_and_security_risks_separate():
+    root = os.path.dirname(os.path.dirname(__file__))
+    matrix = open(os.path.join(root, "docs", "jos-extension-compatibility-matrix.md"), encoding="utf-8").read()
+    guide = open(os.path.join(root, "docs", "jos-public-operations.md"), encoding="utf-8").read()
+
+    assert "| Component | Exact source-tested revision | Package-installed | Live-accepted |" in matrix
+    for risk in (
+        "Untrusted repositories",
+        "Lifecycle commands",
+        "Credentials",
+        "Capability escalation",
+        "Update drift",
+        "Rollback failure",
+    ):
+        assert risk in guide

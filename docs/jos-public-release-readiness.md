@@ -4,7 +4,7 @@
 
 **Decision:** NOT READY — release gate closed
 
-**Assessment basis:** Odysseus `ca3f7177`, ORACLE `b619e2a`, Barehands
+**Assessment basis:** Odysseus `79c506f6`, ORACLE `b619e2a`, Barehands
 candidate `0ef7c9a`, img2threejs candidate `54734b5`, text-to-cad candidate
 `fd444ccf`, Robin candidate `8d4b410`
 
@@ -67,21 +67,19 @@ is complete; it is not a public distribution claim.
 
 | Release criterion | State | Evidence / remaining work |
 | --- | --- | --- |
-| Clean installation has no private identity, organization, path, host, credential, memory, or required ORACLE values | Not met | Generic identity defaults exist, but committed runtime/UI paths still contain private worker labels/topology, and `services/pc-codex-bridge/README.md` contains private path examples. Test-only negative fixtures and upstream provenance must be classified separately from install payload. |
-| Onboarding configures identity/constitution and two model endpoints without code changes | Partial | Identity/constitution and model endpoint settings exist and are tested in source. A clean public onboarding run with two differently named compatible endpoints has not been executed. |
+| Clean installation has no private identity, organization, path, host, credential, memory, or required ORACLE values | Partial | Public worker workspaces now default empty, malformed topology fails closed, fixed deployment host/path examples were removed, and the clean-room state scan passes. A selected package payload still needs its own install receipt and content scan. |
+| Onboarding configures identity/constitution and two model endpoints without code changes | Source-tested | The clean-room check configures a differently named identity/constitution and two differently named loopback endpoints through existing configuration seams with no credentials, extension, network, or source edit. |
 | Extension lifecycle is documented and tested from public sources | Partial | Lifecycle behavior is documented and extensively tested with temporary Git sources, including direct and partial multi-skill native admission; actual ORACLE, Barehands, img2threejs, text-to-cad, and Robin candidate revisions were proven through temporary managed roots. Candidate commits remain unpushed, so a clean public-source replay is still open. |
 | Attribution, licenses, fork lineage, and compatible revisions are preserved | Partial | Odysseus upstream remote/license, ORACLE fork point/revision, Barehands upstream/candidate lineage, the Apache-2.0 img2threejs fork base, and the MIT text-to-cad and Robin fork bases are recorded. Barehands documents AGPL-3.0-or-later obligations; remaining candidate/release obligations stay open. |
-| Compatibility tables distinguish source-tested, installed, and live-accepted states | Partial | The matrix records Barehands, img2threejs, text-to-cad, and Robin as local source-proven while distinguishing public fork creation from unpushed candidate commits and from persistent install/deploy/release. Robin live-network acceptance remains explicitly closed. |
-| Security review covers repository, lifecycle, credential, capability, drift, and rollback risks | Partial | Manifest/registry/installer/live-catalog/skill-bundle/browser-surface/MCP rules fail closed and are tested. Barehands adds its browser/server boundaries; img2threejs adds fixed project paths, strict-quality/state/result checks, bounded subprocesses, offline default, optional-vision timeout, and failure isolation; text-to-cad adds selected-project confinement, deterministic STEP/hash validation, bounded viewer output/timeout, loopback-only correlation, and preserved-artifact failure isolation; Robin adds fixture-only execution, onion-only quoted provenance, prompt-injection/secret/SSRF/size/time rejection, explicit retention, and a separately closed lawful-use/live-network gate. Remaining clean-package review stays open. |
+| Compatibility tables distinguish source-tested, installed, and live-accepted states | Met | The compatibility matrix now has separate component rows for exact source-tested revisions, package-installed state, and live-accepted state. No unpublished or temporary lifecycle proof is promoted. |
+| Security review covers repository, lifecycle, credential, capability, drift, and rollback risks | Source-reviewed | `jos-public-operations.md` records all six risk classes and their fail-closed source controls. Package-specific SBOM/artifact review waits on the packaging selection. |
 | Release artifacts are immutable and reproducible | Not met | No distribution repository or packaging strategy has been selected. No compatible release tags/artifacts were created; mutable branches are not accepted as install versions. |
-| Fresh install passes without private infrastructure or optional extensions | Not met | No public clean-room acceptance run has been performed. |
+| Fresh install passes without private infrastructure or optional extensions | Source-tested only | The offline clean-room check passes with a new settings file, two loopback endpoints, an empty extension registry, no credentials, and no worker topology. No package artifact exists to run the package-installed acceptance gate. |
 
 ## Confirmed blockers
 
-1. Public defaults/onboarding still need a path-limited portability pass over
-   private worker names, direct operator wording, workspace examples, and
-   optional topology. These become installation configuration, not deleted
-   functionality or public defaults.
+1. Candidate implementation commits are still local-only, so the documented
+   lifecycle cannot yet be replayed from their public maintained forks.
 2. Leo must explicitly select the packaging/distribution and release-repository
    strategy before repository creation, tagging, publishing, or pushing.
 
