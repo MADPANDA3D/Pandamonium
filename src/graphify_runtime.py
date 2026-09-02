@@ -194,7 +194,11 @@ def query_graph(
     try:
         from graphify.serve import _load_graph, _query_graph_text
 
-        graph, _communities = _load_graph(str(path))
+        loaded_graph = _load_graph(str(path))
+        # Graphify 0.9.53 returns the graph directly. Older builds returned a
+        # ``(graph, communities)`` pair, so accept both without coupling the
+        # guarded adapter to one private return shape.
+        graph = loaded_graph[0] if isinstance(loaded_graph, tuple) else loaded_graph
         result = _query_graph_text(
             graph,
             prompt,

@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from src.graphify_runtime import (
     GraphifyConfigurationError,
     build_command,
     configured_roots,
+    query_graph,
     sanitize_graph_output,
 )
 
@@ -103,3 +106,34 @@ async def test_graphify_mcp_catalog_exposes_root_ids_but_no_path_parameter(tmp_p
         assert properties["root_id"]["enum"] == ["odysseus"]
         assert "path" not in properties
         assert "project_path" not in properties
+
+
+def test_graphify_query_accepts_current_single_graph_loader_result(tmp_path, monkeypatch):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    output = tmp_path / "graphs" / "odysseus"
+    graph_path = output / "graphify-out" / "graph.json"
+    graph_path.parent.mkdir(parents=True)
+    graph_path.write_text('{"nodes": [], "links": []}', encoding="utf-8")
+    roots = configured_roots(_config(repository, output))
+    loaded_graph = object()
+    calls = {}
+
+    serve = types.ModuleType("graphify.serve")
+    serve._load_graph = lambda path: loaded_graph
+
+    def fake_query(graph, question, **kwargs):
+        calls.update(graph=graph, question=question, **kwargs)
+        return f"{repository}/src/qdrant_projection.py"
+
+    serve._query_graph_text = fake_query
+    package = types.ModuleType("graphify")
+    package.serve = serve
+    monkeypatch.setitem(sys.modules, "graphify", package)
+    monkeypatch.setitem(sys.modules, "graphify.serve", serve)
+
+    result = query_graph("odysseus", "Where is QdrantProjection?", roots=roots)
+
+    assert calls["graph"] is loaded_graph
+    assert calls["question"] == "Where is QdrantProjection?"
+    assert result == "[root:odysseus]/src/qdrant_projection.py"
