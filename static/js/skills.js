@@ -13,6 +13,8 @@ import { topPortalZ } from './toolWindowZOrder.js';
 const API = window.location.origin;
 let skills = [];
 let builtinSkills = [];   // read-only agent tool capabilities (TOOL_SECTIONS)
+let portalSkills = [];    // inert metadata projected from MAD MCP
+let portalSkillsState = { configured: false, status: 'loading' };
 let loaded = false;
 let _loadPromise = null;
 
@@ -74,7 +76,7 @@ function _applySectionCollapse(container) {
   container.querySelectorAll('.skills-section-header').forEach(h => {
     h.classList.toggle('collapsed', _collapsedSections.has(h.dataset.section));
   });
-  container.querySelectorAll('.doclib-card[data-skill-section]').forEach(c => {
+  container.querySelectorAll('[data-skill-section]').forEach(c => {
     c.classList.toggle('skill-card-section-hidden', _collapsedSections.has(c.dataset.skillSection));
   });
 }
@@ -91,8 +93,18 @@ export async function loadSkills(cascade = false) {
   if (_loadPromise) return _loadPromise;
   _loadPromise = (async () => {
   try {
-    const res = await fetch(`${API}/api/skills`);
-    const data = await res.json();
+    const [localResult, portalResult] = await Promise.allSettled([
+      fetch(`${API}/api/skills`).then(async res => {
+        if (!res.ok) throw new Error(`Local skills HTTP ${res.status}`);
+        return res.json();
+      }),
+      fetch(`${API}/api/mcp/portal/skills`).then(async res => {
+        if (!res.ok) throw new Error(`Portal skills HTTP ${res.status}`);
+        return res.json();
+      }),
+    ]);
+    if (localResult.status !== 'fulfilled') throw localResult.reason;
+    const data = localResult.value;
     // Dedupe by name (case-insensitive) — the API has occasionally
     // returned the same skill twice (built-in shadow + user copy, or
     // a write-then-read race), and rendering both made the duplicate
@@ -105,6 +117,17 @@ export async function loadSkills(cascade = false) {
       _seen.add(k);
       return true;
     });
+    if (portalResult.status === 'fulfilled') {
+      const portalData = portalResult.value || {};
+      portalSkills = Array.isArray(portalData.skills) ? portalData.skills : [];
+      portalSkillsState = {
+        configured: !!portalData.configured,
+        status: String(portalData.status || 'unavailable'),
+      };
+    } else {
+      portalSkills = [];
+      portalSkillsState = { configured: false, status: 'unavailable' };
+    }
     _loadSkillApprovalThreshold();
     // Built-in capabilities are no longer surfaced in the Skills menu.
     loaded = true;
@@ -165,10 +188,14 @@ const _selectedNames = new Set();
 let _skillApprovalThreshold = 0.85;
 
 function updateCount() {
+  const total = skills.length + portalSkills.length;
   const el = document.getElementById('skills-count');
-  if (el) el.textContent = skills.length || '0';
+  if (el) el.textContent = total || '0';
   const elH = document.getElementById('skills-count-h2');
-  if (elH) elH.textContent = skills.length + ' skill' + (skills.length === 1 ? '' : 's');
+  if (elH) {
+    elH.textContent = total + ' skill' + (total === 1 ? '' : 's') +
+      ` (${skills.length} local, ${portalSkills.length} Portal)`;
+  }
 }
 
 function _sortSkills(list) {
@@ -623,6 +650,39 @@ function _getFilteredSkills() {
   return _sortSkills(filtered);
 }
 
+function _getFilteredPortalSkills() {
+  // Portal entries are catalog metadata, not local drafts/published skills;
+  // local audit/confidence filters therefore never claim to apply to them.
+  if (_showDraftsOnly || _showPublishedOnly || _confMax != null) return [];
+  const query = (document.getElementById('skills-search')?.value || '').toLowerCase();
+  const filtered = query ? portalSkills.filter(sk => _matches(sk, query)) : portalSkills;
+  return filtered.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+function _buildPortalSkillCards(list) {
+  return list.map(sk => {
+    const card = document.createElement('div');
+    card.className = 'doclib-card skill-card portal-skill-card';
+    card.setAttribute('role', 'listitem');
+    const name = sk.name || sk.slug || sk.id || 'Portal skill';
+    const scope = sk.scope ? `<span class="memory-cat-badge">${esc(sk.scope)}</span>` : '';
+    const category = sk.category ? `<span class="memory-cat-badge">${esc(sk.category)}</span>` : '';
+    card.innerHTML = `
+      <div class="doclib-card-header skill-card-header">
+        <div class="skill-card-textcol">
+          <code class="skill-card-name">${esc(name)}</code>
+          ${sk.description ? `<div class="skill-card-desc">${esc(sk.description)}</div>` : ''}
+        </div>
+        <div class="skill-card-right">
+          ${category}${scope}
+          <span class="memory-cat-badge portal-skill-source">MAD MCP</span>
+          <span class="memory-cat-badge portal-skill-readonly" title="Visible catalog metadata only; installation remains an explicit governed action">Read-only catalog</span>
+        </div>
+      </div>`;
+    return card;
+  });
+}
+
 function renderSkillsList() {
   const container = document.getElementById('skills-list');
   if (!container) return;
@@ -631,22 +691,29 @@ function renderSkillsList() {
   container.closest('.admin-card')?.classList.remove('skills-has-expanded');
 
   const sorted = _getFilteredSkills();
+  const sortedPortal = _getFilteredPortalSkills();
   // Built-in capabilities show as their own read-only section (skipped when
   // the user is filtering to drafts, since built-ins aren't drafts).
   // Skills menu shows the user's own skills only (built-in capabilities
   // are intentionally not surfaced here).
   const showBuiltin = false;
 
-  if (!sorted.length && !showBuiltin) {
+  if (!sorted.length && !sortedPortal.length && !showBuiltin) {
     const selectBtn = document.getElementById('skills-select-btn');
     if (selectBtn) selectBtn.disabled = true;
     if (_selectMode) _exitSelectMode();
-    container.innerHTML = `<div style="text-align:center;opacity:0.4;padding:24px 0;font-size:11px;">${loaded ? 'No skills yet, use agent for it to auto extract them.' : 'Loading…'}</div>`;
+    let message = loaded ? 'No local skills yet.' : 'Loading…';
+    if (loaded && portalSkillsState.status === 'not_configured') {
+      message += ' Connect MAD MCP to discover Portal skills.';
+    } else if (loaded && portalSkillsState.status === 'unavailable') {
+      message += ' MAD MCP skill discovery is currently unavailable.';
+    }
+    container.innerHTML = `<div style="text-align:center;opacity:0.4;padding:24px 0;font-size:11px;">${esc(message)}</div>`;
     return;
   }
 
   const selectBtn = document.getElementById('skills-select-btn');
-  if (selectBtn) selectBtn.disabled = false;
+  if (selectBtn) selectBtn.disabled = !sorted.length;
 
   // Library-style cards: a compact bar that expands in-place to show the
   // SKILL.md, with a footer (Delete left; Edit / Run / Approve right).
@@ -872,8 +939,21 @@ function renderSkillsList() {
   // "Your skills" section — show the header only when there's also a
   // built-in section to distinguish from (otherwise it's just the list).
   if (cards.length) {
-    if (showBuiltin) container.appendChild(_mkSectionHeader('user', 'Your skills', cards.length));
+    if (showBuiltin || sortedPortal.length) container.appendChild(_mkSectionHeader('user', 'Local skills', cards.length));
     cards.forEach(c => { c.dataset.skillSection = 'user'; container.appendChild(c); });
+  }
+
+  // MAD MCP exposes discovery metadata only. These entries never join the
+  // local skill registry or gain slash-command/action authority implicitly.
+  if (sortedPortal.length) {
+    const portalCards = _buildPortalSkillCards(sortedPortal);
+    container.appendChild(_mkSectionHeader('portal', 'MAD MCP Skills Hub', portalCards.length));
+    const note = document.createElement('div');
+    note.className = 'portal-skills-note';
+    note.dataset.skillSection = 'portal';
+    note.textContent = 'Read-only catalog from your connected Portal. Installing a skill remains an explicit governed action.';
+    container.appendChild(note);
+    portalCards.forEach(c => { c.dataset.skillSection = 'portal'; container.appendChild(c); });
   }
 
   // Built-in capabilities — read-only cards (the agent's native tools).

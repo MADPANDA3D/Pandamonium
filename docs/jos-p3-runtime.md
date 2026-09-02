@@ -22,6 +22,32 @@ retrieval projections.
   generator version. Dependency, build, VCS, Obsidian plugin, and secret paths
   are excluded.
 
+## Brain operator surface
+
+The Brain UI reports each storage/retrieval layer separately through
+`GET /api/memory/status`; it must not imply that an optional projection is the
+canonical store.
+
+| Layer | Authority | Behavior |
+| --- | --- | --- |
+| Canonical memory | Owner-scoped `data/memory.json` ledger | Auditable source of approved recall records |
+| Keyword recall | Canonical-record fallback | Remains available when semantic retrieval is degraded |
+| Chroma | Local semantic projection | Optional and rebuildable; a missing service is reported as degraded |
+| Qdrant | Optional remote/local projection | Write-only until reads are explicitly enabled and accepted |
+| Local skills | Owner-scoped `data/skills/**/SKILL.md` bundles | May be reviewed, published, injected, and invoked under native policy |
+| MAD MCP skills | Read-only Portal catalog metadata | Searchable discovery only; visibility never grants install or execution authority |
+
+Text imports remain review-before-save. Full transcripts, archives, and mixed
+memory exports should be retained as Library/RAG source material; only stable,
+reviewed facts belong in the personal-memory ledger. Project-specific memory
+stays with its project unless the operator explicitly promotes a fact to the
+global owner layer.
+
+Code-graph generators such as Graphify complement retrieval projections but do
+not replace them: they derive relationship artifacts from explicitly selected
+source roots. Any such generator remains an optional governed extension, with
+dependency installation, source roots, and indexing runs separately approved.
+
 ## Migration API
 
 | Method and path | Effect |

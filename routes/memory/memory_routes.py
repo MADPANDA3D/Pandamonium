@@ -134,6 +134,59 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         user = _owner(request)
         return {"memory": memory_manager.load(owner=user)}
 
+    @router.get("/status")
+    def api_memory_status(request: Request):
+        """Return a secret-free, owner-scoped Brain storage health summary."""
+        user = _owner(request)
+        canonical_count = len(memory_manager.load(owner=user))
+
+        semantic_state = "disabled"
+        semantic_count = 0
+        if memory_vector is not None:
+            semantic_state = "ready" if bool(memory_vector.healthy) else "degraded"
+            if memory_vector.healthy:
+                try:
+                    semantic_count = max(0, int(memory_vector.count()))
+                except Exception:
+                    semantic_state = "degraded"
+                    semantic_count = 0
+
+        projection = getattr(memory_vector, "_qdrant", None)
+        projection_configured = bool(
+            (projection is not None and getattr(projection, "enabled", False))
+            or os.getenv("QDRANT_URL")
+        )
+        projection_reads = bool(
+            projection_configured
+            and (
+                getattr(projection, "read_enabled", False)
+                or str(os.getenv("ODYSSEUS_QDRANT_READS_ENABLED", "")).lower()
+                in {"1", "true", "yes", "on"}
+            )
+        )
+        if not projection_configured:
+            projection_state = "not_configured"
+        elif projection is None or not getattr(projection, "healthy", False):
+            projection_state = "degraded"
+        elif projection_reads:
+            projection_state = "ready"
+        else:
+            projection_state = "write_only"
+
+        return {
+            "canonical": {"state": "ready", "count": canonical_count},
+            "keyword_recall": {"state": "ready"},
+            "semantic_recall": {
+                "state": semantic_state,
+                "count": semantic_count,
+            },
+            "qdrant_projection": {
+                "state": projection_state,
+                "configured": projection_configured,
+                "read_enabled": projection_reads,
+            },
+        }
+
     @router.post("/search")
     def search_memories(request: Request, query: str = Form(...), session_id: str = Form(None), category: str = Form(None)):
         """Search across all memories with optional filters."""

@@ -132,7 +132,7 @@ def _portal_result_payload(result) -> dict | None:
     return None
 
 
-def _portal_payload_items(payload: dict | None) -> list:
+def _portal_payload_items(payload: dict | None, *, limit: int = 25) -> list:
     """Find one bounded item list in a Portal response envelope."""
     candidates = [payload]
     visited = 0
@@ -143,12 +143,51 @@ def _portal_payload_items(payload: dict | None) -> list:
             continue
         items = candidate.get("items")
         if isinstance(items, list):
-            return items[:25]
+            return items[:max(0, min(int(limit), 200))]
         for key in ("data", "result", "response"):
             nested = candidate.get(key)
             if isinstance(nested, dict):
                 candidates.append(nested)
     return []
+
+
+def _public_portal_skills(payload: dict | None) -> list[dict]:
+    """Project only inert, bounded skill catalog metadata to the browser.
+
+    Portal skill bodies and install details are intentionally excluded. Merely
+    discovering a remote skill must not grant it local execution authority.
+    """
+    skills = []
+    for raw in _portal_payload_items(payload, limit=200):
+        if not isinstance(raw, dict):
+            continue
+        skill_id = _bounded_portal_text(
+            raw.get("id") or raw.get("skillId") or raw.get("skill_id"),
+            160,
+        )
+        slug = _bounded_portal_text(raw.get("slug"), 160)
+        name = _bounded_portal_text(
+            raw.get("name") or raw.get("title"),
+            200,
+        ) or slug or skill_id
+        if not name:
+            continue
+        skills.append({
+            "id": skill_id or slug or name,
+            "slug": slug,
+            "name": name,
+            "description": _bounded_portal_text(
+                raw.get("description") or raw.get("summary"),
+                500,
+            ),
+            "scope": _bounded_portal_text(
+                raw.get("scope") or raw.get("library"),
+                60,
+            ),
+            "category": _bounded_portal_text(raw.get("category"), 100),
+            "source": MAD_MCP_PORTAL_ID,
+        })
+    return skills
 
 
 def _portal_error_code(payload: dict | None) -> str:
@@ -437,6 +476,51 @@ def setup_mcp_routes(mcp_manager: McpManager):
             catalog = await _read_portal_catalog()
             if catalog:
                 response.update(catalog)
+        return response
+
+    @router.get("/portal/skills")
+    async def portal_skills(request: Request):
+        """Return read-only MAD MCP skill metadata through the active session."""
+        require_admin(request)
+        db = SessionLocal()
+        try:
+            srv = db.query(McpServer).filter(McpServer.id == MAD_MCP_PORTAL_ID).first()
+            configured = bool(srv and _static_http_headers(srv.oauth_tokens))
+        finally:
+            db.close()
+
+        portal_status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID).get(
+            "status", "disconnected"
+        )
+        response = {
+            "configured": configured,
+            "status": portal_status if configured else "not_configured",
+            "skills": [],
+            "count": 0,
+        }
+        if not configured or portal_status != "connected":
+            return response
+
+        try:
+            result = await mcp_manager.call_tool(
+                f"mcp__{MAD_MCP_PORTAL_ID}__portal.list_skills",
+                {"limit": 200, "offset": 0},
+                timeout_seconds=20,
+                max_output_bytes=1_000_000,
+            )
+            payload = _portal_result_payload(result)
+            if payload is None or payload.get("ok") is False:
+                response["status"] = "unavailable"
+                return response
+            skills = _public_portal_skills(payload)
+            response.update({
+                "status": "ready",
+                "skills": skills,
+                "count": len(skills),
+            })
+        except Exception as exc:
+            logger.warning("Portal skill discovery failed: %s", type(exc).__name__)
+            response["status"] = "unavailable"
         return response
 
     @router.get("/portal/mailboxes")

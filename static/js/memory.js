@@ -17,6 +17,48 @@ let selectMode = false;
 let selectedIds = new Set();
 
 
+function _brainStateLabel(state) {
+  return ({
+    ready: 'Ready',
+    degraded: 'Degraded',
+    disabled: 'Disabled',
+    not_configured: 'Not configured',
+    write_only: 'Write-only mirror',
+  })[state] || 'Unknown';
+}
+
+async function loadBrainStatus() {
+  const rows = {
+    canonical: document.getElementById('brain-status-canonical'),
+    keyword_recall: document.getElementById('brain-status-keyword'),
+    semantic_recall: document.getElementById('brain-status-semantic'),
+    qdrant_projection: document.getElementById('brain-status-qdrant'),
+  };
+  if (!Object.values(rows).some(Boolean)) return;
+  try {
+    const res = await fetch(`${window.location.origin}/api/memory/status`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    for (const [key, el] of Object.entries(rows)) {
+      if (!el) continue;
+      const item = data[key] || {};
+      let detail = _brainStateLabel(item.state);
+      if ((key === 'canonical' || key === 'semantic_recall') && Number.isFinite(item.count)) {
+        detail += ` · ${item.count} record${item.count === 1 ? '' : 's'}`;
+      }
+      el.textContent = detail;
+      el.dataset.state = item.state || 'unknown';
+    }
+  } catch (error) {
+    for (const el of Object.values(rows)) {
+      if (!el) continue;
+      el.textContent = 'Unavailable';
+      el.dataset.state = 'degraded';
+    }
+  }
+}
+
+
 const MEMORY_CATEGORIES = ['fact', 'identity', 'preference', 'contact', 'project', 'goal', 'task'];
 
 // Sort-option icons for the custom Memory sort picker (and Skills picker
@@ -405,6 +447,7 @@ export async function loadMemories() {
   }
   // Always wire toggles, even if memory API failed
   syncToggles();
+  loadBrainStatus();
 }
 
 // ---- Bulk select mode ----
@@ -1460,6 +1503,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // Lazy-load skills tab (cascade=true → play the domino-in entrance)
       if (target === 'skills') {
         import('./skills.js').then(m => { if (m.loadSkills) m.loadSkills(true); else if (m.default?.loadSkills) m.default.loadSkills(true); });
+      } else if (target === 'settings') {
+        loadBrainStatus();
       }
     });
   });
