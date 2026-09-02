@@ -151,9 +151,7 @@ class QdrantProjection:
             json={"points": [self._point_id(memory_id)]},
         )
 
-    def search(self, vector: List[float], *, owner: Optional[str], limit: int) -> List[Dict]:
-        if not self.read_enabled:
-            return []
+    def _search(self, vector: List[float], *, owner: Optional[str], limit: int) -> List[Dict]:
         must = [{"key": "status", "match": {"value": "approved"}}]
         if owner is not None:
             must.insert(0, {"key": "owner", "match": {"value": owner}})
@@ -178,6 +176,34 @@ class QdrantProjection:
             for point in points or []
             if isinstance(point, dict) and point.get("id")
         ]
+
+    def search(self, vector: List[float], *, owner: Optional[str], limit: int) -> List[Dict]:
+        if not self.read_enabled:
+            return []
+        return self._search(vector, owner=owner, limit=limit)
+
+    def search_for_parity(
+        self, vector: List[float], *, owner: Optional[str], limit: int
+    ) -> List[Dict]:
+        """Read the shadow projection without promoting production retrieval."""
+        if not self.enabled:
+            return []
+        return self._search(vector, owner=owner, limit=limit)
+
+    def count_for_parity(self, *, owner: Optional[str]) -> int:
+        """Count approved shadow points for one owner without changing read state."""
+        if not self.enabled:
+            return 0
+        must = [{"key": "status", "match": {"value": "approved"}}]
+        if owner is not None:
+            must.insert(0, {"key": "owner", "match": {"value": owner}})
+        response = self._request(
+            "POST",
+            f"/collections/{self.collection}/points/count",
+            json={"filter": {"must": must}, "exact": True},
+        )
+        result = response.json().get("result") or {}
+        return max(0, int(result.get("count", 0)))
 
     def reset(self, vector_size: int) -> None:
         if not self.enabled:

@@ -76,6 +76,13 @@ _BUILTIN_SERVERS = {
     "email":      ("mcp_servers/email_server.py",      "Built-in: Email"),
 }
 
+_OPTIONAL_BUILTIN_SERVERS = {
+    "graphify_guarded": (
+        "mcp_servers/graphify_server.py",
+        "Optional: Graphify (explicit roots)",
+    ),
+}
+
 # NPX-based built-in servers (run via npx, not Python)
 _BUILTIN_NPX_SERVERS = {
     "builtin_browser": {
@@ -154,6 +161,21 @@ async def register_builtin_servers(mcp_manager):
             logger.warning(f"Built-in MCP server script not found: {script_path}")
             continue
         _spawn_bg(_connect_python_server(server_id, script_path, name))
+
+    try:
+        from src.graphify_runtime import configured_roots
+
+        graphify_roots = configured_roots()
+    except ValueError as exc:
+        graphify_roots = {}
+        logger.warning("Optional Graphify server disabled: %s", exc)
+    if graphify_roots:
+        for server_id, (script, name) in _OPTIONAL_BUILTIN_SERVERS.items():
+            script_path = os.path.join(base_dir, script)
+            if os.path.exists(script_path):
+                _spawn_bg(_connect_python_server(server_id, script_path, name))
+            else:
+                logger.warning("Optional MCP server script not found: %s", script_path)
 
     # Register NPX-based servers in the background (they take longer to start)
     npx_path = _find_npx()

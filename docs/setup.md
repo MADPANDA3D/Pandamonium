@@ -435,10 +435,11 @@ Key settings:
 | `EMBEDDING_URL` | -- | OpenAI-compatible embeddings endpoint |
 | `QDRANT_URL` | -- | Optional Qdrant projection endpoint; unset keeps the projection disabled |
 | `QDRANT_API_KEY` | -- | Optional Qdrant API key |
-| `JARVIS_QDRANT_MEMORY_COLLECTION` | `jarvis_memory_personal` | Approved personal-memory projection |
-| `JARVIS_QDRANT_DOCUMENT_COLLECTION` | `jarvis_documents` | Canonical-document projection |
-| `JARVIS_QDRANT_WIKI_COLLECTION` | `jarvis_wiki` | Generated-wiki projection |
-| `JARVIS_QDRANT_READS_ENABLED` | `false` | Promote Qdrant reads only after live parity checks |
+| `ODYSSEUS_QDRANT_MEMORY_COLLECTION` | `odysseus_memory` | Approved personal-memory projection; legacy `JARVIS_` name remains accepted |
+| `ODYSSEUS_QDRANT_DOCUMENT_COLLECTION` | `odysseus_documents` | Canonical-document projection; legacy `JARVIS_` name remains accepted |
+| `ODYSSEUS_QDRANT_WIKI_COLLECTION` | `odysseus_wiki` | Generated-wiki projection; legacy `JARVIS_` name remains accepted |
+| `ODYSSEUS_QDRANT_READS_ENABLED` | `false` | Promote Qdrant reads only after live parity checks; legacy `JARVIS_` name remains accepted |
+| `ODYSSEUS_GRAPHIFY_ROOTS` | -- | Optional JSON map of explicit repository/output roots; no startup or workspace scan occurs |
 | `ODYSSEUS_CHAT_UPLOAD_MAX_BYTES` | `10485760` | Chat/agent attachment cap in bytes. Raise for larger local PDFs or text documents. |
 | `ODYSSEUS_GALLERY_UPLOAD_MAX_BYTES` | `104857600` | Gallery image upload cap in bytes (100 MB). |
 | `ODYSSEUS_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES` | `26214400` | Gallery transform input cap in bytes (25 MB). |

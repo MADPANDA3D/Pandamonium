@@ -48,6 +48,25 @@ not replace them: they derive relationship artifacts from explicitly selected
 source roots. Any such generator remains an optional governed extension, with
 dependency installation, source roots, and indexing runs separately approved.
 
+### Optional Graphify code graph
+
+Graphify is disabled unless an operator supplies `ODYSSEUS_GRAPHIFY_ROOTS` as
+a JSON map of short root IDs to exact `repository_root` and isolated
+`output_root` paths. The application never walks the workspace to discover
+repositories and never builds a graph during startup. Build one admitted root
+explicitly:
+
+```bash
+scripts/odysseus-graphify build --root-id project
+```
+
+The fixed build is local, code-only, single-worker, and writes outside the
+repository. The optional MCP wrapper exposes only `graphify_status` and
+`graphify_query`; callers select a configured root ID rather than submitting a
+filesystem path. Upstream multi-project path selection and PR/network tools are
+not exposed. Tool results are path-redacted and capped at 32 KiB. Graphify is
+an optional runtime dependency and is not installed by the public default.
+
 ## Migration API
 
 | Method and path | Effect |
@@ -73,6 +92,20 @@ New installations use `odysseus_memory`, `odysseus_documents`, and
 legacy `JARVIS_QDRANT_*` variables and existing MADPANDA knowledge data paths
 remain compatibility aliases. The canonical ledger/source set can rebuild any
 projection.
+
+The `scripts/odysseus-qdrant-parity` diagnostic compares owner-filtered counts,
+ranked canonical IDs, and cosine scores against the first canonical Chroma lane
+without changing the production read flag:
+
+```bash
+scripts/odysseus-qdrant-parity \
+  --owner OWNER_ID \
+  --query "first representative query" \
+  --query "second representative query"
+```
+
+Promotion remains an explicit operator deployment decision after parity,
+owner isolation, rebuild, and deletion proof.
 
 If Qdrant fails, canonical writes and Chroma recall continue. Unset
 `QDRANT_URL` to roll back without converting memory or documents.
