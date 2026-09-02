@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import io
 import json
 import os
@@ -12,6 +13,33 @@ from typing import Any
 
 TTS_INFERENCE_LOCK = asyncio.Lock()
 _SENTENCE_END = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
+
+
+def speech_text(text: str) -> str:
+    """Turn display Markdown into natural speech without changing the chat copy."""
+    text = re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"```[\s\S]*?```|~~~[\s\S]*?~~~", "", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"https?://\S+|www\.\S+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "", text)
+    text = re.sub(r"\(\s*ID\s*[:#]?\s*[A-Za-z0-9_-]{6,}\s*\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b[0-9a-f]{8}-[0-9a-f-]{27,}\b|\b[0-9a-f]{10,}\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", html.unescape(text))
+
+    paragraphs = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        lines = []
+        for line in paragraph.splitlines():
+            line = re.sub(r"^\s*(?:#{1,6}|>|[-*+]\s+|\d+[.)]\s+)", "", line)
+            line = re.sub(r"`([^`]+)`", r"\1", line)
+            line = re.sub(r"[*_~]+", "", line)
+            line = " ".join(line.split())
+            if line and not re.fullmatch(r"\|?\s*:?-{3,}.*", line):
+                lines.append(line.strip(" |").rstrip(" :;,-"))
+        if lines:
+            paragraphs.append(" ".join(lines))
+    return "\n\n".join(paragraphs).strip()
 
 
 def speech_blocks(text: str, *, first_max_chars: int = 280, max_chars: int = 360) -> list[str]:

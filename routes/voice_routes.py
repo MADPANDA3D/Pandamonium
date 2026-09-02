@@ -37,7 +37,7 @@ from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
 from src.settings import load_settings
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
-from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, wav_to_pcm16
+from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, speech_text, wav_to_pcm16
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
@@ -45,8 +45,8 @@ ORACLE_PROTOCOL_URL = (
     os.getenv("ODYSSEUS_ORACLE_URL", "").strip()
     or extension_runtime_host.urls.get("oracle", "")
 )
-VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "600"))
-VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "1200"))
+VOICE_NORMAL_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_NUM_PREDICT", "1200"))
+VOICE_LONG_NUM_PREDICT = int(os.getenv("ODYSSEUS_VOICE_LONG_NUM_PREDICT", "2400"))
 VOICE_CONTEXT_LENGTH = int(os.getenv("ODYSSEUS_VOICE_CONTEXT_LENGTH", "32768"))
 VOICE_TTS_PREWARM_TIMEOUT_SECONDS = 30.0
 VOICE_SERVER_TTS_ERROR = (
@@ -268,33 +268,77 @@ class VoicePlaybackUpdate(BaseModel):
 
 
 class _SpeechTurn:
-    """One completed spoken payload consumed by one TTS inference."""
+    """One sentence-fed spoken payload consumed by the existing TTS stream."""
 
     def __init__(self, session_id: str, turn_id: str):
         self.session_id = session_id
         self.turn_id = turn_id
         self.voice: str | None = None
         self.text = ""
+        self.raw_text = ""
+        self.pending_text = ""
         self.finished = False
         self.cancelled = False
         self.error: str | None = None
         self.created_at = time.monotonic()
         self.done = asyncio.Event()
+        self.blocks: asyncio.Queue[str | None] = asyncio.Queue()
 
-    async def complete(self, text: str) -> None:
-        self.text = text.strip()
+    def feed(self, delta: str) -> bool:
+        if self.finished or not delta:
+            return False
+        self.raw_text += delta
+        self.pending_text += delta
+        matches = list(re.finditer(r"[.!?][\"')\]]*(?=\s|$)", self.pending_text))
+        if not matches:
+            return False
+        cut = matches[-1].end()
+        ready = speech_text(self.pending_text[:cut])
+        self.pending_text = self.pending_text[cut:].lstrip()
+        return self._queue_text(ready)
+
+    def _queue_text(self, text: str) -> bool:
+        queued = False
+        for block in speech_blocks(text):
+            self.blocks.put_nowait(block)
+            self.text = f"{self.text} {block}".strip()
+            queued = True
+        return queued
+
+    async def complete(self, text: str | None = None) -> None:
+        if text is not None and not self.raw_text:
+            self.raw_text = text
+            self.pending_text = text
+        self._queue_text(speech_text(self.pending_text))
+        self.pending_text = ""
         self.finished = True
         self.done.set()
+        self.blocks.put_nowait(None)
 
     async def fail(self, error: str) -> None:
         self.error = error
         self.finished = True
         self.done.set()
+        self.blocks.put_nowait(None)
 
     async def cancel(self) -> None:
         self.cancelled = True
         self.finished = True
         self.done.set()
+        self.blocks.put_nowait(None)
+
+    async def iter_blocks(self):
+        while True:
+            block = await self.blocks.get()
+            if block is None:
+                break
+            yield block
+        if self.cancelled:
+            raise RuntimeError("Voice playback was interrupted")
+        if self.error:
+            raise RuntimeError(self.error)
+        if not self.text:
+            raise RuntimeError("Jarvis produced no spoken response")
 
     async def wait(self) -> str:
         await self.done.wait()
@@ -684,14 +728,11 @@ def _artifact_spoken_handoff(prompt: str, response_text: str) -> str | None:
 async def _select_spoken_text(prompt: str, response_text: str) -> str:
     response_text = response_text.strip()
     if _asks_read_all(prompt):
-        return response_text if len(response_text) <= 4000 else _bounded_spoken_text(response_text)
+        return speech_text(response_text)
     artifact_handoff = _artifact_spoken_handoff(prompt, response_text)
     if artifact_handoff:
-        return artifact_handoff
-    paragraphs = [part for part in re.split(r"\n\s*\n", response_text) if part.strip()]
-    if len(response_text) <= 1200 and len(paragraphs) <= 3:
-        return response_text
-    return _bounded_spoken_text(response_text)
+        return speech_text(artifact_handoff)
+    return speech_text(response_text)
 
 
 async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
@@ -3452,6 +3493,9 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         user_turn = _append_turn(session, "user", text, "thinking")
         _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
         speech_turn = _register_speech_turn(session_id)
+        speech_turn.voice = _tts_voice_for_final({
+            "diagnostics": {"character_name": _voice_character_name(turn_session)},
+        })
         session["active_audio_turn_id"] = speech_turn.turn_id
         _save_state(state)
         chat_session_id = str(session.get("chat_session_id") or "")
@@ -3460,6 +3504,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             try:
                 final: dict[str, Any] | None = None
                 handoff_greetings: list[dict[str, Any]] = []
+                audio_announced = False
+                stream_speech = _requested_artifact_kind(text) is None
                 yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
                 async for event in _voice_events_with_heartbeats(
                     _jarvis_events(chat_session_id, text, owner, turn_session)
@@ -3505,14 +3551,27 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                     if event.get("type") == "final":
                         final = _decorate_voice_final(event, turn_session)
                         event = final
+                    if event.get("type") == "assistant_delta" and stream_speech:
+                        if speech_turn.feed(str(event.get("text") or "")) and not audio_announced:
+                            audio_announced = True
+                            yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
                     yield f"data: {json.dumps(event)}\n\n"
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
-                spoken_text = await _spoken_text_for_final(text, final)
                 speech_turn.voice = _tts_voice_for_final(final)
+                if stream_speech:
+                    final_text = str(final["assistant_text"])
+                    if not speech_turn.raw_text:
+                        speech_turn.feed(final_text)
+                    elif final_text.startswith(speech_turn.raw_text):
+                        speech_turn.feed(final_text[len(speech_turn.raw_text):])
+                    await speech_turn.complete()
+                else:
+                    await speech_turn.complete(await _spoken_text_for_final(text, final))
+                spoken_text = speech_turn.text
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
-                await speech_turn.complete(spoken_text)
-                yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
+                if not audio_announced:
+                    yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
                 current_state = _load_state()
                 current = _session(current_state, session_id)
                 task_ids = final.get("task_ids") or []
@@ -3618,14 +3677,9 @@ def setup_voice_routes(session_manager=None, tts_service=None):
             block_count = 0
             spoken_text = ""
             try:
-                spoken_text = await speech_turn.wait()
-                blocks = speech_blocks(spoken_text)
-                if not blocks:
-                    raise RuntimeError("Jarvis produced no spoken response")
-
                 sample_rate: int | None = None
-                async with TTS_INFERENCE_LOCK:
-                    for index, block in enumerate(blocks):
+                async for block in speech_turn.iter_blocks():
+                    async with TTS_INFERENCE_LOCK:
                         if speech_turn.cancelled:
                             raise RuntimeError("Voice playback was interrupted")
                         block_started = time.perf_counter()
@@ -3650,7 +3704,7 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                         block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
                         yield json.dumps({
                             "type": "block",
-                            "index": index,
+                            "index": block_count,
                             "text_chars": len(block),
                             "generation_ms": block_generation_ms,
                             "audio_ms": block_audio_ms,
@@ -3667,6 +3721,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
                         if speech_turn.cancelled:
                             raise RuntimeError("Voice playback was interrupted")
                         _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
+
+                spoken_text = speech_turn.text
 
                 yield json.dumps({
                     "type": "done",

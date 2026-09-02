@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from src.voice_pcm import TTS_INFERENCE_LOCK, stream_tts_pcm_segment
+from src.voice_pcm import TTS_INFERENCE_LOCK, speech_text, stream_tts_pcm_segment
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +57,15 @@ def setup_tts_routes(tts_service):
                     status_code=503,
                     detail={"message": "TTS service not available"}
                 )
+            text = speech_text(request.text)
+            if not text:
+                raise HTTPException(status_code=400, detail={"message": "Speech text is required"})
             
             if request.format == "base64":
                 async with TTS_INFERENCE_LOCK:
                     audio_b64 = await asyncio.to_thread(
                         tts_service.synthesize_to_base64,
-                        request.text,
+                        text,
                         model=request.model,
                         voice=request.voice,
                         speed=request.speed,
@@ -79,7 +82,7 @@ def setup_tts_routes(tts_service):
                 async with TTS_INFERENCE_LOCK:
                     audio_data = await asyncio.to_thread(
                         tts_service.synthesize,
-                        request.text,
+                        text,
                         model=request.model,
                         voice=request.voice,
                         speed=request.speed,
@@ -114,7 +117,7 @@ def setup_tts_routes(tts_service):
     @router.post("/stream")
     async def stream_speech(request: TTSRequest):
         """Relay one native PCM inference for the complete utterance."""
-        text = request.text.strip()
+        text = speech_text(request.text)
         if not text:
             raise HTTPException(status_code=400, detail={"message": "Speech text is required"})
         if not tts_service.available:

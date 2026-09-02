@@ -134,7 +134,7 @@ def test_direct_gordon_turn_persists_foreground_identity(monkeypatch, tmp_path):
     assert assistant.metadata.get("task_id") is None
 
 
-def test_stream_keeps_slow_agent_alive_and_opens_audio_after_final(monkeypatch, tmp_path):
+def test_stream_keeps_slow_agent_alive_and_opens_audio_on_first_sentence(monkeypatch, tmp_path):
     completed = False
 
     async def slow_events(*_args, **_kwargs):
@@ -173,7 +173,7 @@ def test_stream_keeps_slow_agent_alive_and_opens_audio_after_final(monkeypatch, 
     ]
     assert response.status_code == 200
     assert ": heartbeat" in response.text
-    assert event_types.index("final") < event_types.index("audio_ready")
+    assert event_types.index("audio_ready") < event_types.index("final")
     assert completed is True
 
 
@@ -286,18 +286,18 @@ def test_voice_session_requires_server_tts_at_start_and_use(monkeypatch, tmp_pat
 
 
 def test_voice_num_predict_stays_short_unless_detail_requested():
-    assert voice_routes._num_predict_for_text("Who are you?") == voice_routes.VOICE_NORMAL_NUM_PREDICT
-    assert voice_routes._num_predict_for_text("Explain this in detail.") == voice_routes.VOICE_LONG_NUM_PREDICT
+    assert voice_routes._num_predict_for_text("Who are you?") == 1200
+    assert voice_routes._num_predict_for_text("Explain this in detail.") == 2400
 
 
-def test_spoken_text_policy_keeps_short_bounds_long_and_honors_read_all():
+def test_spoken_text_policy_keeps_complete_answers_and_honors_read_all():
     short = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
     long = "A long response with details. " * 80
 
     assert asyncio.run(voice_routes._select_spoken_text("Tell me", short)) == short
-    assert asyncio.run(voice_routes._select_spoken_text("Tell me", long)) == voice_routes._bounded_spoken_text(long)
+    assert asyncio.run(voice_routes._select_spoken_text("Tell me", long)) == long.strip()
     assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 4000)) == "x" * 4000
-    assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 5000)) == voice_routes._bounded_spoken_text("x" * 5000)
+    assert asyncio.run(voice_routes._select_spoken_text("Read it all", "x" * 5000)) == "x" * 5000
 
 
 def test_spoken_text_policy_hands_off_artifacts_without_reading_them_aloud():

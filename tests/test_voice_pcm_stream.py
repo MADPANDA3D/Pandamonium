@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from routes import tts_routes, voice_routes
-from src.voice_pcm import pcm_frames, speech_blocks, wav_to_pcm16
+from src.voice_pcm import pcm_frames, speech_blocks, speech_text, wav_to_pcm16
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +75,27 @@ def test_speech_blocks_bound_long_paragraphs_without_dropping_words():
     assert len(blocks) >= 3
     assert max(map(len, blocks)) <= 360
     assert " ".join(blocks) == text
+
+
+def test_speech_text_skips_display_markup_urls_and_opaque_ids():
+    display = "**Plugins**\n- MAD MCP Portal (ID 9d618e74470e)\n- [Docs](https://example.test/setup)"
+
+    assert speech_text(display) == "Plugins MAD MCP Portal Docs"
+
+
+def test_speech_turn_exposes_finished_sentences_before_completion():
+    async def exercise():
+        turn = voice_routes._SpeechTurn("session", "turn")
+        assert turn.feed("First sentence is ready. Second sentence") is True
+        first = await anext(turn.iter_blocks())
+        assert first == "First sentence is ready."
+        assert turn.feed(" is complete.") is True
+        await turn.complete()
+        remaining = [block async for block in turn.iter_blocks()]
+        assert remaining == ["Second sentence is complete."]
+        assert turn.text == "First sentence is ready. Second sentence is complete."
+
+    asyncio.run(exercise())
 
 
 def test_voice_turn_audio_streams_semantic_chatterbox_blocks(monkeypatch, tmp_path):
@@ -197,3 +218,27 @@ def test_tts_synthesize_uses_shared_lock_for_audio_and_base64():
     assert client.post("/api/tts/synthesize", json={"text": "audio"}).status_code == 200
     assert client.post("/api/tts/synthesize", json={"text": "base64", "format": "base64"}).json() == {"audio": "YXVkaW8="}
     assert tts.calls == [("audio", "audio", True), ("base64", "base64", True)]
+
+
+def test_tts_routes_send_only_clean_spoken_text_to_the_provider():
+    class FakeTTS:
+        available = True
+
+        def __init__(self):
+            self.text = ""
+
+        def synthesize(self, text, **_kwargs):
+            self.text = text
+            return b"ID3audio"
+
+    tts = FakeTTS()
+    app = FastAPI()
+    app.include_router(tts_routes.setup_tts_routes(tts))
+
+    response = TestClient(app).post(
+        "/api/tts/synthesize",
+        json={"text": "**Portal** (ID 9d618e74470e): https://example.test/setup"},
+    )
+
+    assert response.status_code == 200
+    assert tts.text == "Portal"

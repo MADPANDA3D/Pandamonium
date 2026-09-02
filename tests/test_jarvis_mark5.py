@@ -27,8 +27,8 @@ def test_leos_worker_names_route_without_confusing_nimbus_and_vps():
 
 
 def test_mark5_voice_budgets():
-    assert VOICE_NORMAL_NUM_PREDICT == 600
-    assert VOICE_LONG_NUM_PREDICT == 1200
+    assert VOICE_NORMAL_NUM_PREDICT == 1200
+    assert VOICE_LONG_NUM_PREDICT == 2400
 
 
 def test_agent_tools_and_worker_defaults_are_narrow():
