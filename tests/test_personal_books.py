@@ -348,3 +348,47 @@ def test_manage_books_search_is_owner_scoped_and_returns_page_provenance(monkeyp
     assert result["results"][0]["page"] == 17
     assert "/api/personal/books" in calls[0][0]
     assert "/srv/" not in result["output"]
+
+
+def test_manage_books_list_keeps_model_payload_focused(monkeypatch):
+    catalog = [{
+        "id": "private-catalog-id",
+        "title": "USMC Land Navigation",
+        "filename": "land-navigation.pdf",
+        "status": "ready",
+        "page_count": 41,
+        "chunk_count": 9,
+        "ocr_status": "not_needed",
+        "needs_attention": False,
+        "updated_at": "2026-09-02T01:00:00Z",
+        "source": "/private/owner/path/land-navigation.pdf",
+    }]
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"books": catalog}
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, headers):
+            return _Response()
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+    result = asyncio.run(do_manage_books('{"action":"list"}', owner="leo"))
+
+    assert result["books"] == catalog
+    assert "USMC Land Navigation" in result["output"]
+    assert "private-catalog-id" not in result["output"]
+    assert "updated_at" not in result["output"]
+    assert "/private/owner/path" not in result["output"]

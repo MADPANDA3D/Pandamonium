@@ -794,8 +794,16 @@ async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
 
     public_books = [item for item in catalog if isinstance(item, dict)]
     if action == "list":
+        summary_fields = (
+            "title", "filename", "page_count", "status", "chunk_count",
+            "ocr_status", "needs_attention", "attention_reason",
+        )
+        model_books = [
+            {key: book.get(key) for key in summary_fields if key in book}
+            for book in public_books
+        ]
         return {
-            "output": json.dumps({"books": public_books}, ensure_ascii=False),
+            "output": json.dumps({"books": model_books}, ensure_ascii=False),
             "books": public_books,
             "count": len(public_books),
             "exit_code": 0,

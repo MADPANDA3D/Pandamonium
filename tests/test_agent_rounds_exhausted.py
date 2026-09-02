@@ -89,3 +89,37 @@ def test_emits_loop_breaker_triggered_when_loop_breaker_trips(monkeypatch):
     guard = next((e for e in events if e.get("type") == "loop_breaker_triggered"), None)
     assert guard is not None, events
     assert guard["reason"] == "loop_breaker_stall"
+
+
+def test_empty_post_tool_completion_forces_a_final_answer(monkeypatch):
+    _patch_common(monkeypatch)
+    rounds = iter([
+        "```bash\necho hi\n```",
+        "",
+        "Final answer from the tool result.",
+    ])
+
+    async def _fake_stream(_candidates, messages, **kwargs):
+        text = next(rounds)
+        if text:
+            yield f'data: {json.dumps({"delta": text})}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
+    events = _types(_collect(al.stream_agent_loop(
+        "http://x/v1", "m",
+        [{"role": "user", "content": "do a long multi-step task"}],
+        max_rounds=3,
+        relevant_tools={"bash"},
+    )))
+
+    assert any(e.get("delta") == "Final answer from the tool result." for e in events), events
+    assert not any(e.get("type") == "rounds_exhausted" for e in events), events
+
+
+def test_tool_result_without_answer_gets_visible_failure_fallback():
+    response, chunk = al._empty_response_fallback("", "hidden reasoning", [{"tool": "bash"}])
+
+    assert "tool call completed" in response
+    assert chunk is not None
+    assert "hidden reasoning" not in response

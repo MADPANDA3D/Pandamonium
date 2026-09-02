@@ -1693,7 +1693,16 @@ def setup_chat_routes(
                         elif chunk == "data: [DONE]\n\n":
                             _has_tool_events = bool((last_metrics or {}).get("tool_events"))
                             if full_response or _has_tool_events:
-                                _response_to_save = full_response or "Done."
+                                _response_to_save = full_response or (
+                                    "The tool call completed, but the model returned no final answer. "
+                                    "Please retry the request."
+                                )
+                                if not full_response:
+                                    logger.warning(
+                                        "Agent stream ended with tool events but no response; "
+                                        "persisting visible failure instead of Done."
+                                    )
+                                    yield f'data: {json.dumps({"delta": _response_to_save})}\n\n'
                                 _metrics_to_save = dict(last_metrics or {})
                                 if thinking_response.strip() and not _metrics_to_save.get("thinking"):
                                     _metrics_to_save["thinking"] = thinking_response.strip()

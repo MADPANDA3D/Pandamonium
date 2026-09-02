@@ -29,3 +29,10 @@ def test_session_fetch_normalizes_duplicate_ids_before_render():
     assert "function _normalizeSessionsList(fetched)" in source
     assert "if (seen.has(id)) continue;" in source
     assert "sessions = _normalizeSessionsList(fetched);" in source
+
+
+def test_session_menu_can_copy_exact_session_id():
+    source = SESSIONS_JS.read_text()
+
+    assert "<span>Copy Session ID</span>" in source
+    assert "uiModule.copyToClipboard(String(s.id))" in source

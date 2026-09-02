@@ -745,6 +745,20 @@ function createSessionItem(s) {
     }
   });
 
+  const copyIdItem = document.createElement('div');
+  copyIdItem.className = 'dropdown-item-compact';
+  copyIdItem.innerHTML = _icon(_copyIcon) + '<span>Copy Session ID</span>';
+  copyIdItem.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    dropdown.style.display = 'none';
+    try {
+      await uiModule.copyToClipboard(String(s.id));
+    } catch (err) {
+      console.error('Copy session ID failed:', err);
+      uiModule.showError('Failed to copy session ID');
+    }
+  });
+
   // Rename is already appended above (line 393)
 
   // "Select" — enter bulk select mode with this session pre-selected
@@ -771,6 +785,7 @@ function createSessionItem(s) {
   // Copy & Move to folder
   const folderItem = buildFolderSubmenu(s.id, s.folder, dropdown);
   dropdown.appendChild(copyItem);
+  dropdown.appendChild(copyIdItem);
   dropdown.appendChild(folderItem);
 
   // Separator before destructive actions

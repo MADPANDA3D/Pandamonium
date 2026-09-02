@@ -245,3 +245,34 @@ async def test_agent_caps_native_schemas_and_reports_the_omission(monkeypatch):
     assert mounted_schema_tokens <= manifest["budget"]["class_token_limits"]["tool_catalog"]
     assert metrics["input_tokens"] + mounted_schema_tokens <= manifest["budget"]["input_tokens"]
     assert "tool_catalog_budget_limited" in manifest["omissions"]
+
+
+@pytest.mark.asyncio
+async def test_current_domain_tool_is_prioritized_before_schema_cap(monkeypatch):
+    captured = {}
+    real_cap = agent_loop.cap_tool_schemas
+
+    def capturing_cap(schemas, input_budget, *, priority_names=None):
+        captured["priority_names"] = set(priority_names or ())
+        return real_cap(schemas, input_budget, priority_names=priority_names)
+
+    async def fake_stream(*args, **kwargs):
+        yield 'data: {"delta":"I checked your Books catalog."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "cap_tool_schemas", capturing_cap)
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Inspect my Books library and report its status."}],
+        context_length=4096,
+        max_tokens=1024,
+        relevant_tools={"manage_books"},
+    ):
+        pass
+
+    assert "manage_books" in captured["priority_names"]

@@ -2571,8 +2571,14 @@ def _empty_response_fallback(
         (final_response: str, chunk: str | None)
             chunk is the SSE string to yield, or None if nothing should be emitted.
     """
-    if full_response.strip() or tool_events:
+    if full_response.strip():
         return full_response, None
+    if tool_events:
+        _error_msg = (
+            "The tool call completed, but the model returned no final answer. "
+            "Please retry the request."
+        )
+        return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
     if round_reasoning.strip():
         return round_reasoning, None
     _error_msg = "The model returned an empty response. Please try again or switch to a different model."
@@ -3534,6 +3540,12 @@ async def stream_agent_loop(
             for name in _extension_names
         }
         _schema_priority = set(forced_tools or set()) | _extension_names
+        # Keep deterministic tools for the current request ahead of unrelated
+        # admin schemas when the provider-context budget caps the catalog.
+        # Otherwise an explicit Books request can receive prose describing
+        # manage_books while its callable schema is omitted from the payload.
+        for _domain in (_intent.get("domains") or set()):
+            _schema_priority.update(_DOMAIN_TOOL_MAP.get(str(_domain), set()))
         # When a workspace is active, keep the tiny discovery schema ahead of
         # larger navigation schemas. Without it, P2B catalog capping can leave
         # the model able to read files but unable to resolve which workspace
@@ -4070,6 +4082,29 @@ async def stream_agent_loop(
             yield f'data: {json.dumps({"delta": cleaned_round})}\n\n'
 
         if not tool_blocks:
+            _round_answer = _strip_think_blocks(cleaned_round).strip()
+            if tool_events and not _round_answer and not _force_answer:
+                # A provider may end a post-tool round successfully while
+                # emitting neither text nor another tool call. Do not treat
+                # that as task completion: force one schema-free round using
+                # the gathered results. The existing force-answer handler also
+                # performs a final synthesis attempt if that round is empty.
+                logger.warning(
+                    "[agent] empty post-tool completion on round %d; forcing final answer",
+                    round_num,
+                )
+                _force_answer = True
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "The tools completed, but your last turn contained no user-facing answer. "
+                        "Use the tool results already gathered to answer the user's original request "
+                        "now. Do not call more tools and do not reply with only 'Done'. If the results "
+                        "are insufficient, state exactly what is missing."
+                    ),
+                })
+                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                continue
             # ── Completion verifier (mechanism 3a) ────────────────────
             # The model is finishing. If this was an effectful agentic turn,
             # have a fresh-context verifier independently check the work
