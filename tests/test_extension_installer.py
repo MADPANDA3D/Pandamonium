@@ -436,11 +436,22 @@ def test_manifest_source_and_revision_mismatch_fail_before_approval(tmp_path, gi
 def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixture):
     repo, _v1, _v2 = git_fixture
     manager, _authority, _registry = _manager(tmp_path, repo)
-    paths = {route.path for route in setup_extension_routes(manager).routes}
+    routes = {route.path: route for route in setup_extension_routes(manager).routes}
 
-    assert paths == {
+    assert set(routes) == {
         "/api/extensions",
+        "/api/extensions/catalog",
         "/api/extensions/plans/source",
         "/api/extensions/plans/lifecycle",
         "/api/extensions/plans/{plan_id}/execute",
     }
+    dependencies = {
+        path: {dependency.call.__name__ for dependency in route.dependant.dependencies}
+        for path, route in routes.items()
+    }
+    assert dependencies["/api/extensions/catalog"] == {"require_user"}
+    assert all(
+        "require_admin" in route_dependencies
+        for path, route_dependencies in dependencies.items()
+        if path != "/api/extensions/catalog"
+    )

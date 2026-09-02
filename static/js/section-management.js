@@ -25,6 +25,9 @@ export function initSectionCollapse(Storage) {
       section.classList.add('collapsed');
     }
 
+    const chevronBtn = header.querySelector('.section-collapse-btn');
+    chevronBtn?.setAttribute('aria-expanded', String(!section.classList.contains('collapsed')));
+
     function toggleCollapse() {
       const wasCollapsed = section.classList.contains('collapsed');
       const willCollapse = !wasCollapsed;
@@ -39,6 +42,7 @@ export function initSectionCollapse(Storage) {
       const gen = (section._collapseGen = (section._collapseGen || 0) + 1);
 
       if (willCollapse) {
+        chevronBtn?.setAttribute('aria-expanded', 'false');
         // Domino-out: play the fade/slide-down on the row children BEFORE
         // actually adding .collapsed (which hides them via display:none),
         // then lock in collapse once the cascade finishes.
@@ -71,6 +75,7 @@ export function initSectionCollapse(Storage) {
           setTimeout(lockCollapsed, 600);
         }
       } else {
+        chevronBtn?.setAttribute('aria-expanded', 'true');
         // Expand path — remove .collapsed and replay the inbound domino.
         section.classList.remove('collapsed');
         // eslint-disable-next-line no-unused-expressions
@@ -94,7 +99,6 @@ export function initSectionCollapse(Storage) {
     }
 
     // Click chevron button
-    const chevronBtn = header.querySelector('.section-collapse-btn');
     if (chevronBtn) {
       chevronBtn.addEventListener('click', (e) => {
         e.stopPropagation();

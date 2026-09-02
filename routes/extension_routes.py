@@ -37,6 +37,23 @@ class LifecyclePlanRequest(BaseModel):
     target_revision: str | None = Field(default=None, max_length=64)
 
 
+def public_extension_catalog(registry) -> dict[str, list[dict[str, str]]]:
+    """Project installed extension metadata without source or host details."""
+    plugins = []
+    for extension_id, record in registry.snapshot().get("extensions", {}).items():
+        manifest = record.get("manifest") if isinstance(record, dict) else None
+        if not isinstance(manifest, dict):
+            continue
+        plugins.append({
+            "id": str(extension_id),
+            "name": str(manifest.get("name") or extension_id)[:200],
+            "state": "enabled" if record.get("enabled") else "disabled",
+            "runtime": str((manifest.get("runtime") or {}).get("type") or "unknown")[:40],
+        })
+    plugins.sort(key=lambda item: (item["name"].lower(), item["id"]))
+    return {"plugins": plugins}
+
+
 def setup_extension_routes(
     manager: ExtensionLifecycleManager | None = None, *, skills_manager=None
 ) -> APIRouter:
@@ -51,7 +68,6 @@ def setup_extension_routes(
     router = APIRouter(
         prefix="/api/extensions",
         tags=["extensions"],
-        dependencies=[Depends(require_admin)],
     )
 
     def _operator(owner: str) -> str:
@@ -73,12 +89,16 @@ def setup_extension_routes(
             if binder:
                 binder(loop)
 
-    @router.get("")
+    @router.get("", dependencies=[Depends(require_admin)])
     async def list_extensions(owner: str = Depends(require_user)):
         _operator(owner)
         return await asyncio.to_thread(manager.snapshot)
 
-    @router.post("/plans/source")
+    @router.get("/catalog")
+    async def list_public_extensions(_owner: str = Depends(require_user)):
+        return await asyncio.to_thread(public_extension_catalog, manager.registry)
+
+    @router.post("/plans/source", dependencies=[Depends(require_admin)])
     async def preview_source_plan(payload: SourcePlanRequest, owner: str = Depends(require_user)):
         try:
             _bind_async_adapters()
@@ -92,7 +112,7 @@ def setup_extension_routes(
         except (ExtensionLifecycleError, ExtensionContractError) as exc:
             raise _http_error(exc) from exc
 
-    @router.post("/plans/lifecycle")
+    @router.post("/plans/lifecycle", dependencies=[Depends(require_admin)])
     async def preview_lifecycle_plan(payload: LifecyclePlanRequest, owner: str = Depends(require_user)):
         try:
             _bind_async_adapters()
@@ -106,7 +126,7 @@ def setup_extension_routes(
         except (ExtensionLifecycleError, ExtensionContractError) as exc:
             raise _http_error(exc) from exc
 
-    @router.post("/plans/{plan_id}/execute")
+    @router.post("/plans/{plan_id}/execute", dependencies=[Depends(require_admin)])
     async def execute_plan(plan_id: str, owner: str = Depends(require_user)):
         try:
             _bind_async_adapters()

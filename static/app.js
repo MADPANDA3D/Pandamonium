@@ -296,10 +296,67 @@ async function _syncWelcomeModelHint() {
   }
 }
 
+async function initPluginSidebar() {
+  const list = el('plugins-list');
+  if (!list) return;
+  const showMessage = (message) => {
+    list.replaceChildren();
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    row.setAttribute('aria-disabled', 'true');
+    row.append(Object.assign(document.createElement('span'), { className: 'grow', textContent: message }));
+    list.append(row);
+  };
+  try {
+    const response = await fetch(`${API_BASE}/api/extensions/catalog`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Plugin catalog unavailable');
+    const catalog = await response.json();
+    const config = await fetch(`${API_BASE}/api/voice/oracle-config`, { credentials: 'same-origin' })
+      .then(result => result.ok ? result.json() : {})
+      .catch(() => ({}));
+    const surfaces = new Set((config.extension_surfaces || []).map(item => item.extension_id));
+    const plugins = Array.isArray(catalog.plugins) ? catalog.plugins.slice(0, 64) : [];
+    if (config.oracle_protocol_url && !plugins.some(item => item.id === 'oracle')) {
+      plugins.push({ id: 'oracle', name: 'ORACLE', runtime: 'web', state: 'enabled', legacy: true });
+    }
+    plugins.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    if (!plugins.length) return showMessage('No plugins installed');
+    list.replaceChildren();
+    for (const plugin of plugins) {
+      const canOpen = plugin.state === 'enabled' && (plugin.legacy || surfaces.has(plugin.id));
+      const row = document.createElement('div');
+      row.className = 'list-item';
+      row.id = `tool-plugin-${plugin.id}`;
+      row.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.72"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/></svg>';
+      row.append(Object.assign(document.createElement('span'), { className: 'grow', textContent: plugin.name }));
+      row.append(Object.assign(document.createElement('span'), { textContent: plugin.state, title: `${plugin.runtime} plugin`, style: 'font-size:9px;opacity:0.55' }));
+      if (canOpen) {
+        row.setAttribute('role', 'button');
+        row.tabIndex = 0;
+        const open = () => window.jarvisVoice?.applyExtensionSurfaceControl({
+          ui_event: plugin.legacy ? 'oracle_protocol_engage' : 'extension_protocol_engage',
+          extension_id: plugin.id,
+        });
+        row.addEventListener('click', open);
+        row.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+        });
+      } else {
+        row.setAttribute('aria-disabled', 'true');
+      }
+      list.append(row);
+    }
+  } catch (error) {
+    console.warn('Could not load plugin catalog:', error);
+    showMessage('Plugins unavailable');
+  }
+}
+
 // ============================================
 // EVENT LISTENERS INITIALIZATION
 // ============================================
 function initializeEventListeners() {
+  initPluginSidebar();
   // Chat form submission
 //  document.getElementById('chat-form').addEventListener('submit', chatModule.handleChatSubmit);
 
