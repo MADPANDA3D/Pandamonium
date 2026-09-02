@@ -156,6 +156,13 @@ def test_image_only_book_is_kept_as_needs_ocr_when_native_ocr_is_unavailable(tmp
     assert book["chunk_count"] == 0
     assert rag.batches == []
 
+    background_tasks = BackgroundTasks()
+    _endpoint(router, "/api/personal/books/{book_id}/reindex", "POST")(
+        book_id=book["id"], background_tasks=background_tasks, owner="alice"
+    )
+    asyncio.run(background_tasks())
+    assert rag.deleted == [personal_routes._load_book_catalog("alice")[0]["source"]]
+
 
 def test_book_upload_returns_before_background_indexing(tmp_path, monkeypatch):
     docs = _PersonalDocs()

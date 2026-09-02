@@ -123,6 +123,8 @@ def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = F
         updated_at=datetime.now(timezone.utc).isoformat(),
     )
     if not _has_indexable_pdf_text(pages):
+        if replace:
+            rag.delete_by_source(source)
         book.update(
             status="needs_attention",
             chunk_count=0,
