@@ -2017,6 +2017,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       return card;
     }
 
+    let _booksPollTimer = null;
+
     async function _renderLibBooks() {
       const grid = document.getElementById('doclib-books-grid');
       const stats = document.getElementById('doclib-books-stats');
@@ -2038,6 +2040,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         }
         _maybeCascadeGrid(grid, 'books');
         books.forEach(book => grid.appendChild(_renderBookCard(book)));
+        clearTimeout(_booksPollTimer);
+        if (books.some(book => book.status === 'indexing')) {
+          _booksPollTimer = setTimeout(() => {
+            if (_libraryOpen) _renderLibBooks();
+          }, 1500);
+        }
       } catch (error) {
         grid.replaceChildren();
         const failed = document.createElement('div');
@@ -3405,7 +3413,10 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
           });
           const imported = Array.isArray(data.book_ids) ? data.book_ids.length : 0;
           const attention = Number(data.needs_attention || 0);
-          const message = attention
+          const indexing = Number(data.indexing_count || 0);
+          const message = indexing
+            ? `Queued ${indexing} book${indexing === 1 ? '' : 's'} for indexing`
+            : attention
             ? `Imported ${imported} book${imported === 1 ? '' : 's'}; ${attention} needs attention`
             : `Imported ${imported} book${imported === 1 ? '' : 's'}`;
           if (uiModule) uiModule.showToast(message);

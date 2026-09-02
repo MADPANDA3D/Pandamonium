@@ -7,7 +7,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, UploadFile, File, Depends
 from src.request_models import DirectoryRequest
 from core.constants import BASE_DIR, PERSONAL_DIR, PERSONAL_UPLOADS_DIR
 from src.rag_singleton import get_rag_manager
@@ -101,11 +101,18 @@ def _book_source(owner: str, book: Dict[str, Any]) -> str:
     return source
 
 
+def _has_indexable_pdf_text(pages: List[str]) -> bool:
+    """Reject sparse PDF metadata/OCR crumbs that do not represent book text."""
+    text_chars = sum(len(page.strip()) for page in pages)
+    required_chars = min(1_000, max(100, len(pages) * 10))
+    return text_chars >= required_chars
+
+
 def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = False) -> Dict[str, Any]:
     source = _book_source(owner, book)
     pages = extract_pdf_pages(source)
     ocr_status = "not_needed"
-    if not any(page.strip() for page in pages):
+    if not _has_indexable_pdf_text(pages):
         ocr_pages, ocr_status = ocr_pdf_pages(source)
         if ocr_pages:
             pages = ocr_pages
@@ -115,7 +122,7 @@ def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = F
         ocr_status=ocr_status,
         updated_at=datetime.now(timezone.utc).isoformat(),
     )
-    if not any(page.strip() for page in pages):
+    if not _has_indexable_pdf_text(pages):
         book.update(
             status="needs_attention",
             chunk_count=0,
@@ -162,6 +169,31 @@ def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = F
             attention_reason="indexing_failed",
         )
     return book
+
+
+def _index_catalog_books(rag: Any, owner: str, book_ids: List[str], *, replace: bool = False) -> None:
+    """Finish persisted book jobs after the upload/reindex response is sent."""
+    for book_id in book_ids:
+        books = _load_book_catalog(owner)
+        book = next((item for item in books if item.get("id") == book_id), None)
+        if book is None:
+            continue
+        try:
+            _index_book(rag, owner, book, replace=replace)
+        except Exception as e:
+            logger.error("Failed to index book %s for %s: %s", book_id, owner, e)
+            book.update(
+                status="failed",
+                needs_attention=True,
+                attention_reason="processing_failed",
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+        latest = _load_book_catalog(owner)
+        for index, current in enumerate(latest):
+            if current.get("id") == book_id:
+                latest[index] = book
+                _save_book_catalog(owner, latest)
+                break
 
 
 def _unique_personal_upload_path(upload_dir: str, original_name: str | None) -> Tuple[str, str, str]:
@@ -422,7 +454,11 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             raise HTTPException(500, f"Failed to remove directory: {str(e)}")
     
     @router.post("/upload")
-    async def upload_files_to_rag(request: Request, files: List[UploadFile] = File(...)):
+    async def upload_files_to_rag(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        files: List[UploadFile] = File(...),
+    ):
         """Upload files directly into RAG. Supports text and PDF."""
         user = require_privilege(request, "can_use_documents")
         rag = _rag()
@@ -478,16 +514,8 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     }
                     books.append(book)
                     _save_book_catalog(user, books)
-                    _index_book(rag, user, book)
-                    _save_book_catalog(user, books)
                     uploaded_files.append(safe_name)
                     book_ids.append(book["id"])
-                    if book["status"] == "ready":
-                        total_indexed += int(book["indexed_chunks"] or 0)
-                    elif book["status"] == "needs_attention":
-                        needs_attention += 1
-                    else:
-                        total_failed += 1
                     continue
 
                 if ext == ".pdf":
@@ -534,6 +562,8 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         # Track uploads directory
         if uploaded_files and not is_books and hasattr(personal_docs_manager, "add_directory"):
             personal_docs_manager.add_directory(upload_dir, index=False)
+        if book_ids:
+            background_tasks.add_task(_index_catalog_books, rag, user, book_ids)
 
         return {
             "success": True,
@@ -542,6 +572,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             "indexed_count": total_indexed,
             "failed_count": total_failed,
             "needs_attention": needs_attention,
+            "indexing_count": len(book_ids),
         }
 
     @router.get("/books")
@@ -554,7 +585,11 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         return {"books": [_public_book(book) for book in books]}
 
     @router.post("/books/{book_id}/reindex")
-    def reindex_book(book_id: str, owner: str = Depends(require_user)):
+    def reindex_book(
+        book_id: str,
+        background_tasks: BackgroundTasks,
+        owner: str = Depends(require_user),
+    ):
         books = _load_book_catalog(owner)
         book = next((item for item in books if item.get("id") == book_id), None)
         if book is None:
@@ -565,20 +600,11 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         if not rag:
             raise HTTPException(503, "RAG system is not available")
         book["status"] = "indexing"
+        book["needs_attention"] = False
+        book["attention_reason"] = None
+        book["updated_at"] = datetime.now(timezone.utc).isoformat()
         _save_book_catalog(owner, books)
-        try:
-            _index_book(rag, owner, book, replace=True)
-        except Exception as e:
-            logger.error("Failed to reindex book %s for %s: %s", book_id, owner, e)
-            book.update(
-                status="failed",
-                needs_attention=True,
-                attention_reason="processing_failed",
-                updated_at=datetime.now(timezone.utc).isoformat(),
-            )
-            _save_book_catalog(owner, books)
-            raise HTTPException(500, "Book reindex failed")
-        _save_book_catalog(owner, books)
+        background_tasks.add_task(_index_catalog_books, rag, owner, [book_id], replace=True)
         return _public_book(book)
 
     @router.delete("/books/{book_id}")

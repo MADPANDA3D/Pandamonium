@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from fastapi import BackgroundTasks
+
 from routes import personal_routes
 from src.rag_vector import _generate_doc_id
 
@@ -64,6 +66,17 @@ def _endpoint(router, path, method):
     )
 
 
+async def _upload_books(endpoint, request, files):
+    background_tasks = BackgroundTasks()
+    result = await endpoint(
+        request=request,
+        background_tasks=background_tasks,
+        files=files,
+    )
+    await background_tasks()
+    return result
+
+
 def test_books_upload_uses_owner_catalog_and_source_aware_batch(tmp_path, monkeypatch):
     docs = _PersonalDocs()
     rag = _RAG()
@@ -72,15 +85,16 @@ def test_books_upload_uses_owner_catalog_and_source_aware_batch(tmp_path, monkey
     monkeypatch.setattr(
         personal_routes,
         "extract_pdf_pages",
-        lambda _path: ["page one full text", "page two full text"],
+        lambda _path: ["page one full text " * 10, "page two full text " * 10],
     )
     monkeypatch.setattr(personal_routes, "ocr_pdf_pages", lambda _path: ([], "unavailable"))
     router = personal_routes.setup_personal_routes(docs, None, True)
 
     result = asyncio.run(
-        _endpoint(router, "/api/personal/upload", "POST")(
-            request=_request(),
-            files=[_Upload()],
+        _upload_books(
+            _endpoint(router, "/api/personal/upload", "POST"),
+            _request(),
+            [_Upload()],
         )
     )
     books = _endpoint(router, "/api/personal/books", "GET")(
@@ -88,7 +102,8 @@ def test_books_upload_uses_owner_catalog_and_source_aware_batch(tmp_path, monkey
     )["books"]
 
     assert result["success"] is True
-    assert result["indexed_count"] == 2
+    assert result["indexed_count"] == 0
+    assert result["indexing_count"] == 1
     assert len(books) == 1
     expected = {
         "title": "field-manual",
@@ -118,25 +133,55 @@ def test_image_only_book_is_kept_as_needs_ocr_when_native_ocr_is_unavailable(tmp
     rag = _RAG()
     monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
     monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: rag)
-    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["", ""])
+    sparse_pages = ["metadata fragments" * 16] + [""] * 156
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: sparse_pages)
     monkeypatch.setattr(personal_routes, "ocr_pdf_pages", lambda _path: ([], "unavailable"))
     router = personal_routes.setup_personal_routes(docs, None, True)
 
     result = asyncio.run(
-        _endpoint(router, "/api/personal/upload", "POST")(
-            request=_request(),
-            files=[_Upload()],
+        _upload_books(
+            _endpoint(router, "/api/personal/upload", "POST"),
+            _request(),
+            [_Upload()],
         )
     )
     book = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
 
-    assert result["needs_attention"] == 1
+    assert result["needs_attention"] == 0
+    assert result["indexing_count"] == 1
     assert book["status"] == "needs_attention"
     assert book["ocr_status"] == "unavailable"
     assert book["attention_reason"] == "needs_ocr"
-    assert book["page_count"] == 2
+    assert book["page_count"] == 157
     assert book["chunk_count"] == 0
     assert rag.batches == []
+
+
+def test_book_upload_returns_before_background_indexing(tmp_path, monkeypatch):
+    docs = _PersonalDocs()
+    rag = _RAG()
+    monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
+    monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: rag)
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["full page text " * 20])
+    router = personal_routes.setup_personal_routes(docs, None, True)
+    endpoint = _endpoint(router, "/api/personal/upload", "POST")
+    background_tasks = BackgroundTasks()
+
+    result = asyncio.run(endpoint(
+        request=_request(),
+        background_tasks=background_tasks,
+        files=[_Upload()],
+    ))
+    pending = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
+
+    assert result["indexing_count"] == 1
+    assert pending["status"] == "indexing"
+    assert rag.batches == []
+
+    asyncio.run(background_tasks())
+    ready = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
+    assert ready["status"] == "ready"
+    assert len(rag.batches) == 1
 
 
 def test_books_reindex_and_delete_are_scoped_to_catalog_source(tmp_path, monkeypatch):
@@ -144,21 +189,25 @@ def test_books_reindex_and_delete_are_scoped_to_catalog_source(tmp_path, monkeyp
     rag = _RAG()
     monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
     monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: rag)
-    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["indexed text"])
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["indexed full text " * 10])
     monkeypatch.setattr(personal_routes, "ocr_pdf_pages", lambda _path: ([], "unavailable"))
     router = personal_routes.setup_personal_routes(docs, None, True)
     upload = _endpoint(router, "/api/personal/upload", "POST")
-    asyncio.run(upload(request=_request(), files=[_Upload()]))
+    asyncio.run(_upload_books(upload, _request(), [_Upload()]))
     book = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
 
+    background_tasks = BackgroundTasks()
     reindexed = _endpoint(router, "/api/personal/books/{book_id}/reindex", "POST")(
-        book_id=book["id"], owner="alice"
+        book_id=book["id"], background_tasks=background_tasks, owner="alice"
     )
+    asyncio.run(background_tasks())
+    assert reindexed["status"] == "indexing"
+    current = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
+    assert current["status"] == "ready"
+
     removed = _endpoint(router, "/api/personal/books/{book_id}", "DELETE")(
         book_id=book["id"], owner="alice"
     )
-
-    assert reindexed["status"] == "ready"
     assert len(rag.deleted) == 2
     assert rag.deleted[0] == rag.deleted[1]
     assert removed["deleted_from_disk"] is True

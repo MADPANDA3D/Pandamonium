@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from routes import personal_routes
 
@@ -71,7 +71,11 @@ def test_personal_upload_requires_document_privilege(monkeypatch):
     endpoint = _upload_endpoint()
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(endpoint(request=_request({"can_use_documents": False}), files=[]))
+        asyncio.run(endpoint(
+            request=_request({"can_use_documents": False}),
+            background_tasks=BackgroundTasks(),
+            files=[],
+        ))
 
     assert exc.value.status_code == 403
 
@@ -86,6 +90,7 @@ def test_personal_upload_indexes_with_privileged_owner(tmp_path, monkeypatch):
     result = asyncio.run(
         endpoint(
             request=_request({"can_use_documents": True}),
+            background_tasks=BackgroundTasks(),
             files=[_Upload()],
         )
     )
