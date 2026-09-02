@@ -44,6 +44,10 @@ def test_permission_classes_and_new_capabilities_fail_closed(tmp_path):
     assert permission_mode_for(_call(name="write_file", arguments={"path": "a", "content": "b"})) == "bounded_write"
     assert permission_mode_for(_call(name="delete_email")) == "destructive"
     assert permission_mode_for(_call(name="bash", arguments={"command": "pwd"})) == "controlled_administrative"
+    assert permission_mode_for(_call(name="api_call", arguments={"method": "GET", "path": "/health"})) == "read_only"
+    assert permission_mode_for(_call(name="api_call", arguments={"method": "get", "path": "/health"})) == "read_only"
+    assert permission_mode_for(_call(name="api_call", arguments={"method": "POST", "path": "/jobs"})) == "external_side_effect"
+    assert permission_mode_for(_call(name="api_call", arguments={"path": "/health"})) == "external_side_effect"
     decision = store.decide(_call(name="new_plugin_mutation"), operator_id="leo", session_id="session-1")
     assert decision["decision"] == "deny"
     assert decision["policy_basis"] == "unclassified_capability"

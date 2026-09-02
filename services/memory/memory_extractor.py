@@ -366,6 +366,8 @@ async def extract_and_store(
                 # enough once thinking has room.
                 max_tokens=4096,
                 headers=headers,
+                workload="background",
+                max_retries=1,
             )
 
             # Parse JSON, tolerating reasoning-model noise (<think> blocks, a
@@ -487,7 +489,13 @@ async def extract_and_store(
                 _extractions_since_audit = 0
                 logger.info("Audit threshold reached, running memory audit")
                 await audit_memories(
-                    memory_manager, memory_vector, endpoint_url, model, headers, owner=_owner
+                    memory_manager,
+                    memory_vector,
+                    endpoint_url,
+                    model,
+                    headers,
+                    owner=_owner,
+                    background=True,
                 )
         else:
             logger.info("Auto memory extraction ran: 0 added")
@@ -503,6 +511,8 @@ async def audit_memories(
     model: str,
     headers: Optional[dict] = None,
     owner: Optional[str] = None,
+    *,
+    background: bool = False,
 ):
     """Send all memories to the LLM for deduplication and consolidation.
 
@@ -551,6 +561,10 @@ async def audit_memories(
             {"role": "user", "content": json.dumps(memory_payload, ensure_ascii=False)},
         ]
 
+        background_options = {
+            "workload": "background",
+            "max_retries": 1,
+        } if background else {}
         raw = await llm_call_async(
             endpoint_url,
             model,
@@ -564,6 +578,7 @@ async def audit_memories(
             # Bound the call so the Tidy whirlpool can't spin indefinitely on a
             # slow/large generation.
             timeout=120,
+            **background_options,
         )
 
         # Parse the JSON list, tolerating reasoning-model noise: <think> blocks,

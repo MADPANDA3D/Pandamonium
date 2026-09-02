@@ -38,7 +38,10 @@ _STRAY_BRACE_RESPONSE = (
 
 @pytest.mark.parametrize("response", [_STRAY_BRACE_RESPONSE])
 async def test_maybe_extract_skill_recovers_json_past_stray_braces(monkeypatch, response):
+    calls = []
+
     async def fake_llm_call_async(*args, **kwargs):
+        calls.append(kwargs)
         return response
 
     monkeypatch.setattr("src.llm_core.llm_call_async", fake_llm_call_async)
@@ -58,6 +61,8 @@ async def test_maybe_extract_skill_recovers_json_past_stray_braces(monkeypatch, 
     assert entry is not None
     assert entry["title"] == "Deploy runbook"
     assert skills_manager.added and skills_manager.added[0]["title"] == "Deploy runbook"
+    assert calls[0]["workload"] == "background"
+    assert calls[0]["max_retries"] == 1
 
 
 # Response *starts* with a brace, but it's an invalid fragment — the valid
@@ -144,4 +149,3 @@ async def test_maybe_extract_skill_drops_on_multiple_json_objects(monkeypatch):
 
     assert entry is None
     assert not skills_manager.added
-

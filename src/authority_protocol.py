@@ -152,12 +152,13 @@ def permission_mode_for(call: Mapping[str, Any]) -> str:
     name = str(call.get("name") or "")
     arguments = call.get("arguments") if isinstance(call.get("arguments"), Mapping) else {}
     action = str(arguments.get("action") or "").lower()
+    method = str(arguments.get("method") or "").upper()
     target = str(call.get("target") or "")
     if target.startswith("extension:"):
         policy = call.get("capability_policy") if isinstance(call.get("capability_policy"), Mapping) else {}
         declared = str(policy.get("permission_mode") or "")
         return declared if declared in _EXTENSION_PERMISSION_MODES else "unclassified"
-    if name in _READ_ONLY_NAMES or action in _READ_ACTIONS:
+    if name in _READ_ONLY_NAMES or action in _READ_ACTIONS or (name == "api_call" and method == "GET"):
         return "read_only"
     if name in _LOCAL_WRITES:
         return "bounded_write"

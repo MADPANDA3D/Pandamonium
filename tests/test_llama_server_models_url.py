@@ -41,7 +41,7 @@ def test_model_context_queries_models_for_v1_base(monkeypatch):
     def fake_get(url, timeout=None):
         seen.append(url)
         request = httpx.Request("GET", url)
-        if url.endswith("/slots"):
+        if url.endswith("/slots") or url.endswith("/v1/stats"):
             return httpx.Response(404, request=request)
         return httpx.Response(
             200,
@@ -54,5 +54,6 @@ def test_model_context_queries_models_for_v1_base(monkeypatch):
     assert model_context._query_context_length("http://127.0.0.1:8080/v1", "qwen3") == (32768, True)
     assert seen == [
         "http://127.0.0.1:8080/slots",
+        "http://127.0.0.1:8080/v1/stats",
         "http://127.0.0.1:8080/v1/models",
     ]

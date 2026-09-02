@@ -200,6 +200,8 @@ async def maybe_extract_skill(
             ],
             headers=headers,
             timeout=30,
+            workload="background",
+            max_retries=1,
         )
         logger.debug(
             "[skill-extract] LLM returned in %.1fs (len=%d, head=%r)",

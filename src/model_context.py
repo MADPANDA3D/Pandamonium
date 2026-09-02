@@ -347,6 +347,41 @@ def _model_ctx_from_entry(m: dict) -> Optional[int]:
     return None
 
 
+def _freetoken_runtime_context(base_url: str, model: str) -> Optional[int]:
+    """Return FreeToken's currently allocated per-request context capacity.
+
+    FreeToken can advertise the configured model maximum through ``/v1/models``
+    while allocating a smaller KV cache after GPU/MoE placement. Its runtime
+    stats expose both values, so use the smaller one when the stats belong to
+    the requested model. Other local OpenAI-compatible servers simply 404 and
+    continue through the existing discovery path.
+    """
+    try:
+        response = httpx.get(f"{base_url}/v1/stats", timeout=REQUEST_TIMEOUT)
+        if not response.is_success:
+            return None
+        data = response.json()
+        runtime_model = data.get("model") if isinstance(data, dict) else None
+        kv = data.get("kv") if isinstance(data, dict) else None
+        if not isinstance(runtime_model, dict) or not isinstance(kv, dict):
+            return None
+
+        runtime_id = str(runtime_model.get("id") or "")
+        if runtime_id != model and runtime_id.split("/")[-1] != model.split("/")[-1]:
+            return None
+
+        declared = runtime_model.get("ctx")
+        total_pages = kv.get("total_pages")
+        page_size = kv.get("page_size", 1)
+        if not all(isinstance(value, (int, float)) and value > 0 for value in (declared, total_pages, page_size)):
+            return None
+
+        allocated = int(total_pages * page_size)
+        return min(int(declared), allocated)
+    except Exception:
+        return None
+
+
 # Per-endpoint cache of the {model_id: context_length} map parsed from a
 # proxy/api catalog. api/proxy endpoints skip the /models download on every
 # lookup because a large catalog is expensive; caching the whole map lets us
@@ -422,8 +457,8 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
 
     # Try llama.cpp /slots endpoint first — reports actual serving context
     if is_local_endpoint(endpoint_url):
+        base = endpoint_url.split("/v1")[0] if "/v1" in endpoint_url else endpoint_url.rsplit("/", 1)[0]
         try:
-            base = endpoint_url.split("/v1")[0] if "/v1" in endpoint_url else endpoint_url.rsplit("/", 1)[0]
             r = httpx.get(f"{base}/slots", timeout=REQUEST_TIMEOUT)
             if r.is_success:
                 slots = r.json()
@@ -434,6 +469,15 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
                         return n_ctx, True
         except Exception:
             pass
+
+        runtime_context = _freetoken_runtime_context(base, model)
+        if runtime_context:
+            logger.info(
+                "FreeToken runtime reports effective context capacity=%s for %s",
+                runtime_context,
+                model,
+            )
+            return runtime_context, True
 
     # GitHub Copilot's /models requires auth + X-GitHub-Api-Version headers that
     # aren't available here; an unauthenticated probe just 400s. All Copilot

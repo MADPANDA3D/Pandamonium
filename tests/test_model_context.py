@@ -224,6 +224,57 @@ class TestGetContextLength:
         assert second == 27000
         assert len(calls) == 2
 
+    def test_local_freetoken_uses_allocated_kv_capacity(self, monkeypatch):
+        seen = []
+
+        def fake_get(url, *args, **kwargs):
+            seen.append(url)
+            if url.endswith("/slots"):
+                return _FakeResp({}, ok=False)
+            if url.endswith("/v1/stats"):
+                return _FakeResp({
+                    "model": {"id": "jarvis", "ctx": 32768},
+                    "kv": {"total_pages": 8208, "page_size": 1},
+                })
+            raise AssertionError(f"unexpected request: {url}")
+
+        monkeypatch.setattr(model_context.httpx, "get", fake_get)
+
+        endpoint = "http://127.0.0.1:1919/v1/chat/completions"
+        assert model_context.get_context_length(endpoint, "jarvis") == 8208
+        assert seen == [
+            "http://127.0.0.1:1919/slots",
+            "http://127.0.0.1:1919/v1/stats",
+        ]
+
+    def test_local_freetoken_stats_for_another_model_are_ignored(self, monkeypatch):
+        seen = []
+
+        def fake_get(url, *args, **kwargs):
+            seen.append(url)
+            if url.endswith("/slots"):
+                return _FakeResp({}, ok=False)
+            if url.endswith("/v1/stats"):
+                return _FakeResp({
+                    "model": {"id": "another-model", "ctx": 32768},
+                    "kv": {"total_pages": 8208, "page_size": 1},
+                })
+            if url.endswith("/v1/models"):
+                return _FakeResp({
+                    "data": [{"id": "jarvis", "context_length": 32768}],
+                })
+            raise AssertionError(f"unexpected request: {url}")
+
+        monkeypatch.setattr(model_context.httpx, "get", fake_get)
+
+        endpoint = "http://127.0.0.1:1919/v1/chat/completions"
+        assert model_context.get_context_length(endpoint, "jarvis") == 32768
+        assert seen == [
+            "http://127.0.0.1:1919/slots",
+            "http://127.0.0.1:1919/v1/stats",
+            "http://127.0.0.1:1919/v1/models",
+        ]
+
     def test_remote_endpoint_keeps_cached_context(self, monkeypatch):
         calls = []
 

@@ -58,7 +58,10 @@ def test_extraction_persists_facts_when_vector_store_fails_at_runtime(monkeypatc
         '{"text": "Alice prefers tea over coffee", "category": "preference"}]'
     )
 
+    calls = []
+
     async def _fake_llm(url, model, messages, **kwargs):
+        calls.append(kwargs)
         return facts_json
 
     monkeypatch.setattr(src.llm_core, "llm_call_async", _fake_llm)
@@ -83,6 +86,8 @@ def test_extraction_persists_facts_when_vector_store_fails_at_runtime(monkeypatc
     # The bug lost ALL of them (save() was never reached); both must survive.
     assert "Alice lives in Lisbon" in texts
     assert "Alice prefers tea over coffee" in texts
+    assert calls[0]["workload"] == "background"
+    assert calls[0]["max_retries"] == 1
 
 
 def test_healthy_vector_store_still_dedups_normally(monkeypatch):
