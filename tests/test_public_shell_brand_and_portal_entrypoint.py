@@ -42,3 +42,12 @@ def test_public_shell_packages_required_visual_assets():
 
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "!static/vendor/organic-sphere/social/share-1200x630.png" in ignore
+
+
+def test_authenticated_server_theme_replaces_a_stale_browser_theme():
+    theme = (ROOT / "static" / "js" / "theme.js").read_text(encoding="utf-8")
+    init = theme.split("async function _initWithSync()", 1)[1]
+
+    assert "const serverTheme = await _loadFromServer();" in init
+    assert "JSON.stringify(serverTheme) !== JSON.stringify(getSaved())" in init
+    assert "if (!getSaved())" not in init

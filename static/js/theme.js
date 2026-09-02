@@ -2113,15 +2113,15 @@ const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
 
 export default themeModule;
 
-// Init on DOM ready, with server-side sync fallback
+// Init on DOM ready, with authenticated server-side sync
 async function _initWithSync() {
-  // If no local theme, try loading from server (cross-device sync)
-  if (!getSaved()) {
-    const serverTheme = await _loadFromServer();
-    if (serverTheme && serverTheme.colors) {
-      if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
+  // The server preference is the cross-device source of truth. Local storage
+  // remains the offline fallback and is updated after every local selection.
+  const serverTheme = await _loadFromServer();
+  if (serverTheme && serverTheme.colors) {
+    if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
+    if (JSON.stringify(serverTheme) !== JSON.stringify(getSaved())) {
       Storage.setJSON(LS_KEY, serverTheme);
-      applyColors(serverTheme.colors);
     }
   }
   // Also sync custom themes from server
