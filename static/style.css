@@ -15751,6 +15751,30 @@ span[id$="-logo"] svg:not([width]) {
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 74%, transparent);
 }
+button.portal-mailbox-card {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+button.portal-mailbox-card:hover,
+button.portal-mailbox-card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 70%, var(--border));
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+  outline: none;
+}
+.portal-mailbox-card.is-selected {
+  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 24%, transparent);
+}
+.portal-mailbox-card.is-loading { opacity: .72; }
+.portal-mailbox-selected-badge {
+  border-color: var(--accent, var(--red)) !important;
+  color: var(--accent, var(--red)) !important;
+}
 .portal-mailbox-provider {
   display: inline-grid;
   place-items: center;
@@ -15806,6 +15830,32 @@ span[id$="-logo"] svg:not([width]) {
   border-color: color-mix(in srgb, var(--accent, var(--red)) 55%, var(--border));
 }
 .portal-mailbox-state.is-loading { opacity: .72; }
+.portal-google-read-only #email-lib-folder,
+.portal-google-read-only #email-filter-btn,
+.portal-google-read-only #email-lib-select-btn,
+.portal-google-read-only #email-lib-compose-btn,
+.portal-google-read-only #email-lib-fab,
+.portal-google-read-only .email-search-row {
+  display: none !important;
+}
+.portal-google-read-only-badge,
+.portal-google-reader-note {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.portal-google-read-only-badge {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 42%, var(--border));
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.portal-google-reader-note {
+  margin: 0 12px 8px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 7%, transparent);
+}
+.portal-google-error { color: var(--color-error, var(--red)); }
 .email-agent-mail-panel {
   flex: 1 1 0;
   min-height: 0;

@@ -11,6 +11,8 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 import logging
 import httpx
+from datetime import datetime, timezone
+from email.utils import parseaddr
 
 from core.database import McpServer, SessionLocal
 from core.middleware import require_admin
@@ -227,6 +229,163 @@ def _public_google_mailboxes(payload: dict | None) -> list[dict]:
     return accounts
 
 
+def _bounded_portal_content(value, limit: int) -> str:
+    """Bound provider text while preserving normal email whitespace."""
+    text = str(value or "")
+    text = "".join(
+        char for char in text
+        if ord(char) >= 32 or char in "\n\r\t"
+    )
+    return text[:max(0, limit)]
+
+
+def _portal_provider_result(payload: dict | None) -> dict | None:
+    """Decode the provider envelope nested in Portal ``data.result``."""
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if isinstance(data, dict) and "result" in data:
+        result = data.get("result")
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except json.JSONDecodeError:
+                return None
+        if isinstance(result, dict):
+            return result
+    if "ok" in payload and ("data" in payload or "error" in payload):
+        return payload
+    return None
+
+
+def _portal_call_payload(result: dict | None) -> dict | None:
+    """Read a Portal wrapper even when the provider call failed closed."""
+    if not isinstance(result, dict):
+        return None
+    structured = result.get("structured_content")
+    if isinstance(structured, dict):
+        return structured
+    stdout = result.get("stdout")
+    if isinstance(stdout, str) and stdout.strip():
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _portal_nested_error_code(payload: dict | None) -> str:
+    """Return only a stable Portal/provider error code, never raw details."""
+    candidates = [payload]
+    visited = 0
+    while candidates and visited < 16:
+        visited += 1
+        candidate = candidates.pop(0)
+        if not isinstance(candidate, dict):
+            continue
+        error = candidate.get("error")
+        if isinstance(error, dict):
+            code = _bounded_portal_text(error.get("code"), 80)
+            if code:
+                return code
+        for key in ("data", "result"):
+            nested = candidate.get(key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+    return "portal_unavailable"
+
+
+def _google_message_headers(data: dict) -> dict[str, str]:
+    headers = data.get("headers")
+    if not isinstance(headers, (dict, list)):
+        payload = data.get("payload")
+        headers = payload.get("headers") if isinstance(payload, dict) else None
+    result = {}
+    if isinstance(headers, dict):
+        for name, value in headers.items():
+            result[str(name).strip().lower()] = _bounded_portal_content(value, 4000)
+    elif isinstance(headers, list):
+        for raw in headers[:100]:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or "").strip().lower()
+            if name:
+                result[name] = _bounded_portal_content(raw.get("value"), 4000)
+    return result
+
+
+def _google_message_date(data: dict, headers: dict[str, str]) -> str:
+    header_date = _bounded_portal_text(headers.get("date"), 200)
+    if header_date:
+        return header_date
+    try:
+        timestamp = int(str(data.get("internalDate") or "")) / 1000
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def _public_google_message_summary(data: dict, profile_id: str) -> dict | None:
+    if not isinstance(data, dict):
+        return None
+    message_id = _bounded_portal_text(data.get("id"), 200)
+    if not message_id:
+        return None
+    headers = _google_message_headers(data)
+    sender_name, sender_address = parseaddr(headers.get("from", ""))
+    raw_label_ids = data.get("labelIds")
+    if not isinstance(raw_label_ids, list):
+        raw_label_ids = []
+    label_ids = {
+        _bounded_portal_text(item, 100)
+        for item in raw_label_ids[:100]
+        if isinstance(item, str)
+    }
+    return {
+        "uid": message_id,
+        "thread_id": _bounded_portal_text(data.get("threadId"), 200),
+        "folder": "INBOX",
+        "subject": _bounded_portal_content(headers.get("subject"), 2000),
+        "from_name": _bounded_portal_content(sender_name, 500),
+        "from_address": _bounded_portal_text(sender_address, 500),
+        "to": _bounded_portal_content(headers.get("to"), 4000),
+        "cc": _bounded_portal_content(headers.get("cc"), 4000),
+        "date": _google_message_date(data, headers),
+        "snippet": _bounded_portal_content(data.get("snippet"), 2000),
+        "is_read": "UNREAD" not in label_ids,
+        "is_answered": False,
+        "is_flagged": "STARRED" in label_ids,
+        "has_attachments": False,
+        "portal_read_only": True,
+        "portal_profile_id": profile_id,
+        "source": "mad-mcp-google",
+    }
+
+
+def _public_google_message_detail(data: dict, profile_id: str) -> dict | None:
+    summary = _public_google_message_summary(data, profile_id)
+    if summary is None:
+        return None
+    summary.update({
+        "from": _bounded_portal_content(
+            _google_message_headers(data).get("from"), 4000
+        ),
+        "body_plain": _bounded_portal_content(data.get("text_plain"), 50_000),
+        "body_html": _bounded_portal_content(data.get("text_html"), 50_000),
+        "attachments": [],
+        "body_truncated": bool(data.get("body_truncated")),
+    })
+    return summary
+
+
+def _safe_portal_path_id(value, *, limit: int = 320) -> str:
+    text = _bounded_portal_text(value, limit)
+    if not text or any(char in text for char in "/\\?#"):
+        raise HTTPException(400, "Invalid Portal resource identifier")
+    return text
+
+
 def _public_agentmail_inboxes(payload: dict | None) -> list[dict]:
     inboxes = []
     for raw in _portal_payload_items(payload):
@@ -384,6 +543,67 @@ def setup_mcp_routes(mcp_manager: McpManager):
             return None
         payload = _portal_catalog_payload(result)
         return _public_portal_catalog(payload) if payload is not None else None
+
+    def _require_ready_portal():
+        db = SessionLocal()
+        try:
+            srv = db.query(McpServer).filter(
+                McpServer.id == MAD_MCP_PORTAL_ID
+            ).first()
+            configured = bool(srv and _static_http_headers(srv.oauth_tokens))
+        finally:
+            db.close()
+        status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID).get(
+            "status", "disconnected"
+        )
+        if not configured or status != "connected":
+            raise HTTPException(503, "MAD MCP Portal is not connected")
+
+    async def _read_google_accounts() -> list[dict]:
+        _require_ready_portal()
+        result = await mcp_manager.call_tool(
+            f"mcp__{MAD_MCP_PORTAL_ID}__portal.list_service_profiles",
+            {"serviceId": "google"},
+            timeout_seconds=20,
+            max_output_bytes=1_000_000,
+        )
+        payload = _portal_call_payload(result)
+        if payload is None or payload.get("ok") is False:
+            raise HTTPException(503, "Google mailbox profiles are unavailable")
+        return _public_google_mailboxes(payload)
+
+    async def _call_portal_read_tool(
+        service_id: str,
+        tool_name: str,
+        arguments: dict,
+        *,
+        profile_id: str | None = None,
+        timeout_seconds: float = 30,
+    ) -> tuple[dict | None, str]:
+        call_arguments = {
+            "serviceId": service_id,
+            "toolName": tool_name,
+            "arguments": arguments,
+        }
+        if profile_id:
+            call_arguments["profileId"] = profile_id
+        result = await mcp_manager.call_tool(
+            f"mcp__{MAD_MCP_PORTAL_ID}__portal.call_read_tool",
+            call_arguments,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=1_000_000,
+        )
+        payload = _portal_call_payload(result)
+        provider = _portal_provider_result(payload)
+        if (
+            result.get("exit_code") != 0
+            or payload is None
+            or payload.get("ok") is False
+            or provider is None
+            or provider.get("ok") is False
+        ):
+            return None, _portal_nested_error_code(provider or payload)
+        return provider, ""
 
     def _portal_server_snapshot(srv):
         if srv is None:
@@ -596,7 +816,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
                     timeout_seconds=20,
                     max_output_bytes=1_000_000,
                 )
-                agentmail_payload = _portal_result_payload(agentmail_result)
+                agentmail_payload = _portal_call_payload(agentmail_result)
                 if agentmail_payload is None or agentmail_payload.get("ok") is False:
                     response["agent_mail"]["status"] = "unavailable"
                     response["agent_mail"]["error_code"] = _portal_error_code(
@@ -611,6 +831,136 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 response["agent_mail"]["status"] = "unavailable"
                 response["agent_mail"]["error_code"] = "portal_unavailable"
         return response
+
+    @router.get("/portal/mailboxes/google/{profile_id}/messages")
+    async def portal_google_messages(
+        profile_id: str,
+        request: Request,
+        limit: int = 12,
+        page_token: str = "",
+    ):
+        """List one bounded Gmail page through the selected Portal profile."""
+        require_admin(request)
+        profile_id = _safe_portal_path_id(profile_id)
+        accounts = await _read_google_accounts()
+        account = next((item for item in accounts if item["id"] == profile_id), None)
+        if account is None:
+            raise HTTPException(404, "Google mailbox profile not found")
+
+        bounded_limit = max(1, min(int(limit or 12), 20))
+        arguments = {
+            "label_ids": ["INBOX"],
+            "max_results": bounded_limit,
+        }
+        bounded_page_token = _bounded_portal_text(page_token, 2048)
+        if bounded_page_token:
+            arguments["page_token"] = bounded_page_token
+        provider, error_code = await _call_portal_read_tool(
+            "google",
+            "gmail_list_messages",
+            arguments,
+            profile_id=profile_id,
+        )
+        if provider is None:
+            return {
+                "status": "unavailable",
+                "error_code": error_code,
+                "account": account,
+                "emails": [],
+                "total": 0,
+                "read_only": True,
+            }
+
+        provider_data = provider.get("data")
+        if not isinstance(provider_data, dict):
+            provider_data = {}
+        stubs = provider_data.get("messages")
+        if not isinstance(stubs, list):
+            stubs = []
+        stubs = stubs[:bounded_limit]
+
+        semaphore = asyncio.Semaphore(4)
+
+        async def _read_metadata(stub):
+            if not isinstance(stub, dict):
+                return None
+            message_id = _bounded_portal_text(stub.get("id"), 200)
+            if not message_id:
+                return None
+            async with semaphore:
+                metadata, _ = await _call_portal_read_tool(
+                    "google",
+                    "gmail_get_message",
+                    {
+                        "message_id": message_id,
+                        "format": "metadata",
+                        "metadata_headers": ["From", "To", "Cc", "Subject", "Date"],
+                    },
+                    profile_id=profile_id,
+                )
+            data = metadata.get("data") if isinstance(metadata, dict) else None
+            return _public_google_message_summary(data, profile_id)
+
+        projected = await asyncio.gather(
+            *(_read_metadata(item) for item in stubs),
+            return_exceptions=True,
+        )
+        if any(isinstance(item, Exception) for item in projected):
+            logger.warning("One or more Portal Google message metadata reads failed")
+        emails = [item for item in projected if isinstance(item, dict)]
+        total = _bounded_portal_count(provider_data.get("resultSizeEstimate"))
+        next_page_token = _bounded_portal_text(
+            provider_data.get("nextPageToken"), 2048
+        )
+        return {
+            "status": "partial" if len(emails) < len(stubs) else "ready",
+            "account": account,
+            "emails": emails,
+            "total": total,
+            "next_page_token": next_page_token,
+            "read_only": True,
+        }
+
+    @router.get("/portal/mailboxes/google/{profile_id}/messages/{message_id}")
+    async def portal_google_message(
+        profile_id: str,
+        message_id: str,
+        request: Request,
+    ):
+        """Read one bounded Gmail message without granting write authority."""
+        require_admin(request)
+        profile_id = _safe_portal_path_id(profile_id)
+        message_id = _safe_portal_path_id(message_id, limit=200)
+        accounts = await _read_google_accounts()
+        if not any(item["id"] == profile_id for item in accounts):
+            raise HTTPException(404, "Google mailbox profile not found")
+
+        provider, error_code = await _call_portal_read_tool(
+            "google",
+            "gmail_get_message",
+            {
+                "message_id": message_id,
+                "format": "full",
+                "metadata_headers": ["From", "To", "Cc", "Subject", "Date"],
+                "max_body_chars": 50_000,
+            },
+            profile_id=profile_id,
+        )
+        if provider is None:
+            return {
+                "status": "unavailable",
+                "error_code": error_code,
+                "portal_read_only": True,
+            }
+        detail = _public_google_message_detail(provider.get("data"), profile_id)
+        if detail is None:
+            return {
+                "status": "unavailable",
+                "error_code": "invalid_provider_response",
+                "portal_read_only": True,
+            }
+        detail["status"] = "ready"
+        return detail
 
     @router.post("/portal/connect")
     async def connect_portal(request: Request):

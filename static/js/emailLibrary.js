@@ -37,6 +37,8 @@ let _libSearchInFlight = false;
 let _activeEmailReaderForSelectAll = null;
 let _libAccountsLoadedAt = 0;
 let _portalMailboxSnapshot = null;
+let _selectedPortalGoogleProfileId = null;
+let _portalGoogleLoadingProfileId = null;
 const _LIB_ACCOUNTS_TTL_MS = 5 * 60 * 1000;
 
 function _isEmailTypingTarget(t) {
@@ -1174,15 +1176,30 @@ function _mailboxState(container, title, message, tone = '') {
 }
 
 function _mailboxCard(item, provider) {
-  const card = document.createElement('div');
+  const selectable = provider === 'Google';
+  const card = document.createElement(selectable ? 'button' : 'div');
   card.className = 'portal-mailbox-card';
+  if (selectable) {
+    card.type = 'button';
+    card.dataset.portalGoogleProfile = item.id || '';
+    const selected = _selectedPortalGoogleProfileId === item.id;
+    const loading = _portalGoogleLoadingProfileId === item.id;
+    card.classList.toggle('is-selected', selected);
+    card.classList.toggle('is-loading', loading);
+    card.setAttribute('aria-pressed', String(selected));
+    card.setAttribute(
+      'aria-label',
+      `${selected ? 'Selected' : 'Open'} ${item.email || item.label || 'Google mailbox'}${loading ? ', loading messages' : ''}`,
+    );
+    card.addEventListener('click', () => _selectPortalGoogleMailbox(item));
+  }
 
   const providerMark = document.createElement('span');
   providerMark.className = 'portal-mailbox-provider';
   providerMark.textContent = provider === 'Google' ? 'G' : 'A';
   providerMark.setAttribute('aria-hidden', 'true');
 
-  const identity = document.createElement('div');
+  const identity = document.createElement(selectable ? 'span' : 'div');
   identity.className = 'portal-mailbox-identity';
   const label = document.createElement('strong');
   label.textContent = item.label || item.email || 'Connected inbox';
@@ -1190,7 +1207,7 @@ function _mailboxCard(item, provider) {
   address.textContent = item.email || item.id || '';
   identity.append(label, address);
 
-  const badges = document.createElement('div');
+  const badges = document.createElement(selectable ? 'span' : 'div');
   badges.className = 'portal-mailbox-badges';
   const connected = document.createElement('span');
   connected.textContent = `${provider} via MAD MCP`;
@@ -1205,9 +1222,101 @@ function _mailboxCard(item, provider) {
     verification.textContent = item.verification;
     badges.appendChild(verification);
   }
+  if (selectable && _selectedPortalGoogleProfileId === item.id) {
+    const selectedBadge = document.createElement('span');
+    selectedBadge.textContent = _portalGoogleLoadingProfileId === item.id ? 'Loading' : 'Selected';
+    selectedBadge.className = 'portal-mailbox-selected-badge';
+    badges.appendChild(selectedBadge);
+  }
 
   card.append(providerMark, identity, badges);
   return card;
+}
+
+function _setPortalGoogleMode(active) {
+  const panel = document.getElementById('email-my-mail-panel');
+  panel?.classList.toggle('portal-google-read-only', !!active);
+  const disableIds = [
+    'email-lib-folder', 'email-filter-btn', 'email-lib-select-btn',
+    'email-lib-compose-btn', 'email-lib-fab', 'email-lib-search',
+    'email-undone-btn', 'email-reminder-btn', 'email-attach-btn',
+    'email-tags-toggle-btn',
+  ];
+  disableIds.forEach(id => {
+    const node = document.getElementById(id);
+    if (node) node.disabled = !!active;
+  });
+  if (active) _resetBulkSelectionForContextChange({ rerender: false });
+}
+
+async function _selectPortalGoogleMailbox(item) {
+  const profileId = String(item?.id || '').trim();
+  if (!profileId) return;
+  _selectedPortalGoogleProfileId = profileId;
+  _setPortalGoogleMode(true);
+  _resetEmailListForFreshLoad();
+  _renderAccountsStrip();
+  _renderPortalMailboxes();
+  await _loadPortalGoogleMessages(profileId);
+}
+
+async function _loadPortalGoogleMessages(profileId = _selectedPortalGoogleProfileId) {
+  if (!profileId || profileId !== _selectedPortalGoogleProfileId) return;
+  const seq = ++_libLoadSeq;
+  state._libLoading = true;
+  _portalGoogleLoadingProfileId = profileId;
+  _renderPortalMailboxes();
+  const grid = document.getElementById('email-lib-grid');
+  const spinner = grid ? _renderEmailLoading(grid) : null;
+  const stats = document.getElementById('email-lib-stats');
+  if (stats) stats.textContent = 'Loading Gmail…';
+  try {
+    const response = await fetch(
+      `${API_BASE}/api/mcp/portal/mailboxes/google/${encodeURIComponent(profileId)}/messages?limit=12`,
+      { credentials: 'same-origin' },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (
+      seq !== _libLoadSeq ||
+      profileId !== _selectedPortalGoogleProfileId ||
+      !document.getElementById('email-lib-modal')
+    ) return;
+    if (!response.ok || !['ready', 'partial'].includes(payload.status)) {
+      throw new Error(payload.error_code || `Gmail status ${response.status}`);
+    }
+    state._libEmails = Array.isArray(payload.emails) ? payload.emails : [];
+    state._libTotal = Number(payload.total || state._libEmails.length);
+    state._libOffset = 0;
+    if (spinner) spinner.destroy();
+    _renderGrid();
+    if (stats) {
+      const visible = state._libEmails.length;
+      const total = Math.max(visible, state._libTotal || 0);
+      stats.textContent = `${visible}${total > visible ? ` of ${total}` : ''} emails · MAD MCP read-only`;
+    }
+    _setEmailSyncStatus({
+      updatedAt: new Date().toISOString(),
+      source: 'MAD MCP Google',
+      loading: false,
+    });
+  } catch (error) {
+    if (seq !== _libLoadSeq || profileId !== _selectedPortalGoogleProfileId) return;
+    if (spinner) spinner.destroy();
+    state._libEmails = [];
+    state._libTotal = 0;
+    const message = error?.message || 'Gmail mailbox unavailable';
+    if (grid) {
+      grid.innerHTML = `<div class="email-loading portal-google-error">Could not load this Gmail inbox: ${_esc(message)}</div>`;
+    }
+    if (stats) stats.textContent = 'Gmail unavailable';
+    _setEmailSyncStatus({ loading: false, source: 'MAD MCP Google' });
+  } finally {
+    if (profileId === _selectedPortalGoogleProfileId) {
+      state._libLoading = false;
+      _portalGoogleLoadingProfileId = null;
+      _renderPortalMailboxes();
+    }
+  }
 }
 
 function _renderPortalMailboxGroup(container, title, items, provider) {
@@ -1495,6 +1604,7 @@ export function openEmailLibrary(opts = {}) {
 
   document.body.appendChild(modal);
   modal.style.display = 'block';
+  _setPortalGoogleMode(!!_selectedPortalGoogleProfileId);
   _renderEmailSyncStatus();
   if (_libSyncTicker) clearInterval(_libSyncTicker);
   _libSyncTicker = setInterval(_renderEmailSyncStatus, 30000);
@@ -2021,7 +2131,7 @@ function _renderAccountsStrip() {
   const _dotFilled = '<svg width="6" height="6" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>';
   const _dotHollow = '<svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="9"/></svg>';
   for (const a of state._libAccounts) {
-    const active = state._libAccountId === a.id ? ' active' : '';
+    const active = !_selectedPortalGoogleProfileId && state._libAccountId === a.id ? ' active' : '';
     const label = a.name || a.from_address || a.imap_user || 'account';
     const dot = a.is_default ? _dotFilled : _dotHollow;
     const dotTitle = a.is_default ? 'Default account' : 'Set as default';
@@ -2033,10 +2143,14 @@ function _renderAccountsStrip() {
   strip.innerHTML = html;
   strip.querySelectorAll('button[data-acc-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
+      _selectedPortalGoogleProfileId = null;
+      _portalGoogleLoadingProfileId = null;
+      _setPortalGoogleMode(false);
       state._libAccountId = btn.dataset.accId || null;
       _publishActiveAccount();
       _resetEmailListForFreshLoad();
       _renderAccountsStrip();
+      _renderPortalMailboxes();
       await _loadFolders({ resetMissing: true });
       _loadEmails({ useCache: true });
     });
@@ -3431,6 +3545,9 @@ async function _refreshUnreadBadge() {
 }
 
 async function _loadEmails({ force = false, useCache = true } = {}) {
+  if (_selectedPortalGoogleProfileId) {
+    return _loadPortalGoogleMessages(_selectedPortalGoogleProfileId);
+  }
   const seq = ++_libLoadSeq;
   state._libLoading = true;
   const accountAtStart = state._libAccountId || '';
@@ -3706,7 +3823,7 @@ function _renderGrid() {
           '<span>No emails' + _smileyIco + '</span>' +
           '<span style="opacity:0.7;font-size:11px;">' +
             (_hasPortalGoogle
-              ? 'Your MAD MCP Google accounts are connected above. Add native IMAP in Settings to read messages here.'
+              ? 'Select a Google account above to read its Gmail inbox through MAD MCP.'
               : 'Set up at: <a href="#" data-open-settings="integrations" style="color:var(--accent,var(--red));text-decoration:underline;">Settings &rsaquo; Integrations</a>') +
           '</span>' +
         '</div>';
@@ -3872,7 +3989,7 @@ function _createCard(em) {
 
   // Done check + unread dot stay next to the subject on the left.
   const isSentFolder = /sent/i.test(cardFolder);
-  if (!isSentFolder) {
+  if (!isSentFolder && !em.portal_read_only) {
     const doneCheck = document.createElement('span');
     doneCheck.className = 'email-card-done' + (em.is_answered ? ' active' : '');
     doneCheck.title = em.is_answered ? 'Mark not done' : 'Mark done';
@@ -3916,6 +4033,13 @@ function _createCard(em) {
       dot.style.cssText = `width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;margin-left:2px;`;
       titleRow.appendChild(dot);
     }
+  }
+  if (!isSentFolder && em.portal_read_only && !em.is_read) {
+    const dot = document.createElement('span');
+    dot.className = 'email-card-unread-dot';
+    dot.title = 'Unread in Gmail';
+    dot.style.cssText = `width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;margin-left:2px;`;
+    titleRow.appendChild(dot);
   }
 
   if (em.is_flagged) {
@@ -3973,7 +4097,7 @@ function _createCard(em) {
   card.appendChild(content);
 
   // Per-card menu button (... menu)
-  if (!state._selectMode) {
+  if (!state._selectMode && !em.portal_read_only) {
     const actionsWrap = document.createElement('div');
     actionsWrap.className = 'memory-item-actions';
     const menuBtn = document.createElement('button');
@@ -4072,8 +4196,10 @@ function _prefetchAdjacentEmails(card, count = 1) {
   // endpoint; otherwise default to the currently-selected folder.
   const _emFold = (() => {
     const emObj = (state._libEmails || []).find(e => String(e.uid) === String(uid));
+    if (emObj?.portal_read_only) return '';
     return (emObj && emObj.folder) || state._libFolder || 'INBOX';
   })();
+  if (!_emFold) return;
   const key = `${state._libAccountId || ''}|${_emFold}|${uid}`;
   if (_emailReadPrefetching.has(key) || _emailReadPrefetching.size > 0) return;
   if (_emailReadPrefetchTimer) clearTimeout(_emailReadPrefetchTimer);
@@ -4087,8 +4213,43 @@ function _prefetchAdjacentEmails(card, count = 1) {
   }, 2500);
 }
 
+function _renderPortalGoogleReader(reader, card, em, data) {
+  const sender = data.from || [data.from_name, data.from_address].filter(Boolean).join(' ') || 'Unknown sender';
+  const body = _safeRenderEmailBody(data);
+  const truncated = data.body_truncated
+    ? '<div class="portal-google-reader-note">This message was bounded by the MAD MCP read limit.</div>'
+    : '';
+  reader.innerHTML = `
+    <div class="email-reader-header">
+      <div class="email-reader-meta">
+        <div class="email-reader-meta-row"><strong>From:</strong><span>${_esc(sender)}</span></div>
+        ${data.to ? `<div class="email-reader-meta-row"><strong>To:</strong><span>${_esc(data.to)}</span></div>` : ''}
+        ${data.cc ? `<div class="email-reader-meta-row"><strong>Cc:</strong><span>${_esc(data.cc)}</span></div>` : ''}
+      </div>
+      <div class="email-reader-actions-inline">
+        <span class="portal-google-read-only-badge">MAD MCP · read-only</span>
+        <button class="memory-toolbar-btn reader-icon-btn" data-act="close" title="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+    ${truncated}
+    <div class="email-reader-body${data.body_html ? ' html-body' : ''}">${body}</div>
+  `;
+  reader.dataset.portalReadOnly = 'true';
+  reader.classList.remove('email-card-reader-loading');
+  reader.style.minHeight = '';
+  _stampReaderContext(reader, { ...em, ...data }, 'INBOX', em.portal_profile_id);
+  reader.querySelector('[data-act="close"]')?.addEventListener('click', async event => {
+    event.stopPropagation();
+    await _toggleCardPreview(card, em);
+  });
+  reader.addEventListener('click', event => event.stopPropagation());
+}
+
 async function _toggleCardPreview(card, em) {
   const accountAtStart = state._libAccountId || '';
+  const portalProfileAtStart = _selectedPortalGoogleProfileId || '';
   const libraryFolderAtStart = state._libFolder || 'INBOX';
   // Prefer the per-email folder stamped by the search endpoint (results
   // from "All Mail" carry folder="[Gmail]/All Mail"). Falls back to the
@@ -4140,7 +4301,7 @@ async function _toggleCardPreview(card, em) {
   requestAnimationFrame(() => {
     try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
   });
-  if (!em.is_read) {
+  if (!em.is_read && !em.portal_read_only) {
     _syncEmailReadState(em.uid, true);
     fetch(`${API_BASE}/api/email/mark-read/${em.uid}?folder=${encodeURIComponent(folderAtStart)}${_acct()}`, { method: 'POST' })
       .catch(err => console.error('Failed to mark email read:', err));
@@ -4162,10 +4323,14 @@ async function _toggleCardPreview(card, em) {
   _markEmailReaderActive(reader);
 
   try {
-    const res = await fetch(`${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(folderAtStart)}${_acct()}`);
+    const readUrl = em.portal_read_only
+      ? `${API_BASE}/api/mcp/portal/mailboxes/google/${encodeURIComponent(em.portal_profile_id)}/messages/${encodeURIComponent(em.uid)}`
+      : `${API_BASE}/api/email/read/${em.uid}?folder=${encodeURIComponent(folderAtStart)}${_acct()}`;
+    const res = await fetch(readUrl, { credentials: 'same-origin' });
     const data = await res.json();
     if (
       accountAtStart !== (state._libAccountId || '') ||
+      portalProfileAtStart !== (_selectedPortalGoogleProfileId || '') ||
       libraryFolderAtStart !== (state._libFolder || 'INBOX') ||
       uidAtStart !== String(card?.dataset?.uid || '') ||
       !card.isConnected ||
@@ -4173,8 +4338,13 @@ async function _toggleCardPreview(card, em) {
     ) {
       return;
     }
-    if (data.error) {
-      reader.innerHTML = `<div style="padding:20px;color:var(--red,#e55)">Error: ${_esc(data.error)}</div>`;
+    if (!res.ok || data.error || data.status === 'unavailable') {
+      const error = data.error_code || data.error || `message status ${res.status}`;
+      reader.innerHTML = `<div style="padding:20px;color:var(--red,#e55)">Error: ${_esc(error)}</div>`;
+      return;
+    }
+    if (em.portal_read_only) {
+      _renderPortalGoogleReader(reader, card, em, data);
       return;
     }
     // Mark as read locally

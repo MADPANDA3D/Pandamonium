@@ -143,6 +143,106 @@ class MailboxManager:
         raise AssertionError(f"Unexpected tool call: {name}")
 
 
+class PortalGmailManager:
+    def __init__(self):
+        self.calls = []
+
+    def get_server_status(self, _server_id):
+        return {"status": "connected", "tool_count": 65}
+
+    @staticmethod
+    def _portal_provider_result(provider):
+        return {
+            "exit_code": 0,
+            "structured_content": {
+                "ok": True,
+                "serviceId": "google",
+                "toolName": "fixture",
+                "data": {"result": json.dumps(provider)},
+                "error": None,
+            },
+        }
+
+    async def call_tool(self, name, arguments, **_kwargs):
+        self.calls.append((name, arguments))
+        if name.endswith("portal.list_service_profiles"):
+            return {
+                "exit_code": 0,
+                "structured_content": {
+                    "ok": True,
+                    "items": [
+                        {
+                            "id": "google-primary",
+                            "label": "Main Google",
+                            "email": "leo@example.test",
+                            "isDefault": True,
+                            "isConfigured": True,
+                            "identityStatus": "verified",
+                            "access_token": "must-not-leak",
+                        }
+                    ],
+                },
+            }
+        if name.endswith("portal.call_read_tool"):
+            assert arguments["serviceId"] == "google"
+            assert arguments["profileId"] == "google-primary"
+            if arguments["toolName"] == "gmail_list_messages":
+                return self._portal_provider_result({
+                    "ok": True,
+                    "data": {
+                        "messages": [{"id": "msg-1", "threadId": "thread-1"}],
+                        "nextPageToken": "next-page",
+                        "resultSizeEstimate": 42,
+                    },
+                    "error": None,
+                    "meta": {},
+                })
+            assert arguments["toolName"] == "gmail_get_message"
+            full = arguments["arguments"].get("format") == "full"
+            data = {
+                "id": "msg-1",
+                "threadId": "thread-1",
+                "labelIds": ["INBOX", "UNREAD", "STARRED"],
+                "snippet": "Bounded fixture preview",
+                "internalDate": "1788217200000",
+                "headers": {
+                    "from": "Sender Name <sender@example.test>",
+                    "to": "leo@example.test",
+                    "cc": "",
+                    "subject": "Portal Gmail fixture",
+                    "date": "Tue, 01 Sep 2026 12:00:00 -0400",
+                },
+                "access_token": "must-not-leak",
+            }
+            if not full:
+                data = {
+                    key: value for key, value in data.items()
+                    if key not in {"headers", "access_token"}
+                }
+                data["payload"] = {
+                    "headers": [
+                        {"name": "From", "value": "Sender Name <sender@example.test>"},
+                        {"name": "To", "value": "leo@example.test"},
+                        {"name": "Subject", "value": "Portal Gmail fixture"},
+                        {"name": "Date", "value": "Tue, 01 Sep 2026 12:00:00 -0400"},
+                    ]
+                }
+            else:
+                data.update({
+                    "text_plain": "Fixture body",
+                    "text_html": "<p>Fixture body</p>",
+                    "body_truncated": False,
+                    "attachments": [{"filename": "secret.fixture"}],
+                })
+            return self._portal_provider_result({
+                "ok": True,
+                "data": data,
+                "error": None,
+                "meta": {},
+            })
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+
 def _endpoint(manager, path, method):
     mcp_routes.setup_mcp_routes(manager)
     matches = [
@@ -279,7 +379,7 @@ def test_portal_mailboxes_reports_agentmail_admission_failure_without_inventing_
     )
     manager = MailboxManager(
         agentmail_result={
-            "exit_code": 0,
+            "exit_code": 1,
             "structured_content": {
                 "ok": False,
                 "error": {
@@ -305,6 +405,115 @@ def test_portal_mailboxes_reports_agentmail_admission_failure_without_inventing_
     assert "sensitive provider detail" not in json.dumps(response)
 
 
+def test_portal_google_profile_lists_bounded_read_only_messages_without_imap(monkeypatch):
+    db = FakeDb(
+        SimpleNamespace(
+            id=mcp_routes.MAD_MCP_PORTAL_ID,
+            oauth_tokens=json.dumps({"static_bearer_token": "fixture-secret"}),
+        )
+    )
+    manager = PortalGmailManager()
+    monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+    endpoint = _endpoint(
+        manager,
+        "/api/mcp/portal/mailboxes/google/{profile_id}/messages",
+        "GET",
+    )
+
+    response = asyncio.run(
+        endpoint("google-primary", FakeRequest({}), limit=2, page_token="")
+    )
+
+    assert response["status"] == "ready"
+    assert response["read_only"] is True
+    assert response["account"]["email"] == "leo@example.test"
+    assert response["total"] == 42
+    assert response["emails"] == [
+        {
+            "uid": "msg-1",
+            "thread_id": "thread-1",
+            "folder": "INBOX",
+            "subject": "Portal Gmail fixture",
+            "from_name": "Sender Name",
+            "from_address": "sender@example.test",
+            "to": "leo@example.test",
+            "cc": "",
+            "date": "Tue, 01 Sep 2026 12:00:00 -0400",
+            "snippet": "Bounded fixture preview",
+            "is_read": False,
+            "is_answered": False,
+            "is_flagged": True,
+            "has_attachments": False,
+            "portal_read_only": True,
+            "portal_profile_id": "google-primary",
+            "source": "mad-mcp-google",
+        }
+    ]
+    read_calls = [args for name, args in manager.calls if name.endswith("portal.call_read_tool")]
+    assert all(call["profileId"] == "google-primary" for call in read_calls)
+    assert {call["toolName"] for call in read_calls} == {
+        "gmail_list_messages",
+        "gmail_get_message",
+    }
+    assert "must-not-leak" not in json.dumps(response)
+    assert "fixture-secret" not in json.dumps(response)
+
+
+def test_portal_google_message_reader_is_bounded_and_omits_provider_secrets(monkeypatch):
+    db = FakeDb(
+        SimpleNamespace(
+            id=mcp_routes.MAD_MCP_PORTAL_ID,
+            oauth_tokens=json.dumps({"static_bearer_token": "fixture-secret"}),
+        )
+    )
+    manager = PortalGmailManager()
+    monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+    endpoint = _endpoint(
+        manager,
+        "/api/mcp/portal/mailboxes/google/{profile_id}/messages/{message_id}",
+        "GET",
+    )
+
+    response = asyncio.run(endpoint("google-primary", "msg-1", FakeRequest({})))
+
+    assert response["status"] == "ready"
+    assert response["portal_read_only"] is True
+    assert response["body_plain"] == "Fixture body"
+    assert response["body_html"] == "<p>Fixture body</p>"
+    assert response["attachments"] == []
+    assert "must-not-leak" not in json.dumps(response)
+    assert "secret.fixture" not in json.dumps(response)
+
+
+def test_portal_google_message_route_rejects_unknown_profile_before_provider_read(
+    monkeypatch,
+):
+    db = FakeDb(
+        SimpleNamespace(
+            id=mcp_routes.MAD_MCP_PORTAL_ID,
+            oauth_tokens=json.dumps({"static_bearer_token": "fixture-secret"}),
+        )
+    )
+    manager = PortalGmailManager()
+    monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+    endpoint = _endpoint(
+        manager,
+        "/api/mcp/portal/mailboxes/google/{profile_id}/messages",
+        "GET",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(endpoint("not-owned", FakeRequest({}), limit=2, page_token=""))
+
+    assert exc.value.status_code == 404
+    assert not any(
+        name.endswith("portal.call_read_tool") for name, _args in manager.calls
+    )
+
+
 def test_email_library_exposes_large_keyboard_accessible_mailbox_tabs():
     source = (REPO_ROOT / "static/js/emailLibrary.js").read_text()
     css = (REPO_ROOT / "static/style.css").read_text()
@@ -320,3 +529,18 @@ def test_email_library_exposes_large_keyboard_accessible_mailbox_tabs():
     assert ".email-mailbox-tabs" in css
     assert ".portal-mailbox-grid" in css
     assert mcp_routes.MAD_MCP_PORTAL_URL not in source
+
+
+def test_email_library_selects_portal_google_profiles_and_keeps_reader_read_only():
+    source = (REPO_ROOT / "static/js/emailLibrary.js").read_text()
+    css = (REPO_ROOT / "static/style.css").read_text()
+
+    assert "dataset.portalGoogleProfile" in source
+    assert "aria-pressed" in source
+    assert "_selectPortalGoogleMailbox" in source
+    assert "/api/mcp/portal/mailboxes/google/" in source
+    assert "portal_read_only" in source
+    assert "MAD MCP · read-only" in source
+    assert "!em.portal_read_only" in source
+    assert ".portal-mailbox-card.is-selected" in css
+    assert ".portal-google-read-only" in css
