@@ -3,6 +3,9 @@ import os
 import re
 import json
 import logging
+import shutil
+import subprocess
+import tempfile
 from typing import List, Dict, Set, Any, Tuple
 from dataclasses import dataclass
 
@@ -11,19 +14,59 @@ from src.markitdown_runtime import MARKITDOWN_EXTS
 logger = logging.getLogger(__name__)
 
 
-def extract_pdf_text(file_path: str) -> str:
-    """Extract text from a PDF file using pypdf (permissive, BSD)."""
+def extract_pdf_pages(file_path: str) -> List[str]:
+    """Extract every PDF page without applying the document-preview cap."""
     try:
         from pypdf import PdfReader
         reader = PdfReader(file_path)
-        text = "".join((page.extract_text() or "") for page in reader.pages)
-        return text
+        return [(page.extract_text() or "") for page in reader.pages]
     except ImportError:
         logger.warning("pypdf not installed, cannot extract PDF text")
-        return ""
+        return []
     except Exception as e:
         logger.error(f"Failed to extract PDF text from {file_path}: {e}")
-        return ""
+        return []
+
+
+def ocr_pdf_pages(file_path: str) -> Tuple[List[str], str]:
+    """OCR an image-only PDF with native tools when both are already installed."""
+    pdftoppm = shutil.which("pdftoppm")
+    tesseract = shutil.which("tesseract")
+    if not pdftoppm or not tesseract:
+        return [], "unavailable"
+
+    pages = extract_pdf_pages(file_path)
+    if not pages:
+        return [], "failed"
+    try:
+        output = []
+        with tempfile.TemporaryDirectory(prefix="odysseus-book-ocr-") as tmp:
+            for page_number in range(1, len(pages) + 1):
+                prefix = os.path.join(tmp, "page")
+                subprocess.run(
+                    [pdftoppm, "-f", str(page_number), "-l", str(page_number), "-r", "150", "-png", "-singlefile", file_path, prefix],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=120,
+                )
+                result = subprocess.run(
+                    [tesseract, f"{prefix}.png", "stdout", "-l", "eng"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                output.append(result.stdout or "")
+        return (output, "complete") if any(page.strip() for page in output) else ([], "failed")
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("Native PDF OCR failed for %s: %s", file_path, e)
+        return [], "failed"
+
+
+def extract_pdf_text(file_path: str) -> str:
+    """Extract full PDF text using pypdf (permissive, BSD)."""
+    return "\n\n".join(extract_pdf_pages(file_path))
 
 
 def extract_office_text(file_path: str) -> str:

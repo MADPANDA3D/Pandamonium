@@ -40,13 +40,16 @@ KEYWORD_WEIGHT = 0.3
 COLLECTION_NAME = "odysseus_rag"
 
 
-def _generate_doc_id(text: str, owner: str = "") -> str:
+def _generate_doc_id(text: str, owner: str = "", source_id: str = "") -> str:
     # Owner-scope the id so two owners can index byte-identical chunks
     # without the second one's add early-returning on the first's id and
     # being silently dropped from their owner-filtered search results.
     # Empty owner reproduces the legacy text-only id so the unowned/base
     # index keeps its existing ids and isn't re-churned.
-    key = f"{owner}\x00{text}" if owner else text
+    if source_id:
+        key = f"{owner}\x00{source_id}\x00{text}"
+    else:
+        key = f"{owner}\x00{text}" if owner else text
     return f"doc_{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}"
 
 
@@ -183,7 +186,11 @@ class VectorRAG:
         if not metadata or not isinstance(metadata, dict):
             return False
 
-        doc_id = _generate_doc_id(text, metadata.get("owner") or "")
+        doc_id = _generate_doc_id(
+            text,
+            metadata.get("owner") or "",
+            metadata.get("source_id") or "",
+        )
         wrote = False
         for lane in self._lanes:
             try:
@@ -219,7 +226,10 @@ class VectorRAG:
         attempted_new = False
         write_failed = False
         for lane in self._lanes:
-            all_ids = [_generate_doc_id(t, m.get("owner") or "") for t, m in valid]
+            all_ids = [
+                _generate_doc_id(t, m.get("owner") or "", m.get("source_id") or "")
+                for t, m in valid
+            ]
             try:
                 existing = lane.collection.get(ids=all_ids)
                 existing_ids = set(existing.get("ids") or [])

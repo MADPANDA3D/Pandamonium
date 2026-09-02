@@ -2014,7 +2014,7 @@ body.bg-pattern-sparkles {
     .first-run-dismiss:hover { color:var(--fg); }
     .first-run-steps {
       display:grid;
-      grid-template-columns:repeat(3, minmax(0, 1fr));
+      grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
       gap:8px;
     }
     .first-run-step {
@@ -2055,9 +2055,10 @@ body.bg-pattern-sparkles {
     .first-run-step-state {
       color:color-mix(in srgb, var(--fg) 55%, transparent);
       font-size:9px;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
+      white-space:normal;
+      overflow:visible;
+      overflow-wrap:anywhere;
+      text-overflow:clip;
     }
     @media (max-width: 768px) {
       #welcome-setup.first-run-guide { width:min(390px, 90vw); }
@@ -15760,6 +15761,30 @@ span[id$="-logo"] svg:not([width]) {
   font-size: 12px;
   background: var(--bg);
 }
+@media (min-width: 769px) {
+  #doclib-modal .doclib-modal-content {
+    width: min(1120px, calc(100vw - 32px)) !important;
+    height: min(860px, calc(100dvh - 32px));
+    max-width: none;
+    max-height: calc(100dvh - 32px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #doclib-modal {
+    padding-top: 16px;
+  }
+  #doclib-modal .modal-body,
+  #doclib-modal [data-doclib-panel] {
+    min-height: 0;
+  }
+  #doclib-modal .doclib-grid:not(:has(.doclib-card-expanded)) {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
+}
 /* Anchor doclib modal to top so only the bottom edge moves on resize */
 #doclib-modal {
   align-items: flex-start;
@@ -16083,6 +16108,100 @@ button.portal-mailbox-card:focus-visible {
   overflow-y: auto;
   padding: 0;
   position: relative;
+}
+.doclib-books-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.doclib-books-heading h2 {
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+.doclib-books-heading .memory-count {
+  font-size: 0.6em;
+  font-weight: normal;
+  opacity: 0.6;
+}
+.doclib-books-heading button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.doclib-books-status {
+  min-height: 1em;
+  color: var(--color-error, var(--red));
+  font-size: 10px;
+}
+.doclib-books-grid {
+  gap: 8px;
+}
+.doclib-book-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 78%, var(--bg));
+}
+.doclib-book-card-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.doclib-book-card h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-size: 12px;
+}
+.doclib-book-filename,
+.doclib-book-meta,
+.doclib-book-attention {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+.doclib-book-filename,
+.doclib-book-meta {
+  color: var(--fg-muted);
+}
+.doclib-book-attention {
+  color: var(--warn, #f0ad4e);
+}
+.doclib-book-status {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+.doclib-book-status.is-ready {
+  border-color: color-mix(in srgb, var(--success, #52c878) 55%, var(--border));
+  color: var(--success, #52c878);
+}
+.doclib-book-status.is-needs_attention,
+.doclib-book-status.is-failed {
+  border-color: color-mix(in srgb, var(--warn, #f0ad4e) 55%, var(--border));
+  color: var(--warn, #f0ad4e);
+}
+.doclib-book-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+.doclib-book-actions button {
+  min-height: 28px;
 }
 
 /* Gallery grid domino-in cascade on open — same recipe as the document/email

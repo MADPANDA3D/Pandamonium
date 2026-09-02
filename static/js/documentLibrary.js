@@ -1,6 +1,6 @@
 // static/js/documentLibrary.js
 /**
- * Document Library — modal with Chats / Documents / Research / Archive tabs.
+ * Document Library — modal with Chats / Documents / Books / Research / Archive tabs.
  * Extracted from document.js to reduce file size.
  */
 
@@ -1605,11 +1605,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
           <h4 id="doclib-header-title"><span id="doclib-header-icon" style="vertical-align:-2px;margin-right:4px;display:inline-flex;"></span><span id="doclib-header-text">Library</span></h4>
           <button class="close-btn" id="doclib-close">\u2716</button>
         </div>
-        <div class="lib-tabs" id="doclib-lib-tabs" style="padding:0 10px;">
-          <button class="lib-tab" data-doclib-tab="chats"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chats</button>
-          <button class="lib-tab active" data-doclib-tab="documents"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>Documents</button>
-          <button class="lib-tab" data-doclib-tab="research"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Research</button>
-          <button class="lib-tab" data-doclib-tab="archive"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button>
+        <div class="lib-tabs" id="doclib-lib-tabs" role="tablist" aria-label="Library sections" style="padding:0 10px;">
+          <button class="lib-tab" role="tab" aria-selected="false" tabindex="-1" data-doclib-tab="chats"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chats</button>
+          <button class="lib-tab active" role="tab" aria-selected="true" tabindex="0" data-doclib-tab="documents"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>Documents</button>
+          <button class="lib-tab" role="tab" aria-selected="false" tabindex="-1" data-doclib-tab="books"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Books</button>
+          <button class="lib-tab" role="tab" aria-selected="false" tabindex="-1" data-doclib-tab="research"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Research</button>
+          <button class="lib-tab" role="tab" aria-selected="false" tabindex="-1" data-doclib-tab="archive"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button>
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;overflow:hidden;">
           <div id="doclib-panel-chats" data-doclib-panel="chats" class="admin-card" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
@@ -1693,6 +1694,19 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
               <button class="memory-toolbar-btn" id="doclib-research-bulk-cancel" title="Cancel (Esc)" style="margin-left:4px;padding:3px 6px;position:relative;top:-2px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div id="doclib-research-grid" class="doclib-grid"></div>
+          </div>
+          <div id="doclib-panel-books" data-doclib-panel="books" role="tabpanel" class="admin-card" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+            <div class="doclib-books-heading">
+              <h2>Books <span id="doclib-books-stats" class="memory-count"></span></h2>
+              <button class="memory-toolbar-btn" id="doclib-books-import-btn" title="Import PDF books">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="21" x2="19" y2="21"/></svg>
+                Import PDF
+              </button>
+            </div>
+            <p class="memory-desc doclib-desc">Private, owner-scoped PDFs indexed for source-attributed retrieval.</p>
+            <div id="doclib-books-status" class="doclib-books-status" role="status" aria-live="polite"></div>
+            <input type="file" id="doclib-books-file-input" accept="application/pdf,.pdf" multiple hidden />
+            <div id="doclib-books-grid" class="doclib-grid doclib-books-grid"></div>
           </div>
           <div data-doclib-panel="documents" class="admin-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;">
@@ -1846,6 +1860,10 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         label: 'Documents',
         svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>',
       },
+      books: {
+        label: 'Books',
+        svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+      },
       research: {
         label: 'Research',
         svg: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
@@ -1858,7 +1876,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
     function _switchLibTab(tab) {
       _activeLibTab = tab;
-      _tabBtns.forEach(b => b.classList.toggle('active', b.dataset.doclibTab === tab));
+      _tabBtns.forEach(b => {
+        const selected = b.dataset.doclibTab === tab;
+        b.classList.toggle('active', selected);
+        b.setAttribute('aria-selected', String(selected));
+        b.tabIndex = selected ? 0 : -1;
+      });
       _tabPanels.forEach(p => {
         if (p.dataset.doclibPanel === tab) {
           p.style.display = 'flex';
@@ -1877,11 +1900,153 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       if (tab === 'chats') _renderLibChats();
       else if (tab === 'archive') _renderLibArchive();
       else if (tab === 'research') _renderLibResearch();
+      else if (tab === 'books') _renderLibBooks();
     }
 
-    _tabBtns.forEach(btn => {
+    _tabBtns.forEach((btn, index) => {
       btn.addEventListener('click', () => _switchLibTab(btn.dataset.doclibTab));
+      btn.addEventListener('keydown', (event) => {
+        let nextIndex = null;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % _tabBtns.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + _tabBtns.length) % _tabBtns.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = _tabBtns.length - 1;
+        if (nextIndex === null) return;
+        event.preventDefault();
+        const next = _tabBtns[nextIndex];
+        _switchLibTab(next.dataset.doclibTab);
+        next.focus();
+      });
     });
+
+    async function _bookRequest(path, options) {
+      const response = await fetch(API_BASE + path, {
+        credentials: 'same-origin',
+        ...(options || {}),
+      });
+      let data = {};
+      try { data = await response.json(); } catch {}
+      if (!response.ok) throw new Error(data.detail || data.message || `Request failed (${response.status})`);
+      return data;
+    }
+
+    function _bookMeta(book) {
+      const pages = Number(book.page_count || 0);
+      const chunks = Number(book.chunk_count || 0);
+      return [
+        pages ? `${pages} page${pages === 1 ? '' : 's'}` : 'Pages unavailable',
+        `${chunks} chunk${chunks === 1 ? '' : 's'}`,
+      ];
+    }
+
+    function _renderBookCard(book) {
+      const card = document.createElement('article');
+      card.className = 'doclib-book-card';
+
+      const heading = document.createElement('div');
+      heading.className = 'doclib-book-card-heading';
+      const title = document.createElement('h3');
+      title.textContent = book.title || book.filename || 'Untitled book';
+      const status = document.createElement('span');
+      status.className = `doclib-book-status is-${book.status || 'unknown'}`;
+      status.textContent = String(book.status || 'unknown').replaceAll('_', ' ');
+      heading.append(title, status);
+
+      const filename = document.createElement('p');
+      filename.className = 'doclib-book-filename';
+      filename.textContent = book.filename || '';
+
+      const metadata = document.createElement('p');
+      metadata.className = 'doclib-book-meta';
+      metadata.textContent = _bookMeta(book).join(' · ');
+
+      card.append(heading, filename, metadata);
+      if (book.needs_attention) {
+        const attention = document.createElement('p');
+        attention.className = 'doclib-book-attention';
+        attention.textContent = book.attention_reason === 'needs_ocr'
+          ? 'Needs OCR: no text was found and native OCR is unavailable.'
+          : `Needs attention: ${String(book.attention_reason || 'indexing failed').replaceAll('_', ' ')}`;
+        card.appendChild(attention);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'doclib-book-actions';
+      const reindex = document.createElement('button');
+      reindex.className = 'memory-toolbar-btn';
+      reindex.type = 'button';
+      reindex.textContent = 'Reindex';
+      reindex.setAttribute('aria-label', `Reindex ${title.textContent}`);
+      reindex.addEventListener('click', async () => {
+        reindex.disabled = true;
+        reindex.textContent = 'Indexing…';
+        try {
+          await _bookRequest(`/api/personal/books/${encodeURIComponent(book.id)}/reindex`, { method: 'POST' });
+          if (uiModule) uiModule.showToast('Book reindexed');
+          await _renderLibBooks();
+        } catch (error) {
+          if (uiModule) uiModule.showError(error.message || 'Reindex failed');
+          reindex.disabled = false;
+          reindex.textContent = 'Reindex';
+        }
+      });
+
+      const remove = document.createElement('button');
+      remove.className = 'memory-toolbar-btn danger';
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', `Remove ${title.textContent}`);
+      remove.addEventListener('click', async () => {
+        const confirmed = await uiModule.styledConfirm(`Remove “${title.textContent}” and its indexed chunks?`, {
+          confirmText: 'Remove',
+          danger: true,
+        });
+        if (!confirmed) return;
+        remove.disabled = true;
+        try {
+          await _bookRequest(`/api/personal/books/${encodeURIComponent(book.id)}`, { method: 'DELETE' });
+          if (uiModule) uiModule.showToast('Book removed');
+          await _renderLibBooks();
+        } catch (error) {
+          if (uiModule) uiModule.showError(error.message || 'Remove failed');
+          remove.disabled = false;
+        }
+      });
+      actions.append(reindex, remove);
+      card.appendChild(actions);
+      return card;
+    }
+
+    async function _renderLibBooks() {
+      const grid = document.getElementById('doclib-books-grid');
+      const stats = document.getElementById('doclib-books-stats');
+      const status = document.getElementById('doclib-books-status');
+      if (!grid) return;
+      grid.replaceChildren(spinnerModule.createLoadingRow('Loading…'));
+      if (status) status.textContent = '';
+      try {
+        const data = await _bookRequest('/api/personal/books');
+        const books = Array.isArray(data.books) ? data.books : [];
+        if (stats) stats.textContent = `${books.length} book${books.length === 1 ? '' : 's'}`;
+        grid.replaceChildren();
+        if (!books.length) {
+          const empty = document.createElement('div');
+          empty.className = 'doclib-empty';
+          empty.textContent = 'No books imported yet.';
+          grid.appendChild(empty);
+          return;
+        }
+        _maybeCascadeGrid(grid, 'books');
+        books.forEach(book => grid.appendChild(_renderBookCard(book)));
+      } catch (error) {
+        grid.replaceChildren();
+        const failed = document.createElement('div');
+        failed.className = 'doclib-empty';
+        failed.textContent = 'Failed to load books.';
+        grid.appendChild(failed);
+        if (status) status.textContent = error.message || 'Failed to load books.';
+      }
+    }
 
     // ── Chats tab state ──
     let _chatsSessions = [];
@@ -3216,6 +3381,40 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
           try { _sp && _sp.stop(); } catch {}
           importFileBtn.innerHTML = _orig;
           importFileBtn.disabled = false;
+        }
+      });
+    }
+
+    const importBooksBtn = document.getElementById('doclib-books-import-btn');
+    const booksInput = document.getElementById('doclib-books-file-input');
+    if (importBooksBtn && booksInput) {
+      importBooksBtn.addEventListener('click', () => booksInput.click());
+      booksInput.addEventListener('change', async () => {
+        const files = Array.from(booksInput.files || []);
+        booksInput.value = '';
+        if (!files.length) return;
+        importBooksBtn.disabled = true;
+        const original = importBooksBtn.innerHTML;
+        importBooksBtn.textContent = 'Indexing…';
+        try {
+          const body = new FormData();
+          files.forEach(file => body.append('files', file));
+          const data = await _bookRequest('/api/personal/upload?collection=books', {
+            method: 'POST',
+            body,
+          });
+          const imported = Array.isArray(data.book_ids) ? data.book_ids.length : 0;
+          const attention = Number(data.needs_attention || 0);
+          const message = attention
+            ? `Imported ${imported} book${imported === 1 ? '' : 's'}; ${attention} needs attention`
+            : `Imported ${imported} book${imported === 1 ? '' : 's'}`;
+          if (uiModule) uiModule.showToast(message);
+          await _renderLibBooks();
+        } catch (error) {
+          if (uiModule) uiModule.showError(error.message || 'Book import failed');
+        } finally {
+          importBooksBtn.disabled = false;
+          importBooksBtn.innerHTML = original;
         }
       });
     }

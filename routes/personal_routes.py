@@ -1,9 +1,11 @@
 # routes/personal_routes.py
 """Routes for personal documents management."""
 import os
+import json
 import logging
 import shutil
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Depends
 from src.request_models import DirectoryRequest
@@ -13,6 +15,7 @@ from src.auth_helpers import require_privilege, require_user
 from core.middleware import require_admin
 from src.upload_handler import secure_filename
 from src.upload_limits import PERSONAL_UPLOAD_MAX_BYTES
+from src.personal_docs import extract_pdf_pages, ocr_pdf_pages
 
 UPLOADS_DIR = PERSONAL_UPLOADS_DIR
 
@@ -29,6 +32,136 @@ def _personal_upload_dir_for_owner(owner: str | None, *, create: bool = True) ->
     if create:
         os.makedirs(upload_dir, exist_ok=True)
     return upload_dir
+
+
+def _books_dir_for_owner(owner: str | None, *, create: bool = True) -> str:
+    owner_dir = _personal_upload_dir_for_owner(owner, create=create)
+    books_dir = os.path.abspath(os.path.join(owner_dir, "books"))
+    if os.path.commonpath([books_dir, owner_dir]) != owner_dir:
+        raise ValueError("Unsafe books path")
+    if create:
+        os.makedirs(books_dir, exist_ok=True)
+    return books_dir
+
+
+def _book_catalog_path(owner: str | None, *, create: bool = True) -> str:
+    return os.path.join(_books_dir_for_owner(owner, create=create), "catalog.json")
+
+
+def _load_book_catalog(owner: str | None) -> List[Dict[str, Any]]:
+    path = _book_catalog_path(owner, create=False)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as catalog_file:
+            payload = json.load(catalog_file)
+        books = payload.get("books", []) if isinstance(payload, dict) else []
+        return [dict(book) for book in books if isinstance(book, dict)]
+    except (OSError, ValueError) as e:
+        logger.error("Failed to read books catalog for %s: %s", owner, e)
+        return []
+
+
+def _save_book_catalog(owner: str | None, books: List[Dict[str, Any]]) -> None:
+    path = _book_catalog_path(owner)
+    temp_path = f"{path}.{uuid.uuid4().hex}.tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as catalog_file:
+            json.dump({"version": 1, "books": books}, catalog_file, indent=2)
+            catalog_file.flush()
+            os.fsync(catalog_file.fileno())
+        os.replace(temp_path, path)
+    finally:
+        try:
+            os.remove(temp_path)
+        except FileNotFoundError:
+            pass
+
+
+def _public_book(book: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: book.get(key)
+        for key in (
+            "id", "title", "filename", "size_bytes", "page_count", "status",
+            "chunk_count", "indexed_chunks", "ocr_status", "needs_attention",
+            "attention_reason", "created_at", "updated_at",
+        )
+    }
+
+
+def _book_source(owner: str, book: Dict[str, Any]) -> str:
+    source = os.path.realpath(str(book.get("source") or ""))
+    books_dir = os.path.realpath(_books_dir_for_owner(owner, create=False))
+    try:
+        allowed = source != books_dir and os.path.commonpath([source, books_dir]) == books_dir
+    except ValueError:
+        allowed = False
+    if not allowed:
+        raise HTTPException(409, "Book catalog source is invalid")
+    return source
+
+
+def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = False) -> Dict[str, Any]:
+    source = _book_source(owner, book)
+    pages = extract_pdf_pages(source)
+    ocr_status = "not_needed"
+    if not any(page.strip() for page in pages):
+        ocr_pages, ocr_status = ocr_pdf_pages(source)
+        if ocr_pages:
+            pages = ocr_pages
+
+    book.update(
+        page_count=len(pages),
+        ocr_status=ocr_status,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    if not any(page.strip() for page in pages):
+        book.update(
+            status="needs_attention",
+            chunk_count=0,
+            indexed_chunks=0,
+            needs_attention=True,
+            attention_reason="needs_ocr" if ocr_status == "unavailable" else "ocr_failed",
+        )
+        return book
+
+    documents = []
+    for page_number, page in enumerate(pages, start=1):
+        for page_chunk, chunk in enumerate(rag._split_into_chunks(page), start=1):
+            documents.append((chunk, {
+                "source": source,
+                "source_id": f"book:{book['id']}:page:{page_number}:chunk:{page_chunk}",
+                "filename": book["filename"],
+                "stored_filename": os.path.basename(source),
+                "directory": os.path.dirname(source),
+                "type": ".pdf",
+                "library": "books",
+                "book_id": book["id"],
+                "page": page_number,
+                "chunk_id": len(documents),
+                "owner": owner,
+            }))
+
+    if replace:
+        rag.delete_by_source(source)
+    result = rag.add_documents_batch(documents)
+    if result.get("success"):
+        book.update(
+            status="ready",
+            chunk_count=len(documents),
+            indexed_chunks=result.get("added_count", len(documents)),
+            needs_attention=False,
+            attention_reason=None,
+        )
+    else:
+        book.update(
+            status="failed",
+            chunk_count=len(documents),
+            indexed_chunks=0,
+            needs_attention=True,
+            attention_reason="indexing_failed",
+        )
+    return book
 
 
 def _unique_personal_upload_path(upload_dir: str, original_name: str | None) -> Tuple[str, str, str]:
@@ -106,6 +239,19 @@ def rename_personal_upload_owner(
         rename_directory = getattr(personal_docs_manager, "rename_directory", None)
         if callable(rename_directory):
             rename_directory(old_dir, new_dir, path_map=path_map)
+
+    books = _load_book_catalog(new_owner)
+    catalog_changed = False
+    for book in books:
+        source = os.path.abspath(str(book.get("source") or ""))
+        rewritten = path_map.get(source)
+        if not rewritten and source.startswith(old_dir + os.sep):
+            rewritten = new_dir + source[len(old_dir):]
+        if rewritten and rewritten != source:
+            book["source"] = rewritten
+            catalog_changed = True
+    if catalog_changed:
+        _save_book_catalog(new_owner, books)
 
     rag_result = None
     if rag_manager is not None:
@@ -283,13 +429,21 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         if not rag:
             raise HTTPException(503, "RAG system is not available — is the embedding service running?")
 
-        upload_dir = _personal_upload_dir_for_owner(user)
+        collection = str(getattr(request, "query_params", {}).get("collection", "documents")).strip().lower()
+        if collection not in {"documents", "books"}:
+            raise HTTPException(400, "Unknown personal upload collection")
+        is_books = collection == "books"
+        upload_dir = _books_dir_for_owner(user) if is_books else _personal_upload_dir_for_owner(user)
+        books = _load_book_catalog(user) if is_books else []
 
         total_indexed = 0
         total_failed = 0
+        needs_attention = 0
         uploaded_files = []
+        book_ids = []
 
         for upload in files:
+            book = None
             try:
                 file_path, stored_name, safe_name = _unique_personal_upload_path(upload_dir, upload.filename)
                 content_bytes = await upload.read(PERSONAL_UPLOAD_MAX_BYTES + 1)
@@ -297,10 +451,45 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     logger.warning(f"Rejected oversized personal upload: {upload.filename!r}")
                     total_failed += 1
                     continue
+                ext = os.path.splitext(safe_name)[1].lower()
+                if is_books and (ext != ".pdf" or not content_bytes.startswith(b"%PDF-")):
+                    total_failed += 1
+                    continue
                 with open(file_path, "wb") as f:
                     f.write(content_bytes)
 
-                ext = os.path.splitext(safe_name)[1].lower()
+                if is_books:
+                    now = datetime.now(timezone.utc).isoformat()
+                    book = {
+                        "id": uuid.uuid4().hex,
+                        "title": os.path.splitext(safe_name)[0],
+                        "filename": safe_name,
+                        "source": file_path,
+                        "size_bytes": len(content_bytes),
+                        "page_count": 0,
+                        "status": "indexing",
+                        "chunk_count": 0,
+                        "indexed_chunks": 0,
+                        "ocr_status": "pending",
+                        "needs_attention": False,
+                        "attention_reason": None,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                    books.append(book)
+                    _save_book_catalog(user, books)
+                    _index_book(rag, user, book)
+                    _save_book_catalog(user, books)
+                    uploaded_files.append(safe_name)
+                    book_ids.append(book["id"])
+                    if book["status"] == "ready":
+                        total_indexed += int(book["indexed_chunks"] or 0)
+                    elif book["status"] == "needs_attention":
+                        needs_attention += 1
+                    else:
+                        total_failed += 1
+                    continue
+
                 if ext == ".pdf":
                     from src.personal_docs import extract_pdf_text
                     text = extract_pdf_text(file_path)
@@ -332,17 +521,90 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 uploaded_files.append(safe_name)
             except Exception as e:
                 logger.error(f"Failed to upload/index {upload.filename}: {e}")
+                if book is not None:
+                    book.update(
+                        status="failed",
+                        needs_attention=True,
+                        attention_reason="processing_failed",
+                        updated_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    _save_book_catalog(user, books)
                 total_failed += 1
 
         # Track uploads directory
-        if uploaded_files and hasattr(personal_docs_manager, "add_directory"):
+        if uploaded_files and not is_books and hasattr(personal_docs_manager, "add_directory"):
             personal_docs_manager.add_directory(upload_dir, index=False)
 
         return {
             "success": True,
             "uploaded": uploaded_files,
+            "book_ids": book_ids,
             "indexed_count": total_indexed,
             "failed_count": total_failed,
+            "needs_attention": needs_attention,
+        }
+
+    @router.get("/books")
+    def list_books(owner: str = Depends(require_user)):
+        books = sorted(
+            _load_book_catalog(owner),
+            key=lambda book: str(book.get("created_at") or ""),
+            reverse=True,
+        )
+        return {"books": [_public_book(book) for book in books]}
+
+    @router.post("/books/{book_id}/reindex")
+    def reindex_book(book_id: str, owner: str = Depends(require_user)):
+        books = _load_book_catalog(owner)
+        book = next((item for item in books if item.get("id") == book_id), None)
+        if book is None:
+            raise HTTPException(404, "Book not found")
+        if not os.path.isfile(_book_source(owner, book)):
+            raise HTTPException(404, "Book file not found")
+        rag = _rag()
+        if not rag:
+            raise HTTPException(503, "RAG system is not available")
+        book["status"] = "indexing"
+        _save_book_catalog(owner, books)
+        try:
+            _index_book(rag, owner, book, replace=True)
+        except Exception as e:
+            logger.error("Failed to reindex book %s for %s: %s", book_id, owner, e)
+            book.update(
+                status="failed",
+                needs_attention=True,
+                attention_reason="processing_failed",
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            _save_book_catalog(owner, books)
+            raise HTTPException(500, "Book reindex failed")
+        _save_book_catalog(owner, books)
+        return _public_book(book)
+
+    @router.delete("/books/{book_id}")
+    def delete_book(book_id: str, owner: str = Depends(require_user)):
+        books = _load_book_catalog(owner)
+        book = next((item for item in books if item.get("id") == book_id), None)
+        if book is None:
+            raise HTTPException(404, "Book not found")
+        source = _book_source(owner, book)
+        rag = _rag()
+        removed_chunks = rag.delete_by_source(source) if rag else 0
+        deleted_from_disk = False
+        try:
+            os.remove(source)
+            deleted_from_disk = True
+        except FileNotFoundError:
+            deleted_from_disk = True
+        books.remove(book)
+        _save_book_catalog(owner, books)
+        exclude_file = getattr(personal_docs_manager, "exclude_file", None)
+        if callable(exclude_file):
+            exclude_file(source)
+        return {
+            "success": True,
+            "removed_chunks": removed_chunks,
+            "deleted_from_disk": deleted_from_disk,
         }
 
     @router.delete("/file")
