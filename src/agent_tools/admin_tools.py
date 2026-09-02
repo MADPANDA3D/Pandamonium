@@ -216,13 +216,91 @@ def _validate_mcp_command(command, args, env) -> Optional[str]:
 
 
 async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
-    """Manage MCP servers: list, add, delete, enable, disable, reconnect."""
+    """Manage MCP servers and inspect the live external-integration inventory."""
     try:
         args = _parse_tool_args(content)
     except ValueError:
         return {"error": "Invalid JSON arguments", "exit_code": 1}
 
     action = args.get("action", "list")
+
+    if action == "inventory":
+        mcp = get_mcp_manager()
+        statuses = mcp.get_all_statuses() if mcp else {}
+        tools = mcp.get_all_tools() if mcp else []
+        tool_names: Dict[str, set] = {}
+        server_names: Dict[str, str] = {}
+        for tool in tools:
+            server_id = str(tool.get("server_id") or "")
+            if not server_id or tool.get("is_disabled"):
+                continue
+            server_names[server_id] = str(tool.get("server_name") or server_id)
+            tool_names.setdefault(server_id, set()).add(str(tool.get("name") or ""))
+
+        mcp_servers = []
+        for server_id, status in statuses.items():
+            if mcp and (mcp.is_builtin(server_id) or mcp.is_extension_server(server_id)):
+                continue
+            mcp_servers.append({
+                "id": server_id,
+                "name": str(status.get("name") or server_names.get(server_id) or server_id),
+                "status": str(status.get("status") or "disconnected"),
+                "capabilities": sorted(name for name in tool_names.get(server_id, set()) if name),
+            })
+
+        from src.extension_registry import ExtensionRegistry
+        extension_rows = ExtensionRegistry().snapshot().get("extensions", {})
+        extensions = []
+        for extension_id, record in extension_rows.items():
+            manifest = record.get("manifest") or {}
+            extensions.append({
+                "id": extension_id,
+                "name": str(manifest.get("name") or extension_id),
+                "enabled": bool(record.get("enabled")),
+                "runtime": str((manifest.get("runtime") or {}).get("type") or "unknown"),
+                "capabilities": sorted(
+                    str(item.get("name")) for item in record.get("effective_capabilities", [])
+                    if item.get("name")
+                ),
+                "skills": sorted(
+                    str(item.get("id")) for item in record.get("admitted_skills", [])
+                    if item.get("id")
+                ),
+            })
+        if os.getenv("ODYSSEUS_ORACLE_URL", "").strip() and not any(
+            row["id"] == "oracle" for row in extensions
+        ):
+            extensions.append({
+                "id": "oracle",
+                "name": "ORACLE",
+                "enabled": True,
+                "runtime": "legacy_web_harness",
+                "capabilities": [],
+                "skills": [],
+            })
+
+        from src.integrations import load_integrations
+        api_integrations = sorted(
+            [
+                {"id": str(item.get("id") or ""), "name": str(item.get("name") or item.get("id") or "unknown")}
+                for item in load_integrations()
+                if item.get("enabled", True)
+            ],
+            key=lambda item: (item["name"].lower(), item["id"]),
+        )
+        mcp_servers.sort(key=lambda item: (item["name"].lower(), item["id"]))
+        extensions.sort(key=lambda item: (item["name"].lower(), item["id"]))
+        return {
+            "response": (
+                f"{len(mcp_servers)} MCP providers, {len(extensions)} extensions, "
+                f"{len(api_integrations)} API integrations"
+            ),
+            "mcp_servers": mcp_servers,
+            "extensions": extensions,
+            "api_integrations": api_integrations,
+            "core_functions_note": "Search, files, calendar, notes, tasks, email, and math are core workspace functions, not external integrations.",
+            "exit_code": 0,
+        }
 
     if action == "list":
         mcp = get_mcp_manager()

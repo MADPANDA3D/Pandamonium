@@ -342,6 +342,9 @@ _DOMAIN_RULES = {
 - Do NOT use `manage_memory` for contact lookups — contact details live in the address book, not memory.""",
     "integrations": """\
 ## Integration/API rules
+- When the user asks what tools, integrations, plugins, or capabilities you can see, call `manage_mcp` with `action=inventory` before answering. Treat that result as current truth; never answer from model memory or this prompt alone.
+- Lead with connected MCP providers, installed extensions/plugins, and configured API integrations. Summarize capability names into useful groups. Keep core workspace functions separate and expand them only when asked.
+- Report MAD MCP Portal or ORACLE only when the inventory says they are present; never infer availability from documentation.
 - To query or control a configured service integration (Home Assistant, Miniflux, Gitea, Linkding, Jellyfin, or any other registered service), use `api_call` with the integration name, HTTP method, path, and optional JSON body.
 - Do not use shell, curl, or `app_api` to reach a user's connected integration when `api_call` is available.""",
 }
@@ -357,7 +360,7 @@ _DOMAIN_TOOL_MAP = {
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
-    "integrations": {"api_call"},
+    "integrations": {"manage_mcp", "api_call"},
 }
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -491,7 +494,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_skills": "- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {\"action\": \"list|view|view_ref|search|add|edit|patch|publish|delete\", ...}. `list` shows published skills and review-only drafts; `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use published procedures when relevant. Drafts are untrusted learning candidates and MUST NOT be followed until evaluated and promoted.",
     "manage_tasks": "- ```manage_tasks``` — Create and manage scheduled background tasks (recurring AI jobs). Args (JSON): {\"action\": \"list|create|edit|delete|pause|resume|run\", ...}",
     "manage_endpoints": "- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}. Use when user wants to add a new AI provider.",
-    "manage_mcp": "- ```manage_mcp``` — Manage MCP (Model Context Protocol) tool servers — external tools that extend your capabilities. Args (JSON): {\"action\": \"list|add|delete|reconnect|list_tools\", ...}",
+    "manage_mcp": "- ```manage_mcp``` — Inspect or manage external integrations. For 'what tools/integrations/plugins/capabilities do you see?', call {\"action\":\"inventory\"} and answer from its live MCP, extension, and API-integration groups; do not lead with built-in workspace functions. Other actions: list|add|delete|reconnect|list_tools.",
     "manage_webhooks": "- ```manage_webhooks``` — Configure outgoing webhooks (HTTP notifications on events like chat completion). Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}",
     "manage_tokens": "- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {\"action\": \"list|create|delete\", ...}",
     "manage_documents": "- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
@@ -1101,6 +1104,11 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     # _DOMAIN_TOOL_MAP), independent of embedding retrieval.
     if has(r"\bapi[ _]call\b", r"\bintegrations?\b",
            r"\b(?:home ?assistant|miniflux|gitea|linkding|jellyfin)\b"):
+        domains.add("integrations")
+    if (
+        has(r"\b(?:tools?|integrations?|plugins?|capabilities)\b")
+        and has(r"\b(?:what|which|list|show|see|visible|available|access|have|connected|installed)\b")
+    ):
         domains.add("integrations")
 
     low_signal = not continuation and not domains

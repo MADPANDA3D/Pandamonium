@@ -69,3 +69,14 @@ def test_router_reports_non_calendar_categories():
     assert classify_tool_intent("reply to that email").category == "email"
     assert classify_tool_intent("open my calendar").category == "ui"
     assert classify_tool_intent("research cost effective local models").category == "research"
+
+
+def test_live_integration_inventory_questions_promote_to_agent():
+    for message in (
+        "I need to know what tools you see visible",
+        "Do you see a plugin/tool named the MAD MCP Portal?",
+        "What integrations do you have access to?",
+    ):
+        intent = classify_tool_intent(message)
+        assert intent.needs_tools
+        assert intent.category == "integrations"

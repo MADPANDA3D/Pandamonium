@@ -76,3 +76,16 @@ def test_plain_greeting_does_not_pull_api_call():
     intent = agent_loop._classify_agent_request([], "hey there, how are you")
     assert "integrations" not in intent["domains"], intent
     assert "api_call" not in _selected_tools(intent["domains"])
+
+
+def test_capability_inventory_selects_live_registry_tool_and_rules():
+    prompt = "What tools and plugins do you see available?"
+    intent = agent_loop._classify_agent_request([], prompt)
+    selected = _selected_tools(intent["domains"])
+
+    assert "integrations" in intent["domains"]
+    assert "manage_mcp" in selected
+    assert "manage_mcp" in _schema_names_sent(selected)
+    rules = agent_loop._domain_rules_for_tools(selected)
+    assert any("action=inventory" in rule for rule in rules)
+    assert any("core workspace functions" in rule for rule in rules)

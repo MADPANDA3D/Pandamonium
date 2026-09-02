@@ -738,7 +738,7 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "add", "delete", "enable", "disable", "reconnect", "list_tools"]},
+                    "action": {"type": "string", "enum": ["inventory", "list", "add", "delete", "enable", "disable", "reconnect", "list_tools"]},
                     "server_id": {"type": "string", "description": "Server ID (for delete/enable/disable/reconnect)"},
                     "name": {"type": "string", "description": "Server name (for add)"},
                     "command": {"type": "string", "description": "Command to run e.g. npx (for add)"},

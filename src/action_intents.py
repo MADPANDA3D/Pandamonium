@@ -90,6 +90,13 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("ui", "open/show panel request", rf"{_PLEASE}(?:open|show|bring\s+up)\s+(?:me\s+)?(?:my\s+|the\s+)?{_PANEL}\b"),
         ("ui", "tool or feature toggle request", r"\b(?:disable|enable|turn\s+(?:on|off))\s+(?:the\s+)?(?:shell|search|web|browser|documents?|memory|skills|images?|calendar|email|mail|research|incognito)\b"),
 
+        # Capability inventory is live runtime state. Promote even from Chat
+        # mode so the model cannot answer from its training or a stale prompt.
+        ("integrations", "live integration inventory request",
+         r"\b(?:what|which)\s+(?:tools?|integrations?|plugins?|capabilities)\b.{0,100}\b(?:see|visible|available|access|have|connected|installed)\b|"
+         r"\b(?:do|can)\s+you\s+(?:see|access|have)\b.{0,100}\b(?:tools?|integrations?|plugins?|capabilities)\b|"
+         r"\b(?:list|show|tell\s+me)\b.{0,80}\b(?:tools?|integrations?|plugins?|capabilities)\b"),
+
         # Deep research jobs, not quick conceptual mentions of research.
         ("web", "explicit web search request", rf"{_PLEASE}(?:do|run|use|perform|make)\s+(?:a\s+)?(?:web\s+search|search\s+the\s+web)\b.+"),
         ("web", "generic search request", rf"{_PLEASE}search\s+(?!(?:my\s+)?(?:chats?|history|sessions?|notes?|todos?|emails?|mail|inbox|documents?|docs|gallery|images?|files?)\b).+"),

@@ -40,6 +40,7 @@ def _store(tmp_path):
 def test_permission_classes_and_new_capabilities_fail_closed(tmp_path):
     store = _store(tmp_path)
     assert permission_mode_for(_call(name="read_file", arguments={"path": "README.md"})) == "read_only"
+    assert permission_mode_for(_call(name="manage_mcp", arguments={"action": "inventory"})) == "read_only"
     assert permission_mode_for(_call(name="write_file", arguments={"path": "a", "content": "b"})) == "bounded_write"
     assert permission_mode_for(_call(name="delete_email")) == "destructive"
     assert permission_mode_for(_call(name="bash", arguments={"command": "pwd"})) == "controlled_administrative"

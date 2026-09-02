@@ -6,6 +6,7 @@ owner-threading adapter factory, without touching the DB (the do_* impls
 themselves are exercised by their own suites).
 """
 import asyncio
+import json
 
 from src.agent_tools import TOOL_HANDLERS
 from src.agent_tools.admin_tools import (
@@ -77,3 +78,69 @@ def test_parse_tool_args_lives_in_tool_utils_single_source():
     assert _parse_tool_args('[1, 2]') == {}
     assert _parse_tool_args('42') == {}
     assert _parse_tool_args('"hello"') == {}
+
+
+def test_manage_mcp_inventory_groups_live_integrations(monkeypatch):
+    class FakeMcp:
+        def get_all_statuses(self):
+            return {
+                "mad-mcp-portal": {
+                    "name": "MAD MCP Portal",
+                    "status": "connected",
+                    "tool_count": 2,
+                },
+                "email": {"name": "Built-in: Email", "status": "connected", "tool_count": 1},
+            }
+
+        def get_all_tools(self):
+            return [
+                {"server_id": "mad-mcp-portal", "server_name": "MAD MCP Portal", "name": "portal.list_services", "is_disabled": False},
+                {"server_id": "mad-mcp-portal", "server_name": "MAD MCP Portal", "name": "portal.call_read_tool", "is_disabled": False},
+                {"server_id": "email", "server_name": "Built-in: Email", "name": "read_email", "is_disabled": False},
+            ]
+
+        def is_builtin(self, server_id):
+            return server_id == "email"
+
+        def is_extension_server(self, _server_id):
+            return False
+
+    class FakeRegistry:
+        def snapshot(self):
+            return {
+                "extensions": {
+                    "oracle": {
+                        "enabled": True,
+                        "manifest": {"name": "ORACLE", "runtime": {"type": "web"}},
+                        "effective_capabilities": [{"name": "inspect_scene"}],
+                        "admitted_skills": [],
+                    }
+                }
+            }
+
+    monkeypatch.setattr("src.agent_tools.admin_tools.get_mcp_manager", lambda: FakeMcp())
+    monkeypatch.setattr("src.extension_registry.ExtensionRegistry", FakeRegistry)
+    monkeypatch.setattr(
+        "src.integrations.load_integrations",
+        lambda: [{"id": "home", "name": "Home Assistant", "enabled": True, "api_key": "never-return"}],
+    )
+
+    result = asyncio.run(do_manage_mcp(json.dumps({"action": "inventory"})))
+
+    assert result["exit_code"] == 0
+    assert result["mcp_servers"] == [{
+        "id": "mad-mcp-portal",
+        "name": "MAD MCP Portal",
+        "status": "connected",
+        "capabilities": ["portal.call_read_tool", "portal.list_services"],
+    }]
+    assert result["extensions"] == [{
+        "id": "oracle",
+        "name": "ORACLE",
+        "enabled": True,
+        "runtime": "web",
+        "capabilities": ["inspect_scene"],
+        "skills": [],
+    }]
+    assert result["api_integrations"] == [{"id": "home", "name": "Home Assistant"}]
+    assert "never-return" not in json.dumps(result)

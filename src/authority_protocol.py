@@ -59,7 +59,7 @@ _ADMINISTRATIVE = frozenset(
         "vault_unlock",
     }
 )
-_READ_ACTIONS = frozenset({"list", "get", "read", "view", "search", "find", "status", "health"})
+_READ_ACTIONS = frozenset({"inventory", "list", "get", "read", "view", "search", "find", "status", "health"})
 _PUBLIC_READS = frozenset({"web_search", "web_fetch", "get_runtime_status"})
 _EXTENSION_PERMISSION_MODES = frozenset(
     {"read_only", "bounded_write", "external_side_effect", "destructive", "controlled_administrative"}
