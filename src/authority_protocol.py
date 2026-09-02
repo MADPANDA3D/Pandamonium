@@ -35,6 +35,7 @@ _READ_ONLY_NAMES = frozenset(
         "list_models", "list_cached_models", "list_downloads", "list_serve_presets",
         "list_served_models", "list_cookbook_servers", "search_hf_models", "vault_search",
         "vault_get", "resolve_contact",
+        "manage_books",
     }
 )
 _LOCAL_WRITES = frozenset(

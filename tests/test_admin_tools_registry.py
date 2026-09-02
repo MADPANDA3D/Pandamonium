@@ -138,9 +138,17 @@ def test_manage_mcp_inventory_groups_live_integrations(monkeypatch):
         "id": "oracle",
         "name": "ORACLE",
         "enabled": True,
+        "status": "enabled_unverified",
+        "verified": False,
         "runtime": "web",
         "capabilities": ["inspect_scene"],
         "skills": [],
     }]
-    assert result["api_integrations"] == [{"id": "home", "name": "Home Assistant"}]
+    assert result["api_integrations"] == [{
+        "id": "home",
+        "name": "Home Assistant",
+        "status": "configured_unverified",
+        "verified": False,
+    }]
+    assert "unverified" in result["verification_note"]
     assert "never-return" not in json.dumps(result)

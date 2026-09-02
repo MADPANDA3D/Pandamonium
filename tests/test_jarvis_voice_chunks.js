@@ -13,6 +13,7 @@ const style = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8
 const serviceWorker = fs.readFileSync(path.join(__dirname, '../static/sw.js'), 'utf8');
 const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_worker_adapters.py'), 'utf8');
 const chatStreamSource = fs.readFileSync(path.join(__dirname, '../static/js/chatStream.js'), 'utf8');
+const chatSource = fs.readFileSync(path.join(__dirname, '../static/js/chat.js'), 'utf8');
 
 assert.match(index, /id="extension-surface-panel"[\s\S]*?id="extension-surface-frame"[\s\S]*?camera 'none'; microphone 'none'; display-capture 'none'/);
 assert.match(style, /\.extension-surface-panel[\s\S]*?inset: 0;[\s\S]*?z-index: 10001;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
@@ -29,7 +30,12 @@ assert.match(source, /type: 'extension_action'[\s\S]*?extension_id: message\.ext
 assert.match(source, /sessions\/\$\{encodeURIComponent\(pending\.voiceSessionId\)\}\/extensions\/\$\{encodeURIComponent\(extensionId\)\}\/results/);
 assert.match(source, /clientState\.extensions = \{[\s\S]*?\[surface\.extension_id\]/);
 assert.match(source, /function oracleProtocolResultMessage\(pending, result = \{\}\)/);
-assert.match(source, /function voiceRequestPayload\(text\)[\s\S]*?clientState\.oracle = oracle/);
+assert.match(source, /function extensionBridgeClientState\(\)[\s\S]*?clientState\.oracle = oracle/);
+assert.match(source, /async function prepareExtensionTextTurn\(extensionId = 'oracle'\)[\s\S]*?extensionBridgeClientState\(\)/);
+assert.match(source, /window\.jarvisVoice = \{[\s\S]*?prepareExtensionTextTurn/);
+assert.match(chatSource, /prepareExtensionTextTurn\('oracle'\)/);
+assert.match(chatSource, /json\.extension_call[\s\S]*?applyExtensionSurfaceControl/);
+assert.doesNotMatch(chatSource, /thinking-toggle live-think-toggle expanded/);
 assert.match(source, /configureExtensionSurfaces\(config\.extension_surfaces\)/);
 assert.match(source, /compatibility: 'oracle-v1'/);
 assert.match(source, /type: 'oracle_command'/);
@@ -103,7 +109,7 @@ assert.match(source, /taskId === activeWorkerTaskId[\s\S]*?task\?\.session_id ==
 assert.match(source, /event\.metadata\?\.codex_thread_id && eventBelongsToActiveVoiceTask/);
 assert.match(source, /'X-Tz-Offset': String\(-new Date\(\)\.getTimezoneOffset\(\)\)/);
 assert.match(source, /'X-Tz-Name': name/);
-assert.equal((source.match(/browserTimezoneHeaders\(\)/g) || []).length, 4);
+assert.equal((source.match(/browserTimezoneHeaders\(\)/g) || []).length, 5);
 assert.match(source, /postPlaybackState\(turnId, 'failed', timings, voiceSessionId\)/);
 assert.match(style, /\.jarvis-call-panel\[data-state="failed"\] \.jarvis-call-copy/);
 assert.match(source, /jarvis-agent-chip/);
@@ -223,10 +229,10 @@ assert.match(index, /<button[^>]*data-worker="hermes"[^>]*>\s*<span>Gordon<\/spa
 assert.match(index, /<button[^>]*data-worker="pc-codex"[^>]*>\s*<span>Friday<\/span><small>Local workstation · checking<\/small>\s*<\/button>/);
 assert.match(index, /style\.css\?v=20260722T162202Z/);
 assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260828T020000Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260902T020000Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'odysseus-v367'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v369'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);

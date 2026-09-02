@@ -226,6 +226,7 @@ def _normalize_dsml(text: str) -> str:
 
 # Map model tool names to our tool types
 _TOOL_NAME_MAP = {
+    "manage_books": "manage_books",
     "get_runtime_status": "get_runtime_status",
     "start_agent_task": "start_agent_task",
     "read_agent_task": "read_agent_task",

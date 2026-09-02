@@ -762,3 +762,85 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
         }
     except Exception as e:
         return {"error": f"{method} {path} failed: {e}", "exit_code": 1}
+
+
+async def do_manage_books(content: str, owner: Optional[str] = None) -> Dict:
+    """Read the authenticated owner's Books catalog or search its RAG chunks."""
+    from src.tool_implementations import _internal_headers, _INTERNAL_BASE
+
+    try:
+        args = _parse_tool_args(content) if content.strip() else {}
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    if not owner:
+        return {"error": "Owner identity is required", "exit_code": 1}
+
+    action = str(args.get("action") or "list").strip().lower()
+    if action not in {"list", "search"}:
+        return {"error": "action must be list or search", "exit_code": 1}
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{_INTERNAL_BASE}/api/personal/books",
+                headers=_internal_headers(owner=owner),
+            )
+        response.raise_for_status()
+        catalog = response.json().get("books", [])
+    except Exception as exc:
+        return {"error": f"Books catalog unavailable: {exc}", "exit_code": 1}
+
+    public_books = [item for item in catalog if isinstance(item, dict)]
+    if action == "list":
+        return {
+            "output": json.dumps({"books": public_books}, ensure_ascii=False),
+            "books": public_books,
+            "count": len(public_books),
+            "exit_code": 0,
+        }
+
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return {"error": "query is required for search", "exit_code": 1}
+    try:
+        limit = max(1, min(int(args.get("limit") or 6), 12))
+    except (TypeError, ValueError):
+        return {"error": "limit must be an integer from 1 to 12", "exit_code": 1}
+
+    from src.rag_singleton import get_rag_manager
+
+    rag = get_rag_manager()
+    if not rag or not rag.healthy:
+        return {"error": "Books semantic index is unavailable", "exit_code": 1}
+
+    title_by_id = {
+        str(book.get("id") or ""): str(book.get("title") or book.get("filename") or "Untitled")
+        for book in public_books
+    }
+    matches = []
+    for row in rag.search(query, k=min(limit * 4, 40), owner=owner):
+        metadata = row.get("metadata") if isinstance(row, dict) else None
+        if not isinstance(metadata, dict) or metadata.get("library") != "books":
+            continue
+        book_id = str(metadata.get("book_id") or "")
+        matches.append({
+            "book_id": book_id,
+            "title": title_by_id.get(book_id) or str(metadata.get("filename") or "Untitled"),
+            "filename": str(metadata.get("filename") or ""),
+            "page": metadata.get("page"),
+            "chunk_id": metadata.get("chunk_id"),
+            "text": str(row.get("document") or "")[:1600],
+            "similarity": row.get("similarity"),
+        })
+        if len(matches) >= limit:
+            break
+
+    return {
+        "output": json.dumps({"query": query, "results": matches}, ensure_ascii=False),
+        "query": query,
+        "results": matches,
+        "count": len(matches),
+        "exit_code": 0,
+    }

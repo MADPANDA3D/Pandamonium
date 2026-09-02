@@ -1162,9 +1162,23 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       if (_inject.prefix) _finalMsgWithInject = _inject.prefix + ' ' + _finalMsgWithInject;
       if (_inject.suffix) _finalMsgWithInject = _finalMsgWithInject + ' ' + _inject.suffix;
 
+      let _textExtensionBridge = null;
+      const _oracleToolIntent = /\boracle\b/i.test(msg) && /\b(engage|activate|open|map|view|layer|cockpit|cctv|track|camera|tool|call|report|current|show|inspect)\b/i.test(msg);
+      if (_oracleToolIntent) {
+        if (!window.jarvisVoice?.prepareExtensionTextTurn) {
+          throw new Error('ORACLE text-tool bridge is unavailable in this client.');
+        }
+        _textExtensionBridge = await window.jarvisVoice.prepareExtensionTextTurn('oracle');
+      }
+
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
+      if (_textExtensionBridge) {
+        fd.append('extension_bridge_session', _textExtensionBridge.sessionId);
+        fd.append('extension_bridge_extension', _textExtensionBridge.extensionId);
+        fd.append('extension_client_state', JSON.stringify(_textExtensionBridge.clientState));
+      }
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
       // Auto-save & send active doc ID so the backend sees latest content
       if (documentModule && activeDocIdForSend) {
@@ -1926,7 +1940,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   thinkingStartTime = Date.now();
                   if (spinner && spinner.element) spinner.destroy();
 
-                  // Create a live thinking box — starts expanded so content streams visibly
+                  // Create a live thinking box collapsed by default. The header
+                  // remains clickable while content continues streaming inside.
                   var thinkBody = roundHolder.querySelector('.body');
                   var thinkContent = _ensureStreamLayout(thinkBody);
                   thinkContent.style.minHeight = '';
@@ -1937,9 +1952,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                         <div class="thinking-header-left"><span class="live-think-header-text">Thinking\u2026</span></div>
                         <span class="live-think-spinner-slot" style="flex-shrink:0;margin-left:auto;"></span>
                         <span class="live-think-timer" style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;margin-left:6px;margin-right:5px;"></span>
-                        <span class="thinking-toggle live-think-toggle expanded" id="${_liveThinkDomId}-toggle"></span>
+                        <span class="thinking-toggle live-think-toggle" id="${_liveThinkDomId}-toggle"></span>
                       </div>
-                      <div class="thinking-content expanded" id="${_liveThinkDomId}">
+                      <div class="thinking-content" id="${_liveThinkDomId}">
                         <div class="thinking-content-inner live-think-inner"></div>
                       </div>
                     </div>`;
@@ -2551,6 +2566,15 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 uiModule.scrollHistory();
 
               } else if (json.type === 'tool_progress') {
+                if (json.extension_call && _textExtensionBridge?.sessionId) {
+                  window.jarvisVoice?.applyExtensionSurfaceControl?.({
+                    ui_event: 'extension_protocol_command',
+                    ...json.extension_call,
+                    voice_session_id: _textExtensionBridge.sessionId,
+                    server_managed: true,
+                  });
+                  continue;
+                }
                 // Long-running subprocess (bash, python) is still in
                 // flight — refresh the running tool card with the
                 // elapsed-time + tail of its stdout/stderr so the

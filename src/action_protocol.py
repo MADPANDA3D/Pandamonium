@@ -49,6 +49,7 @@ _READ_ONLY = frozenset(
         "list_email_accounts",
         "list_emails",
         "read_email",
+        "manage_books",
     }
 )
 _EVIDENCE_KEYS = (

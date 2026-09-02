@@ -1295,6 +1295,78 @@ def test_oracle_native_catalog_and_jarvis_prompt_are_authoritative():
     assert "Moons out, Goons out" in prompt
 
 
+@pytest.mark.asyncio
+async def test_text_chat_bridge_mounts_and_executes_real_oracle_native_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice_sessions.json")
+    monkeypatch.setattr(voice_routes, "ORACLE_PROTOCOL_URL", "https://oracle.example.test/")
+    monkeypatch.setattr(voice_routes, "extension_registry", SimpleNamespace(
+        snapshot=lambda: {"extensions": {}},
+        effective_capabilities=lambda _engaged: {},
+    ))
+    voice_routes._save_state({
+        "sessions": {
+            "text-bridge-1": {
+                "id": "text-bridge-1",
+                "owner": "leo",
+                "chat_session_id": "chat-1",
+                "oracle_protocol_active": False,
+                "engaged_extensions": [],
+            },
+        },
+        "actions": {},
+    })
+    client_state = {
+        "active_view": "chat",
+        "extensions": {
+            "oracle": {
+                "ready": True,
+                "updated_at_ms": 1,
+                "state": {"map": "current"},
+                "capabilities": {
+                    "protocol": "oracle",
+                    "version": "1",
+                    "tools": [{
+                        "type": "function",
+                        "name": "get_current_view_state",
+                        "description": "Read the current map view",
+                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                    }],
+                },
+            },
+        },
+    }
+
+    bridge = voice_routes.prepare_text_extension_bridge(
+        "text-bridge-1", "chat-1", "leo", "oracle", client_state,
+    )
+
+    assert bridge["tool_names"] == {"get_current_view_state"}
+    assert bridge["extra_tool_schemas"][0]["function"]["name"] == "get_current_view_state"
+    persisted = voice_routes._load_state()["sessions"]["text-bridge-1"]
+    assert persisted["oracle_protocol_active"] is True
+    assert persisted["engaged_extensions"] == ["oracle"]
+
+    progress = []
+
+    async def receive_call(payload):
+        progress.append(payload)
+        call_id = payload["extension_call"]["call_id"]
+        voice_routes._EXTENSION_TOOL_CALLS[("text-bridge-1", "oracle", call_id)]["future"].set_result({
+            "ok": True,
+            "action": "get_current_view_state",
+            "camera": {"latitude": 25.76, "longitude": -80.19},
+        })
+
+    description, result = await bridge["tool_executor"](
+        SimpleNamespace(tool_type="get_current_view_state", content="{}"),
+        receive_call,
+    )
+    assert description == "ORACLE get_current_view_state"
+    assert result["ok"] is True
+    assert result["camera"]["latitude"] == 25.76
+    assert progress[0]["extension_call"]["tool"] == "get_current_view_state"
+
+
 def test_registered_extension_catalog_is_authoritative_and_disable_removes_it(tmp_path, monkeypatch):
     manifest = json.loads((
         Path(__file__).parent / "fixtures" / "extensions" / "atlas.manifest.json"

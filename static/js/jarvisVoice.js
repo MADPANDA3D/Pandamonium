@@ -67,6 +67,8 @@ let extensionSurfaceCapabilities = null;
 let extensionSurfaceCommandSequence = 0;
 let extensionSurfacePendingCommands = [];
 const extensionSurfacePendingResults = new Map();
+let textExtensionSessionId = null;
+let textExtensionChatSessionId = null;
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -626,7 +628,7 @@ function mediaVoiceCommand(text) {
   }[value] || null;
 }
 
-function voiceRequestPayload(text) {
+function extensionBridgeClientState() {
   const clientState = collectClientState();
   const surface = extensionSurfaceClientState();
   if (surface) {
@@ -642,6 +644,11 @@ function voiceRequestPayload(text) {
     const oracle = voiceOracleClientState();
     if (oracle) clientState.oracle = oracle;
   }
+  return clientState;
+}
+
+function voiceRequestPayload(text) {
+  const clientState = extensionBridgeClientState();
   const payload = { text, client_state: clientState };
   if (mediaVoiceCommand(text) === 'camera_describe' && voiceOrbMedia.getState().cameraOpen) {
     try {
@@ -651,6 +658,64 @@ function voiceRequestPayload(text) {
     }
   }
   return payload;
+}
+
+async function prepareExtensionTextTurn(extensionId = 'oracle') {
+  const activeChatSessionId = currentChatSessionId();
+  if (!activeChatSessionId) throw new Error('Open a saved chat before using an extension tool.');
+
+  if (textExtensionSessionId && textExtensionChatSessionId !== activeChatSessionId) {
+    await interruptVoiceSession(textExtensionSessionId).catch(() => {});
+    textExtensionSessionId = null;
+    textExtensionChatSessionId = null;
+  }
+  if (!textExtensionSessionId) {
+    const config = await fetchJson('/api/voice/oracle-config');
+    configureExtensionSurfaces(config.extension_surfaces);
+    configureOracleProtocol(config.oracle_protocol_url);
+    const pendingChat = window.sessionModule?.getPendingChat?.() || null;
+    const session = await fetchJson('/api/voice/sessions', {
+      method: 'POST',
+      headers: browserTimezoneHeaders(),
+      body: JSON.stringify({
+        mode: 'text_extension_bridge',
+        chat_session_id: activeChatSessionId,
+        endpoint_id: pendingChat?.endpointId || null,
+        model: pendingChat?.modelId || window.sessionModule?.getCurrentModel?.() || null,
+      }),
+    });
+    textExtensionSessionId = session.id;
+    textExtensionChatSessionId = session.chat_session_id || activeChatSessionId;
+    configureExtensionSurfaces(session.extension_surfaces);
+    configureOracleProtocol(session.oracle_protocol_url);
+  }
+  if (!engageExtensionSurface(extensionId)) {
+    throw new Error(`${extensionId.toUpperCase()} is not configured on this Odysseus host.`);
+  }
+
+  const deadline = Date.now() + 8000;
+  while (
+    Date.now() < deadline
+    && !(
+      extensionSurfaceId === extensionId
+      && extensionSurfaceReady
+      && extensionSurfaceCapabilities?.protocol === extensionId
+    )
+  ) {
+    await new Promise(resolve => window.setTimeout(resolve, 50));
+  }
+  if (
+    extensionSurfaceId !== extensionId
+    || !extensionSurfaceReady
+    || extensionSurfaceCapabilities?.protocol !== extensionId
+  ) {
+    throw new Error(`${extensionId.toUpperCase()} did not provide its native tool catalog.`);
+  }
+  return {
+    sessionId: textExtensionSessionId,
+    extensionId,
+    clientState: extensionBridgeClientState(),
+  };
 }
 
 function isPlainObject(value) {
@@ -3065,4 +3130,5 @@ window.jarvisVoice = {
   isActive: isCallActive,
   restoreSessionTasks,
   applyExtensionSurfaceControl,
+  prepareExtensionTextTurn,
 };

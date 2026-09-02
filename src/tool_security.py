@@ -57,6 +57,7 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "manage_webhooks",
     "manage_tokens",
     "manage_documents",
+    "manage_books",
     "manage_settings",
     "api_call",
     "app_api",

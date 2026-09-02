@@ -935,6 +935,68 @@ def _extension_tool_executor(
     return execute
 
 
+def prepare_text_extension_bridge(
+    session_id: str,
+    chat_session_id: str,
+    owner: str,
+    extension_id: str,
+    client_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Mount a validated browser extension surface into one text-chat turn."""
+    if not EXTENSION_ID_PATTERN.fullmatch(extension_id):
+        raise HTTPException(status_code=400, detail={"message": "Invalid extension ID"})
+    state = _load_state()
+    session = _owned_session(state, session_id, owner)
+    if str(session.get("chat_session_id") or "") != str(chat_session_id or ""):
+        raise HTTPException(status_code=409, detail={"message": "Extension bridge is linked to a different chat"})
+
+    validated = VoiceClientState.model_validate(client_state).model_dump(exclude_none=True)
+    extension_state = (validated.get("extensions") or {}).get(extension_id)
+    if not isinstance(extension_state, dict) and extension_id == "oracle":
+        extension_state = validated.get("oracle")
+    capabilities = extension_state.get("capabilities") if isinstance(extension_state, dict) else None
+    if (
+        not isinstance(extension_state, dict)
+        or extension_state.get("ready") is not True
+        or not isinstance(capabilities, dict)
+        or capabilities.get("protocol") != extension_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={"message": f"{extension_id.upper()} browser tool catalog is not ready"},
+        )
+
+    session["_client_state"] = validated
+    _set_extension_engaged(session, extension_id, True)
+    if extension_id == "oracle":
+        session["oracle_protocol_pending"] = False
+        session["oracle_protocol_active"] = True
+    session["updated_at"] = _now()
+
+    turn_session = dict(session)
+    tool_specs = _extension_tool_specs(turn_session)
+    requested_specs = [tool for tool in tool_specs if tool.get("extension_id") == extension_id]
+    if not requested_specs:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": f"{extension_id.upper()} exposed no admitted native tools"},
+        )
+    _save_state(state)
+    return {
+        "tool_names": {tool["name"] for tool in requested_specs},
+        "extra_tool_schemas": _extension_tool_schemas(requested_specs),
+        "extension_capabilities": {
+            tool["name"]: {
+                "extension_id": tool["extension_id"],
+                "permission_mode": tool["permission_mode"],
+            }
+            for tool in requested_specs
+        },
+        "tool_executor": _extension_tool_executor(turn_session, owner, requested_specs),
+        "context_extensions": _extension_context(turn_session, requested_specs),
+    }
+
+
 def _voice_chat_session(chat_session_id: str):
     if not chat_session_id or not _SESSION_MANAGER:
         return None

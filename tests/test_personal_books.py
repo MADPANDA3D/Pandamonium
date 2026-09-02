@@ -1,11 +1,14 @@
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import BackgroundTasks
 
 from routes import personal_routes
+from src import agent_loop
 from src.rag_vector import _generate_doc_id
+from src.tools.system import do_manage_books
 
 
 class _PersonalDocs:
@@ -226,6 +229,7 @@ def test_books_ui_and_responsive_root_rules_are_present():
     root = Path(__file__).resolve().parent.parent
     library_js = (root / "static/js/documentLibrary.js").read_text(encoding="utf-8")
     style = (root / "static/style.css").read_text(encoding="utf-8")
+    chat_js = (root / "static/js/chat.js").read_text(encoding="utf-8")
 
     assert 'data-doclib-tab="books"' in library_js
     assert 'data-doclib-panel="books"' in library_js
@@ -236,6 +240,10 @@ def test_books_ui_and_responsive_root_rules_are_present():
     assert ".first-run-step-state" in style and "white-space:normal" in style
     assert "#doclib-modal .doclib-modal-content" in style
     assert "min(1120px, calc(100vw - 32px))" in style
+    assert 'thinking-toggle live-think-toggle expanded' not in chat_js
+    assert 'thinking-content expanded" id="${_liveThinkDomId}' not in chat_js
+    assert "prepareExtensionTextTurn('oracle')" in chat_js
+    assert "json.extension_call" in chat_js
 
 
 def test_source_aware_document_ids_do_not_collapse_identical_book_text():
@@ -246,3 +254,97 @@ def test_source_aware_document_ids_do_not_collapse_identical_book_text():
 
     assert first != second
     assert _generate_doc_id(text, "alice") == _generate_doc_id(text, "alice")
+
+
+def test_books_intent_routes_to_owner_scoped_catalog_not_filesystem():
+    prompt = "Check my Books library. Which book needs OCR, and why?"
+    intent = agent_loop._classify_agent_request([], prompt)
+
+    assert "books" in intent["domains"]
+    assert agent_loop._DOMAIN_TOOL_MAP["books"] == {"manage_books"}
+    assert not (agent_loop._DOMAIN_TOOL_MAP["books"] & agent_loop._DOMAIN_TOOL_MAP["files"])
+    assert "never use shell, grep" in agent_loop._DOMAIN_RULES["books"]
+
+
+def test_runtime_identity_reports_selected_model_without_inventing_provider():
+    fact = agent_loop._runtime_model_fact("jarvis")
+
+    assert "model identifier: `jarvis`" in fact
+    assert "unverified" in fact
+    assert "OpenAI" not in fact
+    assert "GPT-4" not in fact
+
+
+def test_manage_books_search_is_owner_scoped_and_returns_page_provenance(monkeypatch):
+    catalog = [{
+        "id": "land-nav",
+        "title": "USMC Land Navigation",
+        "filename": "land-navigation.pdf",
+        "status": "ready",
+        "page_count": 41,
+        "chunk_count": 9,
+        "ocr_status": "not_needed",
+        "needs_attention": False,
+    }]
+    calls = []
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"books": catalog}
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers):
+            calls.append((url, headers))
+            return _Response()
+
+    class _SearchRag:
+        healthy = True
+
+        def search(self, query, k, owner):
+            assert query == "terrain association"
+            assert owner == "leo"
+            assert k == 12
+            return [{
+                "document": "Terrain association uses visible features to maintain position.",
+                "metadata": {
+                    "owner": "leo",
+                    "library": "books",
+                    "book_id": "land-nav",
+                    "filename": "land-navigation.pdf",
+                    "page": 17,
+                    "chunk_id": 3,
+                },
+                "similarity": 0.91,
+            }, {
+                "document": "unrelated private document",
+                "metadata": {"owner": "leo", "library": "documents"},
+                "similarity": 0.99,
+            }]
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+    monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda: _SearchRag())
+
+    result = asyncio.run(do_manage_books(json.dumps({
+        "action": "search",
+        "query": "terrain association",
+        "limit": 3,
+    }), owner="leo"))
+
+    assert result["exit_code"] == 0
+    assert result["count"] == 1
+    assert result["results"][0]["title"] == "USMC Land Navigation"
+    assert result["results"][0]["page"] == 17
+    assert "/api/personal/books" in calls[0][0]
+    assert "/srv/" not in result["output"]

@@ -995,6 +995,23 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_books",
+            "description": "Read the authenticated owner's private Books catalog or semantically search indexed book text with source title and page provenance. Use this for any request about 'my Books library', book indexing/OCR status, or facts from the user's books. Never search the filesystem for Books data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "search"], "description": "list catalog/status or search indexed book text"},
+                    "query": {"type": "string", "description": "Semantic query required for search"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 12, "description": "Maximum source-aware chunks (default 6)"},
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "app_api",
             "description": "Generic loopback to allowed internal Odysseus endpoints. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (cookbook, gallery, library/documents, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked for safety. Do not use for shell commands; use named command tooling instead. Do not use for package installs, engine rebuilds, PID signalling, or email account discovery; use list_email_accounts for email accounts because /api/email/accounts is owner-filtered in tool context.",
             "parameters": {

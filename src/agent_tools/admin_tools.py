@@ -253,10 +253,13 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
         extensions = []
         for extension_id, record in extension_rows.items():
             manifest = record.get("manifest") or {}
+            enabled = bool(record.get("enabled"))
             extensions.append({
                 "id": extension_id,
                 "name": str(manifest.get("name") or extension_id),
-                "enabled": bool(record.get("enabled")),
+                "enabled": enabled,
+                "status": "enabled_unverified" if enabled else "disabled",
+                "verified": False,
                 "runtime": str((manifest.get("runtime") or {}).get("type") or "unknown"),
                 "capabilities": sorted(
                     str(item.get("name")) for item in record.get("effective_capabilities", [])
@@ -274,6 +277,8 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
                 "id": "oracle",
                 "name": "ORACLE",
                 "enabled": True,
+                "status": "configured_unverified",
+                "verified": False,
                 "runtime": "legacy_web_harness",
                 "capabilities": [],
                 "skills": [],
@@ -282,7 +287,12 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
         from src.integrations import load_integrations
         api_integrations = sorted(
             [
-                {"id": str(item.get("id") or ""), "name": str(item.get("name") or item.get("id") or "unknown")}
+                {
+                    "id": str(item.get("id") or ""),
+                    "name": str(item.get("name") or item.get("id") or "unknown"),
+                    "status": "configured_unverified",
+                    "verified": False,
+                }
                 for item in load_integrations()
                 if item.get("enabled", True)
             ],
@@ -298,6 +308,7 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
             "mcp_servers": mcp_servers,
             "extensions": extensions,
             "api_integrations": api_integrations,
+            "verification_note": "Only connected MCP status is live-verified here. Extension and API inventory presence is configured/enabled but unverified until a real operation succeeds.",
             "core_functions_note": "Search, files, calendar, notes, tasks, email, and math are core workspace functions, not external integrations.",
             "exit_code": 0,
         }

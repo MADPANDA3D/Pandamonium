@@ -701,6 +701,9 @@ def setup_chat_routes(
         elif _search_enabled:
             logger.info("adaptive tool hint: search enabled")
         active_doc_id = form_data.get("active_doc_id", "").strip()
+        extension_bridge_session = str(form_data.get("extension_bridge_session") or "").strip()
+        extension_bridge_extension = str(form_data.get("extension_bridge_extension") or "").strip()
+        extension_client_state_raw = str(form_data.get("extension_client_state") or "").strip()
         logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
 
         # Active email reader — when the user has an email open in the UI, the
@@ -1077,6 +1080,29 @@ def setup_chat_routes(
             last_user_message=message,
         )
         disabled_tools = tool_policy.all_disabled_names()
+        text_extension_bridge = None
+        if extension_bridge_session or extension_bridge_extension or extension_client_state_raw:
+            if not (extension_bridge_session and extension_bridge_extension and extension_client_state_raw):
+                raise HTTPException(status_code=400, detail="Incomplete extension bridge state")
+            if len(extension_client_state_raw.encode("utf-8")) > 300_000:
+                raise HTTPException(status_code=413, detail="Extension client state is too large")
+            try:
+                extension_client_state = json.loads(extension_client_state_raw)
+                if not isinstance(extension_client_state, dict):
+                    raise ValueError("client state must be an object")
+                from routes.voice_routes import prepare_text_extension_bridge
+
+                text_extension_bridge = prepare_text_extension_bridge(
+                    extension_bridge_session,
+                    session,
+                    _user,
+                    extension_bridge_extension,
+                    extension_client_state,
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid extension bridge state: {exc}") from exc
         research_blocked_by_policy = bool(
             tool_policy.blocks("trigger_research")
             or tool_policy.blocks("manage_research")
@@ -1262,6 +1288,19 @@ def setup_chat_routes(
                     len(ctx.messages), raw_history_count, len(messages))
             else:
                 messages = _ensure_current_request_is_latest_user(ctx.messages, message)
+            if text_extension_bridge:
+                messages = [
+                    *messages[:-1],
+                    {
+                        "role": "system",
+                        "content": (
+                            f"The `{extension_bridge_extension}` browser extension surface is engaged for this turn. "
+                            "Use its mounted native tools for requested inspection or control. "
+                            "Never claim client state or action success without the matching tool result."
+                        ),
+                    },
+                    messages[-1],
+                ]
             messages, ctx.context_manifest = _refresh_context_manifest(ctx, messages)
 
             # Auto-compact notification
@@ -1553,9 +1592,13 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
-                    _forced_tools = None
+                    _forced_tools = set()
                     if _search_enabled:
+                        # Keep this explicit assignment shape pinned by the
+                        # per-turn web policy regression test.
                         _forced_tools = set(WEB_TOOL_NAMES)
+                    if text_extension_bridge:
+                        _forced_tools.update(text_extension_bridge["tool_names"])
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1578,7 +1621,11 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
-                        forced_tools=_forced_tools,
+                        forced_tools=_forced_tools or None,
+                        extra_tool_schemas=(text_extension_bridge or {}).get("extra_tool_schemas"),
+                        extension_capabilities=(text_extension_bridge or {}).get("extension_capabilities"),
+                        tool_executor=(text_extension_bridge or {}).get("tool_executor"),
+                        context_extensions=(text_extension_bridge or {}).get("context_extensions"),
                         uploaded_files=ctx.uploaded_files,
                         base_context_manifest=ctx.context_manifest,
                     ):
@@ -1601,7 +1648,7 @@ def setup_chat_routes(
                                 elif data.get("type") in (
                                     "tool_start", "tool_output", "agent_step",
                                     "doc_stream_open", "doc_stream_delta",
-                                    "doc_update", "doc_suggestions", "ui_control",
+                                    "doc_update", "doc_suggestions", "ui_control", "tool_progress",
                                     "rounds_exhausted", "budget_exceeded",
                                     "loop_breaker_triggered",
                                     "intent_nudge_exhausted",
