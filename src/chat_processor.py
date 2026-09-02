@@ -309,8 +309,8 @@ class ChatProcessor:
                 except Exception as _e:
                     logger.warning("Failed to increment memory uses: %s", _e)
 
-            # (skills index injection moved out — see below; only fires in
-            # agent mode so chat mode and incognito stay clean.)
+            # (skills index injection moved out — see below; only fires when
+            # the adaptive execution path can call tools, never in incognito.)
 
         # RAG: search if enabled and rag_manager available, inject only above threshold
         if use_rag:
@@ -422,10 +422,10 @@ class ChatProcessor:
                     ))
 
         # Skills index — progressive disclosure. Only injected when the
-        # model has the `manage_skills` tool available (agent_mode), and
+        # model has the `manage_skills` tool available (agent_mode internally), and
         # never in incognito mode (the user has explicitly opted out of
-        # context retention this turn). In plain chat mode the model can't
-        # call the tool anyway, so the index would be noise.
+        # context retention this turn). The agent loop's low-signal path strips
+        # this context for ordinary greetings and other zero-tool replies.
         if agent_mode and not incognito and use_skills and self.skills_manager:
             try:
                 idx = self.skills_manager.index_for(owner=owner)

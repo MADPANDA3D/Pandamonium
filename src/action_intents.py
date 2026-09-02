@@ -1,8 +1,8 @@
-"""Lightweight routing hints for chat requests that need tools.
+"""Lightweight domain hints for adaptive conversation turns.
 
-These patterns are intentionally conservative. They only promote plain chat
-to agent mode when the user asks the assistant to take an action, not when the
-user asks how a feature works.
+The harness, not the user, decides whether a normal conversation needs tools.
+These conservative patterns add deterministic domain/policy hints while the
+existing agent selector handles broader semantic tool discovery.
 """
 
 from __future__ import annotations
@@ -14,11 +14,29 @@ from typing import Iterable, Pattern
 
 @dataclass(frozen=True)
 class ToolIntent:
-    """A cheap, deterministic chat-to-agent routing decision."""
+    """A cheap, deterministic tool-domain routing hint."""
 
     needs_tools: bool
     category: str = ""
     reason: str = ""
+
+
+def resolve_conversation_execution_mode(
+    requested_mode: str | None,
+    *,
+    compare_mode: bool = False,
+) -> str:
+    """Return the internal execution path for a conversational turn.
+
+    Normal sessions always enter the adaptive agent loop, whose low-signal
+    fast path sends no tool schemas and whose tool selector exposes only the
+    capabilities relevant to the turn. Compare is an explicit evaluation
+    surface, so its chat/agent baselines remain distinct.
+    """
+    requested = str(requested_mode or "").strip().lower()
+    if compare_mode and requested in {"chat", "agent"}:
+        return requested
+    return "agent"
 
 
 _ACTION_QUESTION = r"\b(?:can|could|would|will)\s+you\s+"
@@ -138,7 +156,7 @@ _TOOL_INTENT_PATTERNS: tuple[Pattern[str], ...] = tuple(
 
 
 def classify_tool_intent(text: str) -> ToolIntent:
-    """Classify whether a chat message should be promoted to agent mode."""
+    """Classify deterministic tool need and policy domain for a message."""
     if not text:
         return ToolIntent(False, reason="empty message")
     if _EXPLANATORY_PREFIX.search(text):
@@ -150,7 +168,7 @@ def classify_tool_intent(text: str) -> ToolIntent:
 
 
 def message_needs_tools(text: str, patterns: Iterable[Pattern[str]] = _TOOL_INTENT_PATTERNS) -> bool:
-    """Return True when a plain chat message should be promoted to agent mode."""
+    """Return True when a message has a deterministic tool-domain match."""
     if not text:
         return False
     if _EXPLANATORY_PREFIX.search(text):

@@ -42,7 +42,11 @@ from routes.chat_helpers import (
     clean_thinking_for_save,
     _enforce_chat_privileges,
 )
-from src.action_intents import ToolIntent, classify_tool_intent as _classify_tool_intent
+from src.action_intents import (
+    ToolIntent,
+    classify_tool_intent as _classify_tool_intent,
+    resolve_conversation_execution_mode,
+)
 from src.tool_policy import (
     WEB_TOOL_NAMES,
     build_effective_tool_policy,
@@ -652,12 +656,22 @@ def setup_chat_routes(
         # Plan mode is not part of the merge-ready UI. Ignore stale clients or
         # manual form posts that still send plan_mode=true.
         plan_mode = False
-        chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        requested_mode = str(form_data.get("mode", "")).lower()
+        # Normal sessions have one adaptive conversational protocol. The
+        # internal agent loop already owns semantic tool selection and a
+        # zero-tool fast path for ordinary conversation, so the browser no
+        # longer decides whether this turn is "chat" or "agent". Compare is a
+        # deliberate evaluation surface and retains explicit baselines.
+        chat_mode = resolve_conversation_execution_mode(
+            requested_mode,
+            compare_mode=compare_mode,
+        )
+        adaptive_session = not compare_mode and requested_mode != "agent"
         # Workspace: confine the agent's file/shell tools to this folder.
         workspace, workspace_rejected = _resolve_request_workspace(
             request, form_data.get("workspace")
         )
-        # Plan mode is a modifier on agent mode — it only makes sense with tools.
+        # Plan mode is a modifier on the tool-capable execution path.
         if plan_mode:
             chat_mode = "agent"
         # An approved plan being EXECUTED: the frontend sends the checklist back
@@ -668,32 +682,24 @@ def setup_chat_routes(
         approved_plan = ""
         if not plan_mode:
             approved_plan = (form_data.get("approved_plan") or "").strip()[:8192]
-        # Did the USER explicitly pick agent mode? (vs. us auto-escalating
-        # below). Skill extraction should only learn from real agent sessions,
-        # not chats we quietly promoted for a notes/calendar intent.
-        user_requested_agent = (chat_mode == "agent")
+        # Backward compatibility for API clients that explicitly request the
+        # legacy agent route. The Pandamonium composer always sends adaptive.
+        legacy_agent_requested = requested_mode == "agent"
+        # Skill extraction should learn only from explicitly requested legacy
+        # agent sessions, not every adaptive conversational turn.
+        user_requested_agent = legacy_agent_requested
         _search_enabled = web_search_enabled_for_turn(allow_web_search, use_web)
-        # Intent auto-escalation: if the user is clearly asking the assistant
-        # to create a todo, reminder, or calendar event, promote chat → agent
-        # for this turn so the LLM has access to manage_notes / manage_calendar.
-        # This is a LIGHT promotion — see the disabled_tools block below, which
-        # withholds shell/code/file tools so the model doesn't try to `bash`
-        # its way through a plain chat request (and fail, especially with the
-        # shell disabled).
-        auto_escalated = False
+        # Deterministic intent remains a policy/domain hint. Broader semantic
+        # discovery happens inside the existing agent tool selector.
         _tool_intent = _classify_tool_intent(message) if isinstance(message, str) else None
-        if chat_mode == "chat" and _tool_intent and _tool_intent.needs_tools:
-            chat_mode = "agent"
-            auto_escalated = True
+        if _tool_intent and _tool_intent.needs_tools:
             logger.info(
-                "chat→agent auto-escalation: category=%s reason=%s",
+                "adaptive tool hint: category=%s reason=%s",
                 _tool_intent.category,
                 _tool_intent.reason,
             )
-        elif chat_mode == "chat" and _search_enabled:
-            chat_mode = "agent"
-            auto_escalated = True
-            logger.info("chat→agent auto-escalation: search enabled")
+        elif _search_enabled:
+            logger.info("adaptive tool hint: search enabled")
         active_doc_id = form_data.get("active_doc_id", "").strip()
         logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
 
@@ -787,16 +793,13 @@ def setup_chat_routes(
                     "No model selected for this chat. Open the model picker and choose one before sending.",
                 )
             if (
-                chat_mode == "chat"
-                and isinstance(message, str)
+                isinstance(message, str)
                 and (not _tool_intent or not _tool_intent.needs_tools)
                 and _is_contextual_web_followup(message, sess)
             ):
                 _tool_intent = ToolIntent(True, "web", "contextual web lookup follow-up")
-                chat_mode = "agent"
-                auto_escalated = True
                 logger.info(
-                    "chat→agent auto-escalation: category=%s reason=%s",
+                    "adaptive tool hint: category=%s reason=%s",
                     _tool_intent.category,
                     _tool_intent.reason,
                 )
@@ -819,12 +822,12 @@ def setup_chat_routes(
         resolve_session_auth(sess, session, owner=effective_user(request))
 
         hermes_agent_api = False
-        if chat_mode == "agent":
+        if chat_mode == "agent" and legacy_agent_requested:
             _hermes_backend = _resolve_hermes_agent_backend(owner=effective_user(request))
             if _hermes_backend:
                 sess.endpoint_url, sess.model, sess.headers = _hermes_backend
                 hermes_agent_api = True
-                logger.info("Agent mode routed to Hermes API backend")
+                logger.info("Legacy explicit agent route sent to Hermes API backend")
 
         # Check for research_pending BEFORE mode persist overwrites it
         do_research = str(use_research).lower() == "true"
@@ -865,8 +868,7 @@ def setup_chat_routes(
             webhook_manager=webhook_manager,
             use_enhanced_message=True,
             # Skills index only ships when the model can actually call
-            # manage_skills (agent mode). In plain chat or incognito the
-            # index would be useless / unwanted noise.
+            # manage_skills. Incognito still strips it.
             agent_mode=(chat_mode == "agent" and not hermes_agent_api),
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
@@ -1045,16 +1047,6 @@ def setup_chat_routes(
         if _global_disabled and isinstance(_global_disabled, list):
             disabled_tools.update(_global_disabled)
 
-        # Light auto-escalation: the user is in chat mode and just expressed a
-        # notes/calendar/email intent. Grant the relevant managers but withhold
-        # the heavy "do things on the computer" tools — otherwise the model
-        # tries to shell out for a request that never needed it, then fails
-        # (and looks broken when the shell is disabled).
-        if auto_escalated:
-            disabled_tools.update({
-                "bash", "python", "read_file", "write_file", "builtin_browser",
-            })
-
         # Disable document tools in compare sessions — they break the pane UI
         if sess.name and sess.name.startswith("[CMP]"):
             disabled_tools.update({"create_document", "edit_document", "update_document"})
@@ -1095,7 +1087,11 @@ def setup_chat_routes(
 
         # Persist session mode after policy/privilege gates so blocked research
         # turns remain ordinary chat/agent streams and saved messages.
-        _effective_mode = 'research' if effective_do_research else (chat_mode or 'chat')
+        _effective_mode = (
+            'research'
+            if effective_do_research
+            else ('chat' if adaptive_session else (chat_mode or 'chat'))
+        )
         if _effective_mode in ('agent', 'research', 'chat'):
             set_session_mode(session, _effective_mode)
 

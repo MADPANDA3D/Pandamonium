@@ -25,7 +25,6 @@ import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
-  const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 
   let API_BASE = '';
@@ -1194,32 +1193,15 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           if (emCtx.account) fd.append('active_email_account', String(emCtx.account));
         }
       } catch (_e) { /* best-effort */ }
-      // Web toggle: pre-search in Chat mode only. Agent mode should not
-      // opportunistically hit SearXNG just because the chat search toggle is
-      // on; explicit web/current-info requests are handled by the backend
-      // intent gate.
-      const toggleState = Storage.loadToggleState();
-      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
+      // One adaptive conversation protocol: the server selects a zero-tool
+      // reply or the governed tool loop from the request itself. Web and shell
+      // remain explicit capability permissions, not execution modes.
       const incognitoChk = el('incognito-toggle');
       const isIncognito = !!(incognitoChk && incognitoChk.checked);
-      // Auto-escalate to agent mode when a document is open — the user expects
-      // the AI to see the document and have tools to edit it
-      if (!isIncognito && !isAgentMode && documentModule && activeDocIdForSend) {
-        isAgentMode = true;
-      }
-      fd.append('mode', isAgentMode ? 'agent' : 'chat');
-      if (el('web-toggle').checked) {
-        if (!isAgentMode) {
-          fd.append('use_web', 'true');
-        }
-      }
-      if (isAgentMode) {
-        fd.append('allow_web_search', el('web-toggle').checked ? 'true' : 'false');
-      }
+      fd.append('mode', 'adaptive');
+      fd.append('allow_web_search', el('web-toggle').checked ? 'true' : 'false');
       if (el('research-toggle').checked) {
         fd.append('use_research', 'true');
-        // Research always runs in chat mode — override agent if set
-        fd.set('mode', 'chat');
       }
       fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
       const ragChk = el('rag-toggle');
@@ -1242,11 +1224,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       abortCtrl._reason = '';
       currentAbort = abortCtrl;
 
-      const _tState = Storage.loadToggleState();
-      const _isAgent = (_tState.mode || 'chat') === 'agent';
-
-      // Timeout: 6 min for research and agent mode, 3 min otherwise
-      const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+      // Adaptive turns may enter a governed tool loop after beginning as a
+      // normal conversation, so use the existing long-running turn timeout.
+      const timeoutMs = RESEARCH_TIMEOUT_MS;
       timeoutId = setTimeout(() => {
         if (!abortCtrl.signal.aborted) {
           timedOut = true;
@@ -1375,22 +1355,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           if (m) errText = m[1].replace(/\\"/g, '"');
           else if (errBody.length < 200) errText = errBody;
         } catch {}
-        // Auto-switch to chat mode for tool-related errors
+        // Adaptive routing has no user mode to switch. Surface the capability
+        // failure without mutating persistent composer state.
         if (errText.includes('tool') || errText.includes('auto')) {
-          errText = 'This model doesn\'t support agent tools — switched to Chat mode. Try again.';
-          const _ab = document.getElementById('mode-agent-btn');
-          const _cb = document.getElementById('mode-chat-btn');
-          if (_ab && _cb) {
-            _ab.classList.remove('active');
-            _cb.classList.add('active');
-            const _toggle = _ab.closest('.mode-toggle');
-            if (_toggle) _toggle.classList.add('mode-chat');
-          }
-          if (typeof Storage !== 'undefined' && Storage.KEYS) {
-            const _st = Storage.getJSON(Storage.KEYS.TOGGLES, {});
-            _st.mode = 'chat';
-            Storage.setJSON(Storage.KEYS.TOGGLES, _st);
-          }
+          errText = 'The selected model could not complete that approved tool operation. Check the tool permission and model compatibility, then try again.';
         }
         typewriterInto(holder.querySelector('.body'), errText);
         enableResearchBtn();
@@ -3383,7 +3351,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
               let errMsg = `Error: ${err.message}`;
               // Add hint for tool-call errors
               if (err.message && (err.message.includes('tool') || err.message.includes('auto'))) {
-                errMsg += '\n\nThis model may not support tools — try switching to Chat mode.';
+                errMsg += '\n\nThe selected model may not support the requested tool call. Check the capability permission and model compatibility.';
               }
               typewriterInto(errorHolder, errMsg);
             }

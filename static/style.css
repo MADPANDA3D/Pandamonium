@@ -2439,14 +2439,9 @@ body.bg-pattern-sparkles {
       margin-top: 4px;
     }
     /* Progressive shrinkage: as the chat input bar gets narrow, sacrifice
-       chrome before the typing area. First the Agent/Chat toggle drops out,
-       then the model picker — textarea + send button always stay. Container
-       queries so it responds to *bar width*, not viewport width (the bar
-       can be in a split pane). */
+       the model picker before the typing area. Container queries respond to
+       bar width rather than viewport width (the bar can be in a split pane). */
     .chat-input-bar { container-type: inline-size; container-name: chatbar; }
-    @container chatbar (max-width: 340px) {
-      .chat-input-right .mode-toggle { display: none !important; }
-    }
     @container chatbar (max-width: 260px) {
       #model-picker-wrap { display: none !important; }
     }
@@ -2771,7 +2766,7 @@ body.bg-pattern-sparkles {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
     }
-    /* Mode toggle — Agent / Chat */
+    /* Reusable segmented toggle (Cookbook/runtime selectors). */
     .mode-toggle {
       display: flex;
       flex-shrink: 0;
@@ -2805,12 +2800,6 @@ body.bg-pattern-sparkles {
     }
     .mode-toggle.mode-toggle-three.mode-third::before {
       transform: translateX(200%);
-    }
-    #mode-agent-btn {
-      border-radius: 10px 0 0 10px;
-    }
-    #mode-chat-btn {
-      border-radius: 0 10px 10px 0;
     }
     .mode-toggle-btn {
       background: none;
@@ -4602,7 +4591,7 @@ body.bg-pattern-sparkles {
       }
       #pinned-tools-bar:empty { display: none; }
       .chat-input-bottom { margin-top: 0; }
-      /* Mode toggle — larger touch targets */
+      /* Segmented toggle — larger touch targets */
       .mode-toggle {
         height: 34px;
         border-radius: 12px;
@@ -4615,8 +4604,6 @@ body.bg-pattern-sparkles {
         font-size: 12px;
         min-height: 34px;
       }
-      #mode-agent-btn { border-radius: 12px 0 0 12px; }
-      #mode-chat-btn { border-radius: 0 12px 12px 0; }
       /* Diff mode — stack toolbar, bigger buttons */
       .diff-toolbar {
         padding: 8px 12px;
@@ -35536,7 +35523,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .note-form-type-toggle:hover { opacity: 1; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .note-form-type-toggle[data-type="todo"] { color: var(--accent); }
 
-/* Note | Todo | Draw segmented toggle — mirrors .mode-toggle (agent/chat) */
+/* Note | Todo | Draw segmented toggle — mirrors the shared .mode-toggle */
 .note-form-type-seg {
   display: inline-flex;
   height: 32px;

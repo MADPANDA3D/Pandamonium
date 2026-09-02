@@ -66,12 +66,10 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
       hideOn('#tool-research-btn, #research-toggle-btn', privs.can_use_research);
       // Memory & skills (rail/tool button only — UI/API entry).
       hideOn('#tool-memory-btn', privs.can_manage_memory);
-      // Agent mode toggle — force chat mode by hiding the Agent toggle button.
+      // Adaptive tool-bearing controls are hidden for accounts without agent
+      // privilege; backend enforcement remains authoritative.
       if (privs.can_use_agent === false) {
-        const _agent = document.getElementById('mode-agent-btn');
-        const _chat = document.getElementById('mode-chat-btn');
-        if (_agent) _agent.style.display = 'none';
-        if (_chat) { _chat.classList.add('active'); _chat.click?.(); }
+        document.querySelectorAll('[data-mode-tool]').forEach(el => { el.style.display = 'none'; });
       }
     } catch (_) { /* DOM not ready or unexpected shape — UI gates are non-fatal */ }
   } catch (_) { /* anonymous / loopback mode — nothing to do */ }

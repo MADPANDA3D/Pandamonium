@@ -2,7 +2,7 @@
 
 **Protocol ID:** `JOS-P0`
 
-**Version:** `0.1`
+**Version:** `0.2`
 
 **Status:** Baseline contract
 
@@ -88,6 +88,11 @@ successful.
 8. **Replacement is reversible.** The previous working engine configuration and
    its compatibility result remain available until the replacement has passed
    acceptance.
+9. **Conversation routing is adaptive.** A user starts one conversational
+   session and never selects a separate agent mode. Odysseus decides per turn
+   whether the request needs no tools or a bounded relevant-tool catalog.
+   Discovering or proposing a tool call does not bypass permission, authority,
+   confirmation, execution, or evidence requirements.
 
 ## Canonical turn contract
 
@@ -103,7 +108,7 @@ An engine receives a bounded `TurnRequest` containing:
 | `agent_id` | Stable installation-configured agent identity |
 | `session_id` | Odysseus-owned conversation identifier |
 | `messages` | Ordered context assembled by Odysseus |
-| `allowed_tools` | Schemas for tools allowed on this turn only |
+| `allowed_tools` | Relevant schemas selected by Odysseus and allowed on this turn only; empty for an ordinary conversational reply |
 | `limits` | Context, output, tool-round, and timeout budgets |
 | `required_capabilities` | Features this turn needs from the engine |
 
@@ -153,6 +158,7 @@ an explicit compatibility boundary.
 | Backend URL and provider normalization | `src/endpoint_resolver.py` |
 | Backend inference normalization | `src/llm_core.py` |
 | Context assembly and compaction | `routes/chat_helpers.py` |
+| Adaptive conversation routing | `src/action_intents.py`, `src/agent_loop.py`, `routes/chat_routes.py` |
 | Per-turn tool restrictions | `src/tool_policy.py` |
 | Tool-call loop and enforcement | `src/agent_loop.py` |
 | Canonical chat/session state | `core/session_manager.py` |

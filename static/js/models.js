@@ -596,7 +596,7 @@ export async function refreshModels(force = false) {
           ? [
               'Tip: Long-press a session for rename, delete, and memory options.',
               'Tip: Tap the eye icon for Nobody mode - no history saved.',
-              'Tip: Switch to Agent mode when you want tools.',
+              'Tip: Ask naturally — Pandamonium discovers approved tools when needed.',
               'Tip: Attach images or files using the + button next to the input.',
             ]
           : [

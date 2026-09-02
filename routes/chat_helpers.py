@@ -1213,9 +1213,9 @@ def run_post_response_tasks(
             t_url, t_model, t_headers,
         )))
 
-    # Skill extraction from complex agent runs. Only when the user actually
-    # chose agent mode — not a chat we auto-escalated for a notes/calendar
-    # intent, and never in incognito/compare.
+    # Skill extraction from complex legacy agent runs only. Adaptive turns may
+    # use skills but do not silently convert every normal conversation into a
+    # reusable learned procedure; never extract in incognito/compare.
     auto_skills_enabled = bool(uprefs.get("auto_skills", True))
     # Quiet by default — full gate/dispatch/start trace runs at DEBUG so
     # users can re-enable diagnostics with LOG_LEVEL=DEBUG when something

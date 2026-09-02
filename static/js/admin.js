@@ -22,7 +22,7 @@ function esc(s) { return uiModule.esc(s); }
    USERS TAB
    ═══════════════════════════════════════════ */
 const PRIV_LABELS = {
-  can_use_agent: 'Agent mode',
+  can_use_agent: 'Adaptive tool use',
   can_use_browser: 'Browser automation',
   can_use_bash: 'Shell / Python / Files',
   can_use_documents: 'Document editor',

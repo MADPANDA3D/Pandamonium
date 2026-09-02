@@ -575,7 +575,6 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 
     Actions:
       toggle <name> <on|off>  — Toggle a setting (web, bash, rag, research, incognito, document_editor)
-      set_mode <agent|chat>   — Switch between agent and chat mode
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a built-in theme preset (dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
@@ -619,18 +618,6 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
             "toggle_name": toggle_name,
             "state": state,
             "results": f"Toggle '{toggle_name}' set to {'on' if state else 'off'}",
-        }
-
-    elif action == "set_mode":
-        if len(parts) < 2:
-            return {"error": "set_mode needs: set_mode <agent|chat>"}
-        mode = parts[1].lower()
-        if mode not in ("agent", "chat"):
-            return {"error": f"Invalid mode '{mode}'. Use: agent, chat"}
-        return {
-            "ui_event": "set_mode",
-            "mode": mode,
-            "results": f"Mode changed to '{mode}'",
         }
 
     elif action == "switch_model":
@@ -898,7 +885,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
         }
 
     else:
-        return {"error": f"Unknown action '{action}'. Use: toggle, set_mode, switch_model, set_theme, oracle_protocol, highlight, clear_highlight, get_toggles"}
+        return {"error": f"Unknown action '{action}'. Use: toggle, switch_model, set_theme, oracle_protocol, highlight, clear_highlight, get_toggles"}
 
 
 # ---------------------------------------------------------------------------

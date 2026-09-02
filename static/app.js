@@ -853,9 +853,6 @@ function initializeEventListeners() {
     const _overflowRes = el('overflow-research-btn');
     if (_overflowRes) _overflowRes.classList.remove('active');
     if (typeof updatePlusDot === 'function') updatePlusDot();
-    // Reset agent mode to Chat
-    const modeToggle = el('agent-mode-toggle');
-    if (modeToggle && modeToggle.checked) { modeToggle.checked = false; modeToggle.dispatchEvent(new Event('change')); }
     // Clear character/persona
     if (presetsModule && presetsModule.deactivateCharacter) presetsModule.deactivateCharacter();
   }
@@ -884,7 +881,7 @@ function initializeEventListeners() {
       if (bashChk && bashChk.checked) {
         bashChk.checked = false;
         if (bashBtn) bashBtn.classList.remove('active');
-        saveToolPref('bash', (loadToggleState().mode || 'chat'), false);
+        saveToolPref('bash', false);
       }
     }
     const s = loadToggleState(); s.research = active; saveToggleState(s);
@@ -915,7 +912,7 @@ function initializeEventListeners() {
       const _webChk = el('web-toggle');
       if (_webChk && _webChk.checked) {
         _webChk.checked = false;
-        saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+        saveToolPref('web', false);
       }
     }
     const s = loadToggleState(); s.group = active; saveToggleState(s);
@@ -1329,10 +1326,10 @@ function initializeEventListeners() {
       if (d.privileges) {
         window._userPrivileges = d.privileges;
         const p = d.privileges;
-        // Hide agent mode toggle
+        // Tool-bearing controls are cosmetic only; the backend independently
+        // enforces can_use_agent and every finer-grained privilege.
         if (!p.can_use_agent) {
-          const modeToggle = document.getElementById('mode-toggle');
-          if (modeToggle) modeToggle.closest('.chat-input-toggle')?.style.setProperty('display', 'none');
+          document.querySelectorAll('[data-mode-tool]').forEach(node => { node.style.display = 'none'; });
         }
         // Hide bash toggle
         if (!p.can_use_bash) {
@@ -1713,25 +1710,26 @@ function initializeEventListeners() {
     Storage.saveToggleState(state);
   }
 
-  // Mode-affected tools: default ON in Agent mode, default OFF in Chat mode,
-  // but the user's explicit per-mode override is persisted and honored.
+  // Capability permissions are independent of adaptive execution routing.
   const MODE_TOOLS = [
     { btnId: 'web-toggle-btn',  checkboxId: 'web-toggle',  stateKey: 'web' },
     { btnId: 'bash-toggle-btn', checkboxId: 'bash-toggle', stateKey: 'bash' },
   ];
 
-  function _modeKey(stateKey, mode) { return `${stateKey}_${mode}`; }
-
-  function loadToolPref(stateKey, mode) {
+  function loadToolPref(stateKey) {
     const state = loadToggleState();
-    const key = _modeKey(stateKey, mode);
-    if (Object.prototype.hasOwnProperty.call(state, key)) return !!state[key];
-    return mode === 'agent'; // default: ON in agent, OFF in chat
+    if (Object.prototype.hasOwnProperty.call(state, stateKey)) return !!state[stateKey];
+    // One-time compatibility with old per-mode preferences. Prefer the prior
+    // conversational default, then the agent value when only that exists.
+    for (const legacyKey of [`${stateKey}_chat`, `${stateKey}_agent`]) {
+      if (Object.prototype.hasOwnProperty.call(state, legacyKey)) return !!state[legacyKey];
+    }
+    return false;
   }
 
-  function saveToolPref(stateKey, mode, value) {
+  function saveToolPref(stateKey, value) {
     const state = loadToggleState();
-    state[_modeKey(stateKey, mode)] = value;
+    state[stateKey] = value;
     saveToggleState(state);
   }
 
@@ -1746,64 +1744,24 @@ function initializeEventListeners() {
     uiModule.showToast(`${label} ${active ? 'on' : 'off'}`, 1800);
   }
 
-  function applyModeToToggles(mode) {
+  function applyAdaptiveToolPrefs() {
     MODE_TOOLS.forEach(({ btnId, checkboxId, stateKey }) => {
       const btn = el(btnId);
       if (!btn) return;
-      // Hide bash button in chat mode
-      if (mode === 'chat' && stateKey === 'bash') {
-        btn.style.display = 'none';
-        return;
-      }
-      // Show buttons in agent mode (or for web toggle in any mode)
       btn.style.display = '';
-      if (btn.style.display === 'none') return;
-      const on = loadToolPref(stateKey, mode);
+      const on = loadToolPref(stateKey);
       btn.classList.toggle('active', on);
       if (checkboxId) { const chk = el(checkboxId); if (chk) chk.checked = on; }
     });
   }
 
-  // ── Agent / Chat mode toggle ──
-  (function initModeToggle() {
-    const agentBtn = el('mode-agent-btn');
-    const chatBtn = el('mode-chat-btn');
-    if (!agentBtn || !chatBtn) return;
+  // ── Adaptive conversation protocol ──
+  (function initAdaptiveConversation() {
     const state = loadToggleState();
-    let currentMode = state.mode || 'chat';
-
-    // Immediately hide bash button in chat mode on page load
-    if (currentMode === 'chat') {
-      const bashBtn = el('bash-toggle-btn');
-      if (bashBtn) bashBtn.style.display = 'none';
-    }
-
-    function setMode(mode) {
-      currentMode = mode;
-      const st = loadToggleState();
-      st.mode = mode;
-      saveToggleState(st);
-      agentBtn.classList.toggle('active', mode === 'agent');
-      chatBtn.classList.toggle('active', mode === 'chat');
-      agentBtn.setAttribute('aria-pressed', String(mode === 'agent'));
-      chatBtn.setAttribute('aria-pressed', String(mode === 'chat'));
-      // Slide the pill to the active button
-      const toggle = agentBtn.closest('.mode-toggle');
-      if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
-      // Workspace pill + overflow entry are agent-only - hide immediately (no flash).
-      try { workspaceModule.applyMode(mode); } catch (_) {}
-      // Delay tool glow-up for a staggered effect
-      setTimeout(() => applyModeToToggles(mode), 500);
-    }
-    window.__odysseusSetChatMode = setMode;
-    agentBtn.addEventListener('click', () => {
-      // Agent mode turns off research if active
-      const resChk = el('research-toggle');
-      if (resChk && resChk.checked) _syncResearchIndicator(false);
-      setMode('agent');
-    });
-    chatBtn.addEventListener('click', () => setMode('chat'));
-    setMode(currentMode);
+    delete state.mode;
+    saveToggleState(state);
+    applyAdaptiveToolPrefs();
+    try { workspaceModule.applyMode('adaptive'); } catch (_) {}
   })();
 
   // ── Tool splash explainer messages (shown first 2 times per tool) ──
@@ -1837,24 +1795,21 @@ function initializeEventListeners() {
     if (uiModule) uiModule.scrollHistory();
   }
 
-  // ── Checkbox-backed toggle buttons (with per-mode persistence) ──
+  // ── Checkbox-backed capability permission buttons ──
   function setupToggle(btnId, checkboxId, stateKey) {
     const btn = el(btnId);
     if (!btn) return;
-    // Restore per-mode saved state for both Agent and Chat modes.
-    const mode = (loadToggleState().mode) || 'chat';
-    const saved = loadToolPref(stateKey, mode);
+    const saved = loadToolPref(stateKey);
     const chk = el(checkboxId);
     if (chk) chk.checked = saved;
     btn.classList.toggle('active', saved);
     btn.setAttribute('aria-pressed', String(saved));
     btn.addEventListener('click', () => {
-      const curMode = (loadToggleState().mode) || 'chat';
       const chk = el(checkboxId);
       chk.checked = !chk.checked;
       btn.classList.toggle('active', chk.checked);
       btn.setAttribute('aria-pressed', String(chk.checked));
-      saveToolPref(stateKey, curMode, chk.checked);
+      saveToolPref(stateKey, chk.checked);
       showToolToggleToast(stateKey, chk.checked);
       if (chk.checked) _showToolSplash(stateKey);
       // Web search and Research are mutually exclusive — Research takes priority
@@ -2122,7 +2077,7 @@ function initializeEventListeners() {
         if (webChk && webChk.checked) {
           webChk.checked = false;
           if (webBtn) webBtn.classList.remove('active');
-          saveToolPref('web', (st.mode || 'chat'), false);
+          saveToolPref('web', false);
         }
       }
 
@@ -2140,17 +2095,7 @@ function initializeEventListeners() {
           if (webChk && webChk.checked) {
             webChk.checked = false;
             if (webBtn) webBtn.classList.remove('active');
-            saveToolPref('web', (loadToggleState().mode || 'chat'), false);
-          }
-          // Research requires chat mode — force switch from agent
-          const rs = loadToggleState();
-          if (rs.mode === 'agent') {
-            rs.mode = 'chat';
-            saveToggleState(rs);
-            const ab = el('mode-agent-btn'), cb = el('mode-chat-btn');
-            if (ab) ab.classList.remove('active');
-            if (cb) cb.classList.add('active');
-            applyModeToToggles('chat');
+            saveToolPref('web', false);
           }
         }
       });
@@ -2393,17 +2338,7 @@ function initializeEventListeners() {
         if (webChk && webChk.checked) {
           webChk.checked = false;
           if (webBtn) webBtn.classList.remove('active');
-          saveToolPref('web', (loadToggleState().mode || 'chat'), false);
-        }
-        // Research requires chat mode
-        const rs2 = loadToggleState();
-        if (rs2.mode === 'agent') {
-          rs2.mode = 'chat';
-          saveToggleState(rs2);
-          const ab2 = el('mode-agent-btn'), cb2 = el('mode-chat-btn');
-          if (ab2) ab2.classList.remove('active');
-          if (cb2) cb2.classList.add('active');
-          applyModeToToggles('chat');
+          saveToolPref('web', false);
         }
       }
     });
@@ -2499,34 +2434,12 @@ function initializeEventListeners() {
           welcomeSub.style.display = '';
         }
         if (tipEl) { tipEl.dataset.originalTip = tipEl.textContent; tipEl.textContent = 'Temporary session \u2014 won\u2019t be saved and no memory activation.'; tipEl.style.opacity = '0.5'; tipEl.style.marginTop = '8px'; }
-        // Default to plain chat: disable tools visually, switch to chat mode.
-        // IMPORTANT: don't overwrite the user's persisted per-mode tool prefs
-        // (`web_agent`, `bash_agent`, `web_chat`, `bash_chat`). Nobody mode is
-        // ephemeral — their agent-mode defaults must come back on toggle-off.
-        const beforeNobody = Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {};
-        if (!beforeNobody.nobody_prev_mode) beforeNobody.nobody_prev_mode = beforeNobody.mode || 'agent';
-        Storage.setJSON(Storage.KEYS.TOGGLES, beforeNobody);
+        // Nobody mode temporarily disables external capability permissions;
+        // adaptive routing itself stays active and the server's incognito
+        // policy still strips identity-linked tools.
         const _offIds = ['web-toggle', 'bash-toggle', 'research-toggle'];
         _offIds.forEach(id => { const c = el(id); if (c) c.checked = false; });
         ['web-toggle-btn', 'bash-toggle-btn'].forEach(id => { const b = el(id); if (b) b.classList.remove('active'); });
-        if (typeof window.__odysseusSetChatMode === 'function') {
-          window.__odysseusSetChatMode('chat');
-        } else {
-          const _ab = el('mode-agent-btn'), _cb = el('mode-chat-btn');
-          if (_ab) {
-            _ab.classList.remove('active');
-            _ab.setAttribute('aria-pressed', 'false');
-          }
-          if (_cb) {
-            _cb.classList.add('active');
-            _cb.setAttribute('aria-pressed', 'true');
-          }
-          const _toggle = _ab?.closest('.mode-toggle') || _cb?.closest('.mode-toggle');
-          if (_toggle) _toggle.classList.add('mode-chat');
-          const ts = Storage.getJSON(Storage.KEYS.TOGGLES, {});
-          ts.mode = 'chat';
-          Storage.setJSON(Storage.KEYS.TOGGLES, ts);
-        }
         const ts = Storage.getJSON(Storage.KEYS.TOGGLES, {});
         ts.research = false;
         Storage.setJSON(Storage.KEYS.TOGGLES, ts);
@@ -2549,21 +2462,8 @@ function initializeEventListeners() {
           welcomeSub2.style.display = '';
         }
         if (tipEl && tipEl.dataset.originalTip) { tipEl.textContent = tipEl.dataset.originalTip; tipEl.style.opacity = ''; tipEl.style.marginTop = ''; }
-        // Heal any previously-persisted false values from the old Nobody bug
-        // so agent-mode defaults (web/bash ON) come back.
-        const _ts = Storage.getJSON(Storage.KEYS.TOGGLES, {});
-        const _restoreMode = _ts.nobody_prev_mode || 'agent';
-        delete _ts.nobody_prev_mode;
-        ['web_agent', 'bash_agent', 'web_chat', 'bash_chat'].forEach(k => {
-          if (_ts[k] === false) delete _ts[k];
-        });
-        Storage.setJSON(Storage.KEYS.TOGGLES, _ts);
-        if (typeof window.__odysseusSetChatMode === 'function') {
-          window.__odysseusSetChatMode(_restoreMode === 'chat' ? 'chat' : 'agent');
-        }
-        // Reapply the current mode's real defaults to the visible toggles
-        const _curMode = (Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {}).mode || 'chat';
-        try { applyModeToToggles(_curMode); } catch (_) {}
+        // Reapply the user's persisted capability permissions.
+        try { applyAdaptiveToolPrefs(); } catch (_) {}
       }
       // If toggled off mid-chat (welcome screen hidden), hide the button
       if (!chk.checked && ws && ws.classList.contains('hidden')) {
@@ -2631,7 +2531,6 @@ function initializeEventListeners() {
     'rag-toggle-btn':      '#overflow-rag-btn',
     'bash-toggle-btn':     '#bash-toggle-btn',
     'overflow-plus-btn':   '.overflow-wrapper',
-    'mode-toggle':         '.mode-toggle',
     'preset-mini-btn':     '#overflow-preset-btn',
     'attach-btn':          '#overflow-attach-btn',
     'research-btn':        '#overflow-research-btn',

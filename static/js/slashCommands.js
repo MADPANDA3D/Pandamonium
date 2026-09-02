@@ -2469,21 +2469,11 @@ async function _cmdDemo(args, ctx) {
   // Beat between the welcome line and the first hint so it doesn't snap in.
   await delay(900);
 
-  // Reset to a known starting state so the interactive steps (switch to Agent,
-  // turn Web on) actually have something to do.
+  // Reset Web so the capability-permission step has something to do.
   try {
-    const _agentBtn = document.getElementById('mode-agent-btn');
-    const _chatBtn  = document.getElementById('mode-chat-btn');
-    if (_agentBtn && _chatBtn) {
-      _agentBtn.classList.remove('active');
-      _chatBtn.classList.add('active');
-      const _t = _agentBtn.closest('.mode-toggle');
-      if (_t) _t.classList.add('mode-chat');
-    }
-    // Web is persisted per-mode under web_chat / web_agent. Zero both so the
-    // toggle is genuinely off when the user reaches the "turn it on" step.
+    // Keep old per-mode keys cleared while the adaptive preference takes over.
     const _st = Storage.getJSON(Storage.KEYS.TOGGLES, {});
-    _st.mode = 'chat';
+    _st.web = false;
     _st.web_chat = false;
     _st.web_agent = false;
     Storage.setJSON(Storage.KEYS.TOGGLES, _st);
@@ -2503,8 +2493,8 @@ async function _cmdDemo(args, ctx) {
     { sel: '#sidebar-new-chat-btn', text: 'Start a new chat here. <b>Click it.</b> You can do it!', mode: 'click',
       before() { if (sidebar?.classList.contains('hidden')) sidebar.classList.remove('hidden'); } },
     { sel: '#model-picker-btn',   text: 'Pick your LLM, Local or API.', advanceOnClick: true },
-    { sel: '#mode-agent-btn',     text: '<b>Agent mode</b> lets Pandamonium use approved app tools when your model supports them: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
-    { sel: '#web-toggle-btn',     text: 'Toggle tools like <b>web search</b>. Pandamonium includes private built-in <b>SearXNG</b> search.', mode: 'click' },
+    { sel: '.chat-input-bar',     text: 'Every conversation is adaptive. Ask normally and Pandamonium discovers approved tools only when the request needs them.' },
+    { sel: '#web-toggle-btn',     text: 'Capability permissions like <b>web search</b> stay under your control. Pandamonium includes private built-in <b>SearXNG</b> search.', mode: 'click' },
     { sel: '#overflow-plus-btn',  text: 'More tools can be found here, or in your sidebar. <b>Click to peek.</b>',
       advanceOnClick: true, pulseNext: true, afterDelay: 2200 },
     { sel: '#message',            text: 'Write your prompt here. Drag and drop files to attach them. <b>/prompt</b> for random prompt, <b>/help</b> for more.',
