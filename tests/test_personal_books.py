@@ -242,7 +242,7 @@ def test_books_ui_and_responsive_root_rules_are_present():
     assert "min(1120px, calc(100vw - 32px))" in style
     assert 'thinking-toggle live-think-toggle expanded' not in chat_js
     assert 'thinking-content expanded" id="${_liveThinkDomId}' not in chat_js
-    assert "prepareExtensionTextTurn('oracle')" in chat_js
+    assert "prepareExtensionTextTurn('oracle', streamSessionId)" in chat_js
     assert "json.extension_call" in chat_js
 
 

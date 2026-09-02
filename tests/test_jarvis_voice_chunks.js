@@ -31,9 +31,9 @@ assert.match(source, /sessions\/\$\{encodeURIComponent\(pending\.voiceSessionId\
 assert.match(source, /clientState\.extensions = \{[\s\S]*?\[surface\.extension_id\]/);
 assert.match(source, /function oracleProtocolResultMessage\(pending, result = \{\}\)/);
 assert.match(source, /function extensionBridgeClientState\(\)[\s\S]*?clientState\.oracle = oracle/);
-assert.match(source, /async function prepareExtensionTextTurn\(extensionId = 'oracle'\)[\s\S]*?extensionBridgeClientState\(\)/);
+assert.match(source, /async function prepareExtensionTextTurn\(extensionId = 'oracle', chatSessionId = null\)[\s\S]*?String\(chatSessionId \|\| currentChatSessionId\(\) \|\| ''\)/);
 assert.match(source, /window\.jarvisVoice = \{[\s\S]*?prepareExtensionTextTurn/);
-assert.match(chatSource, /prepareExtensionTextTurn\('oracle'\)/);
+assert.match(chatSource, /const streamSessionId = sessionModule\.getCurrentSessionId\(\)[\s\S]*?prepareExtensionTextTurn\('oracle', streamSessionId\)/);
 assert.match(chatSource, /json\.extension_call[\s\S]*?applyExtensionSurfaceControl/);
 assert.doesNotMatch(chatSource, /thinking-toggle live-think-toggle expanded/);
 assert.match(source, /configureExtensionSurfaces\(config\.extension_surfaces\)/);

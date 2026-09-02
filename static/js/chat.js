@@ -1168,7 +1168,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         if (!window.jarvisVoice?.prepareExtensionTextTurn) {
           throw new Error('ORACLE text-tool bridge is unavailable in this client.');
         }
-        _textExtensionBridge = await window.jarvisVoice.prepareExtensionTextTurn('oracle');
+        _textExtensionBridge = await window.jarvisVoice.prepareExtensionTextTurn('oracle', streamSessionId);
       }
 
       const fd = new FormData();

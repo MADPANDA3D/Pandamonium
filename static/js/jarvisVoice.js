@@ -660,8 +660,8 @@ function voiceRequestPayload(text) {
   return payload;
 }
 
-async function prepareExtensionTextTurn(extensionId = 'oracle') {
-  const activeChatSessionId = currentChatSessionId();
+async function prepareExtensionTextTurn(extensionId = 'oracle', chatSessionId = null) {
+  const activeChatSessionId = String(chatSessionId || currentChatSessionId() || '').trim();
   if (!activeChatSessionId) throw new Error('Open a saved chat before using an extension tool.');
 
   if (textExtensionSessionId && textExtensionChatSessionId !== activeChatSessionId) {
