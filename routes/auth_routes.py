@@ -23,7 +23,7 @@ from src.settings import (
     save_features as _save_features,
     DEFAULT_SETTINGS,
 )
-from src.agent_identity import validate_agent_identity_setting
+from src.agent_identity import agent_identity_status, validate_agent_identity_setting
 from src.integrations import (
     load_integrations,
     add_integration,
@@ -187,6 +187,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             u = result.get("username")
             if u:
                 result["privileges"] = auth_manager.get_privileges(u)
+                # Safe, resumable first-run state. This deliberately excludes
+                # the private constitution body while letting the UI tell a
+                # generic public default from an operator-configured identity.
+                result["agent_identity"] = agent_identity_status()
         except Exception:
             pass
         return result

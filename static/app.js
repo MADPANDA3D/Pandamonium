@@ -296,6 +296,92 @@ async function _syncWelcomeModelHint() {
   }
 }
 
+const FIRST_RUN_DISMISS_KEY = 'pandamonium-first-run-dismissed';
+
+async function _renderFirstRunGuide(identityStatus, options = {}) {
+  const guide = document.getElementById('welcome-setup');
+  if (!guide || !window._isAdmin) return;
+  const identityConfigured = identityStatus?.source === 'configured';
+  const hasModel = await _hasUsableChatModel();
+  let dismissed = false;
+  try { dismissed = sessionStorage.getItem(FIRST_RUN_DISMISS_KEY) === '1'; } catch (_) {}
+  if ((identityConfigured && hasModel) || (dismissed && !options.force)) {
+    guide.style.display = 'none';
+    guide.className = '';
+    guide.replaceChildren();
+    return;
+  }
+
+  guide.className = 'first-run-guide';
+  guide.style.display = 'grid';
+  guide.replaceChildren();
+
+  const copy = document.createElement('div');
+  copy.className = 'first-run-guide-copy';
+  const copyText = document.createElement('div');
+  const title = document.createElement('strong');
+  title.textContent = 'Make Pandamonium yours';
+  const detail = document.createElement('span');
+  detail.textContent = 'Name the persistent agent, connect a replaceable model engine, then add the services you want it to use.';
+  copyText.append(title, detail);
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'first-run-dismiss';
+  dismiss.textContent = 'Explore first';
+  dismiss.addEventListener('click', () => {
+    try { sessionStorage.setItem(FIRST_RUN_DISMISS_KEY, '1'); } catch (_) {}
+    guide.style.display = 'none';
+  });
+  copy.append(copyText, dismiss);
+
+  const steps = document.createElement('div');
+  steps.className = 'first-run-steps';
+  const definitions = [
+    {
+      label: 'Agent identity',
+      state: identityConfigured ? `Ready: ${identityStatus.display_name || 'configured'}` : 'Required: using public default',
+      done: identityConfigured,
+      tab: 'ai',
+      target: 'set-agentIdentityCard',
+    },
+    {
+      label: 'Model engine',
+      state: hasModel ? 'Ready: model available' : 'Required: connect a model',
+      done: hasModel,
+      tab: 'services',
+    },
+    {
+      label: 'Integrations',
+      state: 'Optional: connect services and plugins',
+      done: false,
+      tab: 'integrations',
+    },
+  ];
+  definitions.forEach((definition, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `first-run-step${definition.done ? ' done' : ''}`;
+    const indexEl = document.createElement('span');
+    indexEl.className = 'first-run-step-index';
+    indexEl.textContent = definition.done ? '✓' : String(index + 1);
+    const label = document.createElement('span');
+    label.className = 'first-run-step-label';
+    label.textContent = definition.label;
+    const state = document.createElement('span');
+    state.className = 'first-run-step-state';
+    state.textContent = definition.state;
+    button.append(indexEl, label, state);
+    button.addEventListener('click', () => {
+      settingsModule.open(definition.tab);
+      if (definition.target) {
+        setTimeout(() => document.getElementById(definition.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+      }
+    });
+    steps.append(button);
+  });
+  guide.append(copy, steps);
+}
+
 async function initPluginSidebar() {
   const list = el('plugins-list');
   if (!list) return;
@@ -1365,6 +1451,8 @@ function initializeEventListeners() {
     .then(r => r.json())
     .then(d => {
       window._isAdmin = !!d.is_admin;
+      window._agentIdentityStatus = d.agent_identity || null;
+      if (d.is_admin) _renderFirstRunGuide(window._agentIdentityStatus);
       if (d.is_admin && userBarAdmin) userBarAdmin.style.display = '';
       const userBarName = el('user-bar-name');
       const userBarAvatar = el('user-bar-avatar');
@@ -1413,6 +1501,15 @@ function initializeEventListeners() {
       }
     })
     .catch(() => {});
+
+  window.addEventListener('pandamonium-identity-updated', (event) => {
+    window._agentIdentityStatus = event.detail || window._agentIdentityStatus;
+    try { sessionStorage.removeItem(FIRST_RUN_DISMISS_KEY); } catch (_) {}
+    _renderFirstRunGuide(window._agentIdentityStatus);
+  });
+  window.addEventListener('ge:model-endpoints-updated', () => {
+    _renderFirstRunGuide(window._agentIdentityStatus);
+  });
 
   // Session sort dropdown
   const sortBtn = el('session-sort-btn');

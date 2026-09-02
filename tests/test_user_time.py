@@ -110,7 +110,7 @@ def test_agent_system_prompt_includes_shared_current_time(monkeypatch):
     system_messages = [m for m in messages if m["role"] == "system"]
     assert system_messages, "expected at least one system message"
     assert system_messages[0]["content"].endswith("\n\nBASE PROMPT")
-    assert "You are Assistant" in system_messages[0]["content"]
+    assert "persistent agent identity is Assistant" in system_messages[0]["content"]
     assert all("## Current date and time" not in (m.get("content") or "") for m in system_messages)
 
     datetime_messages = [m for m in messages if m["role"] == "user" and "## Current date and time" in (m.get("content") or "")]

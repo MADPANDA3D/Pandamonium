@@ -1577,6 +1577,34 @@
         <!-- ═══ AI TAB ═══ -->
 
         <div data-settings-panel="ai" class="hidden">
+          <div class="admin-card admin-only" id="set-agentIdentityCard">
+            <h2 style="display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></svg>
+              Agent Identity
+              <span id="set-agentIdentityStatus" class="identity-status-badge">Loading</span>
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:10px">This is who the agent is across chat, tools, voice, and plugins. Models are replaceable engines and do not change this identity.</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label" for="set-agentDisplayName">Display name</label>
+                <input id="set-agentDisplayName" type="text" maxlength="80" autocomplete="off" class="settings-select" placeholder="Assistant">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="set-agentId">Stable ID</label>
+                <input id="set-agentId" type="text" maxlength="64" autocomplete="off" spellcheck="false" class="settings-select" placeholder="assistant">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="set-agentConstitutionVersion">Version</label>
+                <input id="set-agentConstitutionVersion" type="text" maxlength="64" autocomplete="off" spellcheck="false" class="settings-select" placeholder="1">
+              </div>
+              <label class="settings-label" for="set-agentConstitution">Constitution</label>
+              <textarea id="set-agentConstitution" rows="7" maxlength="16000" autocomplete="off" class="settings-select identity-constitution-input" placeholder="Define durable behavior, operator boundaries, and presentation guidance for this installation."></textarea>
+              <div class="identity-settings-actions">
+                <span id="set-agentIdentityMsg" class="identity-settings-message" role="status" aria-live="polite"></span>
+                <button type="button" class="admin-btn-add" id="set-agentIdentitySave">Save identity</button>
+              </div>
+            </div>
+          </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Default Chat Model</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">The model used when creating a new chat session.</div>

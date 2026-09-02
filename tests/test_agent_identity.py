@@ -20,8 +20,11 @@ def test_identity_is_installation_configured_not_inferred_from_model_names(monke
     cloud_prompt = agent_identity.agent_system_prompt("Be concise.")
 
     assert local_prompt == cloud_prompt
-    assert "You are Atlas" in local_prompt
+    assert "persistent agent identity is Atlas" in local_prompt
     assert "stable agent id: atlas" in local_prompt
+    assert "replaceable reasoning engines" in local_prompt
+    assert "identify yourself as Atlas" in local_prompt
+    assert "not as the backend vendor's assistant" in local_prompt
     assert "Be concise." in local_prompt
     assert "jarvis" not in local_prompt.casefold()
 
@@ -46,6 +49,7 @@ def test_public_default_identity_is_generic_and_safe():
     assert "Leo" not in DEFAULT_SETTINGS["agent_constitution"]
     assert "Mad Panda" not in DEFAULT_SETTINGS["agent_constitution"]
     assert "Ambiguous follow-ups" not in prompt  # no private legacy constitution is mounted
+    assert "identify yourself as Assistant" in prompt
 
 
 def test_identity_diagnostics_never_expose_constitution(monkeypatch):

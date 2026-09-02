@@ -1362,7 +1362,7 @@ def test_primary_voice_keeps_configured_identity_across_oracle_lifecycle(monkeyp
     online = voice_routes._voice_system_prompt(_oracle_voice_session("fly_to_location"))
 
     for prompt in (offline, online):
-        assert "You are Atlas" in prompt
+        assert "persistent agent identity is Atlas" in prompt
         assert "stable agent id: atlas" in prompt
         assert "Stay accurate across every surface." in prompt
     assert "ORACLE protocol is offline" in offline

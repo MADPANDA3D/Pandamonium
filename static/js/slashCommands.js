@@ -274,6 +274,33 @@ async function _hasConfiguredModels() {
   }
 }
 
+async function _showSetupOverview() {
+  let identity = {};
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/status`, { credentials: 'same-origin' });
+    if (response.ok) identity = (await response.json()).agent_identity || {};
+  } catch (_) {}
+  const identityConfigured = identity.source === 'configured';
+  const hasModel = await _hasConfiguredModels();
+  const displayName = uiModule.esc(identity.display_name || 'Assistant');
+  const step = (number, label, state, tab, target = '') =>
+    '<button type="button" class="setup-guide-action" data-setup-tab="' + tab + '"' +
+      (target ? ' data-setup-target="' + target + '"' : '') +
+      ' style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;text-align:left;cursor:pointer;">' +
+      '<strong style="grid-row:1/3;color:var(--accent,var(--red));">' + number + '</strong>' +
+      '<span style="font-weight:700;">' + label + '</span>' +
+      '<small style="opacity:.6;">' + state + '</small>' +
+    '</button>';
+  return slashReply(
+    '<div class="setup-guide-no-censor" style="display:grid;gap:10px;">' +
+      '<div><strong>Set up Pandamonium</strong><br><span style="opacity:.72;">Pandamonium is the harness. Your configured agent stays the same while model engines and integrations can change.</span></div>' +
+      step(identityConfigured ? '✓' : '1', 'Agent identity', identityConfigured ? 'Configured as ' + displayName : 'Name the agent and define its durable behavior', 'ai', 'set-agentIdentityCard') +
+      step(hasModel ? '✓' : '2', 'Model engine', hasModel ? 'At least one model is available' : 'Connect a local or hosted model', 'services') +
+      step('3', 'Integrations', 'Optionally connect services and install plugins', 'integrations') +
+    '</div>'
+  );
+}
+
 function _setupProviderPrompt() {
   const chips = SETUP_PROVIDER_HINT_NAMES.map(name =>
     '<span style="font-weight:650;">' + name + '</span>'
@@ -5105,6 +5132,22 @@ async function _cmdSetup(args, ctx) {
     }
     return true;
   }
+  if (topic === 'identity' || topic === 'agent') {
+    settingsModule.open('ai');
+    setTimeout(() => document.getElementById('set-agentIdentityCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    await _setupReply('Agent Identity is open. This persistent identity stays stable when you switch models or plugins.');
+    return true;
+  }
+  if (topic === 'model' || topic === 'models') {
+    settingsModule.open('services');
+    await _setupReply('Add Models is open. Connect a local endpoint, scan your network, or add a hosted provider.');
+    return true;
+  }
+  if (topic === 'integration' || topic === 'integrations' || topic === 'plugin' || topic === 'plugins') {
+    settingsModule.open('integrations');
+    await _setupReply('Integrations is open. Connected services and installed plugins become governed capabilities of the configured agent.');
+    return true;
+  }
 
   // Check if models are already configured
   const modelsBox = document.getElementById('models');
@@ -5113,7 +5156,7 @@ async function _cmdSetup(args, ctx) {
   if (hasModels) {
     if (!topic) {
       _clearSetupGuideMessages();
-      return _showSetupEndpointGuide();
+      return _showSetupOverview();
     }
 
     if (topic === 'endpoint' || topic === 'api' || topic === 'key') {
@@ -5175,12 +5218,13 @@ async function _cmdSetup(args, ctx) {
     }
 
     // Unknown topic — hint
-    await typewriterReply(`I don't have a setup wizard for "${topic}" yet. Try: endpoint, theme, memory, or features.`);
+    await typewriterReply(`I don't have a setup wizard for "${topic}" yet. Try: identity, models, integrations, theme, memory, or features.`);
     return true;
   }
 
   // First-time setup — paste API key flow
   _clearSetupGuideMessages();
+  if (!topic) return _showSetupOverview();
   if (setupIntroShown) {
     return _showSetupEndpointGuide();
   }
@@ -5836,9 +5880,9 @@ const COMMANDS = {
   setup: {
     alias: ['su', 'seutp'],
     category: 'Getting started',
-    help: 'Add local or API model endpoints',
+    help: 'Configure identity, models, and integrations',
     handler: _cmdSetup,
-    usage: '/setup local URL  ·  /setup groq KEY  ·  /setup copilot  ·  /setup chatgpt-subscription',
+    usage: '/setup identity  ·  /setup models  ·  /setup integrations  ·  /setup local URL',
     // Provider subs so the autocomplete popup surfaces "/setup deepseek",
     // "/setup openai", etc. when the user types "/setup de". Each sub's
     // handler is a thin wrapper that re-prepends the sub name and
@@ -5847,6 +5891,9 @@ const COMMANDS = {
     // Without the explicit handler, the slash-dispatcher errors with
     // "subDef.handler is not a function".
     subs: {
+      identity:   { help: 'Configure the persistent agent identity', usage: '/setup identity', handler: (a, c) => _cmdSetup(['identity', ...a], c) },
+      models:     { help: 'Connect a local or hosted model', usage: '/setup models', handler: (a, c) => _cmdSetup(['models', ...a], c) },
+      integrations: { help: 'Connect services and plugins', usage: '/setup integrations', handler: (a, c) => _cmdSetup(['integrations', ...a], c) },
       deepseek:   { help: 'DeepSeek',      usage: '/setup deepseek sk-...',     handler: (a, c) => _cmdSetup(['deepseek',   ...a], c) },
       openai:     { help: 'OpenAI',        usage: '/setup openai sk-proj-...',  handler: (a, c) => _cmdSetup(['openai',     ...a], c) },
       anthropic:  { help: 'Anthropic',     usage: '/setup anthropic sk-ant-...',handler: (a, c) => _cmdSetup(['anthropic',  ...a], c) },
@@ -6417,6 +6464,18 @@ export function initSlashCommands(deps) {
         if (chatForm) {
           chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
         }
+      }
+      return;
+    }
+
+    const setupAction = e.target.closest('.setup-guide-action');
+    if (setupAction) {
+      e.preventDefault();
+      const tab = setupAction.dataset.setupTab || 'services';
+      settingsModule.open(tab);
+      const target = setupAction.dataset.setupTarget;
+      if (target) {
+        setTimeout(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
       }
       return;
     }

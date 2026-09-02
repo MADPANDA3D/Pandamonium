@@ -1822,6 +1822,91 @@ async function initResearchSearchSettings() {
   searchSel.addEventListener('change', function() { updateSearchLogo(); saveResearchSearch(); });
 }
 
+/* ── Installation identity (AI tab, admin only) ── */
+async function initAgentIdentitySettings() {
+  const idInput = el('set-agentId');
+  const nameInput = el('set-agentDisplayName');
+  const versionInput = el('set-agentConstitutionVersion');
+  const constitutionInput = el('set-agentConstitution');
+  const saveBtn = el('set-agentIdentitySave');
+  const status = el('set-agentIdentityStatus');
+  const msg = el('set-agentIdentityMsg');
+  if (!idInput || !nameInput || !versionInput || !constitutionInput || !saveBtn) return;
+
+  function renderStatus(source) {
+    const configured = source === 'configured';
+    if (status) {
+      status.textContent = configured ? 'Configured' : 'Public default';
+      status.classList.toggle('configured', configured);
+    }
+  }
+
+  try {
+    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('Identity settings are available to admins only');
+    const settings = await res.json();
+    idInput.value = settings.agent_id || '';
+    nameInput.value = settings.agent_display_name || '';
+    versionInput.value = settings.agent_constitution_version || '';
+    constitutionInput.value = settings.agent_constitution || '';
+    const authRes = await fetch('/api/auth/status', { credentials: 'same-origin' });
+    const auth = authRes.ok ? await authRes.json() : {};
+    renderStatus(auth?.agent_identity?.source || 'default');
+  } catch (error) {
+    if (msg) {
+      msg.textContent = error.message || 'Identity settings could not be loaded';
+      msg.style.color = 'var(--red)';
+    }
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    const payload = {
+      agent_id: idInput.value.trim(),
+      agent_display_name: nameInput.value.trim(),
+      agent_constitution_version: versionInput.value.trim(),
+      agent_constitution: constitutionInput.value.trim(),
+    };
+    saveBtn.disabled = true;
+    if (msg) {
+      msg.textContent = 'Saving…';
+      msg.style.color = '';
+    }
+    try {
+      const res = await fetch('/api/auth/settings', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || 'Identity could not be saved');
+      }
+      renderStatus('configured');
+      if (msg) {
+        msg.textContent = `Saved as ${payload.agent_display_name}`;
+        msg.style.color = 'var(--green)';
+      }
+      window.dispatchEvent(new CustomEvent('pandamonium-identity-updated', {
+        detail: {
+          agent_id: payload.agent_id,
+          display_name: payload.agent_display_name,
+          constitution_version: payload.agent_constitution_version,
+          source: 'configured',
+          status: 'healthy',
+        },
+      }));
+    } catch (error) {
+      if (msg) {
+        msg.textContent = error.message || 'Identity could not be saved';
+        msg.style.color = 'var(--red)';
+      }
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+}
+
 /* ── Agent Settings (AI tab) ── */
 async function initAgentSettings() {
   var toolsInput = el('set-agentMaxTools');
@@ -2485,6 +2570,7 @@ function initAll() {
   initSearchSettings();
   initResearchSettings();
   initResearchSearchSettings();
+  initAgentIdentitySettings();
   initAgentSettings();
   initContextBudgetSettings();
   initAppearance();

@@ -71,9 +71,13 @@ def agent_system_prompt(preset_prompt: str | None = None) -> str:
     """Mount the configured identity and preserve the active behavior preset."""
     identity = resolve_agent_identity()
     prompt = (
-        f"You are {identity['agent_display_name']}, the assistant configured for this Odysseus installation "
+        f"Your persistent agent identity is {identity['agent_display_name']} "
         f"(stable agent id: {identity['agent_id']}; constitution version: "
-        f"{identity['agent_constitution_version']}).\n\n{identity['agent_constitution']}"
+        f"{identity['agent_constitution_version']}). The selected model and provider are replaceable reasoning "
+        f"engines; they never replace or rename your configured agent identity. When asked who or what you are, "
+        f"identify yourself as {identity['agent_display_name']}, not as the backend vendor's assistant. If the "
+        "operator asks about the backend, describe the current model or provider separately and only from "
+        f"runtime facts available to you.\n\n{identity['agent_constitution']}"
     )
     return f"{prompt}\n\n{preset_prompt}" if preset_prompt else prompt
 
