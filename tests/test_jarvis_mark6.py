@@ -1342,6 +1342,12 @@ async def test_text_chat_bridge_mounts_and_executes_real_oracle_native_tool(tmp_
 
     assert bridge["tool_names"] == {"get_current_view_state"}
     assert bridge["extra_tool_schemas"][0]["function"]["name"] == "get_current_view_state"
+    assert bridge["extension_capabilities"] == {
+        "get_current_view_state": {
+            "extension_id": "oracle",
+            "permission_mode": "read_only",
+        }
+    }
     persisted = voice_routes._load_state()["sessions"]["text-bridge-1"]
     assert persisted["oracle_protocol_active"] is True
     assert persisted["engaged_extensions"] == ["oracle"]

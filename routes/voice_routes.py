@@ -80,6 +80,12 @@ JARVIS_TOOLS = {
 }
 EXTENSION_TOOL_TIMEOUT_SECONDS = 45
 EXTENSION_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+LEGACY_ORACLE_READ_ONLY_TOOLS = frozenset({
+    "analyst_query",
+    "get_current_view_state",
+    "get_entity_context",
+    "next_iss_pass",
+})
 _EXTENSION_TOOL_CALLS: dict[tuple[str, str, str], dict[str, Any]] = {}
 extension_registry = ExtensionRegistry()
 VOICE_SYSTEM_PROMPT = """Be terse and conversational: normally one or two spoken sentences unless the operator asks for depth. Never describe pacing or offer a capability menu.
@@ -864,7 +870,11 @@ def _extension_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]
         specs.extend({
             **tool,
             "extension_id": "oracle",
-            "permission_mode": "external_side_effect",
+            "permission_mode": (
+                "read_only"
+                if tool["name"] in LEGACY_ORACLE_READ_ONLY_TOOLS
+                else "external_side_effect"
+            ),
         } for tool in client_by_extension.get("oracle", {}).values())
     return specs
 
