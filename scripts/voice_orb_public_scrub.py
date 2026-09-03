@@ -316,6 +316,35 @@ def self_test() -> None:
         {**assets, "static/media/voice-orb/demo.webm": media + b"A_OPUS"},
     )
 
+    media = b"\x1aE\xdf\xa3silent-webm"
+    checksum = f"sha256:{hashlib.sha256(media).hexdigest()}"
+    entry = {
+        "id": "demo", "title": "First-party demo", "type": "video/webm",
+        "path": "/static/media/voice-orb/demo.webm", "tags": ["demo", "silent"],
+        "license": "CC0-1.0", "source": "Voice Orb contributors",
+        "attribution": "Original first-party asset", "checksum": checksum,
+        "available": True,
+    }
+    manifest = {"version": 1, "media": [entry]}
+    assets = {
+        "static/media/voice-orb/README.md": b"provenance",
+        "static/media/voice-orb/demo.webm": media,
+    }
+    assert media_manifest_reasons(manifest, assets) == []
+    assert media_manifest_reasons(
+        {"version": 1, "media": [{**entry, "license": "unknown"}]}, assets
+    )
+    assert media_manifest_reasons(
+        manifest, {**assets, "static/media/voice-orb/voice.wav": b"private"}
+    )
+    assert media_manifest_reasons(
+        manifest, {**assets, "static/media/voice-orb/camera-frame.jpg": b"private"}
+    )
+    assert media_manifest_reasons(
+        manifest,
+        {**assets, "static/media/voice-orb/demo.webm": media + b"A_OPUS"},
+    )
+
 
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
