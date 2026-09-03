@@ -1724,6 +1724,11 @@ import { getBrandName } from './brand.js';
 
             if (data === '[DONE]') {
               _streamSawDone = true;
+              emitVoiceLifecycle('stream-complete', {
+                source: 'chat',
+                reason: 'completed',
+                sessionId: streamSessionId,
+              });
               // Always update background map if entry exists (even if user switched back)
               var bgDone = _backgroundStreams.get(streamSessionId);
               if (bgDone && !_isBg) {
@@ -3496,6 +3501,11 @@ import { getBrandName } from './brand.js';
   // defeating the whole point. Only the Stop button cancels the server run.
   export function abortCurrentRequest(stopServer = false) {
     if (currentAbort) {
+      emitVoiceLifecycle('stream-interrupted', {
+        source: 'chat',
+        reason: stopServer ? 'user' : 'navigation',
+        ...(_streamSessionId ? { sessionId: _streamSessionId } : {}),
+      });
       currentAbort.abort();
       // Don't set to null here - let catch block handle it
     }

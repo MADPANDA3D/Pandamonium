@@ -27,6 +27,7 @@ const PRECACHE = [
   '/static/js/skills.js',
   '/static/js/tourHints.js',
   '/static/js/fileHandler.js',
+  '/static/js/voiceLifecycle.js',
   '/static/js/voiceRecorder.js',
   '/static/js/models.js',
   '/static/js/rag.js',
