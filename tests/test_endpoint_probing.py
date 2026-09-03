@@ -9,7 +9,7 @@ probe surface that drives endpoint setup and degraded-state reporting:
     /api/tags fallback for Ollama builds without /v1/models, and the
     no-models-found result.
   * `_ping_endpoint`      — reachability classification: 2xx, auth failures,
-    the "this is Odysseus, not a model server" /login-redirect trap, generic
+    the "this is Pandamonium, not a model server" /login-redirect trap, generic
     redirects, transport errors, and the native-Ollama /api/version fallback.
   * `_probe_single_model` — ok/fail/timeout status mapping, upstream error-body
     extraction, and per-provider (OpenAI / Anthropic) request routing.

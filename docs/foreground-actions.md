@@ -1,6 +1,6 @@
 # Foreground action contract
 
-Odysseus browser modules may register one of three version 1 foreground actions:
+Pandamonium browser modules may register one of three version 1 foreground actions:
 
 | Action ID | Core handler |
 | --- | --- |

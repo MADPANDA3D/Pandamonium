@@ -3,7 +3,7 @@
 #
 # This script does not install packages, edit .env, or restart Docker. It only
 # checks host AMD device nodes, Docker access, and whether a small container can
-# see /dev/kfd and /dev/dri. The Odysseus slim image does not include ROCm tools
+# see /dev/kfd and /dev/dri. The Pandamonium slim image does not include ROCm tools
 # such as rocm-smi, so container verification checks devices instead.
 
 set -u
@@ -183,15 +183,15 @@ _print_next_steps() {
         printf 'RENDER_GID=<numeric render group id>\n'
     fi
     echo
-    echo "After restarting Odysseus, verify the slim app container sees devices:"
-    echo "  docker compose exec odysseus sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l /dev/kfd /dev/dri/renderD*'"
+    echo "After restarting Pandamonium, verify the slim app container sees devices:"
+    echo "  docker compose exec pandamonium sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l /dev/kfd /dev/dri/renderD*'"
     echo
-    echo "Note: rocm-smi/rocminfo are not expected inside the slim Odysseus image."
+    echo "Note: rocm-smi/rocminfo are not expected inside the slim Pandamonium image."
     echo "Device passthrough is necessary but not sufficient for GPU serving; vLLM and"
     echo "llama.cpp still need ROCm-compatible builds or ROCm-specific Docker images."
 }
 
-echo "=== Odysseus AMD Docker GPU diagnostic ==="
+echo "=== Pandamonium AMD Docker GPU diagnostic ==="
 echo
 _check_host_devices
 _check_groups

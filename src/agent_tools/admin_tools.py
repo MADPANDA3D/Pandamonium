@@ -557,7 +557,7 @@ async def do_manage_tokens(content: str, owner: Optional[str] = None) -> Dict:
             import uuid as _uuid, secrets, bcrypt
             from datetime import datetime
             name = args.get("name", "API Token")
-            raw_token = secrets.token_urlsafe(32)
+            raw_token = "pan_" + secrets.token_urlsafe(32)
             token_hash = bcrypt.hashpw(raw_token.encode(), bcrypt.gensalt()).decode()
             tid = str(_uuid.uuid4())[:8]
             t = ApiToken(id=tid, name=name, token_hash=token_hash,

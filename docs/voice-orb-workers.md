@@ -4,7 +4,7 @@ Voice Orb workers are optional and disabled by default. The public alpha exposes
 
 ## Security contract
 
-- Worker routes require an interactive Odysseus login. Bearer API tokens are rejected.
+- Worker routes require an interactive Pandamonium login. Bearer API tokens are rejected.
 - The linked chat owner owns the task and every status, event, reply, approval, steer, and cancel operation.
 - Caller-supplied `approved=true` and every permission mode except `read_only` are rejected by the route, broker, adapter, and bundled Codex bridge.
 - Read-only approval requests can only be denied.
@@ -19,16 +19,16 @@ The bridge requires a token file and an explicit JSON map from logical workspace
 From a repository checkout:
 
 ```bash
-export ODYSSEUS_CODEX_WORKER_ID=pc-codex
-export ODYSSEUS_CODEX_BRIDGE_HOST=127.0.0.1
-export ODYSSEUS_CODEX_BRIDGE_TOKEN_FILE=/run/secrets/odysseus_pc_codex_token
-export ODYSSEUS_CODEX_WORKSPACES_JSON='{"demo":"/srv/projects/demo"}'
-PYTHONPATH=. python services/codex-bridge/odysseus_codex_bridge.py
+export PANDAMONIUM_CODEX_WORKER_ID=pc-codex
+export PANDAMONIUM_CODEX_BRIDGE_HOST=127.0.0.1
+export PANDAMONIUM_CODEX_BRIDGE_TOKEN_FILE=/run/secrets/odysseus_pc_codex_token
+export PANDAMONIUM_CODEX_WORKSPACES_JSON='{"demo":"/srv/projects/demo"}'
+PYTHONPATH=. python services/codex-bridge/pandamonium_codex_bridge.py
 ```
 
-Mount the same token file into the Odysseus process and set the matching `ODYSSEUS_PC_CODEX_*` variables from `.env.example`. Use `ODYSSEUS_CODEX_WORKER_ID=vps-codex` plus the VPS-prefixed Odysseus settings for the optional remote bridge. Keep `vps-codex` disabled until its transport and workspace map are intentionally configured.
+Mount the same token file into the Pandamonium process and set the matching `PANDAMONIUM_PC_CODEX_*` variables from `.env.example`. Use `PANDAMONIUM_CODEX_WORKER_ID=vps-codex` plus the VPS-prefixed Pandamonium settings for the optional remote bridge. Keep `vps-codex` disabled until its transport and workspace map are intentionally configured.
 
-The bridge does not select or prewarm a model. `ODYSSEUS_CODEX_MODEL` and `ODYSSEUS_CODEX_REASONING_EFFORT` are optional overrides; otherwise Codex uses its current defaults.
+The bridge does not select or prewarm a model. `PANDAMONIUM_CODEX_MODEL` and `PANDAMONIUM_CODEX_REASONING_EFFORT` are optional overrides; otherwise Codex uses its current defaults.
 
 ## Hermes compatibility gate
 

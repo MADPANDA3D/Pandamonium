@@ -6,7 +6,7 @@ Open Voice Orb changes against the maintained fork's beta branch. Follow the roo
 
 - Keep AGPL-3.0-or-later headers and attribution intact.
 - Never add private Mark Notes, `.whoami`, handovers, personal or client data, private topology, credentials, cloned voices, or unlicensed media.
-- Reuse Odysseus sessions, provider settings, Calendar paths, modals, SSE, and static modules before adding a new API.
+- Reuse Pandamonium sessions, provider settings, Calendar paths, modals, SSE, and static modules before adding a new API.
 - Do not add arbitrary selectors, DOM/script execution, arbitrary URLs, caller-selected Python modules, or source-rewriting installers.
 - Keep workers disabled by default and read-only in the public beta.
 - Add no production dependency when the browser platform, Python standard library, or an existing dependency covers the requirement.

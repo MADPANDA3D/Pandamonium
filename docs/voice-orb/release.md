@@ -34,13 +34,13 @@ The public scrub is also required before tagging. It must fail on private notes,
 Create the annotated source tag only from a fully verified beta commit:
 
 ```bash
-git tag -a voice-orb-v0.3.0-beta.1 -m 'Odysseus Voice Orb v0.3.0-beta.1'
+git tag -a voice-orb-v0.3.0-beta.1 -m 'Pandamonium Voice Orb v0.3.0-beta.1'
 git push origin voice-orb-v0.3.0-beta.1
 ```
 
 The tag-triggered release workflow verifies the compatibility record, runs the release gates, builds natively for `linux/amd64` and `linux/arm64`, pushes by digest, and creates one manifest tagged `voice-orb-v0.3.0-beta.1` in GHCR.
 
-Record the resulting manifest digest in the GitHub release notes. Users should deploy `ghcr.io/madpanda3d/odysseus@sha256:DIGEST`; the tag is a discovery label, while the digest is the immutable pin.
+Record the resulting manifest digest in the GitHub release notes. Users should deploy `ghcr.io/madpanda3d/pandamonium@sha256:DIGEST`; the tag is a discovery label, while the digest is the immutable pin.
 
 ## Nightly drift check
 

@@ -1,17 +1,14 @@
 {
-  "name": "odysseus-voice-orb-dev",
+  "name": "pandamonium",
+  "version": "1.0.1",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/MADPANDA3D/odysseus.git"
+    "url": "https://github.com/MADPANDA3D/Pandamonium.git"
   },
   "scripts": {
     "test:browser": "playwright test",
-    "test:voice-orb": "node tests/test_foreground_control.js && node tests/test_voice_orb.js && node tests/test_voice_orb_setup.js && playwright test tests/browser/voice-orb.spec.js"
-  },
-  "scripts": {
-    "test:browser": "playwright test",
-    "test:voice-orb": "node tests/test_foreground_control.js && node tests/test_voice_orb.js && node tests/test_voice_orb_setup.js && playwright test tests/browser/voice-orb.spec.js"
+    "test:voice-orb": "node tests/test_foreground_control.js && node tests/test_voice_orb.js && node tests/test_voice_orb_setup.js && node tests/voice_lifecycle.test.mjs && playwright test tests/browser/voice-orb.spec.js"
   },
   "devDependencies": {
     "@antithesishq/bombadil": "^0.6.1",

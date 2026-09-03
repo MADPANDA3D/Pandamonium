@@ -5,7 +5,7 @@
 1. Confirm you are signed in through the browser; Voice Orb does not permit bearer-token voice orchestration.
 2. Confirm a normal text chat works with the current/default model.
 3. Check `/api/voice/status` while authenticated. It should report bounded STT/TTS readiness without endpoint secrets.
-4. Review `docker compose logs --tail=200 odysseus` for error categories. Do not paste unredacted logs into a public issue.
+4. Review `docker compose logs --tail=200 pandamonium` for error categories. Do not paste unredacted logs into a public issue.
 
 ## Guided setup reports missing configuration
 
@@ -57,7 +57,7 @@ Enable STT in Settings. Browser STT is not supported equally by every browser. L
 ## A worker is configured but not ready
 
 - Confirm the worker is explicitly enabled and reachable over the intended private path.
-- Confirm the token file exists inside the Odysseus process/container and has restrictive permissions.
+- Confirm the token file exists inside the Pandamonium process/container and has restrictive permissions.
 - Confirm the worker advertises the expected fixed ID and read-only capability.
 - Hermes fails closed if it cannot prove enforced read-only operation.
 - Do not infer worker or cluster readiness from a visible Tailnet peer or discovered model endpoint.
@@ -80,7 +80,7 @@ token privately, then rerun `Check voice setup.`
 
 ## Old UI remains after upgrade
 
-Confirm the running source tag or image digest, then perform a normal reload. If the service worker still serves an older static cache, close other Odysseus tabs, unregister the old service worker in browser developer tools, and reload. Do not delete `data/` to clear a frontend cache.
+Confirm the running source tag or image digest, then perform a normal reload. If the service worker still serves an older static cache, close other Pandamonium tabs, unregister the old service worker in browser developer tools, and reload. Do not delete `data/` to clear a frontend cache.
 
 ## Architecture or container failure
 

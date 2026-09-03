@@ -1,16 +1,15 @@
 name: ci / docker publish
 
-# Build the Odysseus image and publish to GHCR.
-#   push to main -> :latest, :X.Y.Z            (curated release; main is fast-forwarded at releases)
-#   push to dev  -> :dev,    :X.Y.Z-dev.<sha>  (rolling dev + an immutable, traceable pin)
+# Build the Pandamonium image and publish to GHCR.
+# Every supported checkout is on main; releases add immutable version tags.
 # Multi-arch (linux/amd64 + linux/arm64): each arch builds on its own native
 # runner and pushes by digest, then a merge job stitches the digests into one
 # manifest list and applies the tags (faster + cleaner than QEMU emulation).
-# Registry: ghcr.io/<owner>/<repo>.
+# Registry names must be lowercase, so keep the canonical target explicit.
 
 on:
   push:
-    branches: [dev, main]
+    branches: [main]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -25,7 +24,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: madpanda3d/pandamonium
 
 jobs:
   build:
@@ -116,10 +115,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ steps.ver.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
-            type=raw,value=${{ steps.ver.outputs.version }}-dev.${{ steps.ver.outputs.short }},enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=latest
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.short }}
       - name: Create manifest list + push tags
         working-directory: /tmp/digests
         run: |
@@ -132,9 +130,7 @@ jobs:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
       - name: Inspect
-        run: |
-          if [ "$GITHUB_REF" = "refs/heads/main" ]; then ref=latest; else ref=dev; fi
-          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${ref}"
+        run: docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:latest"
         env:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}

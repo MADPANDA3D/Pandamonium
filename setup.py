@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Odysseus — first-time setup script.
+"""Pandamonium — first-time setup script.
 
 Creates data directories, initializes the database, and sets up an
 initial admin user. Safe to re-run (skips what already exists).
@@ -13,6 +13,14 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
+
+from dotenv import load_dotenv
+
+from src.env_compat import apply_legacy_env_aliases
+
+load_dotenv(os.path.join(BASE_DIR, ".env"), encoding="utf-8-sig")
+apply_legacy_env_aliases()
+
 from src.constants import (
     DATA_DIR, AUTH_FILE, UPLOAD_DIR, PERSONAL_DIR, PERSONAL_UPLOADS_DIR,
     TTS_CACHE_DIR, GENERATED_IMAGES_DIR, DEEP_RESEARCH_DIR, CHROMA_DIR,
@@ -33,6 +41,15 @@ DIRS = [
     MEMORY_VECTORS_DIR,
     os.path.join(BASE_DIR, "logs"),
 ]
+
+
+def _pandamonium_env(suffix, default=""):
+    """Read the canonical setting while accepting its pre-rename alias."""
+    return (
+        os.getenv(f"PANDAMONIUM_{suffix}")
+        or os.getenv(f"ODYSSEUS_{suffix}")
+        or default
+    )
 
 
 def create_dirs():
@@ -98,18 +115,18 @@ def create_default_admin():
         import json
 
         # Priority: env vars > interactive prompt > random password
-        username = os.getenv("ODYSSEUS_ADMIN_USER", "").strip().lower()
-        password = os.getenv("ODYSSEUS_ADMIN_PASSWORD", "").strip()
+        username = _pandamonium_env("ADMIN_USER").strip().lower()
+        password = _pandamonium_env("ADMIN_PASSWORD").strip()
 
         if username and password:
             # Both provided via env — validate before using
             if username in RESERVED_USERNAMES:
-                print(f"  [error] ODYSSEUS_ADMIN_USER '{username}' is a reserved username")
+                print(f"  [error] PANDAMONIUM_ADMIN_USER '{username}' is a reserved username")
                 return "failed"
             if len(password) < PASSWORD_MIN_LENGTH:
-                print(f"  [error] ODYSSEUS_ADMIN_PASSWORD must be at least {PASSWORD_MIN_LENGTH} characters")
+                print(f"  [error] PANDAMONIUM_ADMIN_PASSWORD must be at least {PASSWORD_MIN_LENGTH} characters")
                 return "failed"
-        elif sys.stdin.isatty() and not os.getenv("ODYSSEUS_SKIP_ADMIN_PROMPT"):
+        elif sys.stdin.isatty() and not _pandamonium_env("SKIP_ADMIN_PROMPT"):
             # Interactive terminal — ask the user
             username, password = _prompt_admin_credentials()
         else:
@@ -130,13 +147,13 @@ def create_default_admin():
         with open(auth_path, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
 
-        if sys.stdin.isatty() and not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
+        if sys.stdin.isatty() and not _pandamonium_env("ADMIN_PASSWORD"):
             print(f"  [ok] Admin account created ({username})")
         else:
             print(f"  [ok] Initial admin user created ({username})")
-            if not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
+            if not _pandamonium_env("ADMIN_PASSWORD"):
                 print(f"        Temporary password: {password}")
-                print(f"        ** Change it after first login. Set ODYSSEUS_ADMIN_PASSWORD to choose your own. **")
+                print(f"        ** Change it after first login. Set PANDAMONIUM_ADMIN_PASSWORD to choose your own. **")
         return "created"
     except ImportError as e:
         if "incompatible architecture" in str(e).lower():
@@ -237,16 +254,12 @@ def check_arch():
 
 
 def main():
-    print("\n=== Odysseus Setup ===\n")
+    print("\n=== Pandamonium Setup ===\n")
 
-    # Load .env so pre-seeded ODYSSEUS_ADMIN_USER / ODYSSEUS_ADMIN_PASSWORD (and
-    # other deployment vars) are honored on native installs, not just when they
-    # are exported in the shell. Mirrors app.py: encoding="utf-8-sig" tolerates a
-    # UTF-8 BOM in a Notepad-saved .env. load_dotenv does not override already
-    # exported OS env vars, so the existing precedence is preserved. python-dotenv
-    # is a hard dependency (requirements.txt) and is verified by check_deps below.
-    from dotenv import load_dotenv
+    # BASE_DIR can be overridden by installers and tests after this module is
+    # imported, so reload the selected environment at execution time too.
     load_dotenv(os.path.join(BASE_DIR, ".env"), encoding="utf-8-sig")
+    apply_legacy_env_aliases()
 
     # Fail fast with a clear message if the CPU architecture is wrong (Apple
     # Silicon under an x86/Rosetta Python) before importing anything native.

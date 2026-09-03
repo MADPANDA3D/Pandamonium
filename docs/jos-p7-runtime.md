@@ -1,6 +1,6 @@
 # JOS-P7 Runtime Baseline
 
-Odysseus now has one request-level operational trace across agent turns, plain
+Pandamonium now has one request-level operational trace across agent turns, plain
 chat, direct voice worker dispatch, and the learning lifecycle. It reuses the
 existing metrics, health probes, durable sessions/tasks, backup tooling, and
 recovery mechanisms.
@@ -33,7 +33,7 @@ recovery mechanisms.
 
 ## Backup evidence
 
-`scripts/odysseus-backup` now embeds a `jos-p7.backup.v1` manifest containing
+`scripts/pandamonium-backup` now embeds a `jos-p7.backup.v1` manifest containing
 scope, creation time, source version, exclusions, external-vector treatment,
 and restoration procedure. Snapshot output includes its SHA-256 digest.
 Successful verification writes an atomic `.verified.json` proof beside the

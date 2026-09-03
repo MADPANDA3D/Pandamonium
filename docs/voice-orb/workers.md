@@ -23,14 +23,14 @@ Token files should be readable only by the service account. With Docker, mount e
 The bridge requires a token file and an explicit JSON map from logical workspace names to existing directories. It refuses wildcard bind addresses and starts Codex app-server with `sandbox=read-only` and `approvalPolicy=never`.
 
 ```bash
-export ODYSSEUS_CODEX_WORKER_ID=pc-codex
-export ODYSSEUS_CODEX_BRIDGE_HOST=127.0.0.1
-export ODYSSEUS_CODEX_BRIDGE_TOKEN_FILE=/run/secrets/odysseus_pc_codex_token
-export ODYSSEUS_CODEX_WORKSPACES_JSON='{"demo":"/srv/projects/demo"}'
-PYTHONPATH=. python services/codex-bridge/odysseus_codex_bridge.py
+export PANDAMONIUM_CODEX_WORKER_ID=pc-codex
+export PANDAMONIUM_CODEX_BRIDGE_HOST=127.0.0.1
+export PANDAMONIUM_CODEX_BRIDGE_TOKEN_FILE=/run/secrets/odysseus_pc_codex_token
+export PANDAMONIUM_CODEX_WORKSPACES_JSON='{"demo":"/srv/projects/demo"}'
+PYTHONPATH=. python services/codex-bridge/pandamonium_codex_bridge.py
 ```
 
-Mount the same token file into Odysseus and set the matching `ODYSSEUS_PC_CODEX_*` variables. Use `ODYSSEUS_CODEX_WORKER_ID=vps-codex` with the VPS-prefixed settings for the optional remote bridge. The bridge uses Codex defaults unless `ODYSSEUS_CODEX_MODEL` or `ODYSSEUS_CODEX_REASONING_EFFORT` is explicitly set.
+Mount the same token file into Pandamonium and set the matching `PANDAMONIUM_PC_CODEX_*` variables. Use `PANDAMONIUM_CODEX_WORKER_ID=vps-codex` with the VPS-prefixed settings for the optional remote bridge. The bridge uses Codex defaults unless `PANDAMONIUM_CODEX_MODEL` or `PANDAMONIUM_CODEX_REASONING_EFFORT` is explicitly set.
 
 ### Hermes compatibility gate
 
@@ -48,7 +48,7 @@ Hermes is ready only when `/v1/capabilities` reports run submission, SSE events,
 
 The broker records stable event IDs, accepts only the first terminal worker event, retries a broken event stream twice from the last event ID, and performs one bounded status reconciliation. End Voice stops microphone and playback but does not silently cancel an already delegated task. A user may cancel one worker while another continues.
 
-Only an interactive Odysseus user session may invoke voice orchestration. Bearer API tokens cannot start or steer Voice Orb workers, and task/session ownership is enforced inside broker helpers as well as routes.
+Only an interactive Pandamonium user session may invoke voice orchestration. Bearer API tokens cannot start or steer Voice Orb workers, and task/session ownership is enforced inside broker helpers as well as routes.
 
 ## Health output
 

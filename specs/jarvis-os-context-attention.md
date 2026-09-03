@@ -6,21 +6,21 @@
 
 **Status:** Generic source implementation; live acceptance pending
 
-**Context owner:** Odysseus
+**Context owner:** Pandamonium
 
 ## Purpose
 
 Jarvis needs the right information for the current turn, not every available
 piece of information.
 
-`JOS-P2` defines how Odysseus assembles, budgets, orders, labels, compacts, and
+`JOS-P2` defines how Pandamonium assembles, budgets, orders, labels, compacts, and
 audits the bounded context mounted into a reasoning engine. The engine may
 reason over that context, but it does not choose its own hidden sources or own
 canonical conversation state.
 
 ## Implemented baseline
 
-The existing Odysseus context paths now enforce the contract in two layers:
+The existing Pandamonium context paths now enforce the contract in two layers:
 
 - **P2A observability** tags mounted context by class, source, and trust; reports
   mounted and removed token estimates, compaction, omissions, native tool
@@ -39,14 +39,14 @@ work and were not added by this slice.
 
 ## Context classes
 
-Odysseus MUST keep these classes distinct:
+Pandamonium MUST keep these classes distinct:
 
 | Class | Examples | Trust and lifetime |
 | --- | --- | --- |
 | Identity | Jarvis identity and constitution version | Trusted, stable |
 | Operator intent | Current authenticated request and approved plan | Trusted as intent, turn/session scoped |
 | Policy | Mode, authority decision, allowed tools, limits | Trusted, turn scoped |
-| Conversation | Recent turns and Odysseus-owned summary | Canonical history plus derived summary |
+| Conversation | Recent turns and Pandamonium-owned summary | Canonical history plus derived summary |
 | Working state | Active document, email, UI, extension, worker task | Dynamic, scoped, validated |
 | Recalled memory | Approved personal-memory hits | Untrusted data with provenance |
 | Retrieved knowledge | Lab docs, Obsidian, archives, generated wiki, web | Untrusted data with provenance |
@@ -57,14 +57,14 @@ Frequent use does not promote dynamic data into identity, policy, or memory.
 
 ## Logical attention packet
 
-Before an engine call, Odysseus MUST be able to describe the mounted context as
+Before an engine call, Pandamonium MUST be able to describe the mounted context as
 a logical `AttentionPacket`:
 
 | Field | Meaning |
 | --- | --- |
 | `request_id` | Correlates context, engine events, actions, and audit |
 | `agent_id` | Canonical identity from `JOS-P1` |
-| `session_id` | Odysseus-owned conversation |
+| `session_id` | Pandamonium-owned conversation |
 | `goal` | Current operator request and explicit scope |
 | `policy` | Mode, limits, authority, and allowed capabilities |
 | `history` | Selected recent turns and any derived compaction summary |
@@ -79,7 +79,7 @@ array or OpenAI-compatible transport.
 
 ## Assembly rules
 
-Odysseus MUST:
+Pandamonium MUST:
 
 1. resolve identity, operator, session, mode, and authority before retrieval;
 2. derive the current goal from the authenticated request and conversation;
@@ -94,7 +94,7 @@ Odysseus MUST:
 
 The engine MUST NOT independently browse Jarvis memory, Qdrant, Obsidian,
 filesystems, credentials, or extension state outside capabilities mounted by
-Odysseus.
+Pandamonium.
 
 ## Attention and budgeting
 
@@ -102,7 +102,7 @@ The budget is based on the context window actually reported or otherwise
 proven for the selected engine. An unknown window MUST use a conservative
 fallback rather than an optimistic model-family assumption.
 
-Odysseus MUST reserve space for:
+Pandamonium MUST reserve space for:
 
 - the stable trusted prefix;
 - the current operator request;
@@ -135,12 +135,12 @@ budget; they intentionally do not sum to 100:
 
 Identity, policy, presentation, and the current operator request are protected
 classes rather than ordinary retrieval allocations. If the protected set alone
-cannot fit, Odysseus reduces dynamic state and result content first, then trusted
+cannot fit, Pandamonium reduces dynamic state and result content first, then trusted
 prompt tails, and truncates current intent only as the final fallback.
 
 ## Compaction
 
-When history approaches the usable window, Odysseus MAY summarize or trim older
+When history approaches the usable window, Pandamonium MAY summarize or trim older
 turns. It MUST:
 
 - preserve the current request, recent turns, active tool-call/result pairs,
@@ -194,7 +194,7 @@ continues unchanged.
 
 ## Compatibility gate
 
-`JOS-P2` is satisfied only when these pass through real Odysseus routes:
+`JOS-P2` is satisfied only when these pass through real Pandamonium routes:
 
 - the same request produces the same logical packet across compatible engines;
 - an unknown context window uses the conservative budget;
@@ -212,7 +212,7 @@ continues unchanged.
 
 ## Definition of success
 
-`JOS-P2` succeeds when Odysseus can show what Jarvis was allowed to attend to,
+`JOS-P2` succeeds when Pandamonium can show what Jarvis was allowed to attend to,
 why it was selected, how much budget it used, what was omitted, and how the same
 turn can be reconstructed independently of the engine.
 

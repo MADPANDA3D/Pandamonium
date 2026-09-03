@@ -16,25 +16,25 @@ Mark 6 connects a browser voice surface to sensitive local sessions and three co
 
 ### Primary components
 
-- Odysseus browser: microphone capture, live chat rendering, audio playback, active-agent control.
-- Odysseus API: authenticated voice sessions, task broker, durable events, document persistence, policy.
+- Pandamonium browser: microphone capture, live chat rendering, audio playback, active-agent control.
+- Pandamonium API: authenticated voice sessions, task broker, durable events, document persistence, policy.
 - Jarvis brain and mouth: Qwen generation followed by VoxCPM PCM synthesis.
 - PC, Hermes, and VPS workers: independently authenticated adapters with durable thread/session bindings.
 - VPS observer: root-owned fixed read-only commands over a group-restricted Unix socket.
 
 ### Data flows and trust boundaries
 
-- Browser -> Odysseus: transcript/audio state over authenticated HTTPS; schema validation and owner checks apply.
-- Odysseus -> brain/TTS: prompts and assistant text over private service links; one TTS inference lock limits GPU contention.
-- Odysseus -> workers: prompts, workspace aliases, permissions, and thread IDs over bearer-authenticated private HTTP/SSE.
-- Workers -> Odysseus: untrusted normalized events, final text, questions, approvals, and bounded document artifacts.
+- Browser -> Pandamonium: transcript/audio state over authenticated HTTPS; schema validation and owner checks apply.
+- Pandamonium -> brain/TTS: prompts and assistant text over private service links; one TTS inference lock limits GPU contention.
+- Pandamonium -> workers: prompts, workspace aliases, permissions, and thread IDs over bearer-authenticated private HTTP/SSE.
+- Workers -> Pandamonium: untrusted normalized events, final text, questions, approvals, and bounded document artifacts.
 - VPS Codex -> observer: fixed action name and allowlisted target over a filesystem-permissioned Unix socket.
 
 #### Diagram
 
 ```mermaid
 flowchart LR
-  B["Browser voice and chat"] --> O["Odysseus control plane"]
+  B["Browser voice and chat"] --> O["Pandamonium control plane"]
   O --> Q["Jarvis brain"]
   O --> T["VoxCPM mouth"]
   O --> P["PC Codex"]
@@ -52,7 +52,7 @@ flowchart LR
 | --- | --- | --- |
 | Worker bearer credentials | Permit task/event/control access | C, I |
 | Client and workspace files | Contain private business data and source | C, I |
-| Odysseus sessions/documents | Durable operator context and artifacts | C, I, A |
+| Pandamonium sessions/documents | Durable operator context and artifacts | C, I, A |
 | Codex/Hermes thread bindings | Preserve agent continuity and authority | C, I |
 | VPS observer socket | Crosses into root-readable system facts | C, I |
 | GPU voice/brain services | Required for timely call interaction | A |

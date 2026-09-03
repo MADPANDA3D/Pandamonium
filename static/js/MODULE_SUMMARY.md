@@ -1,6 +1,6 @@
 # Frontend Module Organization Summary
 
-> **Scope:** This document describes the architecture of the Odysseus no-build
+> **Scope:** This document describes the architecture of the Pandamonium no-build
 > frontend. The app is a collection of native ES6 modules loaded from
 > `static/`. The authoritative source is the current `static/js/` tree and the
 > top-level orchestrator `static/app.js`.

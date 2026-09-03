@@ -23,7 +23,7 @@ const lifecycle = await import('../static/js/voiceLifecycle.js');
 const received = [];
 const unsubscribe = lifecycle.subscribeVoiceLifecycle(payload => received.push(payload));
 let browserPayload = null;
-window.addEventListener('odysseus:voice-lifecycle', event => {
+window.addEventListener('pandamonium:voice-lifecycle', event => {
   browserPayload = event.detail;
 }, { once: true });
 

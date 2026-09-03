@@ -203,7 +203,7 @@ async def test_worker_adapters_allow_private_preapproved_workspace_write(
         assert captured["payload"]["permission_mode"] == "workspace_write"
         assert captured["payload"]["approved"] is True
     else:
-        assert "Odysseus approved this task at the broker level" in captured["payload"]["instructions"]
+        assert "Pandamonium approved this task at the broker level" in captured["payload"]["instructions"]
         assert "native tool approval gate" in captured["payload"]["instructions"]
         task["remote_task_id"] = "remote-1"
         await adapter.approve(task, {"choice": "once"})

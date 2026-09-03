@@ -9,6 +9,11 @@ from routes import voice_routes
 from src.agent_worker_adapters import WORKER_IDS
 
 
+@pytest.fixture(autouse=True)
+def _skip_tts_gate(monkeypatch):
+    monkeypatch.setattr(voice_routes, "_require_server_tts", lambda _service: None)
+
+
 class _StatsService:
     def __init__(self, value):
         self.value = value
@@ -68,7 +73,7 @@ def _seed_voice_state(path):
                 "id": "voice-1",
                 "owner": "alice",
                 "chat_session_id": "chat-1",
-                "assistant": "Odysseus",
+                "assistant": "Pandamonium",
                 "model": "configured-model",
                 "status": "ready",
                 "turns": [],
@@ -82,7 +87,7 @@ async def _final_event(response):
     events = [
         json.loads(line[5:].strip())
         for line in body.splitlines()
-        if line.startswith("data:")
+        if line.startswith("data:") and line[5:].strip() != "[DONE]"
     ]
     return next(event for event in events if event.get("type") == "final")
 
@@ -165,15 +170,15 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
     assert [item["id"] for item in setup["workers"]["items"]] == list(WORKER_IDS)
     assert setup["workers"]["items"][0]["capabilities"] == ["read_only", "task_status"]
 
-    response = await _endpoint(router, "respond_to_voice_turn")(
+    response = await _endpoint(router, "stream_voice_response")(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="Check voice setup."),
+        _request(),
         "alice",
     )
     final = await _final_event(response)
     assert final["setup"] == setup
-    assert final["text"] == setup["text"]
+    assert final["assistant_text"] == setup["text"]
     assert chat.history[-1].content == setup["text"]
 
     public_blob = json.dumps(status)

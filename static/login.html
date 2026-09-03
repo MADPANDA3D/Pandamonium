@@ -283,7 +283,7 @@
     <section id="setupBrandGroup" class="setup-brand-fields" aria-label="Harness identity" hidden>
       <h2>Make this harness yours</h2>
       <label for="setup-brand-name">Harness name</label>
-      <input id="setup-brand-name" type="text" maxlength="48" autocomplete="organization" value="WhoAmI">
+      <input id="setup-brand-name" type="text" maxlength="48" autocomplete="organization" value="Pandamonium">
       <label for="setup-brand-logo">Logo</label>
       <div class="setup-brand-logo-row">
         <img id="setup-brand-preview" class="setup-brand-preview" alt="Harness logo preview" hidden>
@@ -335,7 +335,7 @@
 <script nonce="{{CSP_NONCE}}">
 (async () => {
   let brandModule = null;
-  let activeBrand = { name: 'WhoAmI', logo: '', accent: '#e06c75' };
+  let activeBrand = { name: 'Pandamonium', logo: '', accent: '#e06c75' };
   try {
     brandModule = await import('/static/js/brand.js');
     activeBrand = await brandModule.loadBrand();

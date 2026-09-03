@@ -2,9 +2,9 @@
 
 **Linear:** `MAD-754`, `MAD-762`
 
-Odysseus now has one reference-neutral adapter for externally managed web
+Pandamonium now has one reference-neutral adapter for externally managed web
 runtimes that publish a live JOS capability catalog. ORACLE uses this contract;
-its native tool inventory is not copied into Odysseus.
+its native tool inventory is not copied into Pandamonium.
 
 ## Runtime discovery
 
@@ -46,7 +46,7 @@ Browser results return through
 match the authenticated owner, extension ID, call ID, and tool name. Unknown
 tools, non-object arguments, oversized/mismatched results, timeouts, disabled
 extensions, and missing catalogs fail closed. Multi-action turns use the same
-bounded agent loop as native Odysseus tools.
+bounded agent loop as native Pandamonium tools.
 
 For enabled `web` manifests, the same configured runtime origin resolves the
 installed manifest entry point. The browser mounts at most one engaged surface,
@@ -83,7 +83,7 @@ The differently named `atlas` browser fixture additionally proves manifest
 entry-point mounting, exact frame/origin/extension/tool/call correlation,
 single and multi-action results, malformed and oversized result handling,
 unavailable frames, timeout, disable, uninstall, and restart recovery. The
-MAD-762 source gate passed the browser harness and the complete Odysseus suite:
+MAD-762 source gate passed the browser harness and the complete Pandamonium suite:
 5,005 passed, 4 intentional skips, and zero failures.
 
 This is source-level host proof only. ORACLE commit `b619e2a` exists locally;

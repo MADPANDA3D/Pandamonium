@@ -47,6 +47,10 @@ from dotenv import load_dotenv
 # utf-8-sig reads plain UTF-8 (no BOM) identically, so this is safe everywhere.
 load_dotenv(encoding="utf-8-sig")
 
+from src.env_compat import apply_legacy_env_aliases
+
+apply_legacy_env_aliases()
+
 import asyncio
 import logging
 import secrets
@@ -102,7 +106,7 @@ try:
     _log_file = os.path.join(_log_dir, "app.log")
 
     # RotatingFileHandler is not multi-process safe (e.g. if uvicorn is run with --workers N).
-    # Odysseus is single-process by convention, so this is acceptable, but be aware that
+    # Pandamonium is single-process by convention, so this is acceptable, but be aware that
     # concurrent log rotation issues can arise if multiple workers are configured.
     _file_h = logging.handlers.RotatingFileHandler(
         _log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
@@ -138,6 +142,8 @@ app.add_middleware(
         "Content-Type",
         "X-API-Key",
         "X-Auth-Token",
+        "X-Pandamonium-Internal-Token",
+        "X-Pandamonium-Owner",
         "X-Odysseus-Internal-Token",
         "X-Odysseus-Owner",
         "X-Requested-With",
@@ -365,7 +371,7 @@ if AUTH_ENABLED:
         forwarding headers. A bare ``client.host in ('127.0.0.1','::1')`` check is
         unsafe behind a Cloudflare tunnel / reverse proxy: those connect from
         loopback, so a remote visitor would otherwise inherit local trust and
-        slip past LOCALHOST_BYPASS or spoof the internal-tool path. Odysseus's own
+        slip past LOCALHOST_BYPASS or spoof the internal-tool path. Pandamonium's own
         in-process agent loopback calls carry none of these headers, so they still
         qualify."""
         host = request.client.host if request.client else None
@@ -395,14 +401,25 @@ if AUTH_ENABLED:
             # (no admin cookie available in that context). Restricted to
             # loopback clients + matching token to keep it locked down.
             try:
-                from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN as _ITT, INTERNAL_TOOL_USER
-                _hdr = request.headers.get(INTERNAL_TOOL_HEADER)
+                from core.middleware import (
+                    INTERNAL_TOOL_HEADER,
+                    INTERNAL_TOOL_TOKEN as _ITT,
+                    INTERNAL_TOOL_USER,
+                    LEGACY_INTERNAL_TOOL_HEADER,
+                )
+                _hdr = request.headers.get(INTERNAL_TOOL_HEADER) or request.headers.get(
+                    LEGACY_INTERNAL_TOOL_HEADER
+                )
                 if _hdr and secrets.compare_digest(_hdr, _ITT) and _is_trusted_loopback(request):
                     # Impersonation: when the agent's loopback call sets
-                    # X-Odysseus-Owner, attribute the request to that user only
+                    # X-Pandamonium-Owner, attribute the request to that user only
                     # if they exist. Authorization checks remain separate; this
                     # is just owner attribution for notes/calendar/etc.
-                    _impersonate = (request.headers.get("X-Odysseus-Owner") or "").strip()
+                    _impersonate = (
+                        request.headers.get("X-Pandamonium-Owner")
+                        or request.headers.get("X-Odysseus-Owner")
+                        or ""
+                    ).strip()
                     _auth_mgr = getattr(request.app.state, "auth_manager", None) or auth_manager
                     if _impersonate and _impersonate in getattr(_auth_mgr, "users", {}):
                         request.state.current_user = _impersonate
@@ -768,7 +785,7 @@ stt_service = get_stt_service()
 from routes.stt_routes import setup_stt_routes
 app.include_router(setup_stt_routes(stt_service))
 
-# Odysseus Voice Orb
+# Pandamonium Voice Orb
 from routes.voice_routes import setup_voice_routes
 app.include_router(setup_voice_routes(session_manager, stt_service, tts_service))
 
@@ -777,18 +794,11 @@ from routes.agent_task_routes import setup_agent_task_routes
 app.include_router(setup_agent_task_routes(session_manager))
 logger.info("STT service initialized (provider managed via settings)")
 
-# Jarvis live voice sessions and safe action bridge
-from routes.agent_task_routes import setup_agent_task_routes
-app.include_router(setup_agent_task_routes(session_manager))
-
 from routes.authority_routes import setup_authority_routes
 app.include_router(setup_authority_routes())
 
 from routes.extension_routes import setup_extension_routes
 app.include_router(setup_extension_routes(skills_manager=skills_manager))
-
-from routes.voice_routes import setup_voice_routes
-app.include_router(setup_voice_routes(session_manager, tts_service))
 
 # Documents (artifacts/canvas)
 from routes.document_routes import setup_document_routes

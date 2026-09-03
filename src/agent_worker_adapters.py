@@ -17,6 +17,10 @@ WORKER_IDS = ("pc-codex", "hermes", "vps-codex")
 _WORKSPACE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
+class WorkerUnavailable(RuntimeError):
+    """Stable, non-sensitive failure raised at the public broker boundary."""
+
+
 def _enabled(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -87,6 +91,13 @@ def require_worker_task_permission(permission_mode: str, approved: bool) -> None
     raise PermissionError("public_tasks_read_only")
 
 
+def require_read_only(permission_mode: str, approved: bool) -> None:
+    """Reject mutation and caller pre-approval on the public Voice Orb API."""
+    if permission_mode == "read_only" and approved is False:
+        return
+    raise PermissionError("public_tasks_read_only")
+
+
 def _validated_approval_choice(task: dict[str, Any], payload: dict[str, Any]) -> str:
     permission_mode = str(task.get("permission_mode") or "read_only")
     require_worker_task_permission(permission_mode, task.get("approved") is True)
@@ -118,7 +129,7 @@ def _hermes_instructions(task: dict[str, Any]) -> str:
     operator = str(task.get("owner") or "the authenticated operator")
     base = (
         f"You are the selected Hermes worker operating for {operator} through {configured_agent_name()} and "
-        "Odysseus. Give factual milestone updates and a clear final result. "
+        "Pandamonium. Give factual milestone updates and a clear final result. "
         "Never claim an action completed without tool evidence. "
         "Only after a subtask is complete and verified by tool evidence, you may emit one reasoning update as "
         f"{MILESTONE_MARKER} <one completed-subtask update>. Do not use that marker for plans, activity, "
@@ -130,7 +141,7 @@ def _hermes_instructions(task: dict[str, Any]) -> str:
         and task.get("approved") is True
     ):
         return base + (
-            "Odysseus approved this task at the broker level. You may attempt only the specifically requested "
+            "Pandamonium approved this task at the broker level. You may attempt only the specifically requested "
             "mutation using normal Hermes tools. Do not bypass or suppress Hermes' native tool approval gate; "
             "no other side effects are authorized."
         )
@@ -154,12 +165,26 @@ class WorkerAdapter(Protocol):
 
 
 class CodexBridgeAdapter:
-    def __init__(self, worker: str, url: str, token_file: Path, *, enabled: bool, machine: str):
+    adapter_name = "codex-bridge"
+
+    def __init__(
+        self,
+        worker: str,
+        url: str,
+        token_file: Path,
+        *,
+        enabled: bool,
+        machine: str,
+        label: str | None = None,
+        workspaces: list[str] | None = None,
+    ):
         self.worker = worker
         self.url = url.rstrip("/")
         self.token_file = token_file
         self.enabled = enabled
         self.machine = machine
+        self.label = label or ("PC Codex" if worker == "pc-codex" else "VPS Codex")
+        self.configured_workspaces = list(workspaces or [])
 
     def _headers(self) -> dict[str, str]:
         token = _token(self.token_file)
@@ -268,12 +293,23 @@ class CodexBridgeAdapter:
 
 class HermesRunsAdapter:
     worker = "hermes"
+    adapter_name = "hermes-runs"
 
-    def __init__(self, url: str, token_file: Path, *, enabled: bool):
+    def __init__(
+        self,
+        url: str,
+        token_file: Path,
+        *,
+        enabled: bool,
+        label: str = "Hermes",
+        workspaces: list[str] | None = None,
+    ):
         self.url = url.rstrip("/")
         self.token_file = token_file
         self.enabled = enabled
         self.machine = "Hermes laptop"
+        self.label = label
+        self.configured_workspaces = list(workspaces or [])
 
     def _headers(self, task: dict[str, Any] | None = None) -> dict[str, str]:
         token = _token(self.token_file)
@@ -452,6 +488,13 @@ class HermesRunsAdapter:
                 if isinstance(capabilities_payload, dict)
                 else {}
             )
+            permission_profile = (
+                capabilities_payload.get("permission_profile")
+                if isinstance(capabilities_payload, dict)
+                else None
+            )
+            if permission_profile != "read_only_enforced" and features.get("read_only_enforced") is not True:
+                return {"state": "incompatible", "reason": "read_only_not_enforced"}
             public_payload = public.json()
             public_payload = public_payload if isinstance(public_payload, dict) else {}
             result = {
@@ -497,35 +540,34 @@ def adapters() -> dict[str, WorkerAdapter]:
     }
 
 
-def worker_catalog() -> dict[str, dict[str, Any]]:
-    registry = adapters()
+def worker_catalog(
+    registry: dict[str, WorkerAdapter] | None = None,
+) -> dict[str, dict[str, Any]]:
+    registry = registry or adapters()
     workspaces = configured_worker_workspaces()
-    return {
-        "pc-codex": {
-            "enabled": registry["pc-codex"].enabled,
-            "configured": registry["pc-codex"].enabled,
-            "ready": False,
-            "adapter": "codex-bridge",
-            "machine": "Local workstation",
-            "capabilities": ["read_only_inspection", "code", "artifacts"],
-            "workspaces": workspaces["pc-codex"],
-        },
-        "hermes": {
-            "enabled": registry["hermes"].enabled,
-            "configured": registry["hermes"].enabled,
-            "ready": False,
-            "adapter": "hermes-runs",
-            "machine": "Remote agent",
-            "capabilities": ["remote_agent", "approvals", "session_memory"],
-            "workspaces": workspaces["hermes"],
-        },
-        "vps-codex": {
-            "enabled": registry["vps-codex"].enabled,
-            "configured": registry["vps-codex"].enabled,
-            "ready": False,
-            "adapter": "codex-bridge",
-            "machine": "Remote server",
-            "capabilities": ["read_only_inspection"],
-            "workspaces": workspaces["vps-codex"],
-        },
+    metadata = {
+        "pc-codex": ("codex-bridge", "Local workstation", ["read_only_inspection", "code", "artifacts"]),
+        "hermes": ("hermes-runs", "Remote agent", ["remote_agent", "approvals", "session_memory"]),
+        "vps-codex": ("codex-bridge", "Remote server", ["read_only_inspection"]),
     }
+    result: dict[str, dict[str, Any]] = {}
+    for worker, adapter in registry.items():
+        adapter_name, machine, capabilities = metadata.get(
+            worker,
+            (getattr(adapter, "adapter_name", "worker"), "Configured worker", ["read_only"]),
+        )
+        result[worker] = {
+            "id": worker,
+            "label": getattr(adapter, "label", worker),
+            "enabled": bool(adapter.enabled),
+            "configured": bool(adapter.enabled),
+            "ready": False,
+            "adapter": getattr(adapter, "adapter_name", adapter_name),
+            "machine": machine,
+            "capabilities": capabilities,
+            "workspaces": list(
+                getattr(adapter, "configured_workspaces", None)
+                or workspaces.get(worker, [])
+            ),
+        }
+    return result

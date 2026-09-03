@@ -372,7 +372,7 @@ export const ERROR_PATTERNS = [
       { label: 'Open Dependencies', action: () => _openCookbookDependencies('vllm') },
       {
         label: 'Copy upgrade hint',
-        action: () => _copyText('Upgrade the vLLM environment that provides the selected vllm CLI, or use a compatible checkpoint. Do not assume Odysseus owns PATH/system/source/Docker installs.'),
+        action: () => _copyText('Upgrade the vLLM environment that provides the selected vllm CLI, or use a compatible checkpoint. Do not assume Pandamonium owns PATH/system/source/Docker installs.'),
       },
     ],
   },
@@ -533,7 +533,7 @@ export const ERROR_PATTERNS = [
   {
     pattern: /sgl_kernel[\s\S]*(Python\.h|libnuma\.so\.1|common_ops|libnvrtc\.so)|(?:Python\.h|libnuma\.so\.1|common_ops|libnvrtc\.so)[\s\S]*sgl_kernel|Could not load any common_ops library|Please ensure sgl_kernel is properly installed/i,
     message: 'SGLang native kernel/runtime is missing or mismatched on this server.',
-    suggestion: 'Suggested action: relaunch with Odysseus’ venv CUDA library path fix. If the venv does not contain the matching NVIDIA runtime libs, run Repair sglang-kernel.',
+    suggestion: 'Suggested action: relaunch with Pandamonium’ venv CUDA library path fix. If the venv does not contain the matching NVIDIA runtime libs, run Repair sglang-kernel.',
     fixes: [
       { label: 'Edit / relaunch serve', action: (panel) => _openServeEditFromDiagnosis(panel) },
       { label: 'Repair sglang-kernel', action: (panel) => _repairSglangKernel(panel) },
@@ -563,7 +563,7 @@ export const ERROR_PATTERNS = [
   {
     pattern: /Unable to quantize model of type <class ['"]mlx_lm\.models\.switch_layers\.QuantizedSwitchLinear['"]>|QuantizedSwitchLinear/i,
     message: 'MLX-LM tried to quantize an already-quantized DeepSeek switch layer.',
-    suggestion: 'Suggested action: relaunch from the cached local snapshot path. Odysseus now rewrites MLX repo-id launches to the newest local Hugging Face snapshot when it exists on the selected Mac.',
+    suggestion: 'Suggested action: relaunch from the cached local snapshot path. Pandamonium now rewrites MLX repo-id launches to the newest local Hugging Face snapshot when it exists on the selected Mac.',
     fixes: [
       { label: 'Edit / relaunch serve', action: (panel) => _openServeEditFromDiagnosis(panel) },
       { label: 'Open Dependencies', action: () => _openCookbookDependencies('mlx_lm') },
@@ -870,7 +870,7 @@ export function _diagnose(text) {
 }
 
 function _diagnosisCopyBundle(task, diagnosis, sourceText, suggestionText) {
-  const lines = ['## Odysseus Cookbook troubleshooting'];
+  const lines = ['## Pandamonium Cookbook troubleshooting'];
   if (task) {
     lines.push(
       '',

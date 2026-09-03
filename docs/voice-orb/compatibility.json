@@ -1,5 +1,5 @@
 {
-  "product": "Odysseus Voice Orb",
+  "product": "Pandamonium Voice Orb",
   "release": "v0.3.0-beta.1",
   "source_tag": "voice-orb-v0.3.0-beta.1",
   "distribution": "maintained-fork",
@@ -13,7 +13,7 @@
   ],
   "plugin_abi": null,
   "container": {
-    "repository": "ghcr.io/madpanda3d/odysseus",
+    "repository": "ghcr.io/madpanda3d/pandamonium",
     "tag": "voice-orb-v0.3.0-beta.1",
     "digest": null
   }

@@ -335,7 +335,7 @@ def analyze_image_bytes_with_vl_result(
     image_bytes: bytes,
     image_format: str,
     owner: str | None = None,
-    preferred_model: str | None = None,
+    preferred_candidate: tuple[str, str, dict] | None = None,
 ) -> dict:
     """Analyze caller-validated image bytes without persisting them."""
     try:
@@ -371,18 +371,11 @@ def analyze_image_bytes_with_vl_result(
         # Vision-specific fallback chain (Settings → Vision → Fallbacks). A
         # downed vision endpoint can fall through to the next configured model
         # — same shape as task/chat but its own list (`vision_model_fallbacks`).
-        _vl_candidates = []
-        requested_models = []
-        for spec in (preferred_model, vl_model):
-            if spec and spec not in requested_models:
-                requested_models.append(spec)
-        if not requested_models:
-            requested_models.append("")
-        for spec in requested_models:
-            try:
-                _vl_candidates.append(_resolve_vl_model(spec, owner=owner))
-            except ValueError:
-                continue
+        _vl_candidates = [preferred_candidate] if preferred_candidate else []
+        try:
+            _vl_candidates.append(_resolve_vl_model(vl_model, owner=owner))
+        except ValueError:
+            pass
         try:
             from src.endpoint_resolver import resolve_vision_fallback_candidates
             _vl_candidates.extend(resolve_vision_fallback_candidates(owner=owner))
@@ -391,7 +384,7 @@ def analyze_image_bytes_with_vl_result(
         if not _vl_candidates:
             return {
                 "text": "[No vision model configured — set one in Settings → Vision]",
-                "model": preferred_model or vl_model or "",
+                "model": (preferred_candidate[1] if preferred_candidate else vl_model) or "",
             }
 
         unique_candidates = []

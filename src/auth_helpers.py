@@ -13,7 +13,7 @@ def get_current_user(request: Request) -> Optional[str]:
 def effective_user(request: Request) -> Optional[str]:
     """The real human behind the request, for ownership/attribution.
 
-    Cookie sessions resolve to the logged-in username. Bearer ``ody_`` callers
+    Cookie sessions resolve to the logged-in username. Bearer API callers
     come through as the sandboxed pseudo-user "api" so they can't wander into
     cookie/user routes by default, but their token was minted by, and belongs
     to, a real owner stamped on ``request.state.api_token_owner``. Routes that

@@ -16,7 +16,7 @@ from core.middleware import require_admin
 from src.constants import BRAND_FILE
 
 
-DEFAULT_BRAND = {"name": "WhoAmI", "logo": "", "accent": "#e06c75"}
+DEFAULT_BRAND = {"name": "Pandamonium", "logo": "", "accent": "#e06c75"}
 _MAX_NAME_CHARS = 48
 _MAX_LOGO_BYTES = 512 * 1024
 _MAX_LOGO_B64_CHARS = ((_MAX_LOGO_BYTES + 2) // 3) * 4

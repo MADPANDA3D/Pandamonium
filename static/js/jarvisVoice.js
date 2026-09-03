@@ -695,7 +695,7 @@ async function prepareExtensionTextTurn(extensionId = 'oracle', chatSessionId = 
     configureOracleProtocol(session.oracle_protocol_url);
   }
   if (!engageExtensionSurface(extensionId)) {
-    throw new Error(`${extensionId.toUpperCase()} is not configured on this Odysseus host.`);
+    throw new Error(`${extensionId.toUpperCase()} is not configured on this Pandamonium host.`);
   }
 
   const deadline = Date.now() + 8000;
@@ -1065,7 +1065,7 @@ function engageExtensionSurface(extensionId) {
   const panel = $('extension-surface-panel');
   const frame = $('extension-surface-frame');
   if (!panel || !frame || !config) {
-    showToast(`${extensionId || 'Extension'} is not configured on this Odysseus host.`);
+    showToast(`${extensionId || 'Extension'} is not configured on this Pandamonium host.`);
     return false;
   }
   if (extensionSurfaceId && extensionSurfaceId !== extensionId) disengageExtensionSurface(extensionSurfaceId, true);

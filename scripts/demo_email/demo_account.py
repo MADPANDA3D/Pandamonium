@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create/remove the switchable, non-default 'Demo' EmailAccount in Odysseus.
+"""Create/remove the switchable, non-default 'Demo' EmailAccount in Pandamonium.
 
 Mirrors the existing local-Dovecot account (localhost:31143, STARTTLS) but points
 at the throwaway demo@odysseus.local mailbox. Password is stored Fernet-encrypted

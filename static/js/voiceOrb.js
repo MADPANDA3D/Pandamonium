@@ -94,7 +94,7 @@ function setState(next, detail = '') {
   const talk = $('voice-orb-talk');
   if (status) status.textContent = STATE_COPY[next] || next;
   if (detailNode) detailNode.textContent = detail || {
-    idle: `${voiceConfig?.assistant || 'Odysseus'} is ready.`,
+    idle: `${voiceConfig?.assistant || 'Pandamonium'} is ready.`,
     listening: 'Speak naturally. Tap the orb when you are done.',
     transcribing: 'Turning speech into text.',
     thinking: 'Preparing a response.',
@@ -233,7 +233,7 @@ async function ensureVoiceSession() {
   voiceConfig = await fetchJson('/api/voice/status');
   renderVoiceSetup(voiceConfig.setup);
   const name = $('voice-orb-name');
-  if (name) name.textContent = voiceConfig.assistant || 'Odysseus';
+  if (name) name.textContent = voiceConfig.assistant || 'Pandamonium';
   const linked = sessionModule.getCurrentSessionId?.() || null;
   const created = await fetchJson('/api/voice/sessions', {
     method: 'POST',

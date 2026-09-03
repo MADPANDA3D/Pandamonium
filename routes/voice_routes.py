@@ -26,18 +26,24 @@ from core.middleware import require_admin
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_identity import agent_system_prompt, configured_agent_id, configured_agent_name
+from src.agent_worker_adapters import WORKER_IDS
+from src.agent_worker_broker import worker_statuses
 from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
+from src.action_intents import classify_tool_intent
 from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
 from src.agent_tools import TOOL_TAGS
 from src.agent_worker_adapters import worker_catalog
 from src.auth_helpers import require_user
+from src import chat_helpers as _chat_helpers
+from src import document_processor as _document_processor
 from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
 from src.extension_host import extension_runtime_host
 from src.extension_mcp_adapter import execute_mcp_extension_tool, mcp_extension_tool_specs
 from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
 from src.settings import load_settings
+from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
 from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, speech_text, wav_to_pcm16
 
@@ -60,6 +66,15 @@ VOICE_FRAME_MAX_BYTES = 1024 * 1024
 VOICE_FRAME_MAX_WIDTH = 1024
 VOICE_FRAME_MAX_HEIGHT = 576
 VOICE_CONTROL_MAX_CHARS = 280
+VOICE_ENDPOINT_ID = os.getenv(
+    "PANDAMONIUM_VOICE_ENDPOINT_ID",
+    os.getenv("ODYSSEUS_VOICE_ENDPOINT_ID", ""),
+).strip()
+VOICE_MODEL = os.getenv(
+    "PANDAMONIUM_VOICE_MODEL",
+    os.getenv("ODYSSEUS_VOICE_MODEL", ""),
+).strip()
+VOICE_SETUP_STATUS_TIMEOUT_SECONDS = 6.0
 PERSISTENT_APPROVAL_PATTERN = (
     r"\b(?:always|all|session|permanent(?:ly)?|indefinitely|forever|blanket|ongoing|default|everything|"
     r"every(?:\s+(?:time|request))?|each\s+request|all(?:\s+future)?\s+requests?|all\s+time|"
@@ -68,6 +83,16 @@ PERSISTENT_APPROVAL_PATTERN = (
 logger = logging.getLogger(__name__)
 _SESSION_MANAGER = None
 _SPEECH_TURNS: dict[tuple[str, str], "_SpeechTurn"] = {}
+
+
+def model_supports_vision(model: str, endpoint_url: str) -> bool:
+    """Patchable Voice Orb seam backed by the canonical chat helper."""
+    return _chat_helpers.model_supports_vision(model, endpoint_url)
+
+
+def analyze_image_bytes_with_vl_result(*args, **kwargs) -> dict:
+    """Patchable Voice Orb seam backed by the canonical document processor."""
+    return _document_processor.analyze_image_bytes_with_vl_result(*args, **kwargs)
 
 DESKTOP_ACTIONS = {"open_grafana_big_screen", "open_odysseus"}
 DEFERRED_ACTIONS = {"start_local_codex_task", "start_hermes_task", "read_task_status"}
@@ -97,7 +122,7 @@ Coordinate work without simulating actions, client state, inspections, approvals
 Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
 Friday owns local project, code, and document inspection through PC Codex. VPS Codex is only for work that explicitly names the VPS. Gordon is the Hermes agent and is explicit-only; never infer or auto-dispatch him.
 Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
-FRIDAY_VOICE_SYSTEM_PROMPT = """You are the selected Codex worker speaking through Odysseus voice.
+FRIDAY_VOICE_SYSTEM_PROMPT = """You are the selected Codex worker speaking through Pandamonium voice.
 Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify.
 Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff."""
 
@@ -105,6 +130,11 @@ WORKER_LABELS = {
     "pc-codex": "Friday",
     "hermes": "Gordon",
     "vps-codex": "VPS Codex",
+}
+_LEGACY_WORKER_NAMES = {
+    "pc codex": ("pc-codex", "PC Codex"),
+    "hermes": ("hermes", "Hermes"),
+    "vps codex": ("vps-codex", "VPS Codex"),
 }
 VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon", "friday": "Friday"}
 DIRECT_MODEL_TARGETS = {"jarvis", "friday"}
@@ -120,6 +150,28 @@ VOICE_WORKSPACES = {
     for details in worker_catalog().values()
     for workspace in details.get("workspaces") or []
 }
+
+
+def _worker_command(text: str) -> tuple[str, str, str, str | None, str | None] | None:
+    """Parse the original fixed Voice Orb worker command contract.
+
+    The richer Jarvis dispatcher owns execution; this parser remains available
+    for clients and tests that adopted the beta command grammar.
+    """
+    normalized = re.sub(r"[.!?]+$", "", text.strip(), flags=re.I).strip()
+    cancel = re.fullmatch(r"cancel\s+(pc codex|hermes|vps codex)", normalized, flags=re.I)
+    if cancel:
+        worker, label = _LEGACY_WORKER_NAMES[cancel.group(1).lower()]
+        return "cancel", worker, label, None, None
+    start = re.fullmatch(
+        r"ask\s+(pc codex|hermes|vps codex)(?:\s+in\s+([A-Za-z0-9][A-Za-z0-9._-]{0,63}))?\s+to\s+(.+)",
+        normalized,
+        flags=re.I | re.S,
+    )
+    if not start:
+        return None
+    worker, label = _LEGACY_WORKER_NAMES[start.group(1).lower()]
+    return "start", worker, label, start.group(2), start.group(3).strip()
 
 
 def _operator_vocative() -> str:
@@ -560,6 +612,65 @@ def _owned_session(state: dict, session_id: str, owner: str) -> dict:
     if stored_owner != owner:
         raise HTTPException(status_code=403, detail={"message": "Voice session does not belong to this user"})
     return session
+
+
+def _owned_voice_session(
+    session_id: str,
+    owner: str,
+    *,
+    session_manager=None,
+    request: Request | None = None,
+) -> dict[str, Any]:
+    """Resolve ownership for legacy sessions without allowing first-caller claims."""
+    state = _load_state()
+    session = _session(state, session_id)
+    stored_owner = str(session.get("owner") or "").strip()
+    if not stored_owner:
+        linked_owner = ""
+        chat_session_id = str(session.get("chat_session_id") or "").strip()
+        if session_manager is not None and chat_session_id:
+            try:
+                linked = session_manager.get_session(chat_session_id)
+            except (KeyError, AttributeError):
+                linked = None
+            linked_owner = str(getattr(linked, "owner", "") or "").strip()
+        if linked_owner:
+            session["owner"] = linked_owner
+            session["updated_at"] = _now()
+            _save_state(state)
+            stored_owner = linked_owner
+        else:
+            if request is None:
+                raise HTTPException(status_code=403, detail="Ownerless voice sessions are admin only")
+            require_admin(request)
+            return dict(session)
+    if stored_owner != str(owner or "").strip():
+        raise HTTPException(status_code=403, detail="Voice session belongs to another user")
+    return dict(session)
+
+
+def _resolve_voice_runtime(owner: str, linked_session=None) -> tuple[str, str, dict[str, str]]:
+    """Resolve an owner-scoped override, then the linked or default chat model."""
+    if VOICE_ENDPOINT_ID:
+        resolved = resolve_endpoint_by_id(
+            VOICE_ENDPOINT_ID,
+            VOICE_MODEL or None,
+            owner=owner or None,
+        )
+        if not resolved:
+            raise HTTPException(status_code=503, detail="Configured voice model endpoint is unavailable")
+        url, model, headers = resolved
+        return url, model, headers or {}
+    if linked_session is not None:
+        url = str(getattr(linked_session, "endpoint_url", "") or "").strip()
+        model = VOICE_MODEL or str(getattr(linked_session, "model", "") or "").strip()
+        if url and model:
+            return url, model, dict(getattr(linked_session, "headers", {}) or {})
+    url, model, headers = resolve_endpoint("default", owner=owner or None)
+    model = VOICE_MODEL or str(model or "").strip()
+    if not url or not model:
+        raise HTTPException(status_code=503, detail="No default chat model is configured")
+    return url, model, headers or {}
 
 
 def _append_turn(session: dict, role: str, text: str, status: str, task_id: str | None = None) -> dict:
@@ -1144,10 +1255,10 @@ async def _handoff_greeting(
         return {
             "text": reply,
             "target": target,
-            "model": "Odysseus",
+            "model": "Pandamonium",
             "diagnostics": {
                 "model": "odysseus-router",
-                "character_name": "Odysseus",
+                "character_name": "Pandamonium",
                 "direct_target": target,
                 "guard_reason": f"handoff_greeting_{target}_failed",
                 "task_ids": [],
@@ -1569,6 +1680,206 @@ def _foreground_command(text: str) -> tuple[str, str | None] | None:
     return None
 
 
+_CALENDAR_READ_REASONS = frozenset({
+    "calendar lookup request",
+    "calendar lookup question",
+    "calendar availability question",
+    "calendar agenda question",
+    "next calendar item question",
+})
+_CALENDAR_MUTATION_RE = re.compile(
+    r"\b(?:add|create|recreate|reschedule|book|put|delete|remove|cancel)\b"
+    r"|\bschedule\s+(?:a|an|the|my)\s+(?:event|meeting|appointment|call)\b",
+    re.I,
+)
+_CALENDAR_LIST_RE = re.compile(
+    r"\b(?:list|show)\b.{0,80}\bcalendars\b"
+    r"|\b(?:what|which)\b.{0,80}\bcalendars\b.{0,80}\b(?:connected|available|configured|have)\b",
+    re.I,
+)
+_CALENDAR_COMPARE_RE = re.compile(
+    r"\b(?:compare|comparison)\b.{0,120}\b(?:calendar|schedule|events?|meetings?|appointments?)\b",
+    re.I,
+)
+
+
+def _calendar_read_args(text: str, now: datetime | None = None) -> dict[str, str] | None:
+    """Return one bounded read request for explicit Calendar lookup intent."""
+    if _CALENDAR_MUTATION_RE.search(text):
+        return None
+    if _CALENDAR_LIST_RE.search(text):
+        return {"action": "list_calendars"}
+    intent = classify_tool_intent(text)
+    is_read = intent.category == "calendar" and intent.reason in _CALENDAR_READ_REASONS
+    if not is_read and not _CALENDAR_COMPARE_RE.search(text):
+        return None
+    local_now = (now or now_user_local()).replace(tzinfo=None, second=0, microsecond=0)
+    today = local_now.replace(hour=0, minute=0)
+    lower = text.lower()
+    if "today" in lower and "tomorrow" in lower:
+        start, end = today, today + timedelta(days=2)
+    elif "tomorrow" in lower:
+        start, end = today + timedelta(days=1), today + timedelta(days=2)
+    elif "today" in lower:
+        start, end = today, today + timedelta(days=1)
+    elif "this week" in lower:
+        start = today
+        end = today + timedelta(days=max(1, 7 - today.weekday()))
+    else:
+        start = local_now if re.search(r"\b(?:next|upcoming|when)\b", lower) else today
+        end = start + timedelta(days=14)
+    return {"action": "list_events", "start": start.isoformat(), "end": end.isoformat()}
+
+
+def _setup_status_command(text: str) -> bool:
+    """Match one exact, read-only setup check and reject compound requests."""
+    normalized = re.sub(r"[.!?]+$", "", text.strip().lower()).strip()
+    return normalized == "check voice setup"
+
+
+def _safe_service_stats(service: Any, label: str) -> dict[str, Any]:
+    if service is None:
+        return {"available": False, "provider": "disabled"}
+    try:
+        value = service.get_stats()
+    except Exception as exc:
+        logger.warning("%s status unavailable: %s", label, type(exc).__name__)
+        return {"available": False, "provider": "disabled"}
+    return value if isinstance(value, dict) else {"available": False, "provider": "disabled"}
+
+
+def _setup_provider_kind(value: Any) -> str:
+    provider = str(value or "").strip().lower()
+    if not provider or provider == "disabled":
+        return "disabled"
+    if provider.startswith("endpoint:"):
+        return "endpoint"
+    if provider in {"browser", "local"}:
+        return provider
+    return "configured"
+
+
+def _setup_voice_name(value: Any) -> str:
+    name = " ".join(str(value or "").split())[:80]
+    return name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._'-]{0,79}", name) else ""
+
+
+def _setup_voice_speed(value: Any) -> float:
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    return speed if 0.25 <= speed <= 4 else 1.0
+
+
+def _setup_logical_names(value: Any, *, limit: int = 16) -> list[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    names = {
+        str(item).strip()
+        for item in value
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", str(item).strip())
+    }
+    return sorted(names)[:limit]
+
+
+async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any) -> dict[str, Any]:
+    """Build one redacted setup snapshot shared by HTTP status and voice."""
+    stt = _safe_service_stats(stt_service, "STT")
+    tts = _safe_service_stats(tts_service, "TTS")
+    model_configured = False
+    try:
+        endpoint_url, model, _headers = _resolve_voice_runtime(owner)
+        model_configured = bool(endpoint_url and model)
+    except Exception as exc:
+        logger.warning("Voice model status unavailable: %s", type(exc).__name__)
+    try:
+        raw_workers = await asyncio.wait_for(
+            worker_statuses(),
+            timeout=VOICE_SETUP_STATUS_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("Voice worker status unavailable: %s", type(exc).__name__)
+        raw_workers = {}
+    if not isinstance(raw_workers, dict):
+        raw_workers = {}
+    workers: list[dict[str, Any]] = []
+    for worker_id in WORKER_IDS:
+        details = raw_workers.get(worker_id)
+        details = details if isinstance(details, dict) else {}
+        configured = bool(details.get("configured"))
+        ready = bool(configured and details.get("ready"))
+        workers.append({
+            "id": worker_id,
+            "configured": configured,
+            "ready": ready,
+            "status": "ready" if ready else ("unavailable" if configured else "not_configured"),
+            "capabilities": _setup_logical_names(details.get("capabilities")),
+        })
+    stt_available = bool(stt.get("available"))
+    tts_available = bool(tts.get("available"))
+    core_ready = model_configured and stt_available and tts_available
+    guidance = ["Core voice setup is ready." if core_ready else "Voice setup needs attention."]
+    if not core_ready:
+        if not model_configured:
+            guidance.append("Configure an available chat model for Voice Orb.")
+        if not stt_available:
+            guidance.append("Enable an available speech-to-text provider.")
+        if not tts_available:
+            guidance.append("Enable an available text-to-speech provider.")
+    ready_workers = sum(1 for worker in workers if worker["ready"])
+    if ready_workers:
+        guidance.append(f"{ready_workers} of {len(workers)} optional fixed read-only workers are ready.")
+    else:
+        guidance.append("Optional fixed read-only workers are not ready.")
+    setup = {
+        "version": 1,
+        "command": "Check voice setup.",
+        "core_ready": core_ready,
+        "model": {
+            "configured": model_configured,
+            "selection": (
+                "endpoint_override"
+                if VOICE_ENDPOINT_ID
+                else ("model_override" if VOICE_MODEL else "default")
+            ),
+        },
+        "speech_to_text": {
+            "available": stt_available,
+            "provider": _setup_provider_kind(stt.get("provider")),
+        },
+        "text_to_speech": {
+            "available": tts_available,
+            "provider": _setup_provider_kind(tts.get("provider")),
+            "voice": _setup_voice_name(tts.get("voice")),
+        },
+        "workers": {
+            "optional": True,
+            "ready_count": ready_workers,
+            "total": len(workers),
+            "items": workers,
+        },
+        "guidance": guidance,
+        "text": " ".join(guidance),
+    }
+    return {
+        "assistant": configured_agent_name(),
+        "model_override": VOICE_MODEL or None,
+        "endpoint_override_configured": bool(VOICE_ENDPOINT_ID),
+        "stt": {
+            "available": stt_available,
+            "provider": _setup_provider_kind(stt.get("provider")),
+        },
+        "tts": {
+            "available": tts_available,
+            "provider": _setup_provider_kind(tts.get("provider")),
+            "voice": _setup_voice_name(tts.get("voice")),
+            "speed": _setup_voice_speed(tts.get("speed", 1)),
+        },
+        "setup": setup,
+    }
+
+
 def _media_command(text: str) -> str | None:
     """Return one narrow, single-purpose camera/media action."""
     intent = _voice_control_intent(text)
@@ -1684,7 +1995,7 @@ def _describe_client_view(client_state: dict[str, Any] | None) -> str:
         return "The main chat is active, and a document is minimized."
     if active == "chat":
         return "The main chat is the active view."
-    return "I cannot confirm the current Odysseus view from this turn."
+    return "I cannot confirm the current Pandamonium view from this turn."
 
 
 def _is_worker_retry_request(text: str) -> bool:
@@ -2360,6 +2671,20 @@ async def _foreground_worker_result(
 async def _server_routed_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
     voice_session.setdefault("_protocol_request_id", str(uuid.uuid4()))
     voice_session["_exact_request"] = text
+    if _setup_status_command(text):
+        status = await _voice_status_snapshot(
+            owner,
+            voice_session.get("_stt_service"),
+            voice_session.get("_tts_service"),
+        )
+        setup = status["setup"]
+        reply = setup["text"]
+        yield {"type": "assistant_delta", "text": reply}
+        final = _server_final_event(text, reply, "voice_setup_status")
+        final["setup"] = setup
+        yield final
+        return
+
     oracle_intent = _oracle_protocol_intent(text, voice_session)
     if oracle_intent:
         active = bool(voice_session.get("oracle_protocol_active"))
@@ -2374,7 +2699,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             guard = "oracle_protocol_declined"
         elif oracle_intent == "engage" and not ORACLE_PROTOCOL_URL:
             pending = False
-            reply = "The ORACLE protocol is not configured on this Odysseus host."
+            reply = "The ORACLE protocol is not configured on this Pandamonium host."
             guard = "oracle_protocol_unavailable"
         elif oracle_intent == "engage" and active:
             pending = False
@@ -2417,19 +2742,21 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             if not isinstance(frame, dict) or not isinstance(frame.get("bytes"), bytes):
                 reply = "My camera is not open, so I cannot see anything yet."
             else:
-                from src.chat_helpers import model_supports_vision
-                from src.document_processor import analyze_image_bytes_with_vl_result
-
                 chat_session = _voice_chat_session(chat_session_id)
                 session_model = str(getattr(chat_session, "model", "") or "")
                 session_endpoint = str(getattr(chat_session, "endpoint_url", "") or "")
-                preferred_model = session_model if model_supports_vision(session_model, session_endpoint) else None
+                session_headers = dict(getattr(chat_session, "headers", {}) or {})
+                preferred_candidate = (
+                    (session_endpoint, session_model, session_headers)
+                    if model_supports_vision(session_model, session_endpoint)
+                    else None
+                )
                 result = await asyncio.to_thread(
                     analyze_image_bytes_with_vl_result,
                     frame["bytes"],
                     frame["mime"],
                     owner,
-                    preferred_model,
+                    preferred_candidate,
                 )
                 description = str(result.get("text") or "").strip()
                 vision_model = str(result.get("model") or "")
@@ -2491,6 +2818,23 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 }[action]
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, f"foreground_{action}")
+        return
+
+    calendar_args = _calendar_read_args(text)
+    if calendar_args:
+        result = await do_read_calendar(json.dumps(calendar_args), owner=owner)
+        freshness = str(result.get("calendar_freshness") or "")
+        warning = (
+            "Calendar freshness could not be confirmed, so this answer uses the last synchronized copy. "
+            if freshness and freshness != "fresh"
+            else ""
+        )
+        if result.get("exit_code") not in {None, 0}:
+            reply = warning + "I could not read your Calendar data."
+        else:
+            reply = warning + str(result.get("response") or "No Calendar results were returned.").strip()
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(text, reply, "calendar_read")
         return
 
     task_control = await _run_task_control(chat_session_id, text, owner, voice_session)
@@ -2587,13 +2931,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         except Exception as exc:
             logger.warning("Direct Gordon turn failed: %s", str(exc)[:200])
             reply = "Gordon is unavailable, so I did not send that through Jarvis."
-            yield {"type": "assistant_delta", "text": reply, "model": "Odysseus"}
+            yield {"type": "assistant_delta", "text": reply, "model": "Pandamonium"}
             yield _server_final_event(
                 text,
                 reply,
                 "direct_gordon_unavailable",
                 direct_target="hermes",
-                character_name="Odysseus",
+                character_name="Pandamonium",
                 model="odysseus-router",
             )
             return
@@ -2665,7 +3009,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 )
             if document_open and worker == "pc-codex" and "ODYSSEUS_ARTIFACT" not in prompt:
                 prompt += (
-                    "\n\nOdysseus is the default destination. Verify the exact text document, then open it "
+                    "\n\nPandamonium is the default destination. Verify the exact text document, then open it "
                     "with the required ODYSSEUS_ARTIFACT marker. Do not use a desktop opener."
                 )
             dispatches.append((worker, workspace, prompt))
@@ -2720,7 +3064,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 reply = (
                     f"I’m asking {label} to retry that request. I’ll keep you updated here."
                     if retry_task
-                    else f"I’m asking {label} to open that in Odysseus. I’ll keep you updated here."
+                    else f"I’m asking {label} to open that in Pandamonium. I’ll keep you updated here."
                     if document_open and worker == "pc-codex"
                     else f"I’m asking {label} to handle that in the {workspace} workspace. I’ll keep you updated here."
                 )
@@ -2738,7 +3082,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 label = WORKER_LABELS[worker]
                 if action == "started":
                     replies.append(
-                        f"{label} is opening the document in Odysseus."
+                        f"{label} is opening the document in Pandamonium."
                         if worker == "pc-codex" and document_open
                         else f"{label} is handling its part in the background."
                     )
@@ -2901,9 +3245,11 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         selected_target == "pc-codex" and _selected_pc_codex_task_request(text)
     )
     if (
-            _oracle_protocol_intent(text, voice_session)
-            or _media_command(text)
+        _oracle_protocol_intent(text, voice_session)
+        or _media_command(text)
         or _foreground_command(text)
+        or _calendar_read_args(text)
+        or _setup_status_command(text)
         or _unsupported_voice_control(text)
         or _task_control_intent(text)
         or _target_switch(text)
@@ -2928,6 +3274,8 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     endpoint_url = chat_session.endpoint_url
     model = chat_session.model
     headers = getattr(chat_session, "headers", None)
+    if VOICE_ENDPOINT_ID or VOICE_MODEL:
+        endpoint_url, model, headers = _resolve_voice_runtime(owner, chat_session)
     if selected_target != origin_target and selected_target != "pc-codex":
         resolved = _resolve_voice_target_endpoint(selected_target, owner)
         if not resolved:
@@ -3117,15 +3465,22 @@ def _assistant_identity_metadata(diagnostics: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def setup_voice_routes(session_manager=None, tts_service=None):
+def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None):
     global _SESSION_MANAGER
+    # Preserve the established two-positional-argument call shape where the
+    # second argument is TTS, while allowing the full app to pass STT and TTS.
+    if tts_service is None and stt_service is not None:
+        tts_service = stt_service
+        stt_service = None
     _SESSION_MANAGER = session_manager
     router = APIRouter(prefix="/api/voice", tags=["voice"])
 
     @router.get("/status")
     async def voice_status(_owner: str = Depends(require_user)):
         server_tts_ready, tts_provider = _server_tts_readiness(tts_service)
+        setup_status = await _voice_status_snapshot(_owner, stt_service, tts_service)
         return {
+            **setup_status,
             "mode": "jarvis_call",
             "activation": "call_button",
             "interruption": "stop_and_redirect",
@@ -3284,9 +3639,18 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         return {**session, "extension_surfaces": _extension_surface_configs()}
 
     @router.get("/sessions/{session_id}")
-    async def get_voice_session(session_id: str, owner: str = Depends(require_user)):
+    async def get_voice_session(
+        session_id: str,
+        request: Request,
+        owner: str = Depends(require_user),
+    ):
         return {
-            **_owned_session(_load_state(), session_id, owner),
+            **_owned_voice_session(
+                session_id,
+                owner,
+                session_manager=session_manager,
+                request=request,
+            ),
             "extension_surfaces": _extension_surface_configs(),
         }
 
@@ -3398,6 +3762,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         session = _owned_session(state, session_id, owner)
         _require_server_tts(tts_service)
         turn_session = dict(session)
+        turn_session["_stt_service"] = stt_service
+        turn_session["_tts_service"] = tts_service
         if payload.client_state:
             turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
         if payload.frame:
@@ -3498,6 +3864,8 @@ def setup_voice_routes(session_manager=None, tts_service=None):
         session = _owned_session(state, session_id, owner)
         _require_server_tts(tts_service)
         turn_session = dict(session)
+        turn_session["_stt_service"] = stt_service
+        turn_session["_tts_service"] = tts_service
         if payload.client_state:
             turn_session["_client_state"] = payload.client_state.model_dump(exclude_none=True)
         if payload.frame:

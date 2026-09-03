@@ -1,22 +1,22 @@
 {
-  "name": "odysseus",
-  "version": "0.1.1",
-  "description": "Connect Codex to a scoped Odysseus instance.",
+  "name": "pandamonium",
+  "version": "1.0.1",
+  "description": "Connect Codex to a scoped Pandamonium instance.",
   "author": {
-    "name": "Odysseus"
+    "name": "MADPANDA3D"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Odysseus",
-    "shortDescription": "Use scoped Odysseus tools from Codex.",
-    "longDescription": "Connects Codex terminal sessions to Odysseus through user-controlled scoped API tokens. Codex must use /api/codex/* endpoints so Odysseus Settings can enforce tool access.",
-    "developerName": "Odysseus",
+    "displayName": "Pandamonium",
+    "shortDescription": "Use scoped Pandamonium tools from Codex.",
+    "longDescription": "Connects Codex terminal sessions to Pandamonium through user-controlled scoped API tokens. Codex must use /api/codex/* endpoints so Pandamonium Settings can enforce tool access.",
+    "developerName": "MADPANDA3D",
     "category": "Productivity",
     "capabilities": [
       "todos",
       "email",
       "scoped-api"
     ],
-    "defaultPrompt": "Use Odysseus only through configured scoped access. Check capabilities before reading or writing data."
+    "defaultPrompt": "Use Pandamonium only through configured scoped access. Check capabilities before reading or writing data."
   }
 }

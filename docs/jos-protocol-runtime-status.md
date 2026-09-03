@@ -5,7 +5,7 @@ This record describes the source state on branch
 
 | Protocol | Source status | Runtime owner / boundary |
 | --- | --- | --- |
-| `JOS-P0` | Canonical engine contract | Odysseus mounts the installation-configured agent around a replaceable engine |
+| `JOS-P0` | Canonical engine contract | Pandamonium mounts the installation-configured agent around a replaceable engine |
 | `JOS-P1` | Source implementation | Authenticated settings own one identity/constitution across chat, agent, primary voice, authority, and diagnostics |
 | `JOS-P2` | Generic source implementation | Context manifests, trust, omissions, compaction, and budgets include reference-neutral extension state with extension IDs |
 | `JOS-P3` | Generic source implementation | Canonical memory provenance and optional projections use public defaults with backward-compatible legacy aliases |
@@ -30,7 +30,7 @@ The dependency order was completed as planned:
 9. Generic P2-P7 convergence — `MAD-750` (commit recorded at issue close)
 10. Generic live-catalog extension host — `MAD-754` (commit recorded at issue close)
 
-The implementation reuses Odysseus's native session, memory, skill, tool,
+The implementation reuses Pandamonium's native session, memory, skill, tool,
 worker, diagnostics, settings, backup, and ORACLE paths. It adds protocol
 records and enforcement around those paths rather than a second orchestrator.
 The evidence-backed portability findings and their source resolutions are

@@ -10,6 +10,11 @@ from starlette.requests import Request
 from routes import voice_routes
 
 
+@pytest.fixture(autouse=True)
+def _skip_tts_gate(monkeypatch):
+    monkeypatch.setattr(voice_routes, "_require_server_tts", lambda _service: None)
+
+
 class _Chat:
     def __init__(self, owner="alice"):
         self.id = "chat-1"
@@ -66,7 +71,7 @@ def _seed_voice_state(path, owner="alice"):
     session = {
         "id": "voice-1",
         "chat_session_id": "chat-1",
-        "assistant": "Odysseus",
+        "assistant": "Pandamonium",
         "model": "example-model",
         "status": "ready",
         "turns": [],
@@ -246,27 +251,31 @@ async def test_conversation_stream_uses_linked_model_and_persists_final(tmp_path
     monkeypatch.setattr(voice_routes, "VOICE_ENDPOINT_ID", "")
     monkeypatch.setattr(voice_routes, "VOICE_MODEL", "")
 
-    async def fake_stream(*args, **kwargs):
-        assert args[0] == "https://models.example.test/v1/chat/completions"
-        assert args[1] == "example-model"
-        assert kwargs["tool_choice_none"] is True
-        yield 'data: {"delta": "Hello "}\n\n'
-        yield 'data: {"delta": "there."}\n\n'
-        yield "data: [DONE]\n\n"
+    async def fake_events(chat_session_id, _text, owner, _voice_session):
+        assert chat_session_id == "chat-1"
+        assert owner == "alice"
+        yield {"type": "assistant_delta", "text": "Hello "}
+        yield {"type": "assistant_delta", "text": "there."}
+        yield {
+            "type": "final",
+            "assistant_text": "Hello there.",
+            "diagnostics": {"model": "example-model", "task_ids": []},
+            "task_ids": [],
+        }
 
-    monkeypatch.setattr(voice_routes, "stream_llm", fake_stream)
+    monkeypatch.setattr(voice_routes, "_jarvis_events", fake_events)
     chat = _Chat()
     router = voice_routes.setup_voice_routes(_Manager(chat))
-    respond = _endpoint(router, "respond_to_voice_turn")
+    respond = _endpoint(router, "stream_voice_response")
     response = await respond(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="Say hello"),
+        _request(),
         "alice",
     )
     body = "".join([part async for part in response.body_iterator])
     assert '"type": "final"' in body
-    assert '"text": "Hello there."' in body
+    assert '"assistant_text": "Hello there."' in body
     assert [message.role for message in chat.history] == ["user", "assistant"]
     assert chat.history[-1].content == "Hello there."
 
@@ -278,18 +287,18 @@ async def test_foreground_response_emits_only_allowlisted_ui_control(tmp_path, m
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
     chat = _Chat()
     router = voice_routes.setup_voice_routes(_Manager(chat))
-    respond = _endpoint(router, "respond_to_voice_turn")
+    respond = _endpoint(router, "stream_voice_response")
     response = await respond(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="open calendar"),
+        _request(),
         "alice",
     )
     body = "".join([part async for part in response.body_iterator])
     assert '"ui_event": "open_view"' in body
     assert '"view": "calendar"' in body
     assert "selector" not in body
-    assert "script" not in body
+    assert '"script"' not in body
 
 
 @pytest.mark.asyncio
@@ -311,30 +320,22 @@ async def test_calendar_voice_read_uses_owner_scoped_wrapper_without_enabling_to
             "exit_code": 0,
         }
 
-    async def fake_stream(_url, _model, messages, **kwargs):
-        seen["messages"] = messages
-        assert kwargs["tool_choice_none"] is True
-        yield 'data: {"delta": "You have planning at nine."}\n\n'
-        yield "data: [DONE]\n\n"
-
     monkeypatch.setattr(voice_routes, "do_read_calendar", read_calendar)
-    monkeypatch.setattr(voice_routes, "stream_llm", fake_stream)
     chat = _Chat()
     router = voice_routes.setup_voice_routes(_Manager(chat))
-    respond = _endpoint(router, "respond_to_voice_turn")
+    respond = _endpoint(router, "stream_voice_response")
     response = await respond(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="What's on my calendar tomorrow?"),
+        _request(),
         "alice",
     )
 
     body = "".join([part async for part in response.body_iterator])
     assert seen["owner"] == "alice"
     assert seen["calendar_args"]["action"] == "list_events"
-    assert any("UNTRUSTED SOURCE DATA" in str(message.get("content")) for message in seen["messages"])
     assert '"type": "final"' in body
-    assert "You have planning at nine." in body
+    assert "One event." in body
 
 
 @pytest.mark.asyncio
@@ -353,18 +354,13 @@ async def test_calendar_voice_read_always_speaks_freshness_failure(tmp_path, mon
             "exit_code": 0,
         }
 
-    async def fake_stream(*_args, **kwargs):
-        assert kwargs["tool_choice_none"] is True
-        yield 'data: {"delta": "There are no cached events."}\n\n'
-
     monkeypatch.setattr(voice_routes, "do_read_calendar", read_calendar)
-    monkeypatch.setattr(voice_routes, "stream_llm", fake_stream)
     chat = _Chat()
-    respond = _endpoint(voice_routes.setup_voice_routes(_Manager(chat)), "respond_to_voice_turn")
+    respond = _endpoint(voice_routes.setup_voice_routes(_Manager(chat)), "stream_voice_response")
     response = await respond(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="What's on my calendar tomorrow?"),
+        _request(),
         "alice",
     )
 

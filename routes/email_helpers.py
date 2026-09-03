@@ -256,7 +256,7 @@ def _friendly_email_auth_error(protocol: str, host: str, error: object) -> str:
     if microsoft_basic_auth_failure:
         return (
             "Microsoft no longer accepts normal mailbox passwords for "
-            "Outlook/Office 365 IMAP/SMTP in most accounts. Odysseus "
+            "Outlook/Office 365 IMAP/SMTP in most accounts. Pandamonium "
             "does not support Microsoft OAuth/Graph mail yet, so Outlook "
             "accounts cannot be added with this password form."
         )
@@ -1904,7 +1904,7 @@ class SendEmailRequest(BaseModel):
     # answered after successful delivery so it leaves undone/reply-soon views.
     source_uid: Optional[str] = None
     source_folder: Optional[str] = None
-    # Internal marker for Odysseus-generated mail (e.g. reminder, scheduled).
+    # Internal marker for Pandamonium-generated mail (e.g. reminder, scheduled).
     odysseus_kind: Optional[str] = None
     # If true, /send waits for SMTP + Sent append and returns the sent UID.
     wait_for_delivery: bool = False

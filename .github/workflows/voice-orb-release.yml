@@ -93,7 +93,7 @@ jobs:
           python -m pytest -q
       - name: Compose validation
         env:
-          ODYSSEUS_IMAGE: ${{ needs.metadata.outputs.image }}@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          PANDAMONIUM_IMAGE: ${{ needs.metadata.outputs.image }}@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker/voice-orb-image.yml config --quiet
@@ -258,7 +258,7 @@ jobs:
           digest=$(printf '%s\n' "$inspect" | awk '/^Digest:/ {print $2; exit}')
           [ -n "$digest" ]
           {
-            echo "## Odysseus Voice Orb image"
+            echo "## Pandamonium Voice Orb image"
             echo
             echo "\`${IMAGE}@${digest}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 # Attachment References and Upload Storage
 
-Odysseus stores uploaded bytes once under the configured upload directory and
+Pandamonium stores uploaded bytes once under the configured upload directory and
 passes stable references through chat history, tools, and future artifact work.
 The goal is to avoid duplicating large inline media payloads in
 `chat_messages.content` or the SQLite FTS index.
@@ -40,7 +40,9 @@ the current turn. Persistence is different:
 ## Tool Access
 
 Agent/tool context receives upload entries as `attachment_ref` manifests with an
-`odysseus://attachment/<id>` URI and `read_policy: "owner_checked_upload"`.
+`pandamonium://attachment/<id>` URI and `read_policy: "owner_checked_upload"`.
+The parser still accepts the former `odysseus://attachment/<id>` form so saved
+sessions and notes remain readable after an upgrade.
 
 For compatibility with existing built-in tools, a local `path` may be included
 only after all of these checks pass:

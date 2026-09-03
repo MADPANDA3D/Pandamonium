@@ -1,6 +1,6 @@
 # JOS-P5 Runtime Baseline
 
-Odysseus now produces a server-owned authority decision between JOS-P4
+Pandamonium now produces a server-owned authority decision between JOS-P4
 validation and native execution.
 
 ## Runtime contract
@@ -30,7 +30,7 @@ validation and native execution.
   and common bearer/provider token forms. Model and retrieved text cannot
   create or resolve a receipt.
 
-Authority state is stored atomically under the configured Odysseus data
+Authority state is stored atomically under the configured Pandamonium data
 directory. Test runs using the repository's in-memory database configuration
 keep the global store ephemeral.
 

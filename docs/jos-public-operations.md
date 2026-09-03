@@ -70,7 +70,7 @@ existing P4/P5/P7 paths:
    no catalog, context, or tools; failed upgrades retain the prior revision.
 
 The installer never runs arbitrary repository setup scripts. Runtime adapters
-are reviewed Odysseus code, lifecycle vectors remain empty for current native
+are reviewed Pandamonium code, lifecycle vectors remain empty for current native
 adapters, Git never uses a shell or interactive credentials, and the accepted
 source revision is immutable.
 
@@ -91,7 +91,7 @@ media, credential, or network authority.
 
 ## Attribution and release records
 
-A distributable release record must contain, for Odysseus and every included
+A distributable release record must contain, for Pandamonium and every included
 extension:
 
 - upstream repository URL, license, and required notices;

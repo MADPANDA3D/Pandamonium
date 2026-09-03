@@ -190,8 +190,8 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(tmp_path,
     assert snapshot["integrity"]["verified"] is False
     assert snapshot["integrity"]["sha256"]
     with tarfile.open(archive, "r:gz") as tar:
-        manifest = json.loads(tar.extractfile("data/.odysseus-backup-manifest.json").read())
-    assert manifest["scope"] == "odysseus canonical data directory"
+        manifest = json.loads(tar.extractfile("data/.pandamonium-backup-manifest.json").read())
+    assert manifest["scope"] == "pandamonium canonical data directory"
     assert "data/deep_research" in manifest["exclusions"]
     assert "qdrant" in manifest["external_vectors"]
 

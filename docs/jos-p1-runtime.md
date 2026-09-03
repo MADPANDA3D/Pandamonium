@@ -86,9 +86,9 @@ revisions on 2026-09-01:
 | Reference behavior | Pandamonium decision |
 |---|---|
 | DeepSeek fixed harness-identity opener plus a separate deployment persona | Adopt the explicit self-identification invariant; keep installation identity in the existing validated settings owner. |
-| DeepSeek profiles, prompt-section registry, and plugin inventory | Keep the native Odysseus preset, context, extension registry, and lifecycle paths; do not add Cordis or a second plugin tree. |
+| DeepSeek profiles, prompt-section registry, and plugin inventory | Keep the native Pandamonium preset, context, extension registry, and lifecycle paths; do not add Cordis or a second plugin tree. |
 | Hermes stable SOUL identity, model-neutral provider setup, and one-time onboarding hints | Adopt a visible, non-blocking first-run checklist and keep identity separate from the replaceable engine. |
-| Hermes personality overlay and user profile as separate layers | Continue using Odysseus presets for presentation and governed memory for user facts; do not overload agent identity with either. |
+| Hermes personality overlay and user profile as separate layers | Continue using Pandamonium presets for presentation and governed memory for user facts; do not overload agent identity with either. |
 
 ORACLE/God's Eye remains an extension capability and context projection. Its
 engagement can change what the configured agent can see or do, never who that

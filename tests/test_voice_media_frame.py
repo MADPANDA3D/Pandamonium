@@ -86,12 +86,12 @@ async def test_describe_uses_in_memory_frame_and_persists_only_model_metadata(mo
             assert session_id == "chat-1"
             return SimpleNamespace(model="vision-selected", endpoint_url="http://vision.test/v1/chat/completions")
 
-    def analyze(image_bytes, image_format, owner=None, preferred_model=None):
+    def analyze(image_bytes, image_format, owner=None, preferred_candidate=None):
         seen.update(
             bytes=image_bytes,
             image_format=image_format,
             owner=owner,
-            preferred_model=preferred_model,
+            preferred_candidate=preferred_candidate,
         )
         return {"text": "I see a brightly lit workspace.", "model": "vision-test"}
 
@@ -113,7 +113,11 @@ async def test_describe_uses_in_memory_frame_and_persists_only_model_metadata(mo
         "bytes": ONE_PIXEL_PNG,
         "image_format": "image/png",
         "owner": "alice",
-        "preferred_model": "vision-selected",
+        "preferred_candidate": (
+            "http://vision.test/v1/chat/completions",
+            "vision-selected",
+            {},
+        ),
     }
     assert events[0] == {"type": "assistant_delta", "text": "I see a brightly lit workspace."}
     assert events[-1]["diagnostics"]["vision_model"] == "vision-test"

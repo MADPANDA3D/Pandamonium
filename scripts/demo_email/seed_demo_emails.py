@@ -38,7 +38,7 @@ PASSWORD = os.getenv("DEMO_IMAP_PASSWORD", "demodemo")
 
 # Marker header on every message we create — lets a human (or a future cleanup)
 # tell demo mail apart at a glance.
-MARKER = ("X-Odysseus-Demo", "1")
+MARKER = ("X-Pandamonium-Demo", "1")
 
 DEMO_OWNER_ADDR = USER  # the demo "you"
 
@@ -94,7 +94,7 @@ def _ics(summary: str, start: datetime, mins: int) -> str:
     end = start + timedelta(minutes=mins)
     fmt = "%Y%m%dT%H%M%SZ"
     return (
-        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Odysseus Demo//EN\r\n"
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pandamonium Demo//EN\r\n"
         "METHOD:REQUEST\r\nBEGIN:VEVENT\r\n"
         f"UID:{make_msgid()}\r\n"
         f"DTSTAMP:{datetime.now(timezone.utc).strftime(fmt)}\r\n"
@@ -144,11 +144,11 @@ def build_dataset() -> list[dict]:
         frm="Brogan O'Hara <talent@northstar-labs.example>",
         subject="We want you on the Northstar AI team 🚀",
         days_ago=0, hours_ago=2,
-        text=("Hey,\n\nSaw your work on the Odysseus stack — seriously impressive. "
+        text=("Hey,\n\nSaw your work on the Pandamonium stack — seriously impressive. "
               "We're building an agentic AI platform and your name keeps coming up.\n\n"
               "Any chance you're open to a quick chat this week? Comp is competitive and "
               "the team is fully remote.\n\nCheers,\nBrogan\nHead of Talent, Northstar Labs"),
-        html=("<p>Hey,</p><p>Saw your work on the <b>Odysseus</b> stack — seriously "
+        html=("<p>Hey,</p><p>Saw your work on the <b>Pandamonium</b> stack — seriously "
               "impressive. We're building an agentic AI platform and your name keeps coming "
               "up.</p><p>Any chance you're open to a quick chat this week? Comp is competitive "
               "and the team is fully remote.</p><p>Cheers,<br>Brogan<br><i>Head of Talent, "
@@ -265,7 +265,7 @@ def _seed_cache() -> None:
         "Source: DeepSeek-V3 Technical Report (arXiv:2412.19437) and the official "
         "model card on Hugging Face.\n\n"
         "Hope that unblocks the slide!\n\n"
-        "— drafted for you by your Odysseus assistant"
+        "— drafted for you by your Pandamonium assistant"
     )
     summary = ("Greg needs the DeepSeek-V3 parameter count (total vs active) for a "
                "comparison slide. Quick factual lookup — answerable with a search.")
@@ -381,7 +381,7 @@ def main() -> int:
             conn.append(it["mailbox"], it["flags"], dt, it["msg"].as_bytes())
         _seed_cache()
         print(f"seeded {len(items)} demo message(s) into {USER} "
-              f"(INBOX + Sent). Switch to the 'Demo' account in Odysseus to view.")
+              f"(INBOX + Sent). Switch to the 'Demo' account in Pandamonium to view.")
         return 0
     finally:
         try:

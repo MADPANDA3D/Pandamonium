@@ -6,7 +6,7 @@
 
 **Status:** Baseline contract
 
-**Control plane and operator surface:** Odysseus
+**Control plane and operator surface:** Pandamonium
 
 ## Purpose
 
@@ -17,21 +17,21 @@ reasoning engine inside that system.
 assistant name. A public installation configures its stable agent identity and
 operator-facing name independently from the selected model.
 
-`JOS-P0` defines the boundary between Odysseus and a reasoning engine. A new
+`JOS-P0` defines the boundary between Pandamonium and a reasoning engine. A new
 engine is Jarvis-compatible only when it can be installed without transferring
 canonical identity, memory, permissions, tools, or session ownership into the
 model.
 
 In the supercar model:
 
-- Odysseus is the cockpit, body, controls, and instrument panel.
+- Pandamonium is the cockpit, body, controls, and instrument panel.
 - Jarvis protocols are the chassis, wiring harness, and engine mounts.
 - The engine adapter is the model-specific fitment.
 - GPT-OSS or another model is the replaceable engine.
 
 ## System ownership
 
-### Odysseus MUST own
+### Pandamonium MUST own
 
 - the stable configured agent identity and operator-facing name;
 - authenticated operator, agent, and session identity;
@@ -68,16 +68,16 @@ successful.
 1. **Identity survives replacement.** Changing the backend model MUST NOT rename
    Jarvis or replace his identity with the checkpoint's identity.
 2. **Canonical state stays outside the engine.** An engine cache or internal
-   conversation state is disposable. Odysseus remains able to reconstruct the
+   conversation state is disposable. Pandamonium remains able to reconstruct the
    next turn after an engine restart or replacement.
-3. **Context is mounted, not surrendered.** Odysseus supplies the bounded
+3. **Context is mounted, not surrendered.** Pandamonium supplies the bounded
    context for each turn. The engine does not independently read Jarvis memory,
    files, credentials, or infrastructure.
 4. **Tools are capabilities, not authority.** A model-generated tool call is an
-   untrusted proposal. Odysseus validates the schema, policy, owner, permission,
+   untrusted proposal. Pandamonium validates the schema, policy, owner, permission,
    and approval before execution.
 5. **Outcomes require evidence.** Model text cannot prove that work ran or
-   succeeded. Odysseus records results only from the responsible tool, worker,
+   succeeded. Pandamonium records results only from the responsible tool, worker,
    or verifier.
 6. **Failures preserve the chassis.** A timeout, malformed stream, unavailable
    engine, or failed tool call MUST fail visibly without corrupting canonical
@@ -89,7 +89,7 @@ successful.
    its compatibility result remain available until the replacement has passed
    acceptance.
 9. **Conversation routing is adaptive.** A user starts one conversational
-   session and never selects a separate agent mode. Odysseus decides per turn
+   session and never selects a separate agent mode. Pandamonium decides per turn
    whether the request needs no tools or a bounded relevant-tool catalog.
    Discovering or proposing a tool call does not bypass permission, authority,
    confirmation, execution, or evidence requirements.
@@ -106,9 +106,9 @@ An engine receives a bounded `TurnRequest` containing:
 | `protocol_version` | Jarvis engine-contract version |
 | `request_id` | Stable identifier for cancellation, events, and audit |
 | `agent_id` | Stable installation-configured agent identity |
-| `session_id` | Odysseus-owned conversation identifier |
-| `messages` | Ordered context assembled by Odysseus |
-| `allowed_tools` | Relevant schemas selected by Odysseus and allowed on this turn only; empty for an ordinary conversational reply |
+| `session_id` | Pandamonium-owned conversation identifier |
+| `messages` | Ordered context assembled by Pandamonium |
+| `allowed_tools` | Relevant schemas selected by Pandamonium and allowed on this turn only; empty for an ordinary conversational reply |
 | `limits` | Context, output, tool-round, and timeout budgets |
 | `required_capabilities` | Features this turn needs from the engine |
 
@@ -122,7 +122,7 @@ An adapter returns normalized events from this set:
 | `completed` | Engine generation ended normally |
 | `error` | Normalized, operator-visible engine failure |
 
-A tool result is added to the next engine turn only after Odysseus has validated
+A tool result is added to the next engine turn only after Pandamonium has validated
 and executed the proposal. No engine event directly mutates canonical state.
 
 ## Engine compatibility gate
@@ -133,8 +133,8 @@ only after all of these pass:
 
 - the configured agent identity appears in chat and voice without exposing a
   backend identity as the agent identity;
-- deterministic plain-chat response through the real Odysseus route;
-- multi-turn continuity reconstructed from Odysseus-owned state;
+- deterministic plain-chat response through the real Pandamonium route;
+- multi-turn continuity reconstructed from Pandamonium-owned state;
 - structured tool proposal, validation, execution, and result round trip;
 - a disabled or unauthorized tool remains unavailable even when requested by
   the model;
@@ -149,7 +149,7 @@ model that violates this contract is not a Jarvis engine.
 
 ## Current implementation anchors
 
-Odysseus already implements much of `JOS-P0`; this protocol makes those pieces
+Pandamonium already implements much of `JOS-P0`; this protocol makes those pieces
 an explicit compatibility boundary.
 
 | Contract responsibility | Existing anchor |
@@ -205,7 +205,7 @@ and rollback path.
 
 ## Open-source implementation constraints
 
-- Protocol code extends existing Odysseus paths; it does not duplicate them in
+- Protocol code extends existing Pandamonium paths; it does not duplicate them in
   a parallel orchestrator.
 - Core behavior cannot depend on a private name, model label, filesystem path,
   host, repository, credential, memory set, or optional extension.
@@ -219,8 +219,8 @@ and rollback path.
 
 ## Non-goals
 
-- Rewriting Odysseus.
-- Creating a second orchestrator beside Odysseus.
+- Rewriting Pandamonium.
+- Creating a second orchestrator beside Pandamonium.
 - Moving existing modules merely to resemble a traditional operating system.
 - Selecting or training the next model.
 - Designing every future Jarvis protocol before its real boundary is traced.

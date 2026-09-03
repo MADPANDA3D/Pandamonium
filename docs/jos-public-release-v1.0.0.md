@@ -2,25 +2,25 @@
 
 **Linear:** `MAD-756`
 
-**Distribution home:** `https://github.com/MADPANDA3D/odysseus`
+**Distribution home:** `https://github.com/MADPANDA3D/Pandamonium`
 
-**Odysseus tag:** `jarvis-os-v1.0.0`
+**Pandamonium tag:** `jarvis-os-v1.0.0`
 
 **Published release:**
-`https://github.com/MADPANDA3D/odysseus/releases/tag/jarvis-os-v1.0.0`
+`https://github.com/MADPANDA3D/Pandamonium/releases/tag/jarvis-os-v1.0.0`
 
 **Release commit:** `ee470206b669a119b6740a71c98ae9cba8c23237`
 
 This release uses native Git archives plus SHA-256 checksums. It adds no
 packager, installer, dependency, registry, or deployment path. ORACLE and all
-other extensions remain optional; a clean Odysseus install has an empty
+other extensions remain optional; a clean Pandamonium install has an empty
 extension registry and no private topology.
 
 ## Compatible immutable sources
 
 | Component | Maintained source | Upstream lineage | License | Compatible commit | Immutable tag | Release archive |
 | --- | --- | --- | --- | --- | --- | --- |
-| Odysseus / Jarvis OS | `MADPANDA3D/odysseus` | `pewdiepie-archdaemon/odysseus` | AGPL-3.0-or-later | `ee470206b669a119b6740a71c98ae9cba8c23237` | `jarvis-os-v1.0.0` | `jarvis-os-v1.0.0.tar.gz` |
+| Pandamonium / Jarvis OS | `MADPANDA3D/Pandamonium` | `pewdiepie-archdaemon/odysseus` | AGPL-3.0-or-later | `ee470206b669a119b6740a71c98ae9cba8c23237` | `jarvis-os-v1.0.0` | `jarvis-os-v1.0.0.tar.gz` |
 | ORACLE reference | `MADPANDA3D/ORACLE` | `bilawalsidhu/gods-eye-view` | MIT | `b619e2a17015d0e1c044fb273677b00abccdbede` | `jos-v0.1.0` | `oracle-jos-v0.1.0.tar.gz` |
 | Barehands | `MADPANDA3D/barehands` | `jaredrhod/barehands` | AGPL-3.0-or-later | `0ef7c9a2f302f1fefe5b3fd9a56f987f4d8f1cff` | `jos-v0.1.0` | `barehands-jos-v0.1.0.tar.gz` |
 | img2threejs | `MADPANDA3D/img2threejs` | `img2threejs/img2threejs` | Apache-2.0 | `54734b5d307876753d0433f489497be5c8c32428` | `jos-v1.5.1-jos.2` | `img2threejs-jos-v1.5.1-jos.2.tar.gz` |
@@ -28,7 +28,7 @@ extension registry and no private topology.
 | Robin | `MADPANDA3D/robin` | `apurvsinghgautam/robin` | MIT | `8d4b4109f6928016f7976472309d2b7336b005b0` | `jos-v2.8.0-jos.2` | `robin-jos-v2.8.0-jos.2.tar.gz` |
 
 Every maintained source preserves its upstream Git history and license file.
-Barehands and Odysseus convey complete corresponding source under the AGPL;
+Barehands and Pandamonium convey complete corresponding source under the AGPL;
 Barehands network use also carries the section 13 source-offer obligation
 documented in its `docs/JOS_EXTENSION.md`. The central release does not combine
 the projects into one differently licensed work; each archive stays separate.
@@ -39,7 +39,7 @@ Run these commands from a directory containing the six clean repositories:
 
 ```bash
 mkdir -p dist/jarvis-os-v1.0.0
-git -C odysseus archive --format=tar.gz --prefix=jarvis-os-v1.0.0/ jarvis-os-v1.0.0 > dist/jarvis-os-v1.0.0/jarvis-os-v1.0.0.tar.gz
+git -C Pandamonium archive --format=tar.gz --prefix=jarvis-os-v1.0.0/ jarvis-os-v1.0.0 > dist/jarvis-os-v1.0.0/jarvis-os-v1.0.0.tar.gz
 git -C ORACLE archive --format=tar.gz --prefix=oracle-jos-v0.1.0/ jos-v0.1.0 > dist/jarvis-os-v1.0.0/oracle-jos-v0.1.0.tar.gz
 git -C barehands archive --format=tar.gz --prefix=barehands-jos-v0.1.0/ jos-v0.1.0 > dist/jarvis-os-v1.0.0/barehands-jos-v0.1.0.tar.gz
 git -C img2threejs archive --format=tar.gz --prefix=img2threejs-jos-v1.5.1-jos.2/ jos-v1.5.1-jos.2 > dist/jarvis-os-v1.0.0/img2threejs-jos-v1.5.1-jos.2.tar.gz
@@ -71,7 +71,7 @@ archives twice from the immutable tags produced byte-identical files.
 
 ## Clean-install acceptance
 
-Download the assets from the Odysseus `jarvis-os-v1.0.0` release, then:
+Download the assets from the Pandamonium `jarvis-os-v1.0.0` release, then:
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -92,7 +92,7 @@ The acceptance run downloaded the public assets, verified all checksums,
 extracted a fresh source tree, ran `setup.py` with a generic administrator and
 new data/extension directories, confirmed no installed extension or private
 runtime value, and passed the public-default/schema checks: 11 passed, zero
-failed. The release commit's complete Odysseus gate passed 5,024 tests with 5
+failed. The release commit's complete Pandamonium gate passed 5,024 tests with 5
 intentional skips and zero failures in 123.84 seconds.
 
 ## Claim boundary

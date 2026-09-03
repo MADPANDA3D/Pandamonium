@@ -76,23 +76,23 @@ def test_brand_contract_persists_only_valid_admin_updates(tmp_path, monkeypatch)
         {"name": 7, "logo": "", "accent": "#e06c75"},
         {"name": "\u0000bad", "logo": "", "accent": "#e06c75"},
         {"name": "x" * 49, "logo": "", "accent": "#e06c75"},
-        {"name": "WhoAmI", "logo": "data:image/svg+xml;base64,PHN2Zz4=", "accent": "#e06c75"},
-        {"name": "WhoAmI", "logo": _PNG_URL.replace("image/png", "image/jpeg"), "accent": "#e06c75"},
+        {"name": "Pandamonium", "logo": "data:image/svg+xml;base64,PHN2Zz4=", "accent": "#e06c75"},
+        {"name": "Pandamonium", "logo": _PNG_URL.replace("image/png", "image/jpeg"), "accent": "#e06c75"},
         {
-            "name": "WhoAmI",
+            "name": "Pandamonium",
             "logo": "data:image/png;base64," + base64.b64encode(_PNG[:-12]).decode("ascii"),
             "accent": "#e06c75",
         },
-        {"name": "WhoAmI", "logo": _image_url("PNG", (4097, 1)), "accent": "#e06c75"},
-        {"name": "WhoAmI", "logo": _image_url("PNG", (2049, 2049)), "accent": "#e06c75"},
+        {"name": "Pandamonium", "logo": _image_url("PNG", (4097, 1)), "accent": "#e06c75"},
+        {"name": "Pandamonium", "logo": _image_url("PNG", (2049, 2049)), "accent": "#e06c75"},
         {
-            "name": "WhoAmI",
+            "name": "Pandamonium",
             "logo": "data:image/png;base64,"
             + base64.b64encode(_PNG + b"x" * brand_routes._MAX_LOGO_BYTES).decode("ascii"),
             "accent": "#e06c75",
         },
-        {"name": "WhoAmI", "logo": "", "accent": "red"},
-        {"name": "WhoAmI", "logo": "", "accent": "#e06c75", "script": "alert(1)"},
+        {"name": "Pandamonium", "logo": "", "accent": "red"},
+        {"name": "Pandamonium", "logo": "", "accent": "#e06c75", "script": "alert(1)"},
     ]
     for value in invalid:
         with pytest.raises(ValidationError):
@@ -100,7 +100,7 @@ def test_brand_contract_persists_only_valid_admin_updates(tmp_path, monkeypatch)
 
     for image_format in ("PNG", "JPEG", "WEBP"):
         logo = _image_url(image_format)
-        assert brand_routes.BrandPayload(name="WhoAmI", logo=logo, accent="#e06c75").logo == logo
+        assert brand_routes.BrandPayload(name="Pandamonium", logo=logo, accent="#e06c75").logo == logo
 
 
 def test_only_public_brand_read_is_auth_exempt():

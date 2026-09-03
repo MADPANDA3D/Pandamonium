@@ -260,7 +260,7 @@ def self_test() -> None:
     assert content_reasons(b"host=100.64.20.4")
     assert content_reasons(b"ODYSSEUS_PRIVATE_WORKER_MUTATIONS=true")
     assert not content_reasons(b"http://127.0.0.1:7000")
-    assert not content_reasons(b"https://github.com/MADPANDA3D/odysseus")
+    assert not content_reasons(b"https://github.com/MADPANDA3D/Pandamonium")
     assert not content_reasons(b"ODYSSEUS_PC_CODEX_ENABLED=false")
     assert not content_reasons_for_path(
         "routes/model_routes.py",

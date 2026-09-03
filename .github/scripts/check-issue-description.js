@@ -42,7 +42,7 @@ module.exports = async ({ github, context, core }) => {
 
     case 'bug': {
       if (!section('Install Method')) {
-        failures.push('**Install Method** — select how you installed WhoAmI');
+        failures.push('**Install Method** — select how you installed Pandamonium');
       }
 
       if (!section('Operating System')) {

@@ -1,5 +1,5 @@
 const DEFAULT_BRAND = Object.freeze({
-  name: 'WhoAmI',
+  name: 'Pandamonium',
   logo: '',
   accent: '#e06c75',
 });

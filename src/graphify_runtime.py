@@ -1,6 +1,6 @@
 """Optional, explicit-root Graphify runtime guard.
 
-Graph creation is operator-invoked through ``scripts/odysseus-graphify``.
+Graph creation is operator-invoked through ``scripts/pandamonium-graphify``.
 The agent-facing MCP surface is read-only and accepts root IDs, never paths.
 """
 

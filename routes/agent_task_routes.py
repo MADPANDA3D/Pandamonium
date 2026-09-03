@@ -79,7 +79,6 @@ class KnowledgeSearch(BaseModel):
 def setup_agent_task_routes(session_manager):
     configure(session_manager)
     router = APIRouter(tags=["jarvis-agent"])
-    router.include_router(madpanda_knowledge_router)
 
     @router.get("/api/agent-workers")
     async def workers(_owner: str = Depends(require_user)):
@@ -214,4 +213,5 @@ def setup_agent_task_routes(session_manager):
         except Exception as exc:
             raise HTTPException(503, str(exc)[:300])
 
+    router.include_router(madpanda_knowledge_router)
     return router

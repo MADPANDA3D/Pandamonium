@@ -8,7 +8,7 @@
 
 **Runtime record:** [JOS-P3 runtime baseline](../docs/jos-p3-runtime.md)
 
-**Memory owner:** Odysseus
+**Memory owner:** Pandamonium
 
 ## Purpose
 
@@ -25,8 +25,8 @@ backfill Jarvis without dumping their full history into memory.
 
 | Layer | Canonical owner | Role |
 | --- | --- | --- |
-| Personal memory | Odysseus memory records | Approved facts, preferences, relationships, decisions |
-| Conversation archive | Odysseus/source export | Searchable historical evidence, not automatic memory |
+| Personal memory | Pandamonium memory records | Approved facts, preferences, relationships, decisions |
+| Conversation archive | Pandamonium/source export | Searchable historical evidence, not automatic memory |
 | Lab documentation | Source files and Obsidian vault | Canonical project and operating knowledge |
 | Generated wiki | KarpathyWiki output | Derived concept/entity/source synthesis |
 | Retrieval projections | Qdrant or existing Chroma indexes | Disposable search acceleration |
@@ -41,14 +41,14 @@ An approved memory MUST have at least:
 
 | Field | Meaning |
 | --- | --- |
-| `memory_id` | Stable Odysseus identifier |
+| `memory_id` | Stable Pandamonium identifier |
 | `owner_id` | Authenticated owner |
 | `text` | Compact asserted fact or preference |
 | `category` | Fact, preference, relationship, decision, or other controlled class |
 | `status` | Candidate, approved, rejected, superseded, or deleted |
 | `source_ref` | Source system and stable locator |
 | `source_time` | Time of the underlying source when known |
-| `admitted_at` | Time Odysseus approved the memory |
+| `admitted_at` | Time Pandamonium approved the memory |
 | `admitted_by` | Operator or approved admission policy |
 | `supersedes` | Prior memory corrected by this record, when applicable |
 
@@ -65,7 +65,7 @@ A memory may enter as a candidate from:
 - a correction or consolidation proposal;
 - an authenticated external memory provider.
 
-Odysseus MUST validate ownership, normalize the text, preserve the source,
+Pandamonium MUST validate ownership, normalize the text, preserve the source,
 check exact and semantic duplicates, detect likely conflicts, and apply the
 configured review policy before approval.
 
@@ -105,7 +105,7 @@ Leo MUST be able to inspect, edit, reject, supersede, merge, and delete memory.
 
 The target topology is:
 
-1. Odysseus records remain the canonical personal-memory store during the
+1. Pandamonium records remain the canonical personal-memory store during the
    migration.
 2. Qdrant becomes the semantic retrieval projection for approved personal
    memory and canonical documentation.

@@ -1,105 +1,86 @@
-<h1 align="center">WhoAmI Platform</h1>
+<h1 align="center">Pandamonium</h1>
 
 <p align="center">
-  <strong>Make the harness yours.</strong><br>
-  An open-source, self-hosted AI workspace from MADPANDA3D.
+  <strong>Your self-hosted AI control plane.</strong><br>
+  Local and API models, agents, voice, memory, tools, documents, and extensions in one workspace.
 </p>
 
-<p align="center">
-  WhoAmI is a fork of <a href="https://github.com/pewdiepie-archdaemon/odysseus">Odysseus</a>.
-  It preserves the original project's attribution and AGPL license while adding
-  MADPANDA3D's identity, orchestration, voice, and configurable-harness work.
-</p>
-
-<p align="center"><sub>Modified by MADPANDA3D beginning July 18, 2026.</sub></p>
+<p align="center"><sub>Maintained by MADPANDA3D.</sub></p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
-  <a href="docs/voice-orb/README.md">Voice Orb Beta</a> ·
   <a href="docs/setup.md">Setup Guide</a> ·
+  <a href="docs/voice-orb/README.md">Voice Orb</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="ROADMAP.md">Roadmap</a>
 </p>
 
 <p align="center">
-  <a href="https://repology.org/project/odysseus-ai/versions"><img src="https://repology.org/badge/vertical-allrepos/odysseus-ai.svg" alt="Packaging status"></a>
+  <img src="docs/pandamonium-browser.jpg" alt="Pandamonium self-hosted AI workspace">
 </p>
-
-<p align="center">
-  <img src="docs/odysseus-browser.jpg" alt="The interface foundation inherited from Odysseus">
-</p>
-
----
-
-## Odysseus Voice Orb beta
-
-This maintained fork adds an authenticated, first-party voice surface, guided setup status, bounded foreground and camera/media controls, optional fixed read-only workers, and explicit admin-only Tailnet model discovery. It is a beta fork distribution, **not an installable Odysseus plugin**; upstream does not yet expose a stable application-plugin contract.
-
-The beta works with no workers configured and uses the current/default Odysseus model unless an operator chooses an explicit voice-model override. `Check voice setup.` returns the same server-generated guidance and structured status used by the authenticated status surface. Start with the [Voice Orb overview](docs/voice-orb/README.md), then read [installation](docs/voice-orb/install.md), [provider setup](docs/voice-orb/providers.md), and the [security model](docs/voice-orb/security.md).
-
-The public fork remains AGPL-3.0-or-later. Private development notes, personal or business data, private network topology, credentials, and assets without clear redistribution rights are intentionally excluded.
 
 ## Quick Start
 
-> This repository is the MADPANDA3D fork. The original Odysseus project remains available at [pewdiepie-archdaemon/odysseus](https://github.com/pewdiepie-archdaemon/odysseus).
-
 ```bash
-git clone https://github.com/MADPANDA3D/odysseus.git
-cd odysseus
+git clone https://github.com/MADPANDA3D/Pandamonium.git
+cd Pandamonium
 cp .env.example .env
 docker compose up -d --build
 ```
 
-Open `http://localhost:7000` when the containers are healthy. The first admin password is printed in `docker compose logs odysseus`.
+Open `http://localhost:7000` after the containers become healthy. The first
+admin password is printed by:
 
-Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration live in the [setup guide](docs/setup.md).
+```bash
+docker compose logs pandamonium
+```
 
-## Features
+Native Linux, macOS, Windows, GPU, HTTPS, and configuration instructions are
+in the [setup guide](docs/setup.md).
 
-- **Chat + Agents** — local/API models, tools, MCP, files, shell, skills, and memory.
-- **Voice Orb (beta fork)** — interruptible speech, guided setup status, safe view and camera/media controls, optional fixed read-only workers, and explicit admin-only Tailnet model discovery.
+## What Is Included
+
+- **Chat and agents** — local or API models, tool use, MCP, files, shell, skills, and memory.
+- **Voice Orb** — interruptible voice, setup diagnostics, camera/media controls, and optional read-only workers.
+- **Extensions** — bounded Git installation, capability registration, lifecycle controls, and rollback.
 - **Cookbook** — hardware-aware model recommendations, downloads, and serving.
-- **Deep Research** — multi-step web research with source reading and report generation.
-- **Compare** — blind side-by-side model testing and synthesis.
-- **Documents** — writing-first editor with AI edits, suggestions, Markdown, HTML, CSV, and syntax highlighting.
-- **Email** — IMAP/SMTP inbox with triage, tags, summaries, reminders, and reply drafts.
-- **Notes, Tasks + Calendar** — reminders, todos, scheduled agent tasks, and CalDAV sync.
-- **Extras** — gallery/image editor, themes, uploads, web search, presets, sessions, and 2FA.
+- **Workspaces** — documents, email, notes, tasks, calendar, gallery, research, and model comparison.
+- **Operations** — owner-scoped data, authentication, backups, security gates, and Docker/systemd installs.
 
-## Demo
+## Command Line
 
-A full hover-to-play tour lives on the landing page: [`docs/index.html`](docs/index.html).
+The canonical command is `pandamonium`:
 
-## Contributing
+```bash
+./scripts/pandamonium help
+./scripts/pandamonium backup snapshot
+./scripts/pandamonium mcp list
+```
 
-Help is welcome. The best entry points are fresh-install testing, provider setup bugs, mobile/editor polish, docs, and small focused refactors. See [CONTRIBUTING.md](CONTRIBUTING.md) and [ROADMAP.md](ROADMAP.md).
+The former `odysseus` command names remain as compatibility aliases for
+existing installations. New configuration uses `PANDAMONIUM_*` environment
+variables; the former `ODYSSEUS_*` names remain accepted during migration.
 
 ## Security
 
-WhoAmI is a self-hosted workspace with powerful local tools. Keep auth enabled, keep private data out of Git, and do not expose raw model/service ports publicly. Deployment details are in the [setup guide](docs/setup.md#security-notes).
+Pandamonium exposes powerful local tools. Keep authentication enabled, keep
+private data and credentials out of Git, and do not expose raw model or service
+ports publicly. See [SECURITY.md](SECURITY.md) and the
+[deployment guidance](docs/setup.md#security-notes).
 
-## Upstream Foundation
+## Project Lineage
+
+Pandamonium began as a fork of
+[Odysseus](https://github.com/pewdiepie-archdaemon/odysseus) and retains the
+original project history, contributor attribution, and AGPL license. It is an
+independent MADPANDA3D project, not an official Odysseus release. Details are
+recorded in [NOTICE](NOTICE) and [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
 
 <p>
-  <a href="https://github.com/pewdiepie-archdaemon/odysseus"><img src="docs/odysseus-wordmark.png" alt="Odysseus, the upstream foundation for WhoAmI" width="180"></a>
+  <a href="https://github.com/pewdiepie-archdaemon/odysseus"><img src="docs/upstream-odysseus-wordmark.png" alt="Odysseus upstream project" width="180"></a>
 </p>
-
-The original project and contributor history remain part of this fork. WhoAmI
-is an independent MADPANDA3D modification, not an official Odysseus release.
-
-## Upstream Star History
-
-This chart belongs to the original Odysseus repository and is retained as part
-of the project's visible lineage.
-
-<a href="https://www.star-history.com/?repos=pewdiepie-archdaemon%2Fodysseus&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=pewdiepie-archdaemon/odysseus&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=pewdiepie-archdaemon/odysseus&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=pewdiepie-archdaemon/odysseus&type=date&legend=top-left" />
- </picture>
-</a>
 
 ## License
 
-AGPL-3.0-or-later -- see [LICENSE](LICENSE), [NOTICE](NOTICE), and [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
+AGPL-3.0-or-later — see [LICENSE](LICENSE), [NOTICE](NOTICE), and
+[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).

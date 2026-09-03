@@ -1,4 +1,4 @@
-"""cmd_add (scripts/odysseus-memory) must tolerate a non-dict row in the
+"""cmd_add (scripts/pandamonium-memory) must tolerate a non-dict row in the
 existing store. Every other command funnels load_all() through
 `_memory_entries()` (which drops non-dicts), but cmd_add iterated the raw
 list in its dedup check: `any(e.get("id") == ... for e in all_entries)`

@@ -37,7 +37,7 @@ engage/disengage behavior.
 The implementation reuses the settings API/UI, context manifest and compactor,
 agent-loop catalog, authority store, operational event store, native worker task
 runner, ORACLE executor, canonical memory ledger, and optional projection
-adapters already present in Odysseus.
+adapters already present in Pandamonium.
 
 ## Boundaries
 

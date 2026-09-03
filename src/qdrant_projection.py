@@ -1,4 +1,4 @@
-"""Optional Qdrant projection for canonical Odysseus memory records.
+"""Optional Qdrant projection for canonical Pandamonium memory records.
 
 The JSON memory ledger remains authoritative. This adapter only mirrors
 approved records and can be rebuilt or disabled without data loss.

@@ -2,7 +2,7 @@
 
 **Linear:** `MAD-752`
 
-Odysseus now exposes an approval-gated source-package flow without introducing
+Pandamonium now exposes an approval-gated source-package flow without introducing
 a package manager, daemon, dependency, or second tool runner.
 
 ## Operator flow
@@ -10,7 +10,7 @@ a package manager, daemon, dependency, or second tool runner.
 1. `POST /api/extensions/plans/source` accepts `install` or `upgrade`, a
    supported public HTTPS Git URL, and `HEAD`, a branch, tag, or advertised full
    commit.
-2. Odysseus resolves the ref to a full immutable revision, checks it out under
+2. Pandamonium resolves the ref to a full immutable revision, checks it out under
    the external managed extension root, validates `jarvis-extension.json`, and
    verifies the declared source and `self`/exact revision binding.
 3. The preview returns requested permissions and lifecycle argument vectors and
@@ -38,7 +38,7 @@ staging paths.
 - Checkout size and file count are bounded. The manifest must be a small regular
   file, not a symlink.
 - The managed root defaults outside the source checkout and can be set with
-  `ODYSSEUS_EXTENSIONS_DIR`. A root inside Odysseus or a broad home/root target
+  `ODYSSEUS_EXTENSIONS_DIR`. A root inside Pandamonium or a broad home/root target
   is rejected.
 
 ## Lifecycle and recovery
@@ -46,7 +46,7 @@ staging paths.
 The built-in adapters accept either a static web entry point with inline
 schemas or a configured external web runtime with a bounded live catalog; both
 require empty install/start/stop/remove vectors. Every other runtime stops with
-a clear adapter requirement. An adapter is trusted Odysseus code; manifest text
+a clear adapter requirement. An adapter is trusted Pandamonium code; manifest text
 cannot make itself executable.
 
 Catalog registration happens only after pinned checkout, manifest validation,

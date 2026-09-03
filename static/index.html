@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Pandamonium</title>
-  <meta name="description" content="Pandamonium, powered by the Odysseus control plane.">
+  <meta name="description" content="Pandamonium, powered by the Pandamonium control plane.">
   <link rel="icon" type="image/png" href="/static/icons/pandamonium.png">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#07080c">
@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- Disable iOS / Android auto-linkifying of numbers (phone/date/address)
        in email bodies — was wrapping random digits in <a href="tel:..."> with
-       browser-default styling that didn't match the Odysseus theme. -->
+       browser-default styling that didn't match the Pandamonium theme. -->
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
   <link rel="apple-touch-icon" href="/static/icons/pandamonium.png">
   <script nonce="{{CSP_NONCE}}">
@@ -694,7 +694,7 @@
     <div class="rail-resize-handle" id="rail-resize-handle"></div>
     <!-- Static: core actions -->
     <button class="icon-rail-btn" id="rail-search-btn" title="Search conversations (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
-    <button class="icon-rail-btn" id="rail-jarvis-call" title="WhoAmI call" aria-label="WhoAmI call"></button>
+    <button class="icon-rail-btn" id="rail-jarvis-call" title="Pandamonium call" aria-label="Pandamonium call"></button>
     <button class="icon-rail-btn rail-new-chat" id="rail-new-session" title="New chat"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     <button class="icon-rail-btn" id="rail-delete-session" title="Delete session">&#x2715;</button>
     <div class="rail-separator"></div>
@@ -1074,10 +1074,10 @@
       <div id="jarvis-activity-rail" class="jarvis-activity-rail" role="region" aria-label="Live worker activity"></div>
       <div class="jarvis-call-copy">
         <div class="jarvis-call-topline">
-          <span class="jarvis-call-name">WhoAmI</span>
+          <span class="jarvis-call-name">Pandamonium</span>
           <span id="jarvis-call-status" class="jarvis-call-status">Ready</span>
         </div>
-        <div id="jarvis-call-detail" class="jarvis-call-detail">WhoAmI is standing by.</div>
+        <div id="jarvis-call-detail" class="jarvis-call-detail">Pandamonium is standing by.</div>
         <div class="jarvis-call-turns">
           <span id="jarvis-call-transcript" class="jarvis-call-turn"></span>
           <span id="jarvis-call-reply" class="jarvis-call-turn"></span>
@@ -1238,7 +1238,7 @@
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
           </button>
-          <button type="button" class="jarvis-input-sphere" id="jarvis-input-sphere" title="WhoAmI live call" aria-label="WhoAmI live call">
+          <button type="button" class="jarvis-input-sphere" id="jarvis-input-sphere" title="Pandamonium live call" aria-label="Pandamonium live call">
             <span class="jarvis-sphere-core" aria-hidden="true"></span>
           </button>
         </div>
@@ -2493,7 +2493,7 @@
 
           <div class="admin-card admin-only" id="settings-brand-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>Harness Identity</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Name this installation and add your own logo. Forked from Odysseus.</div>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Name this installation and add your own logo. Forked from Pandamonium.</div>
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label" for="settings-brand-name">Name</label>
@@ -2524,7 +2524,7 @@
               </svg>
               Terminal Logs
             </h2>
-            <div class="admin-toggle-sub settings-system-logs-toggle-sub">Live diagnostic logs and system output from the underlying Odysseus control-plane process.</div>
+            <div class="admin-toggle-sub settings-system-logs-toggle-sub">Live diagnostic logs and system output from the underlying Pandamonium control-plane process.</div>
 
             <div class="settings-col settings-system-logs-col">
               <!-- Controls row -->
@@ -2678,7 +2678,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- Core-owned mount for reviewed, in-tree voice surfaces. -->
-  <div id="odysseus-voice-surface-root" hidden aria-hidden="true"></div>
+  <div id="pandamonium-voice-surface-root" hidden aria-hidden="true"></div>
 
 
 

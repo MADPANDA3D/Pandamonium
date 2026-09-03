@@ -10,8 +10,8 @@ import json
 import logging
 import os
 import re
-import asyncio 
 from typing import Any, Dict, List, Optional, Set, Tuple
+
 from src.database import McpServer, SessionLocal
 
 from src.runtime_paths import get_app_root
@@ -54,7 +54,7 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
             f"{raw_error}\n\n"
             "Browser MCP could not start. On fresh installs, cache the Playwright MCP package once before connecting:\n\n"
             "npx -y @playwright/mcp@latest --version\n\n"
-            "Then restart Odysseus and reconnect the Browser MCP server."
+            "Then restart Pandamonium and reconnect the Browser MCP server."
         )
 
     return raw_error
@@ -381,17 +381,14 @@ class McpManager:
 
                 # Discover tools
                 tools_result = await session.list_tools()
-
-            self._sessions[server_id] = session
-            self._stacks[server_id] = stack
-            self._tools[server_id] = tools
-            self._connections[server_id] = {
-                "status": "connected",
-                "name": name,
-                "transport": "sse",
-                "tool_count": len(tools),
-                "server_info": _mcp_server_info(initialized),
-            }
+                tools = []
+                for tool in tools_result.tools:
+                    tools.append({
+                        "name": tool.name,
+                        "description": tool.description or "",
+                        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                        "annotations": getattr(tool, "annotations", None),
+                    })
 
                 self._sessions[server_id] = session
                 self._stacks[server_id] = stack
@@ -401,6 +398,7 @@ class McpManager:
                     "name": name,
                     "transport": "sse",
                     "tool_count": len(tools),
+                    "server_info": _mcp_server_info(initialized),
                 }
 
                 registered = True
@@ -596,10 +594,17 @@ class McpManager:
                     args=args,
                     env=env,
                     url=srv.url,
-                    headers=_static_http_headers(srv.oauth_tokens),
-                )
-        finally:
-            db.close()
+                    headers=_static_http_headers(getattr(srv, "oauth_tokens", None)),
+                ),
+                timeout=20,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Timed out connecting to %s", srv.name)
+            self._connections[srv.id] = {
+                "status": "timeout",
+                "error": "Timed out after 20 seconds",
+                "name": srv.name,
+            }
 
     async def call_tool(
         self,

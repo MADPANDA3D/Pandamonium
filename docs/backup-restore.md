@@ -1,8 +1,8 @@
 # Backup & Restore
 
-Odysseus keeps all of your state in the `data/` directory — the SQLite database
+Pandamonium keeps all of your state in the `data/` directory — the SQLite database
 (`app.db`), the Fernet encryption key (`data/.app_key`), the vault, memory, RAG
-indexes, personal documents, and uploads. The `scripts/odysseus-backup` tool
+indexes, personal documents, and uploads. The `scripts/pandamonium-backup` tool
 snapshots that directory into a single gzip tarball and restores it later.
 
 Snapshots are safe to take while the app is running: SQLite databases are copied
@@ -20,17 +20,17 @@ write can't corrupt the snapshot.
 Run the tool from the repository root:
 
 ```bash
-# Create a snapshot → backups/odysseus-backup-<YYYYMMDD-HHMMSS>.tar.gz
-./scripts/odysseus-backup snapshot
+# Create a snapshot → backups/pandamonium-backup-<YYYYMMDD-HHMMSS>.tar.gz
+./scripts/pandamonium-backup snapshot
 
 # List existing snapshots (most recent first)
-./scripts/odysseus-backup list
+./scripts/pandamonium-backup list
 
 # Check a tarball's integrity without extracting it
-./scripts/odysseus-backup verify backups/odysseus-backup-20260101-120000.tar.gz
+./scripts/pandamonium-backup verify backups/pandamonium-backup-20260101-120000.tar.gz
 
 # Restore (destructive — see the warning below)
-./scripts/odysseus-backup restore backups/odysseus-backup-20260101-120000.tar.gz --yes
+./scripts/pandamonium-backup restore backups/pandamonium-backup-20260101-120000.tar.gz --yes
 ```
 
 The script depends only on the Python standard library, so any `python3` on your
@@ -42,7 +42,7 @@ Every new snapshot embeds a `jos-p7.backup.v1` manifest with its scope, source
 version, exclusions, external-vector treatment, and restoration procedure. The
 snapshot result includes a SHA-256 digest but remains untrusted until `verify`
 succeeds. Verification writes an atomic `<archive>.verified.json` proof beside
-the tarball; Odysseus diagnostics use that proof when reporting rollback
+the tarball; Pandamonium diagnostics use that proof when reporting rollback
 availability.
 
 ## Commands
@@ -63,10 +63,10 @@ included.
 
 ```bash
 # Snapshot straight to a mounted NAS path
-./scripts/odysseus-backup snapshot --out /mnt/nas/odysseus-$(date +%F).tar.gz
+./scripts/pandamonium-backup snapshot --out /mnt/nas/pandamonium-$(date +%F).tar.gz
 
 # Full snapshot including research runs and mail attachments
-./scripts/odysseus-backup snapshot --include-research --include-attachments
+./scripts/pandamonium-backup snapshot --include-research --include-attachments
 ```
 
 ### `list`
@@ -100,7 +100,7 @@ The tarball output composes cleanly with cron and any copy tool. For example, a
 nightly snapshot copied offsite:
 
 ```cron
-0 3 * * *  cd /path/to/odysseus && ./scripts/odysseus-backup snapshot --out "/mnt/nas/odysseus-$(date +\%F).tar.gz"
+0 3 * * *  cd /path/to/Pandamonium && ./scripts/pandamonium-backup snapshot --out "/mnt/nas/pandamonium-$(date +\%F).tar.gz"
 ```
 
 Swap the `--out` target for `scp`, `rclone`, `s3cmd`, or similar to push the
@@ -122,7 +122,7 @@ where you run it matters:
 
 > **ChromaDB caveat (Docker only).** In the Docker setup, ChromaDB stores its
 > vectors in a separate Compose-managed volume (declared as `chromadb-data`),
-> **not** under `./data`. `odysseus-backup` therefore does not capture the Docker
+> **not** under `./data`. `pandamonium-backup` therefore does not capture the Docker
 > ChromaDB store. Back it up separately if you need it. Compose prefixes the
 > volume with the project name, so find the real name first
 > (`docker volume ls | grep chromadb`), then archive it — for example:

@@ -1,8 +1,12 @@
-# Odysseus Voice Orb
+# Pandamonium Voice Orb
 
-Odysseus Voice Orb is a beta voice, media, and orchestration surface maintained in the MADPANDA3D fork of Odysseus. It keeps normal Odysseus conversation available without workers, while optionally exposing fixed, read-only worker adapters.
+Pandamonium Voice Orb is the in-tree voice, media, and orchestration surface. It
+keeps normal Pandamonium conversation available without workers, while optionally
+exposing fixed, read-only worker adapters.
 
-This release is a maintained fork, not an installable plugin. Odysseus does not currently provide a stable application-plugin ABI capable of safely hosting the feature. The fork will follow upstream extension work and can be extracted only after a real host contract exists.
+Voice Orb is not an independently installable plugin. It can be extracted only
+after a stable host contract provides the required trust, permission, update, and
+compatibility boundaries.
 
 ## Releases
 
@@ -13,12 +17,14 @@ This release is a maintained fork, not an installable plugin. Odysseus does not 
 | v0.2-alpha.1 | `voice-orb-v0.2.0-alpha.1` | User-initiated camera frames and allowlisted local media |
 | v0.3.0-beta.1 | `voice-orb-v0.3.0-beta.1` | Guided setup parity and explicit admin-only Tailnet model discovery |
 
-v0.3 keeps the v0.2 camera/media contracts and adds the bounded setup and discovery behavior described below. These remain maintained-fork releases, not plugins.
+The historical v0.3 release kept the v0.2 camera/media contracts and added the
+bounded setup and discovery behavior described below. These tags remain available
+for provenance and rollback.
 
 ## v0.3.0-beta.1 scope
 
 - First-party Canvas, CSS, and Web Audio orb with no remote rendering bundle.
-- Microphone capture, configured STT and TTS providers, interruption, and conversation through the current/default Odysseus model.
+- Microphone capture, configured STT and TTS providers, interruption, and conversation through the current/default Pandamonium model.
 - Exact foreground commands: `open Calendar`, `close this document`, `minimize this document`, and `what view is open?`.
 - Optional fixed worker adapters: `pc-codex`, `hermes`, and disabled-by-default `vps-codex`.
 - Read-only worker execution, attributed progress, cancellation, and reload reconstruction.
@@ -32,7 +38,7 @@ v0.3 keeps the v0.2 camera/media contracts and adds the bounded setup and discov
 - Admin-only Tailnet peer listing returns opaque IDs without probing, followed only by an explicit selected-peer model probe of at most five listed peers.
 - Fixed-worker readiness counts only explicitly configured adapters whose bounded health check is ready; Tailnet visibility never implies a healthy worker cluster.
 
-The camera slice does not interpret compound commands such as “Open your eyes and describe what you see.” The beta does not include continuous recording, surveillance, face recognition, arbitrary media URLs, arbitrary DOM control, arbitrary worker-module loading, workspace mutation, automatic or blind Tailnet discovery, agent discovery, or an installer that patches an existing Odysseus checkout. It never runs `tailscale up`, changes ACLs or Funnel, enrolls devices, or widens bind addresses.
+The camera slice does not interpret compound commands such as “Open your eyes and describe what you see.” Voice Orb does not include continuous recording, surveillance, face recognition, arbitrary media URLs, arbitrary DOM control, arbitrary worker-module loading, workspace mutation, automatic or blind Tailnet discovery, agent discovery, or a source-rewriting installer. It never runs `tailscale up`, changes ACLs or Funnel, enrolls devices, or widens bind addresses.
 
 ## Documentation
 
@@ -51,4 +57,7 @@ The camera slice does not interpret compound commands such as “Open your eyes 
 
 ## License and public boundary
 
-The fork is distributed under AGPL-3.0-or-later, matching upstream. Private Mark Notes are documentation outside this repository; credentials, private topology, personal or business data, and unlicensed media are excluded for security and legal reasons.
+Pandamonium is distributed under AGPL-3.0-or-later, matching upstream. Private
+Mark Notes are documentation outside this repository; credentials, private
+topology, personal or business data, and unlicensed media are excluded for
+security and legal reasons.

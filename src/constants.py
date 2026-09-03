@@ -2,7 +2,10 @@
 """Application-wide constants and configuration values."""
 import os
 
+from src.env_compat import apply_legacy_env_aliases
 from src.runtime_paths import get_app_root, get_default_data_dir, get_default_extensions_dir
+
+apply_legacy_env_aliases()
 
 APP_VERSION = "1.0.1"
 
@@ -112,7 +115,7 @@ DEFAULT_MAX_TOKENS = 0
 
 
 def internal_api_base() -> str:
-    """Base URL for in-process loopback calls to Odysseus's own API.
+    """Base URL for in-process loopback calls to Pandamonium's own API.
 
     Agent tools and background jobs reach admin-gated routes by calling the
     running server over HTTP. Resolution order:

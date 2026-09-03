@@ -321,7 +321,7 @@ async def test_mcp_draft_email_document_uses_hidden_owner(monkeypatch):
         },
     )
 
-    assert "Created Odysseus email draft" in out[0].text
+    assert "Created Pandamonium email draft" in out[0].text
     docs = [obj for obj in saved if isinstance(obj, FakeDocument)]
     assert len(docs) == 1
     assert docs[0].owner == "alice"

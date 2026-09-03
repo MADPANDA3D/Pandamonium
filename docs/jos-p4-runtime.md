@@ -1,6 +1,6 @@
 # JOS-P4 Runtime Baseline
 
-Odysseus now records one canonical action lifecycle around its existing native
+Pandamonium now records one canonical action lifecycle around its existing native
 runners. The implementation does not add a second dispatcher.
 
 ## Runtime contract

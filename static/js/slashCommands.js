@@ -333,7 +333,7 @@ function slashReply(text) {
   div.className = 'msg msg-ai';
   const role = document.createElement('div');
   role.className = 'role';
-  role.textContent = 'Pandamonium';
+  role.textContent = getBrandName();
   div.appendChild(role);
   const body = document.createElement('div');
   body.className = 'body';
@@ -452,7 +452,7 @@ function typewriterReply(text, options = {}) {
     div.className = 'msg msg-ai';
     const role = document.createElement('div');
     role.className = 'role';
-    role.textContent = 'Pandamonium';
+    role.textContent = getBrandName();
     div.appendChild(role);
     const body = document.createElement('div');
     body.className = 'body';
@@ -492,7 +492,7 @@ function typewriterBlocksReply(blocks, options = {}) {
     div.className = 'msg msg-ai';
     const role = document.createElement('div');
     role.className = 'role';
-    role.textContent = 'Pandamonium';
+    role.textContent = getBrandName();
     div.appendChild(role);
     const body = document.createElement('div');
     body.className = 'body';
@@ -2493,7 +2493,7 @@ async function _cmdDemo(args, ctx) {
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   // ── Welcome ──
-  await typewriterReply('Welcome to Pandamonium. This is your private AI control plane — let’s take a quick tour.');
+  await typewriterReply(`Welcome to ${getBrandName()}. This is your private AI control plane — let’s take a quick tour.`);
   // Beat between the welcome line and the first hint so it doesn't snap in.
   await delay(900);
 
@@ -5303,7 +5303,7 @@ const _ODYSSEY_QUOTES = [
   "A man who has been through bitter experiences and travelled far enjoys even his sufferings after a time.",
   "For a friend with an understanding heart is worth no less than a brother.",
   "The wine urges me on, the bewitching wine, which sets even a wise man to singing and to laughing gently.",
-  "I am Odysseus, son of Laertes, known to all for my cunning. My fame reaches even unto heaven.",
+  "I am Pandamonium, son of Laertes, known to all for my cunning. My fame reaches even unto heaven.",
 ];
 
 const _8BALL = [
@@ -5345,7 +5345,7 @@ function _eggRender(html) {
   div.className = 'msg msg-ai';
   const role = document.createElement('div');
   role.className = 'role';
-  role.textContent = 'Pandamonium';
+  role.textContent = getBrandName();
   div.appendChild(role);
   const body = document.createElement('div');
   body.className = 'body';

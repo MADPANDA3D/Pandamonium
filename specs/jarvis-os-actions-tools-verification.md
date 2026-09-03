@@ -8,11 +8,11 @@
 
 **Runtime record:** [JOS-P4 runtime baseline](../docs/jos-p4-runtime.md)
 
-**Execution owner:** Odysseus
+**Execution owner:** Pandamonium
 
 ## Purpose
 
-A model may propose an action. Only Odysseus may turn that proposal into an
+A model may propose an action. Only Pandamonium may turn that proposal into an
 authorized execution and a verified result.
 
 `JOS-P4` defines the lifecycle shared by built-in tools, MCP tools, UI controls,
@@ -23,14 +23,14 @@ action is authorized.
 
 Every action follows this path:
 
-1. **Discover** — Odysseus builds the live capability catalog.
+1. **Discover** — Pandamonium builds the live capability catalog.
 2. **Select** — `JOS-P2` exposes only relevant capabilities for this turn.
 3. **Propose** — the engine emits an untrusted structured call.
 4. **Normalize** — the adapter maps provider syntax to a canonical call.
-5. **Validate** — Odysseus checks name, schema, arguments, limits, and state.
+5. **Validate** — Pandamonium checks name, schema, arguments, limits, and state.
 6. **Authorize** — `JOS-P5` returns an allow, deny, or approval-required result.
 7. **Execute** — the responsible native runner performs the bounded action.
-8. **Correlate** — Odysseus matches the result to the request and call.
+8. **Correlate** — Pandamonium matches the result to the request and call.
 9. **Verify** — explicit result fields or a verifier establish the outcome.
 10. **Record** — events, result, timing, actor, and evidence enter canonical
     task/session history.
@@ -79,7 +79,7 @@ proves the first execution did not start.
 
 ## Capability catalog
 
-Odysseus MUST compose the effective catalog from existing built-in schemas,
+Pandamonium MUST compose the effective catalog from existing built-in schemas,
 enabled MCP servers, active extension catalogs, and available worker actions.
 
 - Every name is unique within the effective turn catalog.
@@ -119,7 +119,7 @@ bounded action loop or end visibly; they do not recurse without limit.
 
 ## Multi-action turns
 
-Jarvis MAY compose multiple allowed actions. Odysseus MUST preserve order and
+Jarvis MAY compose multiple allowed actions. Pandamonium MUST preserve order and
 dependencies, return each result before the next dependent decision, and stop
 or compensate according to declared failure policy. Partial success is reported
 as partial success with the successful and failed calls identified.

@@ -26,7 +26,7 @@ Run worker services with least privilege, a dedicated OS account, a read-only ex
 
 ## Network boundary
 
-Keep Odysseus on loopback or behind an authenticated HTTPS reverse proxy/private access gateway. Keep model and worker ports private. Restrict `ALLOWED_ORIGINS`, set `SECURE_COOKIES=true` behind HTTPS, and never enable the development localhost bypass on a shared deployment.
+Keep Pandamonium on loopback or behind an authenticated HTTPS reverse proxy/private access gateway. Keep model and worker ports private. Restrict `ALLOWED_ORIGINS`, set `SECURE_COOKIES=true` behind HTTPS, and never enable the development localhost bypass on a shared deployment.
 
 Default model discovery never reads Tailscale state. Tailnet discovery is an
 admin-only, explicit two-step operation: `tailnet_peers` returns short-lived

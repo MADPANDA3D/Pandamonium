@@ -82,7 +82,7 @@ def _hermes_agent_context_messages(sess) -> List[Dict[str, Any]]:
     """Build Hermes passthrough from the latest user turn only.
 
     Hermes has its own agent context and tool state. Replaying the full
-    Odysseus transcript into every Hermes API call resends tool schemas and
+    Pandamonium transcript into every Hermes API call resends tool schemas and
     stale prompts until local models hit 100% context.
     """
     for msg in reversed(getattr(sess, "history", []) or []):
@@ -1284,7 +1284,7 @@ def setup_chat_routes(
                 messages = _hermes_agent_context_messages(sess)
                 messages = _ensure_current_request_is_latest_user(messages, message)
                 logger.info(
-                    "Hermes API passthrough: stripped Odysseus context preface and local-chat assistant turns (%d ctx -> %d raw -> %d sent messages)",
+                    "Hermes API passthrough: stripped Pandamonium context preface and local-chat assistant turns (%d ctx -> %d raw -> %d sent messages)",
                     len(ctx.messages), raw_history_count, len(messages))
             else:
                 messages = _ensure_current_request_is_latest_user(ctx.messages, message)
@@ -1444,7 +1444,7 @@ def setup_chat_routes(
                                         last_metrics["context_tokens_after_trim"] = ctx.context_tokens_after_trim
                                     if ctx.context_length and last_metrics.get("input_tokens"):
                                         # Hermes reports aggregate input across its internal tool loop.
-                                        # Use the Odysseus->Hermes payload for context %, not cumulative spend.
+                                        # Use the Pandamonium->Hermes payload for context %, not cumulative spend.
                                         _ctx_input = estimate_tokens(messages) if hermes_agent_api else last_metrics["input_tokens"]
                                         pct = min(round((_ctx_input / ctx.context_length) * 100, 1), 100.0)
                                         last_metrics["context_percent"] = pct

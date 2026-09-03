@@ -37,7 +37,7 @@ def _token(args: argparse.Namespace) -> str:
         ]
         if valid:
             return valid[0]
-    raise RuntimeError("No valid Odysseus session token was supplied")
+    raise RuntimeError("No valid Pandamonium session token was supplied")
 
 
 def _get(base_url: str, path: str, token: str) -> dict:

@@ -200,7 +200,7 @@ def test_push_update_preserves_remote_meeting_fields_alarms_and_overrides():
         [FakeCalendar(REMOTE_URL, existing=existing)],
         CAL_ID,
         _ev(
-            summary="Odysseus title",
+            summary="Pandamonium title",
             rrule="FREQ=WEEKLY;COUNT=2",
             recurrence_exdates=["2026-07-01T14:00"],
         ),
@@ -210,7 +210,7 @@ def test_push_update_preserves_remote_meeting_fields_alarms_and_overrides():
     parsed = Calendar.from_ical(existing.data)
     master = next(event for event in parsed.walk("VEVENT") if "RECURRENCE-ID" not in event)
     override = next(event for event in parsed.walk("VEVENT") if "RECURRENCE-ID" in event)
-    assert str(master["SUMMARY"]) == "Odysseus title"
+    assert str(master["SUMMARY"]) == "Pandamonium title"
     assert str(master["ORGANIZER"]) == "mailto:host@example.com"
     assert master["ORGANIZER"].params["CN"] == "Host"
     assert str(master["ATTENDEE"]) == "mailto:leo@example.com"

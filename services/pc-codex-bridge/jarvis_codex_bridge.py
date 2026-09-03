@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:
     # The PC/VPS bridges are deployed as small standalone bundles. Their
     # installer copies core/atomic_io.py beside this script so the exact same
-    # durability helper remains available without the full Odysseus package.
+    # durability helper remains available without the full Pandamonium package.
     from atomic_io import atomic_write_json
 
 HOST = os.getenv("JARVIS_CODEX_BRIDGE_HOST", "127.0.0.1")
@@ -49,14 +49,14 @@ except json.JSONDecodeError as exc:
 if not isinstance(WORKSPACES, dict) or not WORKSPACES:
     raise RuntimeError("workspace_configuration_required")
 
-DEVELOPER_INSTRUCTIONS = os.getenv("JARVIS_CODEX_DEVELOPER_INSTRUCTIONS", "") or """You are PC Codex working for the authenticated operator through Odysseus.
+DEVELOPER_INSTRUCTIONS = os.getenv("JARVIS_CODEX_DEVELOPER_INSTRUCTIONS", "") or """You are PC Codex working for the authenticated operator through Pandamonium.
 Give short, useful commentary updates at meaningful milestones while you work.
 Do not narrate raw commands or internal reasoning. End with a standalone result.
 Only after a subtask is complete and verified by tool evidence, you may emit one commentary update as:
 [[ODYSSEUS_MILESTONE]] <one completed-subtask update>
 Do not use that marker for plans, activity, commands, estimates, or the final result.
 Respect the selected sandbox. Ask a focused question only when genuinely blocked.
-When the operator asks to open, show, or put a text document in Odysseus, finish with exactly one marker on its own line:
+When the operator asks to open, show, or put a text document in Pandamonium, finish with exactly one marker on its own line:
 [[ODYSSEUS_ARTIFACT path="path inside the active workspace" title="Human title"]]
 Only emit that marker for a file you verified exists inside the active workspace.
 """
@@ -131,8 +131,8 @@ def _task_developer_instructions(task: "Task") -> str:
         f"The selected source workspace is {source_root}. Read it using absolute paths. "
         f"{source_rule}\n"
         f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
-        "Keep generated reports and generated Odysseus artifacts there so Jarvis tasks do not clutter the source project. "
-        "Existing verified text documents in the selected source workspace may be emitted directly as Odysseus artifacts.\n"
+        "Keep generated reports and generated Pandamonium artifacts there so Jarvis tasks do not clutter the source project. "
+        "Existing verified text documents in the selected source workspace may be emitted directly as Pandamonium artifacts.\n"
     )
 
 
@@ -352,7 +352,7 @@ def _extract_artifacts(task: Task, text: str) -> str:
             and item[0].stat().st_size <= ARTIFACT_MAX_BYTES
         ), None)
         if not valid:
-            task.event("error", "Codex could not open that artifact as a supported Odysseus document.")
+            task.event("error", "Codex could not open that artifact as a supported Pandamonium document.")
             cleaned = cleaned.replace(match.group(0), "")
             continue
         candidate, relative = valid
@@ -362,7 +362,7 @@ def _extract_artifacts(task: Task, text: str) -> str:
         ).hexdigest()
         task.event(
             "artifact",
-            f"Opened {match.group(2) or candidate.stem} in Odysseus.",
+            f"Opened {match.group(2) or candidate.stem} in Pandamonium.",
             {
                 "artifact_key": fingerprint,
                 "title": (match.group(2) or candidate.stem)[:240],
@@ -407,7 +407,7 @@ def _handle_server_message(task: Task, message: dict) -> None:
         else:
             text = _extract_artifacts(task, text)
             if not text:
-                text = "The requested document is open in Odysseus."
+                text = "The requested document is open in Pandamonium."
         task.event("progress" if phase == "commentary" else "result", text, metadata)
     elif kind in {"commandExecution", "fileChange", "mcpToolCall", "webSearch"}:
         task.event("tool_activity", _safe_tool_text(item), {"item_type": kind})

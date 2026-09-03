@@ -424,7 +424,7 @@ def build_uploaded_file_manifest(att_ids: list, upload_handler, owner: Optional[
         ref = attachment_ref({**info, "id": info.get("id") or str(att_id)})
         ref.update({
             "id": ref["attachment_id"],
-            "uri": f"odysseus://attachment/{ref['attachment_id']}",
+            "uri": f"pandamonium://attachment/{ref['attachment_id']}",
             "read_policy": "owner_checked_upload",
             # Transitional compatibility: existing built-in tools can still use
             # this path, but only after owner, upload-root, and tool-root checks.

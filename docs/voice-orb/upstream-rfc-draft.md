@@ -4,9 +4,9 @@
 
 ## Purpose
 
-Voice Orb is a maintained-fork demonstration of authenticated voice, bounded foreground actions, read-only Calendar context, and user-initiated camera/media controls. This packet proposes four small host seams that are independently useful to Odysseus core. It does **not** propose merging the full fork delta, publishing a plugin wheel, or declaring a stable plugin ABI.
+Voice Orb is a maintained-fork demonstration of authenticated voice, bounded foreground actions, read-only Calendar context, and user-initiated camera/media controls. This packet proposes four small host seams that are independently useful to Pandamonium core. It does **not** propose merging the full fork delta, publishing a plugin wheel, or declaring a stable plugin ABI.
 
-The immediate goal is to make existing in-tree features compose through explicit contracts while Odysseus internals are still changing. External distribution can be reconsidered only after those contracts are stable and the project has made an explicit trust, compatibility, and governance decision.
+The immediate goal is to make existing in-tree features compose through explicit contracts while Pandamonium internals are still changing. External distribution can be reconsidered only after those contracts are stable and the project has made an explicit trust, compatibility, and governance decision.
 
 ## Current upstream context
 
@@ -24,7 +24,7 @@ The conservative interpretation is: stabilize the smallest core-owned adapters f
 
 - Distribution: maintained AGPL-3.0-or-later fork, not an installable plugin.
 - Compatibility: the machine-readable record names an exact canonical upstream commit; `plugin_abi` remains `null`.
-- Default behavior: normal Odysseus chat remains available with no worker configured.
+- Default behavior: normal Pandamonium chat remains available with no worker configured.
 - Optional surfaces: Voice Orb uses existing owner-scoped model/provider settings; workers are fixed, disabled by default, and read-only.
 - Public boundary: source, neutral tests, first-party assets, and setup documentation only. Credentials, operator topology, personal/business data, cloned voices, and unlicensed media are excluded.
 
@@ -34,7 +34,7 @@ This RFC asks upstream to evaluate four contracts, not to adopt the fork's produ
 
 Use a clean, authenticated deployment and neutral demonstration data. The recording should show only the following sequence:
 
-1. Start a linked voice conversation through the current/default Odysseus model.
+1. Start a linked voice conversation through the current/default Pandamonium model.
 2. Demonstrate interruption and End Voice stopping microphone and playback.
 3. Run the exact foreground actions `open Calendar`, `what view is open?`, `minimize this document`, and `close this document`.
 4. Ask one read-only Calendar question and show either fresh synchronized results or the explicit stale-data warning.
@@ -65,7 +65,7 @@ The host application, its authenticated owner, and explicitly configured provide
 | Data | Creation and transit | Retention | Stop / deletion boundary |
 |---|---|---|---|
 | Microphone audio | User opens Voice Orb and grants permission; audio goes to the selected browser, local, or endpoint STT path | No intentional raw-audio retention by Voice Orb; a local STT temporary file is deleted after transcription | Tracks stop on End Voice, interruption/error paths, page hide, or hidden-page transition |
-| Transcript and reply | Stored through normal linked-chat behavior and sent to the configured model/TTS path | Normal chat, voice-session, backup, and retention rules apply | User manages it through normal Odysseus data controls |
+| Transcript and reply | Stored through normal linked-chat behavior and sent to the configured model/TTS path | Normal chat, voice-session, backup, and retention rules apply | User manages it through normal Pandamonium data controls |
 | Synthesized speech | Browser TTS stays in the browser; server TTS may use the existing cache | Server-generated audio may remain in the normal TTS cache | Playback stops on interruption or End Voice; normal cache retention applies |
 | Camera frame | One explicit describe command captures one JPEG/PNG frame and sends it with the authenticated voice request | Raw bytes remain in browser/request memory and are not written to history, diagnostics, uploads, or caches | Request memory is released after analysis; every track is stopped by the camera lifecycle controls |
 | Camera stream | Top-level same-origin page owns the native video element; no audio track is requested | No continuous sampling or recording | `Close your eyes.`, End Voice, error, permission loss, track end, page hide, hidden-page transition, or media-mode switch |

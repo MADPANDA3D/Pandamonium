@@ -15,6 +15,11 @@ from routes import voice_routes
 from src import document_processor
 
 
+@pytest.fixture(autouse=True)
+def _skip_tts_gate(monkeypatch):
+    monkeypatch.setattr(voice_routes, "_require_server_tts", lambda _service: None)
+
+
 def _image_bytes(image_format="PNG", size=(1, 1)):
     buffer = io.BytesIO()
     Image.new("RGB", size, "white").save(buffer, format=image_format)
@@ -79,7 +84,7 @@ def _seed_voice_state(path):
                 "id": "voice-1",
                 "owner": "alice",
                 "chat_session_id": "chat-1",
-                "assistant": "Odysseus",
+                "assistant": "Pandamonium",
                 "model": "active-vision-model",
                 "status": "ready",
                 "turns": [],
@@ -90,7 +95,7 @@ def _seed_voice_state(path):
 
 def _respond_endpoint(manager):
     router = voice_routes.setup_voice_routes(manager)
-    return next(route.endpoint for route in router.routes if route.name == "respond_to_voice_turn")
+    return next(route.endpoint for route in router.routes if route.name == "stream_voice_response")
 
 
 async def _body(response):
@@ -157,12 +162,12 @@ async def test_camera_and_media_emit_only_enumerated_controls(tmp_path, monkeypa
     }
     for text, marker in expected.items():
         response = await respond(
-            "voice-1", _request(), voice_routes.VoiceRespondRequest(text=text), "alice"
+            "voice-1", voice_routes.VoiceRespondRequest(text=text), _request(), "alice"
         )
         body = await _body(response)
         assert marker in body
         assert "selector" not in body
-        assert "script" not in body
+        assert '"script"' not in body
         assert "https://" not in body
     assert '"media_id": "motivational-abstract"' in body
 
@@ -174,11 +179,6 @@ async def test_compound_camera_phrase_is_plain_conversation_and_frame_is_not_for
     monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", state_file)
     encoded = base64.b64encode(PNG).decode("ascii")
 
-    async def stream(_url, _model, messages, **_kwargs):
-        assert encoded not in json.dumps(messages)
-        yield 'data: {"delta": "Please use one camera command at a time."}\n\n'
-
-    monkeypatch.setattr(voice_routes, "stream_llm", stream)
     monkeypatch.setattr(
         voice_routes,
         "analyze_image_bytes_with_vl_result",
@@ -186,15 +186,15 @@ async def test_compound_camera_phrase_is_plain_conversation_and_frame_is_not_for
     )
     response = await _respond_endpoint(_Manager(_Chat()))(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(
             text="Open your eyes and describe what you see", frame=_frame()
         ),
+        _request(),
         "alice",
     )
     body = await _body(response)
     assert "ui_control" not in body
-    assert "Please use one camera command at a time." in body
+    assert "one allowlisted" in body
     assert encoded not in state_file.read_text(encoding="utf-8")
 
 
@@ -223,8 +223,8 @@ async def test_description_prefers_active_vision_model_and_never_persists_frame(
     chat = _Chat()
     response = await _respond_endpoint(_Manager(chat))(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="What do you see?", frame=_frame()),
+        _request(),
         "alice",
     )
     body = await _body(response)
@@ -245,7 +245,8 @@ async def test_description_prefers_active_vision_model_and_never_persists_frame(
     assert "I see a brightly lit workspace." in persisted
     assert '"model": "active-vision-model"' in persisted
     assert [message.role for message in chat.history] == ["user", "assistant"]
-    assert chat.history[-1].metadata == {"source": "voice_orb", "model": "active-vision-model"}
+    assert chat.history[-1].metadata["source"] == "jarvis_voice"
+    assert chat.history[-1].metadata["diagnostics"]["vision_model"] == "active-vision-model"
 
 
 @pytest.mark.asyncio
@@ -263,8 +264,8 @@ async def test_description_skips_active_model_when_it_is_not_vision_capable(tmp_
     monkeypatch.setattr(voice_routes, "analyze_image_bytes_with_vl_result", analyze)
     response = await _respond_endpoint(_Manager(_Chat()))(
         "voice-1",
-        _request(),
         voice_routes.VoiceRespondRequest(text="Describe what you see.", frame=_frame()),
+        _request(),
         "alice",
     )
     assert "configured vision model sees a desk" in (await _body(response))

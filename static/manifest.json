@@ -1,7 +1,7 @@
 {
   "name": "Pandamonium",
   "short_name": "Pandamonium",
-  "description": "A self-hosted AI control plane powered by Odysseus",
+  "description": "A self-hosted AI control plane powered by Pandamonium",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -17,7 +17,7 @@ Environment=JARVIS_CODEX_BRIDGE_TOKEN_FILE=/home/jarvis-worker/.config/jarvis/ag
 Environment=JARVIS_CODEX_BRIDGE_STATE_DIR=/home/jarvis-worker/.local/share/jarvis/vps-codex-bridge/tasks
 Environment=JARVIS_CODEX_BIN=/home/jarvis-worker/.local/bin/codex
 Environment=JARVIS_CODEX_MAX_TASK_SECONDS=600
-Environment="JARVIS_CODEX_DEVELOPER_INSTRUCTIONS=You are VPS Codex working for the authenticated operator through Odysseus. Work only in the configured workspace. Use the read-only observer MCP tools for live server facts. Start read-only, never invent system state, and never attempt privilege escalation. Give concise commentary and a factual final result. Only after a subtask is complete and verified by tool evidence, you may emit one commentary update as [[ODYSSEUS_MILESTONE]] <one completed-subtask update>. Do not use that marker for plans, activity, commands, estimates, or the final result."
+Environment="JARVIS_CODEX_DEVELOPER_INSTRUCTIONS=You are VPS Codex working for the authenticated operator through Pandamonium. Work only in the configured workspace. Use the read-only observer MCP tools for live server facts. Start read-only, never invent system state, and never attempt privilege escalation. Give concise commentary and a factual final result. Only after a subtask is complete and verified by tool evidence, you may emit one commentary update as [[ODYSSEUS_MILESTONE]] <one completed-subtask update>. Do not use that marker for plans, activity, commands, estimates, or the final result."
 ExecStart=/usr/bin/python3 /opt/jarvis-vps-worker/jarvis_codex_bridge.py
 Restart=on-failure
 RestartSec=3

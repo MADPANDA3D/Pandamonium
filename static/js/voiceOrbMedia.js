@@ -1,4 +1,4 @@
-// Browser-owned camera and allowlisted clip controller for Odysseus Voice Orb.
+// Browser-owned camera and allowlisted clip controller for Pandamonium Voice Orb.
 
 const VIDEO_ID = 'odysseus-voice-orb-media';
 const HOST_IDS = ['jarvis-call-orb', 'jarvis-call-panel'];

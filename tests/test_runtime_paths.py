@@ -25,7 +25,7 @@ def test_get_app_root_frozen_with_meipass():
 
 def test_get_app_root_frozen_without_meipass():
     """Verify that get_app_root falls back to the sys.executable parent directory when frozen but _MEIPASS is absent."""
-    mock_exe_path = os.path.join(os.path.abspath("mock_exe_dir"), "Odysseus.exe")
+    mock_exe_path = os.path.join(os.path.abspath("mock_exe_dir"), "Pandamonium.exe")
     with mock.patch.object(sys, "frozen", True, create=True), \
          mock.patch.object(sys, "executable", mock_exe_path, create=True):
         # Remove sys._MEIPASS if it exists in the test process environment

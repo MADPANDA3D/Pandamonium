@@ -18,23 +18,24 @@ PYTHON_BIN="$(command -v python)"
 
 # Reuse an existing matching group/user if the host's UID/GID already
 # corresponds to one in /etc/passwd (e.g. when the image is rebuilt
-# and "odysseus" already exists at the same id). Otherwise create.
+# and "pandamonium" already exists at the same id). Otherwise create.
 if ! getent group "$PGID" >/dev/null 2>&1; then
-    groupadd -g "$PGID" odysseus
+    groupadd -g "$PGID" pandamonium
 fi
 if ! getent passwd "$PUID" >/dev/null 2>&1; then
-    useradd -u "$PUID" -g "$PGID" -M -s /bin/sh -d /app odysseus
+    useradd -u "$PUID" -g "$PGID" -M -s /bin/sh -d /app pandamonium
 fi
 
-ODY_USER="$(getent passwd "$PUID" | cut -d: -f1)"
-[ -z "$ODY_USER" ] && ODY_USER=odysseus
+APP_USER="$(getent passwd "$PUID" | cut -d: -f1)"
+[ -z "$APP_USER" ] && APP_USER=pandamonium
 
 # Docker-socket group plumbing for the explicit host-Docker overlay. When
 # opted in, the socket is owned by root:<host docker gid>. Add the app user
 # to that group and later call gosu by username so supplementary groups are
 # retained.
 DOCKER_SOCK="${DOCKER_SOCK:-/var/run/docker.sock}"
-if [ "${ODYSSEUS_ENABLE_HOST_DOCKER:-}" = "true" ] && [ -S "$DOCKER_SOCK" ]; then
+HOST_DOCKER_ENABLED="${PANDAMONIUM_ENABLE_HOST_DOCKER:-${ODYSSEUS_ENABLE_HOST_DOCKER:-}}"
+if [ "$HOST_DOCKER_ENABLED" = "true" ] && [ -S "$DOCKER_SOCK" ]; then
     SOCK_GID="$(stat -c '%g' "$DOCKER_SOCK" 2>/dev/null || echo '')"
     if [ -n "$SOCK_GID" ] && [ "$SOCK_GID" != "0" ]; then
         if ! getent group "$SOCK_GID" >/dev/null 2>&1; then
@@ -42,7 +43,7 @@ if [ "${ODYSSEUS_ENABLE_HOST_DOCKER:-}" = "true" ] && [ -S "$DOCKER_SOCK" ]; the
         fi
         SOCK_GROUP="$(getent group "$SOCK_GID" | cut -d: -f1)"
         if [ -n "$SOCK_GROUP" ]; then
-            usermod -aG "$SOCK_GROUP" "$ODY_USER" 2>/dev/null || true
+            usermod -aG "$SOCK_GROUP" "$APP_USER" 2>/dev/null || true
         fi
     fi
 fi
@@ -138,9 +139,9 @@ export PATH="/app/.local/bin:$PATH"
 # Run first-time setup as the app user so data/ files get the right ownership.
 # setup.py is idempotent — skips auth.json / .env if they already exist.
 # || true so a setup failure never prevents the container from starting.
-"$GOSU_BIN" "$ODY_USER" "$PYTHON_BIN" /app/setup.py || true
+"$GOSU_BIN" "$APP_USER" "$PYTHON_BIN" /app/setup.py || true
 
 # Drop root and run the actual app. `gosu` is preferred over `su` /
 # `sudo` because it cleans up the process tree (no extra shell layer)
 # so signals (SIGTERM from `docker stop`) reach uvicorn directly.
-exec "$GOSU_BIN" "$ODY_USER" "$@"
+exec "$GOSU_BIN" "$APP_USER" "$@"

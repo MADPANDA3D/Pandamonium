@@ -14,7 +14,7 @@ Jarvis is the persistent operating system. An extension adds a capability
 domain to Jarvis without becoming a second agent, model, memory store, or
 authority layer.
 
-`JOS-EXT-1` defines the boundary between Odysseus and independently maintained
+`JOS-EXT-1` defines the boundary between Pandamonium and independently maintained
 projects adapted as Jarvis extensions. ORACLE is the first implementation of
 this contract and the pattern future open-source integrations must prove before
 the contract grows.
@@ -23,7 +23,7 @@ the contract grows.
 
 - Leo is the operator and final authority.
 - Jarvis is the stable identity and protocol-governed system.
-- Odysseus is the control plane, cockpit, state owner, and enforcement surface.
+- Pandamonium is the control plane, cockpit, state owner, and enforcement surface.
 - A reasoning model is a replaceable engine behind an adapter.
 - An extension supplies domain UI, state, data, and native actions.
 - Workers such as Gordon/Hermes and Codex remain separately routed services.
@@ -45,10 +45,10 @@ An extension MUST:
 4. execute actions inside the extension's existing native runner;
 5. return a correlated success or failure result for every requested action;
 6. reject unknown actions, malformed arguments, and unauthorized origins;
-7. remain optional so Odysseus works when the extension is absent;
+7. remain optional so Pandamonium works when the extension is absent;
 8. keep provider credentials and private data outside model context and Git.
 
-Odysseus MUST:
+Pandamonium MUST:
 
 1. discover and validate the live capability catalog;
 2. offer only the current turn's allowed capabilities to Jarvis;
@@ -68,14 +68,14 @@ The intended public installation experience may begin with a Git URL, similar
 to installing a community package. A repository is not compatible merely
 because it can be cloned, and cloning it does not authorize its code or tools.
 
-Before activation, Odysseus MUST:
+Before activation, Pandamonium MUST:
 
 1. read a versioned extension manifest or supported standard descriptor;
 2. identify the extension ID, source revision, runtime requirements,
    capabilities, schemas, permissions, health check, and removal procedure;
 3. present declared permissions for operator approval;
 4. pin the accepted source revision rather than tracking a mutable branch;
-5. install outside the Odysseus source tree through a bounded lifecycle;
+5. install outside the Pandamonium source tree through a bounded lifecycle;
 6. validate the live capability catalog before exposing tools;
 7. retain the prior working revision for rollback;
 8. remove the catalog, state, and tools cleanly on disable or uninstall.
@@ -89,7 +89,7 @@ public Git hosts and resolves `HEAD`, a named branch/tag, or an advertised full
 commit to one immutable revision. Preview uses a bounded Git checkout under the
 managed extension root, returns the manifest permissions and lifecycle vectors,
 and creates an exact P5 approval decision. Approval never authorizes undeclared
-setup scripts: only an installed Odysseus adapter may implement a runtime.
+setup scripts: only an installed Pandamonium adapter may implement a runtime.
 
 ## Manifest v1
 
@@ -129,7 +129,7 @@ catalogs, revision mismatches, and cross-extension name conflicts fail closed.
 Disabled extensions expose neither tools nor context metadata.
 
 `src/extension_installer.py` owns pinned source checkout and reversible package
-state outside the Odysseus source tree. It reuses P4 action validation, P5 exact
+state outside the Pandamonium source tree. It reuses P4 action validation, P5 exact
 approval receipts, P7 events, atomic JSON state, and the extension registry.
 Its built-in adapters support static web extensions with inline schemas,
 configured external web runtimes with bounded live catalogs, and reviewed
@@ -163,7 +163,7 @@ The adapter MUST:
 1. validate the immutable checkout, descriptor, selected paths, non-symlinked
    files, bounded text assets, strict supported skill frontmatter, unique skill
    IDs, and owner-scoped name collisions before activation;
-2. reuse Odysseus's existing `SkillsManager` storage, parsing, discovery,
+2. reuse Pandamonium's existing `SkillsManager` storage, parsing, discovery,
    invocation, enablement, and owner scope rather than introducing another
    skill root, registry, installer, or invocation path;
 3. copy only each reviewed skill directory into the native owner-scoped skill
@@ -196,7 +196,7 @@ revision, declared permission modes, and health result before registration.
 ### Browser-surface mount and result bridge
 
 An enabled `web` extension may expose its installed `runtime.entrypoint` at the
-configured runtime origin. Odysseus mounts at most one engaged surface in the
+configured runtime origin. Pandamonium mounts at most one engaged surface in the
 shared browser host; it does not copy the candidate UI or create another
 session or action bus. A disabled, uninstalled, unconfigured, malformed, or
 disengaged extension has no mounted frame and receives no calls.
@@ -231,7 +231,7 @@ equivalence gate both pass.
 
 A pinned extension may declare `runtime.type: mcp` with a
 `capabilities.descriptor.type: mcp`. The descriptor `reference` names one
-existing Odysseus `McpServer` runtime configuration. It is not a URL, command,
+existing Pandamonium `McpServer` runtime configuration. It is not a URL, command,
 credential, copied tool list, or second registry record. The referenced native
 MCP configuration MUST remain disabled for ordinary MCP exposure; the extension
 adapter alone reserves and connects it after JOS-EXT-1 reconciliation.
@@ -251,7 +251,7 @@ The adapter MUST:
    pinned revision during preview and again before activation, exposure, and
    every call; duplicate names, catalog drift, identity/revision mismatch, or a
    malformed schema fail closed;
-5. reserve the referenced server from Odysseus's ordinary MCP prompt/function
+5. reserve the referenced server from Pandamonium's ordinary MCP prompt/function
    catalog so its tools are exposed only while that extension is enabled and
    engaged through the existing P2 context, P4 action/result, P5 authority, and
    P7 evidence paths;
@@ -269,7 +269,7 @@ reference, sanitized server identity, manifest boundaries, pinned provenance,
 effective schemas, and result state.
 
 The adapter adds no shell runner or child-process supervisor. Stdio children
-remain owned by `McpManager` and inherit the Odysseus service/container process
+remain owned by `McpManager` and inherit the Pandamonium service/container process
 and resource envelope. Remote MCP transport is not admitted: SSE/HTTP endpoints
 must resolve to loopback configuration. Each extension call uses the manifest's
 bounded 1-30 second health timeout, a 64 KiB result ceiling, the registry's
@@ -281,10 +281,10 @@ the runtime's OS/container network policy.
 
 The minimum lifecycle is:
 
-1. **Discover** — Odysseus loads and validates the extension catalog.
+1. **Discover** — Pandamonium loads and validates the extension catalog.
 2. **Engage** — the extension surface becomes active and its scoped tools/state
    are mounted for Jarvis.
-3. **Operate** — Jarvis proposes one or more native calls; Odysseus validates,
+3. **Operate** — Jarvis proposes one or more native calls; Pandamonium validates,
    dispatches, and returns their results to the same agent loop.
 4. **Disengage** — the extension surface, state, and tool catalog are removed
    without changing Jarvis or the active engine.
@@ -298,11 +298,11 @@ Memorable phrases may be model guidance for native actions.
 | Change | Canonical repository |
 | --- | --- |
 | Extension-native UI, data, feeds, state, or actions | Extension repository |
-| Discovery, policy, agent loop, voice, lifecycle, or result enforcement | Odysseus |
+| Discovery, policy, agent loop, voice, lifecycle, or result enforcement | Pandamonium |
 | Installer, pinned component versions, and public distribution assembly | Jarvis OS distribution |
 | Improvement useful to the original project without Jarvis assumptions | Upstream project when practical |
 
-Forks retain their upstream remotes and history. Tested extension and Odysseus
+Forks retain their upstream remotes and history. Tested extension and Pandamonium
 versions are promoted by tag; the public distribution pins those versions. The
 development frankenbuild is an integration laboratory, not a release artifact.
 
@@ -314,9 +314,9 @@ development frankenbuild is an integration laboratory, not a release artifact.
 | Native catalog source | ORACLE `GEV_REALTIME_TOOLS` |
 | Native action runner | ORACLE client tool runner |
 | Origin-locked bridge | ORACLE `src/odysseusBridge.js` |
-| Catalog/state relay | Odysseus `static/js/jarvisVoice.js` |
-| Tool schemas and result correlation | Odysseus `routes/voice_routes.py` |
-| Engine tool loop | Odysseus `src/agent_loop.py` |
+| Catalog/state relay | Pandamonium `static/js/jarvisVoice.js` |
+| Tool schemas and result correlation | Pandamonium `routes/voice_routes.py` |
+| Engine tool loop | Pandamonium `src/agent_loop.py` |
 
 In ORACLE mode, Jarvis remains Jarvis. ORACLE contributes the globe, live data,
 scene state, and native actions. Jarvis chooses actions and explains verified
@@ -325,7 +325,7 @@ results through his existing voice and memory.
 ## Compatibility gate
 
 An extension is Jarvis-compatible only when these pass through the real
-Odysseus route:
+Pandamonium route:
 
 - catalog discovery and schema validation;
 - engage and disengage without changing Jarvis identity;
@@ -333,18 +333,18 @@ Odysseus route:
 - one multi-action request completed through the same Jarvis loop;
 - accurate capability explanation from the live catalog;
 - unknown, malformed, unavailable, and timed-out actions fail closed;
-- Odysseus remains functional with the extension disabled;
+- Pandamonium remains functional with the extension disabled;
 - a clean installation needs no private infrastructure values.
 - a differently named reference fixture passes without an ORACLE-specific core
   branch;
-- installation, disable, upgrade, rollback, and removal preserve Odysseus when
+- installation, disable, upgrade, rollback, and removal preserve Pandamonium when
   the extension is broken or unavailable.
 
 ## Non-goals
 
 - A second extension-specific agent or voice.
 - A hardcoded natural-language command engine.
-- Copying extension source into Odysseus.
+- Copying extension source into Pandamonium.
 - Building a generic SDK before a second extension proves the shared need.
 - Designing the deferred ORACLE vision helper.
 - Replacing the existing OpenAI-compatible engine transport.

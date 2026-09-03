@@ -2,7 +2,7 @@
 
 **Linear:** `MAD-751`
 
-Odysseus now has the smallest reference-neutral contract needed to admit
+Pandamonium now has the smallest reference-neutral contract needed to admit
 extension metadata before any Git installer or generic lifecycle host exists.
 
 ## Contract
@@ -30,7 +30,7 @@ The registry exposes validated schemas, extension IDs, and permission metadata
 for the existing agent-loop catalog. It has no install, fetch, shell, lifecycle,
 or execute method. Disabling a record clears its effective capabilities and
 removes it from engaged context output without affecting another extension or
-Odysseus itself.
+Pandamonium itself.
 
 ## Fixtures and boundaries
 

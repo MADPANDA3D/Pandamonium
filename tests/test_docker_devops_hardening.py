@@ -27,14 +27,15 @@ TEST_DOCS = [
 
 def _compose_env_names(path: Path) -> set[str]:
     compose = yaml.safe_load(path.read_text(encoding="utf-8"))
-    env = compose["services"]["odysseus"]["environment"]
+    env = compose["services"]["pandamonium"]["environment"]
     return {entry.split("=", 1)[0] for entry in env}
 
 
 def _upload_limit_env_names() -> set[str]:
     source = (ROOT / "src" / "upload_limits.py").read_text(encoding="utf-8")
-    return set(re.findall(r'"(ODYSSEUS_[A-Z_]*BYTES)"', source)) | {
-        "ODYSSEUS_CHAT_UPLOAD_MAX_BYTES"
+    legacy_names = set(re.findall(r'"(ODYSSEUS_[A-Z_]*BYTES)"', source))
+    return {name.replace("ODYSSEUS_", "PANDAMONIUM_", 1) for name in legacy_names} | {
+        "PANDAMONIUM_CHAT_UPLOAD_MAX_BYTES"
     }
 
 
@@ -73,11 +74,11 @@ def test_hardened_image_does_not_bundle_or_download_docker_cli():
 
 def test_host_docker_overlay_mounts_socket_and_adds_docker_group():
     overlay = yaml.safe_load(HOST_DOCKER_OVERLAY.read_text(encoding="utf-8"))
-    service = overlay["services"]["odysseus"]
+    service = overlay["services"]["pandamonium"]
 
     assert "/var/run/docker.sock:/var/run/docker.sock" in service["volumes"]
     assert "${DOCKER_GID:-963}" in service["group_add"]
-    assert "ODYSSEUS_ENABLE_HOST_DOCKER=true" in service["environment"]
+    assert "PANDAMONIUM_ENABLE_HOST_DOCKER=true" in service["environment"]
 
 
 def test_docker_entrypoint_gates_socket_group_plumbing_on_explicit_opt_in():
@@ -87,7 +88,7 @@ def test_docker_entrypoint_gates_socket_group_plumbing_on_explicit_opt_in():
     socket_group_block = script[block_start:block_end]
 
     opt_in_check = socket_group_block.index(
-        "[ \"${ODYSSEUS_ENABLE_HOST_DOCKER:-}\" = \"true\" ]"
+        "[ \"$HOST_DOCKER_ENABLED\" = \"true\" ]"
     )
     socket_check = socket_group_block.index("[ -S \"$DOCKER_SOCK\" ]")
     stat_socket = socket_group_block.index("stat -c")
@@ -102,8 +103,8 @@ def test_docker_entrypoint_does_not_resolve_root_commands_from_app_local_path():
     path_export = script.index('export PATH="/app/.local/bin:$PATH"')
     gosu_capture = script.index('GOSU_BIN="$(command -v gosu)"')
     python_capture = script.index('PYTHON_BIN="$(command -v python)"')
-    setup_call = script.index('"$GOSU_BIN" "$ODY_USER" "$PYTHON_BIN" /app/setup.py')
-    final_exec = script.index('exec "$GOSU_BIN" "$ODY_USER" "$@"')
+    setup_call = script.index('"$GOSU_BIN" "$APP_USER" "$PYTHON_BIN" /app/setup.py')
+    final_exec = script.index('exec "$GOSU_BIN" "$APP_USER" "$@"')
 
     assert gosu_capture < path_export < setup_call
     assert python_capture < path_export < setup_call

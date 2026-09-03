@@ -8,7 +8,7 @@ def test_app_owns_voice_surface_and_precaches_contract():
     index = (ROOT / "static/index.html").read_text(encoding="utf-8")
     worker = (ROOT / "static/sw.js").read_text(encoding="utf-8")
 
-    assert 'id="odysseus-voice-surface-root"' in index
+    assert 'id="pandamonium-voice-surface-root"' in index
     assert "'/static/js/voiceLifecycle.js'" in worker
 
 

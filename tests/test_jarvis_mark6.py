@@ -153,7 +153,7 @@ async def test_odysseus_document_open_routes_to_background_pc_codex(text, monkey
     ]
 
     assert calls[0][:2] == ("pc-codex", "home-lab")
-    assert "Odysseus is the default destination" in calls[0][2]
+    assert "Pandamonium is the default destination" in calls[0][2]
     assert "ODYSSEUS_ARTIFACT" in calls[0][2]
     task = next(event for event in events if event["type"] == "agent_task")
     assert task["foreground"] is False
@@ -196,7 +196,7 @@ async def test_compound_voice_request_starts_pc_and_hermes_as_scoped_tasks(monke
     assert events[-1]["diagnostics"]["guard_reason"] == (
         "delegation_multi_pc-codex_started_hermes_started"
     )
-    assert "Friday is opening the document in Odysseus" in events[-1]["assistant_text"]
+    assert "Friday is opening the document in Pandamonium" in events[-1]["assistant_text"]
     assert "Gordon is handling its part" in events[-1]["assistant_text"]
 
 
@@ -236,7 +236,7 @@ async def test_do_it_again_replays_the_latest_completed_worker_request(monkeypat
         "session_id": "chat-1",
         "owner": "leo",
         "status": "failed",
-        "prompt": "Open Mark 6 in Odysseus with ODYSSEUS_ARTIFACT.",
+        "prompt": "Open Mark 6 in Pandamonium with ODYSSEUS_ARTIFACT.",
     }
     calls = []
 
@@ -578,7 +578,7 @@ async def test_direct_gordon_failure_does_not_fall_back_to_jarvis_broker(monkeyp
     assert all(event["type"] != "agent_task" for event in events)
     assert events[-1]["task_ids"] == []
     assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon_unavailable"
-    assert events[-1]["diagnostics"]["character_name"] == "Odysseus"
+    assert events[-1]["diagnostics"]["character_name"] == "Pandamonium"
     assert "did not send that through Jarvis" in events[-1]["assistant_text"]
 
 

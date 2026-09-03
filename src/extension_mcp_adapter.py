@@ -1,4 +1,4 @@
-"""JOS-EXT-1 adapter over Odysseus's existing native MCP manager."""
+"""JOS-EXT-1 adapter over Pandamonium's existing native MCP manager."""
 
 from __future__ import annotations
 

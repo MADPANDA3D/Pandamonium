@@ -239,7 +239,7 @@ def _package_pip_update_status(
 
     if pkg.get("kind") == "system" or not pkg.get("pip"):
         return PackageUpdateStatus(
-            False, "Update this system dependency outside Odysseus."
+            False, "Update this system dependency outside Pandamonium."
         )
 
     name = pkg.get("name")
@@ -262,7 +262,7 @@ def _package_pip_update_status(
     if name == "vllm" and binaries.get("vllm") and not dists.get("vllm"):
         return PackageUpdateStatus(
             False,
-            "Using a vLLM CLI on PATH without Python package metadata; update it outside Odysseus.",
+            "Using a vLLM CLI on PATH without Python package metadata; update it outside Pandamonium.",
         )
 
     return PackageUpdateStatus(

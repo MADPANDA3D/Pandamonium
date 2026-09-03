@@ -886,7 +886,7 @@ async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {
             );
             uiModule.scrollHistory();
           }
-          // Text delta (Odysseus format)
+          // Text delta (Pandamonium format)
           else if (json.delta !== undefined) {
             if (_firstToken) { _firstToken = false; if (holderEl._spinner) { holderEl._spinner.destroy(); delete holderEl._spinner; } bodyEl.innerHTML = ''; }
             // Handle thinking tags from vLLM

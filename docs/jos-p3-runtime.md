@@ -1,6 +1,6 @@
 # JOS P3 runtime baseline
 
-Odysseus remains the canonical personal-memory owner. `data/memory.json` is the
+Pandamonium remains the canonical personal-memory owner. `data/memory.json` is the
 auditable ledger; Chroma and optional Qdrant collections are disposable
 retrieval projections.
 
@@ -57,7 +57,7 @@ repositories and never builds a graph during startup. Build one admitted root
 explicitly:
 
 ```bash
-scripts/odysseus-graphify build --root-id project
+scripts/pandamonium-graphify build --root-id project
 ```
 
 The fixed build is local, code-only, single-worker, and writes outside the
@@ -93,12 +93,12 @@ legacy `JARVIS_QDRANT_*` variables and existing MADPANDA knowledge data paths
 remain compatibility aliases. The canonical ledger/source set can rebuild any
 projection.
 
-The `scripts/odysseus-qdrant-parity` diagnostic compares owner-filtered counts,
+The `scripts/pandamonium-qdrant-parity` diagnostic compares owner-filtered counts,
 ranked canonical IDs, and cosine scores against the first canonical Chroma lane
 without changing the production read flag:
 
 ```bash
-scripts/odysseus-qdrant-parity \
+scripts/pandamonium-qdrant-parity \
   --owner OWNER_ID \
   --query "first representative query" \
   --query "second representative query"

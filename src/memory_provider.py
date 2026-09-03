@@ -37,7 +37,7 @@ class MemorySearchHit:
 
 
 class MemoryProvider(ABC):
-    """Base contract for Odysseus memory providers.
+    """Base contract for Pandamonium memory providers.
 
     The native memory provider should always be available. External providers
     can add recall/write behavior and their own tools without replacing the
@@ -100,10 +100,10 @@ class MemoryProvider(ABC):
 
 
 class NativeMemoryProvider(MemoryProvider):
-    """Provider adapter for Odysseus' built-in memory manager and vector store."""
+    """Provider adapter for Pandamonium' built-in memory manager and vector store."""
 
     provider_id = "native"
-    display_name = "Odysseus native memory"
+    display_name = "Pandamonium native memory"
 
     _CORE_FIELDS = {
         "id",

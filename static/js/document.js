@@ -18,6 +18,11 @@ import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { getBrandName } from './brand.js';
+import {
+  CLIENT_STATE_VERSION,
+  markClientStateView,
+  registerClientStateProvider,
+} from './clientState.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -3121,7 +3126,7 @@ import { getBrandName } from './brand.js';
 
   let _odysseusAttachMenu = null;
 
-  function _closeOdysseusAttachMenu() {
+  function _closePandamoniumAttachMenu() {
     if (_odysseusAttachMenu) {
       _odysseusAttachMenu.remove();
       _odysseusAttachMenu = null;
@@ -3131,15 +3136,15 @@ import { getBrandName } from './brand.js';
   }
 
   function _attachMenuOutsideClick(e) {
-    if (_odysseusAttachMenu && !_odysseusAttachMenu.contains(e.target)) _closeOdysseusAttachMenu();
+    if (_odysseusAttachMenu && !_odysseusAttachMenu.contains(e.target)) _closePandamoniumAttachMenu();
   }
 
   function _attachMenuEscape(e) {
     if (e.key !== 'Escape') return;
-    _closeOdysseusAttachMenu();
+    _closePandamoniumAttachMenu();
   }
 
-  function _positionOdysseusAttachMenu(anchor, menu) {
+  function _positionPandamoniumAttachMenu(anchor, menu) {
     const r = anchor?.getBoundingClientRect?.();
     if (!r) return;
     menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 310))}px`;
@@ -3159,7 +3164,7 @@ import { getBrandName } from './brand.js';
     return item.title || 'Untitled document';
   }
 
-  async function _stageOdysseusAttachment(kind, id) {
+  async function _stagePandamoniumAttachment(kind, id) {
     const doc = docs.get(activeDocId);
     if (!doc || doc.language !== 'email') return null;
     if (!doc._composeAtts) doc._composeAtts = [];
@@ -3180,7 +3185,7 @@ import { getBrandName } from './brand.js';
     return data;
   }
 
-  async function _stageOdysseusZip(items) {
+  async function _stagePandamoniumZip(items) {
     const doc = docs.get(activeDocId);
     if (!doc || doc.language !== 'email') return null;
     if (!doc._composeAtts) doc._composeAtts = [];
@@ -3201,31 +3206,31 @@ import { getBrandName } from './brand.js';
     return data;
   }
 
-  function _afterOdysseusAttachmentsAdded(count, label) {
+  function _afterPandamoniumAttachmentsAdded(count, label) {
     _renderComposeAttachments();
     clearTimeout(_autoSaveDebounce);
     _autoSaveDebounce = setTimeout(() => { saveDocument({ silent: true }); }, 800);
     if (uiModule) uiModule.showToast(count > 1 ? `Attached ${count} items` : `Attached ${label || 'item'}`);
   }
 
-  async function _attachOdysseusItem(kind, id, label, opts = {}) {
+  async function _attachPandamoniumItem(kind, id, label, opts = {}) {
     try {
-      const data = await _stageOdysseusAttachment(kind, id);
+      const data = await _stagePandamoniumAttachment(kind, id);
       if (!data) return;
-      _afterOdysseusAttachmentsAdded(1, label || data.filename);
-      if (!opts.keepOpen) _closeOdysseusAttachMenu();
+      _afterPandamoniumAttachmentsAdded(1, label || data.filename);
+      if (!opts.keepOpen) _closePandamoniumAttachMenu();
     } catch (err) {
-      console.error('Failed to attach Odysseus item:', err);
+      console.error('Failed to attach Pandamonium item:', err);
       if (uiModule) uiModule.showError(`Failed to attach from ${getBrandName()}`);
     }
   }
 
-  function _selectedOdysseusAttachRows(menu) {
+  function _selectedPandamoniumAttachRows(menu) {
     return Array.from(menu?.querySelectorAll?.('.email-odysseus-attach-row.is-selected') || []);
   }
 
-  function _syncOdysseusAttachSelection(menu) {
-    const selected = _selectedOdysseusAttachRows(menu);
+  function _syncPandamoniumAttachSelection(menu) {
+    const selected = _selectedPandamoniumAttachRows(menu);
     const bar = menu?.querySelector?.('.email-odysseus-attach-actions');
     const count = menu?.querySelector?.('.email-odysseus-attach-count');
     const attachBtn = menu?.querySelector?.('.email-odysseus-attach-selected');
@@ -3234,8 +3239,8 @@ import { getBrandName } from './brand.js';
     if (attachBtn) attachBtn.disabled = selected.length === 0;
   }
 
-  async function _attachSelectedOdysseusItems(menu) {
-    const rows = _selectedOdysseusAttachRows(menu);
+  async function _attachSelectedPandamoniumItems(menu) {
+    const rows = _selectedPandamoniumAttachRows(menu);
     if (!rows.length) return;
     const btn = menu.querySelector('.email-odysseus-attach-selected');
     if (btn) {
@@ -3253,18 +3258,18 @@ import { getBrandName } from './brand.js';
           : window.confirm(`Attach ${items.length} files as one zip?`);
       }
       if (zip) {
-        await _stageOdysseusZip(items);
+        await _stagePandamoniumZip(items);
         added = 1;
       } else {
         for (const item of items) {
-          await _stageOdysseusAttachment(item.kind, item.id);
+          await _stagePandamoniumAttachment(item.kind, item.id);
           added += 1;
         }
       }
-      _afterOdysseusAttachmentsAdded(added, zip ? 'odysseus-attachments.zip' : undefined);
-      _closeOdysseusAttachMenu();
+      _afterPandamoniumAttachmentsAdded(added, zip ? 'odysseus-attachments.zip' : undefined);
+      _closePandamoniumAttachMenu();
     } catch (err) {
-      console.error('Failed to attach selected Odysseus items:', err);
+      console.error('Failed to attach selected Pandamonium items:', err);
       if (uiModule) uiModule.showError(added ? `Attached ${added}, then failed` : `Failed to attach from ${getBrandName()}`);
       _renderComposeAttachments();
     } finally {
@@ -3275,7 +3280,7 @@ import { getBrandName } from './brand.js';
     }
   }
 
-  async function _loadOdysseusAttachItems(menu, kind) {
+  async function _loadPandamoniumAttachItems(menu, kind) {
     const list = menu.querySelector('.email-odysseus-attach-list');
     if (!list) return;
     menu.dataset.odyAttachKind = kind;
@@ -3298,7 +3303,7 @@ import { getBrandName } from './brand.js';
         : (Array.isArray(data?.documents) ? data.documents : Array.isArray(data?.items) ? data.items : []);
       if (!items.length) {
         list.innerHTML = `<div class="email-odysseus-attach-empty">${q ? 'No matches' : `No ${kind === 'gallery' ? 'images' : 'documents'}`}</div>`;
-        _syncOdysseusAttachSelection(menu);
+        _syncPandamoniumAttachSelection(menu);
         return;
       }
       list.innerHTML = '';
@@ -3332,14 +3337,14 @@ import { getBrandName } from './brand.js';
         row.addEventListener('click', (ev) => {
           ev.preventDefault();
           row.classList.toggle('is-selected');
-          _syncOdysseusAttachSelection(menu);
+          _syncPandamoniumAttachSelection(menu);
         });
-        row.addEventListener('dblclick', () => _attachOdysseusItem(kind, item.id, label, { keepOpen: false }));
+        row.addEventListener('dblclick', () => _attachPandamoniumItem(kind, item.id, label, { keepOpen: false }));
         list.appendChild(row);
       }
-      _syncOdysseusAttachSelection(menu);
+      _syncPandamoniumAttachSelection(menu);
     } catch (err) {
-      console.error('Failed to load Odysseus attach items:', err);
+      console.error('Failed to load Pandamonium attach items:', err);
       list.innerHTML = '<div class="email-odysseus-attach-empty">Could not load</div>';
     }
   }
@@ -3349,7 +3354,7 @@ import { getBrandName } from './brand.js';
       document.getElementById('doc-md-image-input')?.click();
       return;
     }
-    _closeOdysseusAttachMenu();
+    _closePandamoniumAttachMenu();
     const menu = document.createElement('div');
     menu.className = 'email-odysseus-attach-menu';
     menu.innerHTML = `
@@ -3382,27 +3387,27 @@ import { getBrandName } from './brand.js';
     `;
     document.body.appendChild(menu);
     _odysseusAttachMenu = menu;
-    _positionOdysseusAttachMenu(anchor, menu);
+    _positionPandamoniumAttachMenu(anchor, menu);
     menu.querySelector('.email-odysseus-attach-local')?.addEventListener('click', () => {
-      _closeOdysseusAttachMenu();
+      _closePandamoniumAttachMenu();
       document.getElementById('doc-email-file-input')?.click();
     });
     menu.querySelectorAll('[data-ody-attach-kind]').forEach(btn => {
-      btn.addEventListener('click', () => _loadOdysseusAttachItems(menu, btn.dataset.odyAttachKind));
+      btn.addEventListener('click', () => _loadPandamoniumAttachItems(menu, btn.dataset.odyAttachKind));
     });
     let attachSearchTimer = null;
     menu.querySelector('.email-odysseus-attach-search')?.addEventListener('input', () => {
       clearTimeout(attachSearchTimer);
       attachSearchTimer = setTimeout(() => {
-        _loadOdysseusAttachItems(menu, menu.dataset.odyAttachKind || 'document');
+        _loadPandamoniumAttachItems(menu, menu.dataset.odyAttachKind || 'document');
       }, 220);
     });
-    menu.querySelector('.email-odysseus-attach-selected')?.addEventListener('click', () => _attachSelectedOdysseusItems(menu));
+    menu.querySelector('.email-odysseus-attach-selected')?.addEventListener('click', () => _attachSelectedPandamoniumItems(menu));
     setTimeout(() => {
       document.addEventListener('click', _attachMenuOutsideClick, true);
       document.addEventListener('keydown', _attachMenuEscape, true);
     }, 0);
-    _loadOdysseusAttachItems(menu, 'document');
+    _loadPandamoniumAttachItems(menu, 'document');
   }
 
   function _isMarkdownImageFile(file) {

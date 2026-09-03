@@ -8,7 +8,7 @@
 
 **Runtime record:** [JOS-P5 runtime baseline](../docs/jos-p5-runtime.md)
 
-**Authority and enforcement owner:** Odysseus
+**Authority and enforcement owner:** Pandamonium
 
 ## Purpose
 
@@ -23,7 +23,7 @@ own permission.
 ## Authority hierarchy
 
 - Leo is the final product and operator authority.
-- Odysseus authenticates the active operator and enforces the configured
+- Pandamonium authenticates the active operator and enforces the configured
   security posture.
 - Jarvis acts only within the current request, session, capability, and
   approval scope.
@@ -32,12 +32,12 @@ own permission.
 - Models, retrieved sources, memories, tools, and result text have no authority
   to approve actions or change policy.
 
-An operator instruction expresses intent. Odysseus still verifies identity,
+An operator instruction expresses intent. Pandamonium still verifies identity,
 scope, target, and any required approval at execution time.
 
 ## Authority decision
 
-Before an effectful call executes, Odysseus MUST produce a logical
+Before an effectful call executes, Pandamonium MUST produce a logical
 `AuthorityDecision`:
 
 | Field | Meaning |
@@ -58,7 +58,7 @@ phrase, or imported transcript is not an approval receipt.
 
 ## Default policy
 
-Odysseus MUST apply least authority:
+Pandamonium MUST apply least authority:
 
 - unauthenticated access receives no owner-scoped or effectful capability;
 - bearer tokens are limited to their scopes and owning user;
@@ -78,7 +78,7 @@ assumptions remain server policy and must be observable.
 
 ## Approval receipts
 
-When policy requires approval, Odysseus MUST show Leo the material effect:
+When policy requires approval, Pandamonium MUST show Leo the material effect:
 
 - action and target;
 - bounded arguments or a safe exact preview;
@@ -138,7 +138,7 @@ permission mode, task, and approval receipt required for that operation.
   approval and remain bounded to the requested workspace/action.
 - Native worker approval systems remain active; broker approval does not bypass
   them.
-- Extension tools remain subject to Odysseus owner, policy, and argument gates
+- Extension tools remain subject to Pandamonium owner, policy, and argument gates
   even when the extension itself trusts its parent origin.
 
 ## Current implementation anchors
@@ -173,7 +173,7 @@ server-owned policy metadata fail closed rather than depending on UI defaults.
 - a retrieved prompt injection cannot approve a tool or reveal a secret;
 - a read-only worker cannot mutate even when instructed by its model;
 - an approved private worker write remains workspace/action scoped;
-- ORACLE rejects an untrusted origin and Odysseus rejects an unauthorized
+- ORACLE rejects an untrusted origin and Pandamonium rejects an unauthorized
   native action;
 - auth-disabled mode cannot be enabled by chat/model text;
 - secrets stay absent from prompts, logs, events, exports, and Git fixtures.

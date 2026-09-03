@@ -18,7 +18,7 @@ from core.atomic_io import atomic_write_json
 
 HOST = os.getenv("ODYSSEUS_CODEX_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.getenv("ODYSSEUS_CODEX_BRIDGE_PORT", "8040"))
-TOKEN_FILE = Path(os.getenv("ODYSSEUS_CODEX_BRIDGE_TOKEN_FILE", "odysseus-codex-token"))
+TOKEN_FILE = Path(os.getenv("ODYSSEUS_CODEX_BRIDGE_TOKEN_FILE", "pandamonium-codex-token"))
 STATE_DIR = Path(os.getenv("ODYSSEUS_CODEX_BRIDGE_STATE_DIR", "data/codex-bridge-tasks"))
 CODEX_BIN = os.getenv("ODYSSEUS_CODEX_BIN", "codex")
 CODEX_MODEL = os.getenv("ODYSSEUS_CODEX_MODEL", "").strip()
@@ -47,7 +47,7 @@ def _load_workspaces() -> dict[str, str]:
 WORKSPACES = _load_workspaces()
 DEVELOPER_INSTRUCTIONS = os.getenv(
     "ODYSSEUS_CODEX_DEVELOPER_INSTRUCTIONS",
-    "You are a read-only Codex worker for Odysseus. Inspect and explain the requested workspace. "
+    "You are a read-only Codex worker for Pandamonium. Inspect and explain the requested workspace. "
     "Do not modify files, install software, change services, or perform other side effects. "
     "Give concise progress updates and finish with one clear final result.",
 ).strip()
@@ -266,7 +266,7 @@ def _run_task(task: Task) -> None:
         task.send({
             "id": 1,
             "method": "initialize",
-            "params": {"clientInfo": {"name": "odysseus-codex-bridge", "version": "1.0"}},
+            "params": {"clientInfo": {"name": "pandamonium-codex-bridge", "version": "1.0"}},
         })
         _read_until(task, 1)
         task.send({"method": "initialized", "params": {}})
@@ -421,7 +421,7 @@ def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "OdysseusCodexBridge/1.0"
+    server_version = "PandamoniumCodexBridge/1.0"
 
     def log_message(self, _fmt: str, *_args) -> None:
         return
@@ -454,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
             _json(self, 200, {
                 "ok": True,
                 "worker": WORKER_ID,
-                "protocol": "odysseus-worker-v1",
+                "protocol": "pandamonium-worker-v1",
                 "permission_profile": "read_only_enforced",
                 "capabilities": ["tasks", "events", "cancel", "steer", "reply", "read_only"],
                 "workspaces": sorted(WORKSPACES),

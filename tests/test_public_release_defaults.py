@@ -147,7 +147,7 @@ def test_public_release_docs_keep_claim_states_and_security_risks_separate():
     ):
         assert risk in guide
     for value in (
-        "https://github.com/MADPANDA3D/odysseus/releases/tag/jarvis-os-v1.0.0",
+        "https://github.com/MADPANDA3D/Pandamonium/releases/tag/jarvis-os-v1.0.0",
         "ee470206b669a119b6740a71c98ae9cba8c23237",
         "jarvis-os-v1.0.0",
         "jos-v0.1.0",

@@ -32,5 +32,5 @@ def test_reduced_prompt_paths_keep_configured_identity_model_independent(monkeyp
         assert "persistent agent identity is Atlas" in system_prompt
         assert "identify yourself as Atlas" in system_prompt
         assert "replaceable reasoning engines" in system_prompt
-        assert "You are Odysseus" not in system_prompt
+        assert "You are Pandamonium" not in system_prompt
         assert prompt_messages[-1] == {"role": "user", "content": "Who are you?"}

@@ -3848,7 +3848,7 @@ data.setdefault("interface", {}).setdefault("displayName", "Personal")
 plugins = data.setdefault("plugins", [])
 entry = {
     "name": "odysseus",
-    "source": {"source": "local", "path": "./plugins/odysseus"},
+    "source": {"source": "local", "path": "./plugins/pandamonium"},
     "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
     "category": "Productivity",
 }
@@ -3856,7 +3856,7 @@ data["plugins"] = [item for item in plugins if item.get("name") != "odysseus"] +
 p.write_text(json.dumps(data, indent=2) + "\\n")
 PY
 codex plugin add odysseus@personal
-python3 ~/plugins/odysseus/scripts/odysseus_api.py capabilities`,
+python3 ~/plugins/pandamonium/scripts/pandamonium_api.py capabilities`,
   },
   claude: {
     label: 'Claude Agent',
@@ -3870,7 +3870,7 @@ export ODYSSEUS_API_TOKEN='${token}'
 mkdir -p ~/.claude
 curl -fsSL -H "Authorization: Bearer $ODYSSEUS_API_TOKEN" "$ODYSSEUS_URL/api/claude/plugin.zip" -o /tmp/odysseus-claude-skill.zip
 python3 -m zipfile -e /tmp/odysseus-claude-skill.zip ~/.claude/
-python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py capabilities`,
+python3 ~/.claude/skills/pandamonium/scripts/pandamonium_api.py capabilities`,
   },
 };
 
@@ -4296,7 +4296,7 @@ async function initUnifiedIntegrations() {
     formEl.innerHTML = `
       <div class="admin-card" style="margin-top:8px">
         <h2 style="font-size:13px">Google Calendar</h2>
-        <p style="font-size:11px;line-height:1.45;opacity:.72;margin:6px 0 12px">Connect through Google OAuth. Odysseus can view and edit events, but cannot manage calendar sharing or delete calendars.</p>
+        <p style="font-size:11px;line-height:1.45;opacity:.72;margin:6px 0 12px">Connect through Google OAuth. Pandamonium can view and edit events, but cannot manage calendar sharing or delete calendars.</p>
         ${account ? `<div style="font-size:11px;margin-bottom:12px">Connected as <strong>${esc(account.username || '')}</strong></div>` : ''}
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
           <button type="button" class="admin-btn-add" id="uf-google-calendar-connect" style="font-weight:600">${account ? 'Reconnect' : 'Connect Google Calendar'}</button>

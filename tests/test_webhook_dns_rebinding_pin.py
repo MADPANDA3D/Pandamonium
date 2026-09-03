@@ -116,7 +116,7 @@ def test_deliver_pins_to_validated_ip_end_to_end(monkeypatch):
         def do_POST(self):  # noqa: N802
             length = int(self.headers.get("Content-Length", 0))
             received["body"] = self.rfile.read(length)
-            received["event"] = self.headers.get("X-Odysseus-Event")
+            received["event"] = self.headers.get("X-Pandamonium-Event")
             self.send_response(200)
             self.end_headers()
 

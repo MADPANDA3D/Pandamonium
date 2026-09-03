@@ -8,7 +8,7 @@
 
 **Runtime record:** [JOS-P7 runtime baseline](../docs/jos-p7-runtime.md)
 
-**Operational state owner:** Odysseus
+**Operational state owner:** Pandamonium
 
 ## Purpose
 
@@ -42,7 +42,7 @@ fields remain stable across transports.
 
 ## Outcome taxonomy
 
-Odysseus MUST distinguish:
+Pandamonium MUST distinguish:
 
 - `succeeded` — required evidence exists;
 - `failed` — execution completed unsuccessfully;
@@ -90,7 +90,7 @@ Failures preserve canonical state:
 
 ## Recovery
 
-After process, engine, worker, extension, or index restart, Odysseus MUST be able
+After process, engine, worker, extension, or index restart, Pandamonium MUST be able
 to reconstruct the next valid state from canonical storage:
 
 1. load authenticated users, sessions, protocol/component versions, and policy;
@@ -149,7 +149,7 @@ verified.
 | Consolidated bounded service health | `src/service_health.py`, `routes/diagnostics_routes.py` |
 | Event-trigger persistence | `src/event_bus.py`, `src/task_scheduler.py` |
 | API data export/import | `routes/backup_routes.py` |
-| Full data snapshot, verify, and restore | `scripts/odysseus-backup`, `docs/backup-restore.md` |
+| Full data snapshot, verify, and restore | `scripts/pandamonium-backup`, `docs/backup-restore.md` |
 | Provider cooldown and stream failure guards | `src/llm_core.py` |
 | Protocol-specific deployment rollback records | Home Lab `HANDOVER.md` |
 

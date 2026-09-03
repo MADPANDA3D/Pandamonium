@@ -4,7 +4,7 @@
 
 ## Target branch
 
-- [ ] This PR targets **`dev`**, not `main`. All PRs land in `dev`; `main` is curated by the maintainer at each release. If your PR is on `main` by accident, click "Edit" on this PR and change the base.
+- [ ] This PR targets the canonical **`main`** branch.
 
 ## Linked Issue
 
@@ -24,8 +24,8 @@ Fixes #
 
 ## Checklist
 
-- [ ] I searched [open issues](https://github.com/MADPANDA3D/odysseus/issues) and [open PRs](https://github.com/MADPANDA3D/odysseus/pulls) — this is not a duplicate.
-- [ ] This PR targets `dev`
+- [ ] I searched [open issues](https://github.com/MADPANDA3D/Pandamonium/issues) and [open PRs](https://github.com/MADPANDA3D/Pandamonium/pulls) — this is not a duplicate.
+- [ ] This PR targets `main`
 - [ ] My changes are limited to the scope described above — no unrelated refactors or whitespace changes mixed in.
 - [ ] I actually ran the app (`docker compose up` or `uvicorn app:app`) and verified the change works end-to-end. Type-checks and unit tests are not enough.
 
@@ -43,7 +43,7 @@ Fixes #
 **Anything that changes what the UI looks like — buttons, icons, padding, colors, fonts, spacing, layout, CSS, HTML, SVG, or any `static/js/` module that draws to the DOM — needs all of the following. PRs that change rendering without these WILL be closed.**
 
 - [ ] **Screenshot or short clip** of the change in the running app, attached below. Mobile screenshot too if the change affects mobile.
-- [ ] **Style match**: the change uses WhoAmI's existing visual language. Specifically:
+- [ ] **Style match**: the change uses Pandamonium's existing visual language. Specifically:
   - Reuse existing CSS variables (`--red`, `--fg`, `--bg`, `--card`, `--border`, etc.) — do not introduce new color values, font sizes, or spacing units.
   - Reuse existing button/input/card/border classes. Don't invent parallel styling.
   - **No Unicode emoji in UI or code.** Use inline SVG (matching the monochrome icon style already in `static/index.html`) or plain text.

@@ -1,6 +1,6 @@
 # JOS-P6 Runtime Baseline
 
-JOS-P6 turns the existing Odysseus Skills and teacher-audit features into a
+JOS-P6 turns the existing Pandamonium Skills and teacher-audit features into a
 controlled learning lifecycle. It does not fine-tune a model and it does not
 let model confidence alter Jarvis behavior.
 

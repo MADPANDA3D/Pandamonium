@@ -8,7 +8,7 @@
 
 **Runtime record:** [JOS-P6 runtime baseline](../docs/jos-p6-runtime.md)
 
-**Promotion owner:** Odysseus under Leo's authority
+**Promotion owner:** Pandamonium under Leo's authority
 
 ## Purpose
 
@@ -124,7 +124,7 @@ version or the new approved version, never a partially written artifact.
 
 ## Evaluation suites
 
-Odysseus SHOULD maintain small versioned suites for:
+Pandamonium SHOULD maintain small versioned suites for:
 
 - engine compatibility (`JOS-P0`);
 - identity and prompt-injection stability (`JOS-P1`);

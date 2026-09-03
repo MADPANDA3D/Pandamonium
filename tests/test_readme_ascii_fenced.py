@@ -3,8 +3,8 @@
 Originally (#1390) the README opened with an ASCII-art banner that had to live
 inside a ``` code fence, otherwise GitHub's markdown collapsed its leading
 whitespace and box-drawing rules and rendered it misaligned. The README refresh
-(#4306) dropped that banner in favour of a centered wordmark image. The WhoAmI
-fork now opens with its own heading plus explicit Odysseus attribution, while
+(#4306) dropped that banner in favour of a centered wordmark image. The Pandamonium
+fork now opens with its own heading plus explicit Pandamonium attribution, while
 still catching the original failure mode if an un-fenced ASCII banner returns.
 """
 from pathlib import Path
@@ -22,10 +22,10 @@ def _fenced_segments(text: str):
     return parts[1::2]
 
 
-def test_readme_opens_with_whoami_title_and_upstream_credit():
+def test_readme_opens_with_pandamonium_title_and_maintainer_credit():
     head = "\n".join(README.read_text(encoding="utf-8").splitlines()[:15])
-    assert "WhoAmI Platform" in head
-    assert "fork of" in head and "Odysseus" in head
+    assert '<h1 align="center">Pandamonium</h1>' in head
+    assert "Maintained by MADPANDA3D" in head
 
 
 def test_reintroduced_ascii_banner_stays_fenced():

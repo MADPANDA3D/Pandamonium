@@ -4,7 +4,7 @@
 // fixed same-origin imports owned by the application source tree.
 
 export const VOICE_LIFECYCLE_VERSION = 1;
-export const VOICE_SURFACE_ROOT_ID = 'odysseus-voice-surface-root';
+export const VOICE_SURFACE_ROOT_ID = 'pandamonium-voice-surface-root';
 
 const EVENT_TYPES = new Set([
   'capture-started',
@@ -81,7 +81,7 @@ export function emitVoiceLifecycle(type, detail) {
   if (typeof window !== 'undefined'
       && typeof window.dispatchEvent === 'function'
       && typeof CustomEvent === 'function') {
-    window.dispatchEvent(new CustomEvent('odysseus:voice-lifecycle', { detail: payload }));
+    window.dispatchEvent(new CustomEvent('pandamonium:voice-lifecycle', { detail: payload }));
   }
   return payload;
 }

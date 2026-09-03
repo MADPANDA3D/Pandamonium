@@ -85,7 +85,7 @@ def test_mint_token_returns_raw_once_and_stores_only_a_hash(monkeypatch):
         monkeypatch.setattr(parent, "database", _db, raising=False)
 
     token_id, raw = P.mint_token("alice")
-    assert raw.startswith("ody_")
+    assert raw.startswith("pan_")
     # The persisted row stores a bcrypt hash + prefix, never the plaintext.
     assert _CAPTURED["token_hash"] != raw
     assert _CAPTURED["token_hash"].startswith("$2")  # bcrypt

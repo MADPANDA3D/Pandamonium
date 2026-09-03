@@ -1,23 +1,17 @@
-# Contributing to WhoAmI
+# Contributing to Pandamonium
 
 Thanks for helping. The project is moving quickly, so the best contributions are focused, easy to review, and easy to test.
 
-## Voice Orb fork contributions
+## Voice Orb contributions
 
-Voice Orb work in this maintained fork follows the same small-PR rule as upstream. Read the [Voice Orb contributor guide](docs/voice-orb/contributing.md) before changing voice, foreground-control, or worker surfaces. The public repository must never contain private Mark Notes, handovers, personal or client data, private topology, credentials, cloned voices, or media without redistribution rights.
+Voice Orb work follows the same small-PR rule as the rest of Pandamonium. Read the [Voice Orb contributor guide](docs/voice-orb/contributing.md) before changing voice, foreground-control, or worker surfaces. The public repository must never contain private Mark Notes, handovers, personal or client data, private topology, credentials, cloned voices, or media without redistribution rights.
 
-The alpha is a maintained fork, not a plugin. Do not add installers that rewrite Odysseus source files, inject scripts, accept arbitrary selectors or URLs, or dynamically load caller-selected worker modules.
+Voice Orb is an in-tree feature, not a plugin. Do not add installers that rewrite Pandamonium source files, inject scripts, accept arbitrary selectors or URLs, or dynamically load caller-selected worker modules.
 
 ## Branch model
 
-WhoAmI follows the upstream two-branch model:
-
-- **`dev`** — where all PRs land. Things can be in flux here; the merge button gets used freely.
-- **`main`** — what users run. Curated and tested by the maintainer. Fast-forwarded to a stable `dev` commit at each release.
-
-**Open your PR against `dev`, not `main`.** The GitHub "base" dropdown defaults to `dev`. If you opened a PR against `main` by accident, click "Edit" on the PR and change the base — no rebase needed.
-
-End-users cloning the repo will land on `dev` by default. To run the curated/stable version: `git checkout main` after clone.
+Pandamonium uses one canonical branch: **`main`**. Open every pull request against
+`main`; a passing, reviewed merge is immediately part of the history users clone.
 
 ## Before You Start
 
@@ -28,14 +22,14 @@ End-users cloning the repo will land on `dev` by default. To run the curated/sta
 
 ## Jarvis OS and extension work
 
-Jarvis OS work extends Odysseus; it does not create a second orchestrator beside
-it. Protocol enforcement belongs in the smallest existing Odysseus seam that
+Jarvis OS work extends Pandamonium; it does not create a second orchestrator beside
+it. Protocol enforcement belongs in the smallest existing Pandamonium seam that
 all affected requests already use. Extension-native behavior belongs in the
 extension repository.
 
 These are merge gates for protocol and extension changes:
 
-- **Preserve Odysseus.** Reuse its sessions, settings, model transport, tools,
+- **Preserve Pandamonium.** Reuse its sessions, settings, model transport, tools,
   memory, diagnostics, and UI before adding code. Do not duplicate a working
   subsystem or move files only to make the protocol layout look cleaner.
 - **Use the minimum solution.** For agent-assisted work, apply the Ponytail
@@ -48,7 +42,7 @@ These are merge gates for protocol and extension changes:
   credential, memory, or extension. Those values come from authenticated state,
   configuration, or a versioned extension manifest.
 - **Keep ownership explicit.** Generic protocol, discovery, policy, lifecycle,
-  and enforcement code belongs in Odysseus. Native UI, data, state, and actions
+  and enforcement code belongs in Pandamonium. Native UI, data, state, and actions
   belong in the extension's maintained fork. Personal constitutions, memories,
   documents, and infrastructure remain installation data.
 
@@ -62,8 +56,8 @@ state with optional extensions disabled.
 Docker is the recommended path for normal testing:
 
 ```bash
-git clone https://github.com/MADPANDA3D/odysseus.git
-cd odysseus
+git clone https://github.com/MADPANDA3D/Pandamonium.git
+cd Pandamonium
 cp .env.example .env
 docker compose up -d --build
 ```
@@ -94,7 +88,7 @@ For Docker-related changes:
 ```bash
 docker compose config
 docker compose up -d --build
-docker compose logs --tail=120 odysseus
+docker compose logs --tail=120 pandamonium
 ```
 
 Mention what you ran in the pull request description. If you could not run a check, say so.
@@ -115,7 +109,7 @@ Please keep PRs small. Large PRs that mix unrelated cleanup, formatting, refacto
 
 ## Style and visual changes
 
-WhoAmI preserves an intentional visual style inherited from Odysseus. PRs that ignore it will be closed without merge, no matter how correct the underlying code is.
+Pandamonium preserves an intentional visual style inherited from upstream Odysseus and refined by MADPANDA3D. PRs that ignore it will be closed without merge, no matter how correct the underlying code is.
 
 Before submitting any change that affects what the app looks like — buttons, icons, fonts, colors, spacing, layout, CSS, HTML, SVG, or any `static/js/` module that draws to the DOM — please:
 
@@ -135,8 +129,8 @@ If you are unsure whether a change is "visual," it is. Default to attaching a sc
 
 Don't hardcode values that the project already exposes through a constant or a helper. Hardcoded literals drift out of sync, break on non-default deployments, and reintroduce bugs we've already fixed.
 
-- **Filesystem paths:** never build writable paths from `Path(__file__)...` into the source tree, hardcode `/app/...`, or use a relative `"data/..."` string. Every persisted file and directory has a named constant in `src/constants.py` (for example `AUTH_FILE`, `USER_PREFS_FILE`, `SETTINGS_FILE`, `TTS_CACHE_DIR`, `CHROMA_DIR`). Import and use that named constant; do not re-derive the path locally with `os.path.join(DATA_DIR, "x.json")` or `DATA_DIR / "x.json"`. `DATA_DIR` is the single place that reads `ODYSSEUS_DATA_DIR`, so use it directly only for dynamic paths that have no fixed name (for example per-owner files). If a data file or directory has no constant yet, add one to `src/constants.py`. The source tree is read-only in Docker and `/app/...` does not exist on native runs; guard directory creation so an unwritable path degrades gracefully instead of crashing at import.
-- **Internal API / loopback URLs:** don't hardcode `http://localhost:7000`. Use `internal_api_base()` from `src.constants` (it honors `ODYSSEUS_INTERNAL_BASE` / `APP_PORT`).
+- **Filesystem paths:** never build writable paths from `Path(__file__)...` into the source tree, hardcode `/app/...`, or use a relative `"data/..."` string. Every persisted file and directory has a named constant in `src/constants.py` (for example `AUTH_FILE`, `USER_PREFS_FILE`, `SETTINGS_FILE`, `TTS_CACHE_DIR`, `CHROMA_DIR`). Import and use that named constant; do not re-derive the path locally with `os.path.join(DATA_DIR, "x.json")` or `DATA_DIR / "x.json"`. `DATA_DIR` is the single place that reads `PANDAMONIUM_DATA_DIR` (with `ODYSSEUS_DATA_DIR` retained as a compatibility alias), so use it directly only for dynamic paths that have no fixed name (for example per-owner files). If a data file or directory has no constant yet, add one to `src/constants.py`. The source tree is read-only in Docker and `/app/...` does not exist on native runs; guard directory creation so an unwritable path degrades gracefully instead of crashing at import.
+- **Internal API / loopback URLs:** don't hardcode `http://localhost:7000`. Use `internal_api_base()` from `src.constants` (it honors `PANDAMONIUM_INTERNAL_BASE`, its legacy alias, and `APP_PORT`).
 - **Ports, limits, model lists, and similar:** reuse the existing constant if one exists; if it doesn't and the value is used in more than one place, add a constant rather than copying the literal.
 
 If you need a value that has no constant or helper yet, add it to `src/constants.py` (the single source of truth for paths and config; `core/constants.py` only re-exports it for backward compatibility) and import it, rather than repeating a literal across files.

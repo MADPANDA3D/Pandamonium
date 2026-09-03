@@ -10,17 +10,17 @@ deployment details.
 
 | Evidence | Exact value |
 |---|---|
-| Source tag | [`voice-orb-v0.3.0-beta.1`](https://github.com/MADPANDA3D/odysseus/releases/tag/voice-orb-v0.3.0-beta.1) |
+| Source tag | [`voice-orb-v0.3.0-beta.1`](https://github.com/MADPANDA3D/Pandamonium/releases/tag/voice-orb-v0.3.0-beta.1) |
 | Source commit | `f726621efe9d313f6d49bc5eb3c6de4c32316a36` |
-| Release workflow | [`29435057533`](https://github.com/MADPANDA3D/odysseus/actions/runs/29435057533) |
-| OCI index | `ghcr.io/madpanda3d/odysseus@sha256:816f68c9b5cc4d093abd4be6e015822280d6d269f9ea8821c3c33ce444991017` |
+| Release workflow | [`29435057533`](https://github.com/MADPANDA3D/Pandamonium/actions/runs/29435057533) |
+| OCI index | `ghcr.io/madpanda3d/pandamonium@sha256:816f68c9b5cc4d093abd4be6e015822280d6d269f9ea8821c3c33ce444991017` |
 
 ## Clean demo setup
 
 1. Start the immutable image or source tag with authentication enabled.
 2. Sign in interactively and use a neutral linked chat.
 3. Configure a normal model, STT, TTS, and optional Vision model through
-   existing Odysseus settings. Do not speak or display credentials.
+   existing Pandamonium settings. Do not speak or display credentials.
 4. Use neutral Calendar fixtures if demonstrating the read-only Calendar
    facade. Do not display a real account or event.
 5. Leave workers and Tailnet inspection disabled; neither is part of the
@@ -70,8 +70,8 @@ execution, network discovery, or a stable external plugin ABI.
 ## Reproduce the public gates
 
 ```bash
-git clone --branch voice-orb-v0.3.0-beta.1 --depth 1 https://github.com/MADPANDA3D/odysseus.git
-cd odysseus
+git clone --branch voice-orb-v0.3.0-beta.1 --depth 1 https://github.com/MADPANDA3D/Pandamonium.git
+cd Pandamonium
 python -m pip install -r requirements.txt
 npm ci
 python -m pytest -q

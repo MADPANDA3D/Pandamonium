@@ -182,7 +182,7 @@ def test_static_brand_defaults_admin_gate_and_theme_logo_precedence():
     middleware = (ROOT / "core" / "middleware.py").read_text(encoding="utf-8")
 
     assert 'class="admin-card admin-only" id="settings-brand-card"' in index
-    assert manifest["name"] == manifest["short_name"] == "WhoAmI"
+    assert manifest["name"] == manifest["short_name"] == "Pandamonium"
     assert "const instanceBrand = window._instanceBrand" in theme
     assert "if (instanceBrand?.logo)" in theme
     assert "window.addEventListener('instance-brand-changed'" in theme
@@ -206,10 +206,10 @@ def test_high_visibility_app_copy_uses_runtime_brand_name():
     for source in files.values():
         assert "getBrandName" in source
 
-    assert "role.textContent = 'Odysseus'" not in files["slashCommands.js"]
-    assert "Welcome to Odysseus" not in files["slashCommands.js"]
-    assert '<div class="role">Odysseus</div>' not in files["chat.js"]
-    assert "Failed to attach from Odysseus" not in files["document.js"]
-    assert "Show Odysseus reminder emails" not in files["emailLibrary.js"]
-    assert "Odysseus app itself" not in files["cookbook.js"]
-    assert "install Odysseus keys" not in files["cookbook.js"]
+    assert "role.textContent = 'Pandamonium'" not in files["slashCommands.js"]
+    assert "Welcome to Pandamonium" not in files["slashCommands.js"]
+    assert '<div class="role">Pandamonium</div>' not in files["chat.js"]
+    assert "Failed to attach from Pandamonium" not in files["document.js"]
+    assert "Show Pandamonium reminder emails" not in files["emailLibrary.js"]
+    assert "Pandamonium app itself" not in files["cookbook.js"]
+    assert "install Pandamonium keys" not in files["cookbook.js"]

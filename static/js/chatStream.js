@@ -10,6 +10,7 @@ import sessionModule from './sessions.js';
 import documentModule from './document.js';
 import calendarModule from './calendar.js';
 import * as Modals from './modalManager.js';
+import { dispatchForegroundAction } from './foregroundActions.js';
 
 export function collectClientState() {
   const calendar = calendarModule.getViewState();
@@ -36,6 +37,8 @@ export function handleUIControl(uiData) {
   var esc = uiModule.esc;
 
   try {
+    if (dispatchForegroundAction(uiData)) return;
+
     if (String(uiEvent).startsWith('oracle_protocol_')) {
       window.jarvisVoice?.applyExtensionSurfaceControl?.(uiData);
 
@@ -148,16 +151,6 @@ export function handleUIControl(uiData) {
         // persists across refresh (saved with the message). No ephemeral
         // chip injection needed here anymore.
       }
-
-    } else if (uiEvent === 'open_view' && uiData.view === 'calendar') {
-      calendarModule.openCalendar();
-
-    } else if (uiEvent === 'close_view' && uiData.view === 'document') {
-      if (Modals.isMinimized('doc-panel')) Modals.close('doc-panel');
-      else if (documentModule.isPanelOpen()) documentModule.closePanel();
-
-    } else if (uiEvent === 'minimize_view' && uiData.view === 'document') {
-      if (documentModule.isPanelOpen()) documentModule.closePanel('down');
 
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;

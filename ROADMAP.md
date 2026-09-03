@@ -1,6 +1,6 @@
 # Roadmap / Help Wanted
 
-WhoAmI is an independent MADPANDA3D fork of Odysseus. The harness is moving fast, and focused feedback, testing, and contributions are welcome.
+Pandamonium is an independent MADPANDA3D fork of Pandamonium. The harness is moving fast, and focused feedback, testing, and contributions are welcome.
 
 If you see weird CSS, strange layout behavior, or a suspiciously murky corner of
 the codebase, you are probably right to stay away.

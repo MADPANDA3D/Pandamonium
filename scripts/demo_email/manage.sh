@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Manage the isolated email demo: a throwaway, local-only Dovecot user +
-# a switchable 'Demo' account in Odysseus + fake seed mail.
+# a switchable 'Demo' account in Pandamonium + fake seed mail.
 #
 #   ./manage.sh setup      # add Dovecot user, reload, create account, seed mail
 #   ./manage.sh reseed     # wipe + re-seed the fake mail (clean slate)
@@ -52,7 +52,7 @@ case "${1:-}" in
     "$PY" "$HERE/demo_account.py" setup
     "$PY" "$HERE/seed_demo_emails.py" --reset
     echo
-    echo "Done. In Odysseus, switch to the 'Demo' account to show off the inbox."
+    echo "Done. In Pandamonium, switch to the 'Demo' account to show off the inbox."
     ;;
   reseed)
     "$PY" "$HERE/seed_demo_emails.py" --reset

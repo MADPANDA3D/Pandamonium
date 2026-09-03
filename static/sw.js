@@ -1,4 +1,4 @@
-// static/sw.js — Odysseus PWA Service Worker
+// static/sw.js — Pandamonium PWA Service Worker
 // Strategy:
 //   - HTML (navigation): stale-while-revalidate. Instant open from cache,
 //     background refresh so the next open has latest HTML.
@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v369';
+const CACHE_NAME = 'pandamonium-v370';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -40,15 +40,11 @@ const PRECACHE = [
   '/static/js/chatRenderer.js',
   '/static/js/codeRunner.js',
   '/static/js/chatStream.js',
+  '/static/js/foregroundActions.js',
   '/static/js/jarvisVoice.js',
   '/static/js/voiceOrbMedia.js',
   '/static/voice-orb-media.json',
   '/static/js/chat.js',
-  '/static/js/voiceOrb.js',
-  '/static/js/voiceOrbMedia.js',
-  '/static/js/voiceOrbSetup.js',
-  '/static/js/voiceOrbWorkers.js',
-  '/static/voice-orb-media.json',
   '/static/js/cookbook.js',
   '/static/js/search-chat.js',
   '/static/js/compare/index.js',
