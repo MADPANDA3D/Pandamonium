@@ -61,6 +61,16 @@ def test_default_compose_files_do_not_mount_host_docker_socket():
         assert "/var/run/docker.sock" not in text, path.name
 
 
+def test_hardened_image_does_not_bundle_or_download_docker_cli():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "DOCKER_CLI_VERSION" not in dockerfile
+    assert "download.docker.com/linux/static" not in dockerfile
+    assert not re.search(
+        r"\b(docker\.io|docker-ce-cli|docker-cli|moby-cli)\b", dockerfile
+    )
+
+
 def test_host_docker_overlay_mounts_socket_and_adds_docker_group():
     overlay = yaml.safe_load(HOST_DOCKER_OVERLAY.read_text(encoding="utf-8"))
     service = overlay["services"]["odysseus"]

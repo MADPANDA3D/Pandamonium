@@ -421,11 +421,11 @@ def analyze_image_bytes_with_vl_result(
                     }
                 description = description[:8_000]
                 logger.info("VL analysis complete with model %s", _model)
-                return {"text": description, "model": _model}
+                return {"text": description[:8_000], "model": str(_model)[:200]}
             except Exception as e:
                 last_err = e
                 tag = "primary" if i == 0 else "candidate"
-                logger.warning(f"[vision fallback] {tag} {_model} failed ({type(e).__name__}); trying next")
+                logger.warning("[vision fallback] %s %s failed (%s); trying next", tag, _model, type(e).__name__)
                 continue
         raise last_err if last_err else RuntimeError("No vision model endpoint configured")
 

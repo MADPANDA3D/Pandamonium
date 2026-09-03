@@ -1,0 +1,3 @@
+services:
+  odysseus:
+    image: ${ODYSSEUS_IMAGE:?Set ODYSSEUS_IMAGE to the release manifest digest}

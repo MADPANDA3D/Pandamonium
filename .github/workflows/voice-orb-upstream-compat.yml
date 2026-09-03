@@ -1,0 +1,51 @@
+name: Voice Orb upstream compatibility
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-orb-upstream-compat
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Reapply public delta to upstream dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: "20"
+      - name: Fetch upstream and apply public delta
+        run: |
+          set -euo pipefail
+          base=$(python3 -c 'import json; print(json.load(open("docs/voice-orb/compatibility.json"))["upstream_commit"])')
+          git remote add canonical https://github.com/odysseus-dev/odysseus.git
+          git fetch --no-tags canonical dev
+          git diff --binary "$base" HEAD > "$RUNNER_TEMP/voice-orb.patch"
+          git worktree add "$RUNNER_TEMP/upstream-dev" canonical/dev
+          git -C "$RUNNER_TEMP/upstream-dev" apply --check "$RUNNER_TEMP/voice-orb.patch"
+          git -C "$RUNNER_TEMP/upstream-dev" apply "$RUNNER_TEMP/voice-orb.patch"
+      - name: Run bounded compatibility checks
+        working-directory: ${{ runner.temp }}/upstream-dev
+        run: |
+          python -m compileall -q app.py core routes src services scripts tests
+          node tests/test_foreground_control.js
+          node tests/test_voice_orb.js
+          node tests/test_voice_orb_media.js
+          node tests/test_voice_orb_setup.js
+          pip install -r requirements.txt
+          mkdir -p data
+          python -m pytest -q tests/test_voice_orb_routes.py

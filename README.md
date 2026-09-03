@@ -15,6 +15,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
+  <a href="docs/voice-orb/README.md">Voice Orb Beta</a> ·
   <a href="docs/setup.md">Setup Guide</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="ROADMAP.md">Roadmap</a>
@@ -29,6 +30,14 @@
 </p>
 
 ---
+
+## Odysseus Voice Orb beta
+
+This maintained fork adds an authenticated, first-party voice surface, guided setup status, bounded foreground and camera/media controls, optional fixed read-only workers, and explicit admin-only Tailnet model discovery. It is a beta fork distribution, **not an installable Odysseus plugin**; upstream does not yet expose a stable application-plugin contract.
+
+The beta works with no workers configured and uses the current/default Odysseus model unless an operator chooses an explicit voice-model override. `Check voice setup.` returns the same server-generated guidance and structured status used by the authenticated status surface. Start with the [Voice Orb overview](docs/voice-orb/README.md), then read [installation](docs/voice-orb/install.md), [provider setup](docs/voice-orb/providers.md), and the [security model](docs/voice-orb/security.md).
+
+The public fork remains AGPL-3.0-or-later. Private development notes, personal or business data, private network topology, credentials, and assets without clear redistribution rights are intentionally excluded.
 
 ## Quick Start
 
@@ -48,6 +57,7 @@ Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration
 ## Features
 
 - **Chat + Agents** — local/API models, tools, MCP, files, shell, skills, and memory.
+- **Voice Orb (beta fork)** — interruptible speech, guided setup status, safe view and camera/media controls, optional fixed read-only workers, and explicit admin-only Tailnet model discovery.
 - **Cookbook** — hardware-aware model recommendations, downloads, and serving.
 - **Deep Research** — multi-step web research with source reading and report generation.
 - **Compare** — blind side-by-side model testing and synthesis.

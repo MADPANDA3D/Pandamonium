@@ -1,0 +1,264 @@
+name: Voice Orb release
+
+on:
+  push:
+    tags:
+      - 'voice-orb-v*'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: voice-orb-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.image.outputs.value }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate tag and compatibility record
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          record = json.loads(Path("docs/voice-orb/compatibility.json").read_text())
+          tag = os.environ["RELEASE_TAG"]
+          if not tag.startswith("voice-orb-v"):
+              raise SystemExit("Voice Orb releases require a voice-orb-v* tag")
+          if record["source_tag"] != tag:
+              raise SystemExit(f"compatibility source_tag {record['source_tag']} does not match {tag}")
+          if not re.fullmatch(r"[0-9a-f]{40}", record.get("upstream_commit", "")):
+              raise SystemExit("compatibility upstream_commit must be a full lowercase Git commit")
+          PY
+          base=$(python3 -c 'import json; print(json.load(open("docs/voice-orb/compatibility.json"))["upstream_commit"])')
+          git merge-base --is-ancestor "$base" HEAD
+      - name: Normalize GHCR image name
+        id: image
+        run: echo "value=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Static, unit, Compose, and browser gates
+    runs-on: ubuntu-latest
+    needs: metadata
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements.txt
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Diff and public scrub
+        run: |
+          git show --check --oneline --no-renames HEAD
+          python scripts/voice_orb_public_scrub.py --self-test
+          python scripts/voice_orb_public_scrub.py
+      - name: Compile and syntax checks
+        run: |
+          python -m compileall -q app.py core routes src services scripts tests
+          shopt -s globstar nullglob
+          for file in static/app.js static/js/**/*.js; do node --check "$file"; done
+      - name: Voice Orb media contract
+        run: node tests/test_voice_orb_media.js
+      - name: Voice Orb setup browser contract
+        run: node tests/test_voice_orb_setup.js
+      - name: Full pytest
+        run: |
+          mkdir -p data
+          python -m pytest -q
+      - name: Compose validation
+        env:
+          ODYSSEUS_IMAGE: ${{ needs.metadata.outputs.image }}@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker/voice-orb-image.yml config --quiet
+      - name: Browser lifecycle with fake devices
+        run: npm run test:browser -- --project=chromium
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: "20"
+          package-manager-cache: false
+      - name: Audit Python and Node dependencies
+        run: |
+          pip install pip-audit==2.10.0
+          pip-audit -r requirements.txt -r requirements-optional.txt --strict
+          npm ci
+          npm audit --audit-level=high
+
+  secrets:
+    name: Full-history secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run gitleaks (pinned, checksum-verified)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$tarball" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+          base=$(python3 -c 'import json; print(json.load(open("docs/voice-orb/compatibility.json"))["upstream_commit"])')
+          ./gitleaks git --no-banner --redact --verbose --log-opts="${base}..HEAD" .
+
+  container-security:
+    name: Docker build and Trivy gate
+    runs-on: ubuntu-latest
+    needs: metadata
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - name: Build release candidate
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: voice-orb:release-candidate
+      - name: Scan release candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: voice-orb:release-candidate
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+        env:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
+
+  build:
+    name: Build and push (${{ matrix.arch }})
+    needs: [metadata, verify, dependencies, secrets, container-security]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ needs.metadata.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=voice-orb-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=voice-orb-${{ matrix.arch }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: voice-orb-digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Publish immutable manifest tag
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: voice-orb-digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and inspect manifest
+        env:
+          IMAGE: ${{ needs.metadata.outputs.image }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          refs=$(printf "${IMAGE}@sha256:%s " *)
+          # shellcheck disable=SC2086
+          docker buildx imagetools create -t "${IMAGE}:${RELEASE_TAG}" $refs
+          inspect=$(docker buildx imagetools inspect "${IMAGE}:${RELEASE_TAG}")
+          printf '%s\n' "$inspect"
+          digest=$(printf '%s\n' "$inspect" | awk '/^Digest:/ {print $2; exit}')
+          [ -n "$digest" ]
+          {
+            echo "## Odysseus Voice Orb image"
+            echo
+            echo "\`${IMAGE}@${digest}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
