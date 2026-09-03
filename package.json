@@ -9,6 +9,10 @@
     "test:browser": "playwright test",
     "test:voice-orb": "node tests/test_foreground_control.js && node tests/test_voice_orb.js && node tests/test_voice_orb_setup.js && playwright test tests/browser/voice-orb.spec.js"
   },
+  "scripts": {
+    "test:browser": "playwright test",
+    "test:voice-orb": "node tests/test_foreground_control.js && node tests/test_voice_orb.js && playwright test tests/browser/voice-orb.spec.js"
+  },
   "devDependencies": {
     "@antithesishq/bombadil": "^0.6.1",
     "@playwright/test": "1.61.1"
