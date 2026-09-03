@@ -10,7 +10,9 @@ import json
 import logging
 import os
 import re
+import asyncio 
 from typing import Any, Dict, List, Optional, Set, Tuple
+from src.database import McpServer, SessionLocal
 
 from src.runtime_paths import get_app_root
 
@@ -353,7 +355,11 @@ class McpManager:
 
         except ImportError:
             logger.warning("MCP package not installed. Install with: pip install mcp")
-            self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
+            self._connections[server_id] = {
+                "status": "error",
+                "error": "mcp package not installed",
+                "name": name,
+            }
             return False
 
     async def _connect_sse(self, server_id: str, name: str, url: str) -> bool:
@@ -364,6 +370,8 @@ class McpManager:
             from contextlib import AsyncExitStack
 
             stack = AsyncExitStack()
+            registered = False
+
             try:
                 transport = await stack.enter_async_context(sse_client(url))
                 read_stream, write_stream = transport
@@ -373,20 +381,6 @@ class McpManager:
 
                 # Discover tools
                 tools_result = await session.list_tools()
-            except Exception:
-                await stack.aclose()
-                raise
-            tools = []
-            for tool in tools_result.tools:
-                tools.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
-                    # MCP tool annotations (readOnlyHint / destructiveHint) drive
-                    # plan-mode read-only gating. Absent on many servers, so we
-                    # fall back to a name heuristic in mcp_tool_is_readonly().
-                    "annotations": getattr(tool, 'annotations', None),
-                })
 
             self._sessions[server_id] = session
             self._stacks[server_id] = stack
@@ -399,8 +393,24 @@ class McpManager:
                 "server_info": _mcp_server_info(initialized),
             }
 
-            logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via SSE")
-            return True
+                self._sessions[server_id] = session
+                self._stacks[server_id] = stack
+                self._tools[server_id] = tools
+                self._connections[server_id] = {
+                    "status": "connected",
+                    "name": name,
+                    "transport": "sse",
+                    "tool_count": len(tools),
+                }
+
+                registered = True
+
+                logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via SSE")
+                return True
+
+            finally:
+                if not registered:
+                    await stack.aclose()
 
         except ImportError:
             logger.warning("MCP package not installed. Install with: pip install mcp")
@@ -556,17 +566,29 @@ class McpManager:
         for sid in ids:
             await self.disconnect_server(sid)
 
-    async def connect_all_enabled(self):
-        """Connect to all enabled MCP servers from the database."""
-        from src.database import McpServer, SessionLocal
 
+    async def connect_all_enabled(self):
         db = SessionLocal()
         try:
             servers = db.query(McpServer).filter(McpServer.is_enabled == True).all()
-            for srv in servers:
-                args = json.loads(srv.args) if srv.args else []
-                env = json.loads(srv.env) if srv.env else {}
-                await self.connect_server(
+
+            tasks = [
+                asyncio.create_task(self._connect_with_timeout(srv))
+                for srv in servers
+            ]
+
+            await asyncio.gather(*tasks)
+        finally:
+            db.close()
+
+
+    async def _connect_with_timeout(self, srv):
+        args = json.loads(srv.args) if srv.args else []
+        env = json.loads(srv.env) if srv.env else {}
+
+        try:
+            await asyncio.wait_for(
+                self.connect_server(
                     server_id=srv.id,
                     name=srv.name,
                     transport=srv.transport,

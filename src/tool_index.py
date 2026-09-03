@@ -355,7 +355,7 @@ class ToolIndex:
         frozenset({"email", "emails", "mail", "mails", "gmail", "googlemail", "message", "messages", "send", "reply", "replies", "inbox", "unread"}):
             {"list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "bulk_email", "delete_email", "archive_email", "mark_email_read", "resolve_contact", "ui_control"},
         frozenset({"calendar", "event", "meeting", "schedule", "appointment"}):
-            {"manage_calendar"},
+            {"manage_calendar", "read_calendar"},
         # Detached background `bash` jobs (#!bg): check on / read output / kill.
         frozenset({"background job", "background jobs", "bg job", "bg jobs",
                    "background task", "is the job done", "check the job",

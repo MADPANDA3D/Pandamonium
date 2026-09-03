@@ -24,12 +24,13 @@ import inspect
 
 import src.tool_implementations as ti
 
-# 33 do_* tool functions
+# 34 do_* tool functions
 _EXPECTED = [
     "do_adopt_served_model", "do_api_call", "do_app_api", "do_cancel_download",
     "do_download_model", "do_edit_image", "do_list_cached_models",
     "do_list_cookbook_servers", "do_list_downloads", "do_list_served_models",
-    "do_list_serve_presets", "do_manage_calendar", "do_manage_contact",
+    "do_list_serve_presets", "do_manage_calendar", "do_read_calendar",
+    "do_manage_contact",
     "do_manage_endpoints", "do_manage_mcp", "do_manage_notes",
     "do_manage_research", "do_manage_settings", "do_manage_skills",
     "do_manage_tasks", "do_manage_tokens", "do_manage_webhooks",

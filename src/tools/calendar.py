@@ -7,6 +7,7 @@ Holds the manage_calendar tool (CalDAV-backed event CRUD).
 import json
 import logging
 import re
+from datetime import timedelta
 from typing import Dict, Optional
 
 from src.tools._common import _parse_tool_args
