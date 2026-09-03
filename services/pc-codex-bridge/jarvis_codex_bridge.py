@@ -30,10 +30,6 @@ CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
 WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
-INTERACTION_WORKSPACE = Path(os.getenv(
-    "JARVIS_CODEX_INTERACTION_WORKSPACE",
-    str(Path.home() / ".local/share/jarvis/pc-codex-workspace"),
-)).expanduser()
 CODEX_MODEL = os.getenv(
     "JARVIS_CODEX_MODEL",
     "gpt-5.6-terra" if WORKER_ID == "pc-codex" else "",
@@ -106,16 +102,32 @@ def _codex_command() -> list[str]:
 
 
 def _task_developer_instructions(task: "Task") -> str:
+    instructions = DEVELOPER_INSTRUCTIONS
+    if (
+        task.data.get("workspace") == "discord-mod"
+        and str(task.data.get("session_id") or "").startswith("discord:")
+    ):
+        instructions = re.sub(
+            r"^You are PC Codex working for Jarvis and Leo\.\s*",
+            "",
+            instructions,
+            count=1,
+        )
+        instructions = (
+            "You are JARVIS, Leo's persistent AI assistant and Discord server operations "
+            "partner. Codex is your execution engine; do not describe JARVIS as separate "
+            f"from yourself in Discord.\n{instructions.lstrip()}"
+        )
     source_root = task.data.get("source_root")
     if not source_root or source_root == task.data["cwd"]:
-        return DEVELOPER_INSTRUCTIONS
+        return instructions
     source_rule = (
         "You may modify it only within this explicitly approved workspace-write task."
         if _approved_workspace_write(task)
         else "Treat it as read-only."
     )
     return (
-        f"{DEVELOPER_INSTRUCTIONS.rstrip()}\n\n"
+        f"{instructions.rstrip()}\n\n"
         f"The selected source workspace is {source_root}. Read it using absolute paths. "
         f"{source_rule}\n"
         f"Your dedicated Jarvis interaction workspace is {task.data['cwd']}. "
@@ -471,6 +483,13 @@ def _run_task(task: Task) -> None:
             })
         started = _read_until(task, 2)
         thread_id = started["thread"]["id"]
+        if task.data.get("thread_title"):
+            task.send({
+                "id": 20,
+                "method": "thread/name/set",
+                "params": {"threadId": thread_id, "name": task.data["thread_title"]},
+            })
+            _read_until(task, 20)
         task.data["codex_thread_id"] = thread_id
         task.data["status"] = "running"
         task.save()
@@ -484,7 +503,7 @@ def _run_task(task: Task) -> None:
         task.data["codex_turn_id"] = turn["turn"]["id"]
         task.save()
         assert task.proc.stdout
-        while task.data.get("status") not in TERMINAL:
+        while True:
             line = task.proc.stdout.readline()
             if not line:
                 break
@@ -533,12 +552,11 @@ def create_task(payload: dict) -> Task:
     source_root = WORKSPACES.get(workspace)
     if not source_root:
         raise ValueError("unknown_workspace")
-    source_root = str(Path(source_root).expanduser().resolve())
-    if WORKER_ID == "pc-codex":
-        INTERACTION_WORKSPACE.mkdir(parents=True, exist_ok=True)
-        cwd = str(INTERACTION_WORKSPACE.resolve())
-    else:
-        cwd = source_root
+    source_path = Path(source_root).expanduser().resolve()
+    if not source_path.is_dir():
+        raise ValueError("workspace_not_found")
+    source_root = str(source_path)
+    cwd = source_root
     prompt = str(payload.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("prompt_required")
@@ -552,6 +570,7 @@ def create_task(payload: dict) -> Task:
         except ValueError as exc:
             raise ValueError("invalid_codex_thread_id") from exc
     now = int(time.time())
+    thread_title = " ".join(str(payload.get("thread_title") or "").split())[:200] or None
     data = {
         "task_id": str(uuid.uuid4()),
         "worker": WORKER_ID,
@@ -562,6 +581,7 @@ def create_task(payload: dict) -> Task:
         "permission_mode": permission,
         "approved": approved,
         "prompt": prompt[:50000],
+        "thread_title": thread_title,
         "codex_thread_id": codex_thread_id,
         "status": "queued",
         "result": None,
@@ -752,7 +772,6 @@ class Handler(BaseHTTPRequestHandler):
 def self_check() -> None:
     assert WORKER_ID in {"pc-codex", "vps-codex"}
     assert all(Path(path).is_absolute() for path in WORKSPACES.values())
-    assert INTERACTION_WORKSPACE.is_absolute()
     assert _codex_command()[-2:] == ["app-server", "--stdio"]
     assert _safe_tool_text({"type": "webSearch", "query": "test"}) == "Web search completed: test"
     assert MAX_TASK_RUNTIME >= 60
