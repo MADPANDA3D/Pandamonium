@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.constants import DATA_DIR
 from core.atomic_io import atomic_write_json
+from core.middleware import require_admin
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_identity import agent_system_prompt, configured_agent_id, configured_agent_name
