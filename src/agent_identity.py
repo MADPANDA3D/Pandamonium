@@ -67,7 +67,19 @@ def configured_agent_name() -> str:
     return str(resolve_agent_identity()["agent_display_name"])
 
 
-def agent_system_prompt(preset_prompt: str | None = None) -> str:
+def runtime_model_fact(model: Any) -> str:
+    """State the selected model identifier without guessing backend details."""
+    identifier = re.sub(r"[\r\n`]+", " ", str(model or "unknown")).strip()[:200] or "unknown"
+    return (
+        "## Current runtime facts\n"
+        f"- Selected reasoning-engine model identifier: `{identifier}`. "
+        "When asked which model is running, state exactly this identifier. "
+        "Do not infer its vendor, family, provider, or architecture; those details are unverified "
+        "unless a current tool result explicitly confirms them."
+    )
+
+
+def agent_system_prompt(preset_prompt: str | None = None, *, model: Any = None) -> str:
     """Mount the configured identity and preserve the active behavior preset."""
     identity = resolve_agent_identity()
     prompt = (
@@ -79,6 +91,8 @@ def agent_system_prompt(preset_prompt: str | None = None) -> str:
         "operator asks about the backend, describe the current model or provider separately and only from "
         f"runtime facts available to you.\n\n{identity['agent_constitution']}"
     )
+    if model is not None:
+        prompt = f"{runtime_model_fact(model)}\n\n{prompt}"
     return f"{prompt}\n\n{preset_prompt}" if preset_prompt else prompt
 
 

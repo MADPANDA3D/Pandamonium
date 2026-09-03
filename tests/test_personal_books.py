@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks
 
 from routes import personal_routes
 from src import agent_loop
+from src.agent_identity import runtime_model_fact
 from src.rag_vector import _generate_doc_id
 from src.tools.system import do_manage_books
 
@@ -267,7 +268,7 @@ def test_books_intent_routes_to_owner_scoped_catalog_not_filesystem():
 
 
 def test_runtime_identity_reports_selected_model_without_inventing_provider():
-    fact = agent_loop._runtime_model_fact("jarvis")
+    fact = runtime_model_fact("jarvis")
 
     assert "model identifier: `jarvis`" in fact
     assert "unverified" in fact

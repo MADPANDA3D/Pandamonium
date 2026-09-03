@@ -707,17 +707,6 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
 AGENT_SYSTEM_PROMPT = _assemble_prompt(set(TOOL_SECTIONS.keys()))
 
 
-def _runtime_model_fact(model: str) -> str:
-    """State only the selected model identifier; provider details may be opaque."""
-    identifier = re.sub(r"[\r\n`]+", " ", str(model or "unknown")).strip()[:200] or "unknown"
-    return (
-        "\n\n## Current runtime facts\n"
-        f"- Selected reasoning-engine model identifier: `{identifier}`. "
-        "Do not infer its vendor, family, provider, or architecture from the identifier; "
-        "those details are unverified unless a current tool result explicitly confirms them."
-    )
-
-
 _cached_base_prompt = None
 _cached_base_prompt_key = None
 
@@ -1651,7 +1640,7 @@ def _build_system_prompt(
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
 
-    agent_prompt = _runtime_model_fact(model).strip() + "\n\n" + agent_system_prompt(agent_prompt)
+    agent_prompt = agent_system_prompt(agent_prompt, model=model)
 
     # Dynamic parts that change per request
     mcp_schemas = []

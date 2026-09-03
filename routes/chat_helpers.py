@@ -738,7 +738,7 @@ async def build_chat_context(
         use_web=use_web and not skip_web,
         use_memory=mem_enabled,
         time_filter=time_filter,
-        preset_system_prompt=agent_system_prompt(preset.system_prompt),
+        preset_system_prompt=agent_system_prompt(preset.system_prompt, model=sess.model),
         owner=user,
         character_name=preset.character_name,
         agent_mode=agent_mode,

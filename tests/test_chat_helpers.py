@@ -482,6 +482,7 @@ async def _build_context_owner_probe(monkeypatch, request_state):
 
     def fake_build_context_preface(**kwargs):
         captured["preface_owner"] = kwargs["owner"]
+        captured["preset_system_prompt"] = kwargs["preset_system_prompt"]
         return [], [], []
 
     async def fake_maybe_compact(sess, endpoint_url, model, messages, headers, owner=None):
@@ -541,6 +542,9 @@ async def test_build_chat_context_uses_api_token_owner_for_compaction_scope(monk
     )
 
     assert ctx.user == "alice"
+    prompt = captured.pop("preset_system_prompt")
+    assert "model identifier: `test-model`" in prompt
+    assert "GPT-4o" not in prompt
     assert captured == {
         "prefs_owner": "alice",
         "preface_owner": "alice",
@@ -562,6 +566,7 @@ async def test_build_chat_context_keeps_cookie_user_owner_scope(monkeypatch):
     )
 
     assert ctx.user == "bob"
+    captured.pop("preset_system_prompt")
     assert captured == {
         "prefs_owner": "bob",
         "preface_owner": "bob",

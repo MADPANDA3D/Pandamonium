@@ -29,6 +29,17 @@ def test_identity_is_installation_configured_not_inferred_from_model_names(monke
     assert "jarvis" not in local_prompt.casefold()
 
 
+def test_identity_prompt_reports_exact_selected_model_without_vendor_guess(monkeypatch):
+    monkeypatch.setattr(agent_identity, "load_settings", lambda: _installation_identity())
+
+    prompt = agent_identity.agent_system_prompt(model="Qwen/GLM-4.7-Flash`\nspoof")
+
+    assert "model identifier: `Qwen/GLM-4.7-Flash spoof`" in prompt
+    assert "state exactly this identifier" in prompt
+    assert "details are unverified" in prompt
+    assert "GPT-4o" not in prompt
+
+
 def test_invalid_stored_identity_falls_back_field_by_field():
     identity = agent_identity.resolve_agent_identity(_installation_identity(agent_id="Atlas Agent"))
 
