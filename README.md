@@ -9,6 +9,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#pandamonium-upgrades">Upgrades</a> ·
   <a href="docs/setup.md">Setup Guide</a> ·
   <a href="docs/voice-orb/README.md">Voice Orb</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
@@ -16,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/pandamonium-browser.jpg" alt="Pandamonium self-hosted AI workspace">
+  <img src="docs/pandamonium-dashboard.png" alt="Pandamonium self-hosted AI workspace">
 </p>
 
 ## Quick Start
@@ -38,14 +39,78 @@ docker compose logs pandamonium
 Native Linux, macOS, Windows, GPU, HTTPS, and configuration instructions are
 in the [setup guide](docs/setup.md).
 
-## What Is Included
+## Pandamonium Upgrades
 
-- **Chat and agents** — local or API models, tool use, MCP, files, shell, skills, and memory.
-- **Voice Orb** — interruptible voice, setup diagnostics, camera/media controls, and optional read-only workers.
-- **Extensions** — bounded Git installation, capability registration, lifecycle controls, and rollback.
-- **Cookbook** — hardware-aware model recommendations, downloads, and serving.
-- **Workspaces** — documents, email, notes, tasks, calendar, gallery, research, and model comparison.
-- **Operations** — owner-scoped data, authentication, backups, security gates, and Docker/systemd installs.
+Pandamonium keeps Odysseus's self-hosted workspace foundation and adds the
+following maintained platform capabilities.
+
+### Model-neutral identity and chat
+
+- Installation-owned agent name, ID, constitution, and version instead of a
+  model-owned persona.
+- Guided first-run setup for identity, model endpoints, and integrations.
+- Exact runtime model reporting: the agent reports the configured model
+  identifier without inventing a vendor or claiming to be GPT.
+- One adaptive conversation flow that keeps ordinary chat lightweight and
+  brings in tools only when the request needs them.
+- Local and API model support through configurable endpoints, with model
+  switching that does not replace the agent's identity, memory, or sessions.
+
+### Governed agents, tools, and extensions
+
+- Built-in tools, MCP servers, skills, files, shell, web, and browser-facing
+  foreground actions behind owner, permission, approval, and evidence gates.
+- Jarvis OS protocol coverage for identity, bounded context, memory provenance,
+  action envelopes, authority receipts, learning controls, and operational
+  traces. See the [runtime status](docs/jos-protocol-runtime-status.md).
+- Generic extension manifests, installed-plugin visibility, pinned Git source
+  installation, capability registration, enable/disable lifecycle, and
+  rollback without giving extensions authority over the host.
+- Scoped client-state and foreground-action bridges for extensions that need
+  to interact with the active browser surface.
+- ORACLE remains an optional reference extension; clean installations start
+  without private extensions, workers, credentials, or topology.
+
+### Knowledge and workspaces
+
+- Owner-scoped long-term memory and document RAG with source provenance,
+  compaction, prompt-injection boundaries, and optional Graphify code graphs.
+- Owner-scoped Books library with PDF ingestion, page-aware retrieval, source
+  attribution, reindexing, deletion, and explicit OCR-needed status.
+- Documents, attachments, email, notes, tasks, calendar and CalDAV, gallery,
+  Deep Research, model comparison, and the hardware-aware model Cookbook.
+- Pandamonium branding, configurable themes, and authenticated preference sync
+  across browser sessions.
+- Integration inventory distinguishes configured services from services that
+  have actually passed a live health check.
+
+### Voice Orb and workers
+
+- Integrated microphone, STT, TTS, interruption, and streamed spoken responses
+  that preserve the complete written answer while sanitizing speech-only text.
+- Setup diagnostics for the selected model, speech providers, and optional
+  worker readiness.
+- Explicit, user-initiated camera frames and checksummed same-origin media;
+  camera frames are bounded and are not persisted.
+- Optional concurrent read-only worker adapters with attributed progress,
+  cancellation, session reconstruction, health gates, and disabled-by-default
+  configuration.
+  See the [Voice Orb documentation](docs/voice-orb/README.md).
+
+### Reliability, deployment, and security
+
+- Context budgets use the model server's effective allocated capacity, with
+  bounded tool schemas, trimming, and compaction for smaller local models.
+- Automatic memory work runs in the background, and tool-backed turns include
+  a guarded final-answer recovery path instead of returning an empty result.
+- Owner-scoped authentication, sessions, data, integrations, API tokens,
+  backups, and restore paths for shared or proxied installations.
+- Docker Compose, native Python, and systemd workflows; canonical
+  `pandamonium` CLI, service, package, environment, and GHCR naming.
+- Required pytest, browser, syntax, Compose, secret, dependency, workflow, and
+  container security checks on the canonical `main` branch.
+- Legacy `odysseus` commands and `ODYSSEUS_*` environment variables remain as
+  documented compatibility aliases so existing installations can upgrade.
 
 ## Command Line
 
@@ -75,10 +140,6 @@ Pandamonium began as a fork of
 original project history, contributor attribution, and AGPL license. It is an
 independent MADPANDA3D project, not an official Odysseus release. Details are
 recorded in [NOTICE](NOTICE) and [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
-
-<p>
-  <a href="https://github.com/pewdiepie-archdaemon/odysseus"><img src="docs/upstream-odysseus-wordmark.png" alt="Odysseus upstream project" width="180"></a>
-</p>
 
 ## License
 
