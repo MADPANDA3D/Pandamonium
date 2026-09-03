@@ -38,7 +38,8 @@ python-dateutil
 caldav
 cryptography
 bcrypt
-mcp
+# The bundled MCP servers use Server.list_tools(), removed in mcp 2.x.
+mcp==1.28.1
 pyotp
 qrcode[pil]
 croniter
