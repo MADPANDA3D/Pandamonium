@@ -1,0 +1,12 @@
+title = "Pandamonium gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test-only MCP Portal fixture keys"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^tests/test_mad_mcp_portal_routes\.py$''']
+regexes = ['''fixture-(?:invalid-)?(?:master-)?key-123456789''']
