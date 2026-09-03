@@ -22,6 +22,7 @@ import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
+import { getBrandName } from './brand.js';
 
 // ── Module state ──────────────────────────────────────────────────────
 
@@ -5445,7 +5446,7 @@ async function _cmdOdyssey(args, ctx) {
 }
 
 async function _cmdAscii(args, ctx) {
-  const text = args.join(' ') || 'Odysseus';
+  const text = args.join(' ') || getBrandName();
   const FONT = {
     'A':'  #  \n # # \n#####\n#   #\n#   #','B':'#### \n#   #\n#### \n#   #\n#### ','C':' ####\n#    \n#    \n#    \n ####',
     'D':'#### \n#   #\n#   #\n#   #\n#### ','E':'#####\n#    \n###  \n#    \n#####','F':'#####\n#    \n###  \n#    \n#    ',

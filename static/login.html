@@ -145,7 +145,7 @@
     font-family: 'Fira Code', monospace;
     font-size: 2rem; font-weight: 600;
     letter-spacing: 0.04em;
-    /* Same gradient as the main app's welcome-screen "Odysseus" title
+    /* Same gradient as the main app's welcome-screen harness title
        (static/style.css #welcome-screen .welcome-name) so the brand
        wordmark is consistent across login + first-launch screens. */
     background: linear-gradient(135deg, var(--brand-color, var(--red)), color-mix(in srgb, var(--brand-color, var(--red)) 60%, var(--fg)));
@@ -157,6 +157,14 @@
   .login-welcome { color: var(--fg); font-size: 0.86rem; font-weight: 600; text-align: center; margin-bottom: 0.35rem; }
   .login-intro { color: color-mix(in srgb, var(--fg) 58%, transparent); font-size: 0.72rem; line-height: 1.5; text-align: center; margin: 0 auto 1.25rem; max-width: 30rem; }
   .setup-note { color: color-mix(in srgb, var(--fg) 60%, transparent); font-size: 0.8rem; margin-bottom: 1rem; text-align: center; }
+  .fork-attribution { text-align:center;font-size:0.68rem;opacity:0.35;margin-bottom:1.25rem; }
+  .setup-brand-fields { border:1px solid color-mix(in srgb, var(--border) 70%, transparent);border-radius:8px;padding:0.8rem;margin-bottom:1rem; }
+  .setup-brand-fields h2 { font-size:0.85rem;margin-bottom:0.7rem;color:var(--fg); }
+  .setup-brand-logo-row { display:flex;align-items:center;gap:8px; }
+  .setup-brand-logo-row input { min-width:0;font-size:0.72rem !important;margin-bottom:0.35rem !important; }
+  .setup-brand-preview { width:36px;height:36px;object-fit:contain;border:1px solid var(--border);border-radius:6px;padding:2px;flex-shrink:0; }
+  #setup-brand-accent { width:48px;height:34px;padding:2px;margin-bottom:0.7rem; }
+  .setup-brand-hint { font-size:0.65rem;opacity:0.42;margin-top:-0.15rem; }
   label { display: block; font-size: 0.85rem; margin-bottom: 0.3rem; color: color-mix(in srgb, var(--fg) 65%, transparent); }
   input:not(.remember-check) {
     width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
@@ -272,6 +280,20 @@
   <div class="error" id="error" role="alert" aria-live="assertive"></div>
 
   <form id="authForm" autocomplete="on">
+    <section id="setupBrandGroup" class="setup-brand-fields" aria-label="Harness identity" hidden>
+      <h2>Make this harness yours</h2>
+      <label for="setup-brand-name">Harness name</label>
+      <input id="setup-brand-name" type="text" maxlength="48" autocomplete="organization" value="WhoAmI">
+      <label for="setup-brand-logo">Logo</label>
+      <div class="setup-brand-logo-row">
+        <img id="setup-brand-preview" class="setup-brand-preview" alt="Harness logo preview" hidden>
+        <input id="setup-brand-logo" type="file" accept="image/png,image/jpeg,image/webp">
+      </div>
+      <div class="setup-brand-hint">PNG, JPEG, or WebP · 512 KiB maximum</div>
+      <label for="setup-brand-accent" style="margin-top:0.7rem">Accent</label>
+      <input id="setup-brand-accent" type="color" value="#e06c75">
+    </section>
+
     <label for="username">Username</label>
     <div class="pw-wrapper">
       <input id="username" name="username" type="text" required autofocus autocomplete="username">
@@ -312,6 +334,17 @@
 
 <script nonce="{{CSP_NONCE}}">
 (async () => {
+  let brandModule = null;
+  let activeBrand = { name: 'WhoAmI', logo: '', accent: '#e06c75' };
+  try {
+    brandModule = await import('/static/js/brand.js');
+    activeBrand = await brandModule.loadBrand();
+  } catch (error) {
+    // Branding is optional presentation state. A stale/missing static asset
+    // must never block authentication or first-run account creation.
+    console.warn('[login-brand] using defaults:', error);
+  }
+
   // Load version
   try {
     const vr = await fetch('/api/version');
@@ -337,6 +370,37 @@
   const toggleArea = document.getElementById('toggleArea');
   const toggleLink = document.getElementById('toggleLink');
   const toggleText = document.getElementById('toggleText');
+  const setupBrandGroup = document.getElementById('setupBrandGroup');
+  const setupBrandName = document.getElementById('setup-brand-name');
+  const setupBrandLogo = document.getElementById('setup-brand-logo');
+  const setupBrandAccent = document.getElementById('setup-brand-accent');
+  const setupBrandPreview = document.getElementById('setup-brand-preview');
+
+  let setupLogo = activeBrand.logo;
+  setupBrandName.value = activeBrand.name;
+  setupBrandAccent.value = activeBrand.accent;
+  if (setupLogo) {
+    setupBrandPreview.src = setupLogo;
+    setupBrandPreview.hidden = false;
+  }
+  setupBrandLogo.addEventListener('change', async () => {
+    const file = setupBrandLogo.files?.[0];
+    if (!file) return;
+    if (!brandModule) {
+      setupBrandLogo.value = '';
+      return;
+    }
+    try {
+      setupLogo = await brandModule.readLogoFile(file);
+      setupBrandPreview.src = setupLogo;
+      setupBrandPreview.hidden = false;
+      errEl.style.display = 'none';
+    } catch (error) {
+      setupBrandLogo.value = '';
+      errEl.textContent = error.message;
+      errEl.style.display = 'block';
+    }
+  });
 
   let mode = 'login'; // 'login' | 'signup' | 'setup'
   let signupAllowed = false;
@@ -347,6 +411,7 @@
   function setMode(m) {
     mode = m;
     errEl.style.display = 'none';
+    setupBrandGroup.hidden = m !== 'setup';
     if (m === 'setup') {
       setupNote.textContent = 'First-time setup — create your admin account';
       setupNote.style.display = 'block';
@@ -409,6 +474,21 @@
 
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
+    let setupBrandDraft = null;
+    if (mode === 'setup' && brandModule) {
+      try {
+        setupBrandDraft = brandModule.validateBrand({
+          name: setupBrandName.value,
+          logo: setupLogo,
+          accent: setupBrandAccent.value,
+        });
+      } catch (error) {
+        errEl.textContent = error.message;
+        errEl.style.display = 'block';
+        submitBtn.disabled = false;
+        return;
+      }
+    }
 
     // If in TOTP mode, handle the code submission directly
     if (form._totpMode) {
@@ -528,6 +608,15 @@
         totpInput.focus();
         submitBtn.textContent = 'Verify';
         return;
+      }
+      if (setupBrandDraft) {
+        try {
+          await brandModule.saveBrand(setupBrandDraft);
+        } catch (error) {
+          // The admin account and login already succeeded. Keep moving into
+          // the app; identity can be retried from Admin > System.
+          console.warn('[login-brand] setup identity was not saved:', error);
+        }
       }
       finishLogin();
     } catch (err) {

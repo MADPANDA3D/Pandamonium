@@ -9,6 +9,7 @@ import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
 import { bindMenuDismiss } from './escMenuStack.js';
+import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 
 let initialized = false;
 let modalEl = null;
@@ -19,6 +20,81 @@ function esc(s) { return uiModule.esc(s); }
 function safeRasterDataUrl(raw) {
   const value = String(raw || '').trim();
   return /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value) ? value : '';
+}
+
+async function initBrandSettings() {
+  const nameInput = el('settings-brand-name');
+  const logoInput = el('settings-brand-logo');
+  const accentInput = el('settings-brand-accent');
+  const preview = el('settings-brand-preview');
+  const removeButton = el('settings-brand-remove-logo');
+  const saveButton = el('settings-brand-save');
+  const message = el('settings-brand-msg');
+  if (!nameInput || !logoInput || !accentInput || !preview || !removeButton || !saveButton) return;
+
+  let brand = await loadBrand();
+  let logo = brand.logo;
+  const render = () => {
+    nameInput.value = brand.name;
+    accentInput.value = brand.accent;
+    preview.hidden = !logo;
+    if (logo) preview.src = logo;
+    else preview.removeAttribute('src');
+    removeButton.disabled = !logo;
+  };
+  render();
+
+  logoInput.addEventListener('change', async () => {
+    const file = logoInput.files?.[0];
+    if (!file) return;
+    try {
+      logo = await readLogoFile(file);
+      preview.src = logo;
+      preview.hidden = false;
+      removeButton.disabled = false;
+      if (message) message.textContent = '';
+    } catch (error) {
+      logoInput.value = '';
+      if (message) {
+        message.textContent = error.message;
+        message.style.color = 'var(--red)';
+      }
+    }
+  });
+
+  removeButton.addEventListener('click', () => {
+    logo = '';
+    logoInput.value = '';
+    preview.hidden = true;
+    preview.removeAttribute('src');
+    removeButton.disabled = true;
+    if (message) {
+      message.textContent = 'Logo will be removed when saved.';
+      message.style.color = '';
+    }
+  });
+
+  saveButton.addEventListener('click', async () => {
+    saveButton.disabled = true;
+    if (message) message.textContent = '';
+    try {
+      brand = await saveBrand({ name: nameInput.value, logo, accent: accentInput.value });
+      logo = brand.logo;
+      logoInput.value = '';
+      render();
+      if (message) {
+        message.textContent = 'Identity saved.';
+        message.style.color = 'var(--green, #50fa7b)';
+      }
+    } catch (error) {
+      if (message) {
+        message.textContent = error.message;
+        message.style.color = 'var(--red)';
+      }
+    } finally {
+      saveButton.disabled = false;
+    }
+  });
 }
 
 /* ── Tab switching ── */
@@ -2576,6 +2652,7 @@ function initAll() {
   initAppearance();
   initShortcuts();
   initAccount();
+  initBrandSettings();
   initIntegrations();
   initEmailSettings();
   initEmailAccountsSettings();
@@ -2813,7 +2890,7 @@ async function initReminderSettings() {
   // regardless of channel). The hint should make that clear so
   // users don't think they have to choose between channels.
   const CHANNEL_HINTS = {
-    browser: 'Reminders appear as browser notifications inside Odysseus.',
+    browser: `Reminders appear as browser notifications inside ${getBrandName()}.`,
     email: 'Reminders are emailed and shown as a browser notification.',
     ntfy: 'Reminders are pushed via ntfy AND shown as a browser notification.',
     webhook: 'Reminders are POSTed to the selected integration AND shown as a browser notification. Use {{title}} and {{message}} in the payload template.',
@@ -3213,7 +3290,7 @@ async function initEmailAccountsSettings() {
     const eafProviderNotes = {
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
-        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
+        body: `Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. ${getBrandName()} does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.`,
       },
     };
     const eafNoteEl = el('eaf-provider-note');
@@ -4141,7 +4218,7 @@ async function initUnifiedIntegrations() {
       if (ntfyHint) {
         ntfyHint.style.display = isNtfy ? 'block' : 'none';
         if (isNtfy) {
-          ntfyHint.innerHTML = 'Enter the ntfy server URL Odysseus can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
+          ntfyHint.innerHTML = `Enter the ntfy server URL ${esc(getBrandName())} can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.`;
         }
       }
       if (url) {
@@ -4768,7 +4845,7 @@ async function initUnifiedIntegrations() {
       },
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
-        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
+        body: `Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. ${getBrandName()} does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.`,
         url: 'https://learn.microsoft.com/exchange/clients-and-mobile-in-exchange-online/disable-basic-authentication-in-exchange-online',
         linkLabel: 'Read Microsoft note',
       },
@@ -5588,7 +5665,7 @@ async function initUnifiedIntegrations() {
               </button>
             </div>
             <div id="uf-codex-config-body" style="display:none;">
-              <div style="font-size:11px;opacity:0.62;margin:4px 0 6px;">Toggle which Odysseus tools this agent can use. New agents start with chat only.</div>
+              <div style="font-size:11px;opacity:0.62;margin:4px 0 6px;">Toggle which ${esc(getBrandName())} tools this agent can use. New agents start with chat only.</div>
               <div id="uf-codex-inline-scopes"></div>
             </div>
           </div>

@@ -17,6 +17,7 @@ import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documen
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { getBrandName } from './brand.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -3215,7 +3216,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (!opts.keepOpen) _closeOdysseusAttachMenu();
     } catch (err) {
       console.error('Failed to attach Odysseus item:', err);
-      if (uiModule) uiModule.showError('Failed to attach from Odysseus');
+      if (uiModule) uiModule.showError(`Failed to attach from ${getBrandName()}`);
     }
   }
 
@@ -3264,7 +3265,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       _closeOdysseusAttachMenu();
     } catch (err) {
       console.error('Failed to attach selected Odysseus items:', err);
-      if (uiModule) uiModule.showError(added ? `Attached ${added}, then failed` : 'Failed to attach from Odysseus');
+      if (uiModule) uiModule.showError(added ? `Attached ${added}, then failed` : `Failed to attach from ${getBrandName()}`);
       _renderComposeAttachments();
     } finally {
       if (btn) {

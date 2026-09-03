@@ -8,6 +8,7 @@ import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
+import { getBrandChatName } from './brand.js';
 
 const API_BASE = window.location.origin;
 

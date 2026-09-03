@@ -102,8 +102,8 @@ def test_disabled_tools_respects_missing_vs_explicit_toggles():
     )
 
 
-def test_hermes_agent_api_bypasses_odysseus_context_preface():
-    """Hermes owns the agent context; Odysseus should send only chat history."""
+def test_hermes_agent_api_bypasses_local_context_preface():
+    """Hermes owns its context; the local harness sends only the latest user turn."""
     source = _CHAT_ROUTES.read_text(encoding="utf-8")
     assert "messages = _hermes_agent_context_messages(sess)" in source
     assert "messages = _ensure_current_request_is_latest_user(ctx.messages, message)" in source
