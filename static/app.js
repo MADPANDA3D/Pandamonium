@@ -29,10 +29,11 @@ import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
 import { getBrandChatName, getBrandName, loadBrand } from './js/brand.js';
 // Eagerly bind unified minimize/restore behavior across all tool modals.
-import './js/modalManager.js';
+import * as Modals from './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
 import themeModule from './js/theme.js';
+import { FOREGROUND_ACTIONS, registerForegroundAction } from './js/foregroundActions.js';
 // IMPORTANT: import cookbook.js with NO ?v= query — the same plain specifier
 // every other importer (cookbook-hwfit.js / cookbook-diagnosis.js) uses. A query
 // mismatch makes the browser load cookbook.js twice as separate modules (two
@@ -54,6 +55,25 @@ window.uiModule = uiModule;
 window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
 loadBrand();
+
+registerForegroundAction(FOREGROUND_ACTIONS.OPEN_CALENDAR, () => {
+  calendarModule.openCalendar();
+  return true;
+});
+registerForegroundAction(FOREGROUND_ACTIONS.CLOSE_DOCUMENT, () => {
+  if (Modals.isMinimized('doc-panel')) {
+    Modals.close('doc-panel');
+    return true;
+  }
+  if (!documentModule.isPanelOpen()) return false;
+  documentModule.closePanel();
+  return true;
+});
+registerForegroundAction(FOREGROUND_ACTIONS.MINIMIZE_DOCUMENT, () => {
+  if (!documentModule.isPanelOpen()) return false;
+  documentModule.closePanel('down');
+  return true;
+});
 
 function _isMobileChatInput() {
   return window.innerWidth <= 768;
