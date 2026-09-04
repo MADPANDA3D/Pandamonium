@@ -15,6 +15,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from core.atomic_io import atomic_write_json
+from src.env_compat import apply_legacy_env_aliases
+
+apply_legacy_env_aliases()
 
 HOST = os.getenv("ODYSSEUS_CODEX_BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.getenv("ODYSSEUS_CODEX_BRIDGE_PORT", "8040"))

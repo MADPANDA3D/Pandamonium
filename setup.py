@@ -294,7 +294,7 @@ def main():
     print("\n=== Setup complete ===")
     # start-macos.sh launches the server itself (on its own port) right after
     # this, so suppress the manual hint there to avoid a contradictory URL.
-    if not os.getenv("ODYSSEUS_SKIP_RUN_HINT"):
+    if not _pandamonium_env("SKIP_RUN_HINT"):
         print(f"\nStart the server with:")
         print(f"  python -m uvicorn app:app --host 127.0.0.1 --port 7000")
         print(f"\nThen open http://localhost:7000")

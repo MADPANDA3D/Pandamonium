@@ -13,7 +13,7 @@ FAIL=0
 WARN=0
 RENDER_GID=""
 VIDEO_GID=""
-TEST_IMAGE="${ODYSSEUS_AMD_TEST_IMAGE:-alpine:3.20}"
+TEST_IMAGE="${PANDAMONIUM_AMD_TEST_IMAGE:-${ODYSSEUS_AMD_TEST_IMAGE:-alpine:3.20}}"
 
 _pass() { printf '\033[32m[PASS]\033[0m %s\n' "$*"; PASS=$((PASS + 1)); }
 _fail() { printf '\033[31m[FAIL]\033[0m %s\n' "$*"; FAIL=$((FAIL + 1)); }
@@ -34,8 +34,8 @@ Checks:
   - Docker can pass AMD device nodes into a small container
 
 Environment:
-  ODYSSEUS_AMD_TEST_IMAGE   Docker image for the passthrough smoke
-                            (default: alpine:3.20)
+  PANDAMONIUM_AMD_TEST_IMAGE  Docker image for the passthrough smoke
+                              (legacy: ODYSSEUS_AMD_TEST_IMAGE; default: alpine:3.20)
 USAGE
 }
 

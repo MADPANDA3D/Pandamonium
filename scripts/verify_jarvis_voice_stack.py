@@ -17,13 +17,19 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:7000")
     parser.add_argument("--session-token-file")
     parser.add_argument("--sessions-file")
-    parser.add_argument("--username", default=os.getenv("ODYSSEUS_ADMIN_USER", "admin"))
+    parser.add_argument(
+        "--username",
+        default=os.getenv("PANDAMONIUM_ADMIN_USER") or os.getenv("ODYSSEUS_ADMIN_USER", "admin"),
+    )
     parser.add_argument("--require-workers", action="store_true")
     return parser.parse_args()
 
 
 def _token(args: argparse.Namespace) -> str:
-    supplied = os.getenv("ODYSSEUS_SESSION_TOKEN", "").strip()
+    supplied = (
+        os.getenv("PANDAMONIUM_SESSION_TOKEN")
+        or os.getenv("ODYSSEUS_SESSION_TOKEN", "")
+    ).strip()
     if supplied:
         return supplied
     if args.session_token_file:
