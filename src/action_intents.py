@@ -140,6 +140,12 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("shell", "ssh target request", r"\bssh\s+\w+"),
         ("shell", "remote command request", r"\b(run|execute)\s+.{1,40}\bon\s+\w+"),
         ("shell", "assistant command execution request", r"\b(can|could|please|would)\s+you\s+(run|execute|exec)\b"),
+        (
+            "shell",
+            "explicit command execution request",
+            rf"{_PLEASE}(?:(?:execute|exec)\b\s+\S+|"
+            r"run\b(?!\s+(?:this|it)\b.{0,40}\b(?:in\s+the\s+)?background\b)\s+\S+)",
+        ),
         # Shell verbs only count in imperative position (start of message,
         # optionally after "please") or as a "can you ..." request. A bare
         # word match promoted informational questions ("What does the grep

@@ -19,6 +19,9 @@ assert.match(voice, /'X-Tz-Offset': String\(-new Date\(\)\.getTimezoneOffset\(\)
 assert.match(voice, /'X-Tz-Name': name/);
 assert.match(voice, /function applyVoiceUIControl\(event\)[\s\S]*?VOICE_UI_CONTROL_ALLOWLIST\.has\(viewControl\)[\s\S]*?handleUIControl\(event\)/);
 assert.match(voice, /navigator\.mediaDevices\.getUserMedia/);
+assert.match(voice, /function startSphereStream\(stream\)[\s\S]*?createMediaStreamSource\(stream\)/);
+assert.match(voice, /mediaStream = requestedStream;\s*startSphereStream\(mediaStream\);/);
+assert.match(voice, /type: 'jarvis-audio-levels'[\s\S]*?volume: shaped\.volume[\s\S]*?levels: shaped\.levels/);
 assert.match(voice, /\/api\/stt\/transcribe/);
 assert.match(voice, /\/api\/voice\/sessions\/\$\{encodeURIComponent\(turnSessionId\)\}\/respond\/stream/);
 assert.match(voice, /voiceOrbMedia\.stopMedia\(\)/);
@@ -29,7 +32,7 @@ assert.match(html, /id="jarvis-call-orb"/);
 assert.match(html, /id="voice-worker-rail"/);
 assert.match(html, /src="\/static\/js\/jarvisVoice\.js/);
 
-assert.match(sw, /const CACHE_NAME = 'pandamonium-v373'/);
+assert.match(sw, /const CACHE_NAME = 'pandamonium-v374'/);
 assert.match(sw, /'\/static\/js\/jarvisVoice\.js'/);
 assert.match(sw, /'\/static\/js\/voiceOrbMedia\.js'/);
 assert.match(sw, /'\/static\/voice-orb-media\.json'/);

@@ -3,6 +3,7 @@
 
 import markdownModule from './markdown.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
+import { renderAuthorityApprovalCard, restorePendingAuthorityDecision } from './chatRenderer.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
 import { getBrandName } from './brand.js';
 
@@ -1878,15 +1879,17 @@ function enqueueSpeech(text, type = 'speech', source = 'jarvis', timings = {}) {
 
 function workerSpeech(event) {
   const label = WORKER_LABELS[event.worker] || event.worker || 'Worker';
-  if (event.type === 'approval_required') return `${label} is requesting approval. Please take a look.`;
-  if (event.type === 'question') return `${label} has a question. Please take a look.`;
-  if (event.type === 'error') return `${label} hit a problem. Please take a look.`;
-  const source = event.type === 'result'
-    ? (event.spoken_text || `${label} finished. The full result is in chat.`)
-    : event.type === 'progress'
-      ? (event.spoken_text || '')
-      : '';
+  const fallback = {
+    approval_required: `${label} is requesting approval. Approve or deny the exact request in chat.`,
+    question: `${label} has a question. The complete question is in chat.`,
+    error: `${label} failed. Review the useful error and next action in chat.`,
+    result: `${label} finished. The full result is in chat.`,
+  }[event.type] || '';
+  const source = event.type === 'error'
+    ? (event.spoken_text || fallback)
+    : (event.spoken_text || event.text || fallback);
   const clean = (window.aiTTSManager?.extractPlainText?.(source) || source).trim();
+  if (event.speech_mode === 'verbatim') return clean;
   if (clean.length <= WORKER_SPEECH_MAX_CHARS) return clean;
   const clipped = clean.slice(0, WORKER_SPEECH_MAX_CHARS - 1);
   const boundary = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf(' '));
@@ -2209,6 +2212,10 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
       }
       else if (event.type === 'ui_control' && isCurrentVoiceCall(callGeneration)) {
         applyVoiceUIControl({ ...event, voice_session_id: turnSessionId });
+      }
+      else if (event.type === 'authority_approval_required' && isCurrentVoiceCall(callGeneration)) {
+        showChatFromExtension('Approval required in chat.');
+        renderAuthorityApprovalCard(event.data || {});
       }
       else if (event.type === 'agent_task') {
         const currentCall = isCurrentVoiceCall(callGeneration);
@@ -3147,6 +3154,9 @@ function bind() {
   window.addEventListener('odysseus:session-rendered', event => {
     restoreSessionTasks(event.detail?.sessionId).catch(error => {
       console.warn('Could not restore Jarvis task activity:', error);
+    });
+    restorePendingAuthorityDecision(event.detail?.sessionId).catch(error => {
+      console.warn('Could not restore authority decision:', error);
     });
   });
   window.addEventListener('instance-brand-changed', () => {

@@ -1208,17 +1208,14 @@ import { getBrandName } from './brand.js';
           if (emCtx.account) fd.append('active_email_account', String(emCtx.account));
         }
       } catch (_e) { /* best-effort */ }
-      // One adaptive conversation protocol: the server selects a zero-tool
-      // reply or the governed tool loop from the request itself. Web and shell
-      // remain explicit capability permissions, not execution modes.
+      // One adaptive conversation protocol: prompt intent and configured,
+      // healthy discovery select the relevant governed tool schemas.
       const incognitoChk = el('incognito-toggle');
       const isIncognito = !!(incognitoChk && incognitoChk.checked);
       fd.append('mode', 'adaptive');
-      fd.append('allow_web_search', el('web-toggle').checked ? 'true' : 'false');
       if (el('research-toggle').checked) {
         fd.append('use_research', 'true');
       }
-      fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');

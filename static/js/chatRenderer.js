@@ -2116,12 +2116,16 @@ export function removeAskUserCards(root) {
 export function renderAuthorityApprovalCard(payload) {
   const decisionId = String(payload?.decision_id || '');
   const capability = String(payload?.capability?.name || 'requested action');
+  const target = String(payload?.capability?.target || 'tool');
+  const effect = String(payload?.action_effect || payload?.gate_reason || '');
+  const workspace = String(payload?.workspace || 'configured workspace');
   const chatBox = document.getElementById('chat-history');
   if (!decisionId || !chatBox) return null;
 
   chatBox.querySelectorAll('.authority-approval-card').forEach(node => node.remove());
   const card = document.createElement('div');
   card.className = 'ask-user-card authority-approval-card';
+  card.dataset.decisionId = decisionId;
   card.setAttribute('role', 'group');
   card.setAttribute('aria-label', `Approval required for ${capability}`);
 
@@ -2129,6 +2133,11 @@ export function renderAuthorityApprovalCard(payload) {
   question.className = 'ask-user-question';
   question.textContent = `Approval required: ${capability}`;
   card.appendChild(question);
+
+  const context = document.createElement('div');
+  context.className = 'authority-approval-context';
+  context.textContent = [effect, target, workspace].filter(Boolean).join(' · ');
+  card.appendChild(context);
 
   const preview = document.createElement('pre');
   preview.className = 'authority-approval-preview';
@@ -2176,6 +2185,24 @@ export function renderAuthorityApprovalCard(payload) {
   chatBox.appendChild(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   return card;
+}
+
+export async function restorePendingAuthorityDecision(sessionId) {
+  if (!sessionId) return null;
+  const response = await fetch('/api/authority', { credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const state = await response.json();
+  const now = Date.now();
+  const pending = (state?.decisions || [])
+    .filter(row => (
+      row?.session_id === sessionId
+      && row?.decision === 'approval_required'
+      && row?.status !== 'resolved'
+      && row?.status !== 'expired'
+      && Date.parse(row?.expires_at || '') > now
+    ))
+    .sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))[0];
+  return pending ? renderAuthorityApprovalCard(pending) : null;
 }
 
 /**
@@ -2823,6 +2850,8 @@ const chatRenderer = {
   safeToolScreenshotSrc,
   safeDisplayImageSrc,
   removeAskUserCards,
+  renderAuthorityApprovalCard,
+  restorePendingAuthorityDecision,
   renderAskUserCard,
   buildSourcesBox,
   buildFindingsBox,

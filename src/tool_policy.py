@@ -38,11 +38,12 @@ def is_web_search_explicitly_denied(allow_web_search: object) -> bool:
 
 
 def web_search_enabled_for_turn(allow_web_search: object, use_web: object = None) -> bool:
-    """Return true only when this request explicitly enables web search.
+    """Honor explicit web-search flags for legacy request callers.
 
-    Adaptive composer turns send ``allow_web_search``. Legacy callers may send
-    ``use_web``. If both are present, an explicit ``allow_web_search=false``
-    wins so a stale or conflicting request cannot re-enable web tools.
+    Adaptive first-party turns omit these flags and rely on prompt intent plus
+    configured discovery. Legacy callers may send ``use_web``. If both are
+    present, an explicit ``allow_web_search=false`` wins so a stale or
+    conflicting request cannot re-enable web tools.
     """
 
     if is_web_search_explicitly_denied(allow_web_search):

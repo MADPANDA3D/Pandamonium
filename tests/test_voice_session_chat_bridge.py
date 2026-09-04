@@ -320,6 +320,83 @@ def test_spoken_text_policy_uses_a_human_fallback_for_an_artifact_without_a_summ
     assert spoken == "I finished the script. It's in the chat for you to review."
 
 
+def test_spoken_text_policy_hands_off_file_contents_without_narrating_them():
+    response = "The requested file contains a long block of plain text that remains visible in chat. " * 20
+
+    spoken = asyncio.run(voice_routes._select_spoken_text("Show me the configuration file", response))
+
+    assert spoken == "I found the file. It's available in the chat."
+
+
+def test_spoken_text_policy_honors_explicit_read_all_for_files():
+    response = "First line. Second line. Third line."
+
+    spoken = asyncio.run(voice_routes._select_spoken_text("Read the whole file aloud", response))
+
+    assert spoken == response
+
+
+def test_completed_worker_result_uses_concise_spoken_handoff():
+    final = {
+        "assistant_text": "The worker completed the audit. " * 40,
+        "diagnostics": {"guard_reason": "selected_completed_pc-codex"},
+        "task_ids": ["task-1"],
+    }
+
+    spoken = asyncio.run(voice_routes._spoken_text_for_final("Ask PC Codex to audit the repo", final))
+
+    assert spoken == "The agent finished. The complete result is in chat."
+    assert len(spoken.split()) <= 40
+
+
+def test_short_plain_worker_result_is_verbatim():
+    response = "The audit passed. CT103 is healthy and no restart occurred."
+    final = {
+        "assistant_text": response,
+        "diagnostics": {"guard_reason": "selected_completed_pc-codex"},
+        "task_ids": ["task-1"],
+    }
+
+    contract = voice_routes._speech_contract_for_final("Ask PC Codex to audit the repo", final)
+
+    assert contract == {"spoken_text": response, "speech_mode": "verbatim"}
+
+
+def test_failed_worker_result_reports_issue_without_reading_details():
+    final = {
+        "assistant_text": "PC Codex could not complete the request because the worker disconnected.",
+        "diagnostics": {"guard_reason": "selected_failed_pc-codex"},
+        "task_ids": ["task-1"],
+    }
+
+    spoken = asyncio.run(voice_routes._spoken_text_for_final("Ask PC Codex to audit the repo", final))
+
+    assert spoken.startswith("PC Codex could not complete the request")
+    assert "try again" in spoken
+    assert len(spoken.split()) <= 40
+
+
+def test_approval_question_is_verbatim_and_actionable():
+    response = "Approve deleting only archive 42, or deny it."
+    final = {
+        "assistant_text": response,
+        "diagnostics": {"guard_reason": "authority_approval_required"},
+        "task_ids": [],
+    }
+
+    contract = voice_routes._speech_contract_for_final("Delete archive 42", final)
+
+    assert contract == {"spoken_text": response, "speech_mode": "verbatim"}
+
+
+def test_streaming_speech_waits_for_file_and_worker_handoff_policy():
+    assert voice_routes._should_stream_spoken_response("Tell me a joke", {"target": "jarvis"}) is True
+    assert voice_routes._should_stream_spoken_response("Read the whole file aloud", {"target": "jarvis"}) is True
+    assert voice_routes._should_stream_spoken_response("Show me the config file", {"target": "jarvis"}) is False
+    assert voice_routes._should_stream_spoken_response("Ask PC Codex to audit the repo", {"target": "jarvis"}) is False
+    assert voice_routes._should_stream_spoken_response("Audit the repo", {"target": "pc-codex"}) is False
+
+
 @pytest.mark.parametrize(
     ("target", "endpoint", "model", "character"),
     [

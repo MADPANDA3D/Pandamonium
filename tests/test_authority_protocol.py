@@ -6,9 +6,13 @@ import pytest
 import src.agent_loop as agent_loop
 import src.agent_identity as agent_identity
 from src.authority_protocol import (
+    ACTION_EFFECTS,
+    SEPARATE_GATE_EFFECTS,
     AuthorityStore,
+    action_effect_for,
     audit_safe_action_call,
     argument_fingerprint,
+    natural_approval_choice,
     operator_identity,
     permission_mode_for,
     safe_preview,
@@ -39,18 +43,70 @@ def _store(tmp_path):
 
 def test_permission_classes_and_new_capabilities_fail_closed(tmp_path):
     store = _store(tmp_path)
-    assert permission_mode_for(_call(name="read_file", arguments={"path": "README.md"})) == "read_only"
-    assert permission_mode_for(_call(name="manage_mcp", arguments={"action": "inventory"})) == "read_only"
-    assert permission_mode_for(_call(name="write_file", arguments={"path": "a", "content": "b"})) == "bounded_write"
-    assert permission_mode_for(_call(name="delete_email")) == "destructive"
-    assert permission_mode_for(_call(name="bash", arguments={"command": "pwd"})) == "controlled_administrative"
-    assert permission_mode_for(_call(name="api_call", arguments={"method": "GET", "path": "/health"})) == "read_only"
-    assert permission_mode_for(_call(name="api_call", arguments={"method": "get", "path": "/health"})) == "read_only"
-    assert permission_mode_for(_call(name="api_call", arguments={"method": "POST", "path": "/jobs"})) == "external_side_effect"
-    assert permission_mode_for(_call(name="api_call", arguments={"path": "/health"})) == "external_side_effect"
+    assert action_effect_for(_call(name="read_file", arguments={"path": "README.md"})) == "read"
+    assert action_effect_for(_call(name="manage_mcp", arguments={"action": "inventory"})) == "read"
+    assert action_effect_for(_call(name="write_file", arguments={"path": "a", "content": "b"})) == "reversible_write"
+    assert action_effect_for(_call(name="delete_email")) == "destructive_or_difficult_to_recover"
+    assert action_effect_for(_call(name="bash", arguments={"command": "pwd"})) == "read"
+    assert action_effect_for(_call(name="api_call", arguments={"method": "GET", "path": "/health"})) == "read"
+    assert action_effect_for(_call(name="api_call", arguments={"method": "get", "path": "/health"})) == "read"
+    assert action_effect_for(_call(name="api_call", arguments={"method": "POST", "path": "/jobs"})) == "external_publication_or_communication"
+    assert action_effect_for(_call(name="api_call", arguments={"path": "/health"})) == "external_publication_or_communication"
+    assert permission_mode_for(_call(name="write_file")) == "bounded_write"
     decision = store.decide(_call(name="new_plugin_mutation"), operator_id="leo", session_id="session-1")
     assert decision["decision"] == "deny"
     assert decision["policy_basis"] == "unclassified_capability"
+
+
+def test_all_eight_effects_and_only_six_separate_gates_are_enforced(tmp_path):
+    calls = {
+        "read": _call(name="read_file", arguments={"path": "README.md"}),
+        "reversible_write": _call(name="write_file", arguments={"path": "notes.md", "content": "ok"}),
+        "destructive_or_difficult_to_recover": _call(name="delete_email", arguments={"id": "7"}),
+        "external_publication_or_communication": _call(name="send_email", arguments={"to": "a@example.test"}),
+        "purchase": _call(name="app_api", arguments={"action": "purchase", "item": "seat"}),
+        "credential_or_auth_change": _call(name="manage_tokens", arguments={"action": "rotate_token"}),
+        "privilege_expansion": _call(name="bash", arguments={"command": "sudo systemctl restart demo"}),
+        "outside_workspace_boundary": _call(
+            name="read_file",
+            arguments={"path": "../outside.txt"},
+        ) | {"capability_policy": {"configured_workspace": "/srv/workspace"}},
+    }
+    assert set(calls) == ACTION_EFFECTS
+    store = _store(tmp_path)
+    for index, (effect, call) in enumerate(calls.items()):
+        assert action_effect_for(call) == effect
+        decision = store.decide(call, operator_id="leo", session_id=f"session-{index}")
+        if effect in {"read", "reversible_write"}:
+            assert decision["decision"] == "allow"
+            assert decision["gate_reason"] is None
+        else:
+            assert decision["decision"] == "approval_required"
+            assert decision["gate_reason"] == effect
+    assert SEPARATE_GATE_EFFECTS == set(calls) - {"read", "reversible_write"}
+
+
+def test_delegated_surfaces_cannot_downgrade_concrete_effects(tmp_path):
+    store = _store(tmp_path)
+    for index, target in enumerate(("extension:oracle", "mcp", "worker")):
+        call = _call(name="delete_email", target=target, arguments={"id": "7"})
+        call["capability_policy"] = {"action_effect": "read"}
+        decision = store.decide(call, operator_id="leo", session_id=f"session-{index}")
+        assert decision["action_effect"] == "destructive_or_difficult_to_recover"
+        assert decision["decision"] == "approval_required"
+
+
+def test_concrete_setting_arguments_select_credential_and_privilege_gates():
+    credential = _call(
+        name="manage_settings",
+        arguments={"action": "set", "key": "provider_api_key", "value": "secret"},
+    )
+    privilege = _call(
+        name="manage_settings",
+        arguments={"action": "set", "key": "shell_enabled", "value": True},
+    )
+    assert action_effect_for(credential) == "credential_or_auth_change"
+    assert action_effect_for(privilege) == "privilege_expansion"
 
 
 def test_unauthenticated_owner_scoped_or_effectful_action_is_denied(tmp_path, monkeypatch):
@@ -213,18 +269,18 @@ def test_session_time_bounded_persistent_denied_and_expired_are_distinct(tmp_pat
     denied_pending = store.decide(
         _call(arguments={"action": "delete", "id": "8"}, request_id="denied-1"),
         operator_id="leo",
-        session_id="session-1",
+        session_id="session-3",
     )
     store.resolve(denied_pending["decision_id"], operator_id="leo", choice="deny", scope="once")
     denied = store.decide(
         _call(arguments={"action": "delete", "id": "8"}, request_id="denied-1", call_id="retry"),
         operator_id="leo",
-        session_id="session-1",
+        session_id="session-3",
     )
     new_instruction = store.decide(
         _call(arguments={"action": "delete", "id": "8"}, request_id="denied-2"),
         operator_id="leo",
-        session_id="session-1",
+        session_id="session-3",
     )
     assert denied["decision"] == "deny"
     assert new_instruction["decision"] == "approval_required"
@@ -255,6 +311,108 @@ def test_wrong_operator_cannot_resolve_or_revoke(tmp_path):
     receipt = store.resolve(pending["decision_id"], operator_id="leo", choice="approve")
     with pytest.raises(KeyError):
         store.revoke(receipt["receipt_id"], operator_id="mallory")
+
+
+def test_pending_decision_expires_durably_during_reconnect_readback(tmp_path):
+    store = _store(tmp_path)
+    pending = store.decide(_call(), operator_id="leo", session_id="session-1")
+    state = json.loads(store.path.read_text())
+    state["decisions"][pending["decision_id"]]["expires_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=1)
+    ).isoformat()
+    store.path.write_text(json.dumps(state))
+
+    restored = store.list_state(operator_id="leo")
+
+    assert next(row for row in restored["decisions"] if row["decision_id"] == pending["decision_id"])["status"] == "expired"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["yes", "yeah", "yep", "approved", "approve", "go ahead", "do it", "proceed", "Yes!", "yes, please"],
+)
+def test_natural_affirmatives_approve_the_only_active_gate_once(tmp_path, reply):
+    store = _store(tmp_path)
+    call = _call(arguments={"action": "create", "title": "Exact review"})
+    pending = store.decide(call, operator_id="leo", session_id="session-1")
+
+    resolved = store.resolve_natural_reply(reply, operator_id="leo", session_id="session-1")
+
+    assert natural_approval_choice(reply) == "approve"
+    assert resolved["choice"] == "approve"
+    assert resolved["decision"]["decision_id"] == pending["decision_id"]
+    assert resolved["receipt"]["scope"] == "once"
+    approved = store.decide(
+        _call(arguments=call["arguments"], request_id="request-2", call_id="call-2"),
+        operator_id="leo",
+        session_id="session-1",
+    )
+    repeated = store.decide(
+        _call(arguments=call["arguments"], request_id="request-3", call_id="call-3"),
+        operator_id="leo",
+        session_id="session-1",
+    )
+    assert approved["decision"] == "allow"
+    assert repeated["decision"] == "approval_required"
+
+
+@pytest.mark.parametrize("reply", ["no", "nope", "deny", "denied", "cancel", "stop", "No!"])
+def test_natural_negatives_deny_the_only_active_gate(tmp_path, reply):
+    store = _store(tmp_path)
+    pending = store.decide(_call(), operator_id="leo", session_id="session-1")
+
+    resolved = store.resolve_natural_reply(reply, operator_id="leo", session_id="session-1")
+
+    assert natural_approval_choice(reply) == "deny"
+    assert resolved["choice"] == "deny"
+    assert resolved["decision"]["decision_id"] == pending["decision_id"]
+    assert resolved["receipt"]["decision"] == "deny"
+
+
+def test_natural_reply_without_exactly_one_current_gate_authorizes_nothing(tmp_path):
+    store = _store(tmp_path)
+    assert store.resolve_natural_reply("yes", operator_id="leo", session_id="session-1") is None
+
+    first = store.decide(_call(), operator_id="leo", session_id="session-1")
+    state = json.loads(store.path.read_text())
+    duplicate = dict(state["decisions"][first["decision_id"]])
+    duplicate["decision_id"] = "second-pending"
+    duplicate["argument_fingerprint"] = "different-fingerprint"
+    state["decisions"][duplicate["decision_id"]] = duplicate
+    store.path.write_text(json.dumps(state))
+
+    assert store.resolve_natural_reply("yes", operator_id="leo", session_id="session-1") is None
+    assert store.resolve_natural_reply("yes", operator_id="other", session_id="session-1") is None
+    assert store.resolve_natural_reply("yes", operator_id="leo", session_id="other") is None
+
+
+def test_changed_arguments_do_not_consume_natural_approval_receipt(tmp_path):
+    store = _store(tmp_path)
+    original = _call(arguments={"action": "create", "title": "Original"})
+    store.decide(original, operator_id="leo", session_id="session-1")
+    store.resolve_natural_reply("go ahead", operator_id="leo", session_id="session-1")
+
+    changed = store.decide(
+        _call(arguments={"action": "create", "title": "Changed"}, request_id="request-2"),
+        operator_id="leo",
+        session_id="session-1",
+    )
+
+    assert changed["decision"] == "approval_required"
+
+
+def test_only_one_material_gate_can_be_pending_per_operator_session(tmp_path):
+    store = _store(tmp_path)
+    first = store.decide(_call(), operator_id="leo", session_id="session-1")
+    second = store.decide(
+        _call(name="send_email", arguments={"to": "other@example.test"}, request_id="request-2"),
+        operator_id="leo",
+        session_id="session-1",
+    )
+
+    assert first["decision"] == "approval_required"
+    assert second["decision"] == "deny"
+    assert second["policy_basis"] == "authority_decision_already_pending"
 
 
 @pytest.mark.asyncio
