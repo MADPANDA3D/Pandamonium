@@ -10,6 +10,7 @@ name: ci / docker publish
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -93,6 +94,10 @@ jobs:
         run: |
           v=$(grep -E '^APP_VERSION' src/constants.py | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
           [ -n "$v" ] || { echo "APP_VERSION not found"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match APP_VERSION $v"
+            exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - name: Download digests
@@ -115,8 +120,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.ver.outputs.version }},enable=${{ github.ref_type == 'tag' }}
             type=raw,value=${{ steps.ver.outputs.version }}-${{ steps.ver.outputs.short }}
       - name: Create manifest list + push tags
         working-directory: /tmp/digests

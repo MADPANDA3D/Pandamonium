@@ -175,3 +175,17 @@ def test_testing_docs_use_project_venv_for_python_validation():
         text = path.read_text(encoding="utf-8")
         for stale in stale_patterns:
             assert stale not in text, f"{path.name} still contains {stale!r}"
+
+
+def test_docker_publish_keeps_release_version_tags_immutable():
+    workflow = (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tags: ['v*']" in workflow
+    assert "Tag $GITHUB_REF_NAME does not match APP_VERSION $v" in workflow
+    assert (
+        "type=raw,value=${{ steps.ver.outputs.version }},"
+        "enable=${{ github.ref_type == 'tag' }}"
+    ) in workflow
+    assert "type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}" in workflow
