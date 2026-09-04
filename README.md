@@ -133,6 +133,16 @@ private data and credentials out of Git, and do not expose raw model or service
 ports publicly. See [SECURITY.md](SECURITY.md) and the
 [deployment guidance](docs/setup.md#security-notes).
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=MADPANDA3D%2FPandamonium&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=MADPANDA3D/Pandamonium&type=date&theme=dark&legend=top-left&sealed_token=1p4_3IuUF5yfOSHwneNKxDToQM9CQZ-ZEqbi1EgfQBPHJM7gAqAZkZOJ4WgXmFh8pqsWLxCh_8FfTp1_hIHJ0TJNxxtP9PrLYPCClMr2Qy7Yw92nH6xAA23n6Zp3Rq_ZSIvQ9TnfuLFdUvCG11ITzZ7Co85qN1jWEm1j7RLCwCqVjKENVwjsmEUSYUdC">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=MADPANDA3D/Pandamonium&type=date&legend=top-left&sealed_token=1p4_3IuUF5yfOSHwneNKxDToQM9CQZ-ZEqbi1EgfQBPHJM7gAqAZkZOJ4WgXmFh8pqsWLxCh_8FfTp1_hIHJ0TJNxxtP9PrLYPCClMr2Qy7Yw92nH6xAA23n6Zp3Rq_ZSIvQ9TnfuLFdUvCG11ITzZ7Co85qN1jWEm1j7RLCwCqVjKENVwjsmEUSYUdC">
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=MADPANDA3D/Pandamonium&type=date&legend=top-left&sealed_token=1p4_3IuUF5yfOSHwneNKxDToQM9CQZ-ZEqbi1EgfQBPHJM7gAqAZkZOJ4WgXmFh8pqsWLxCh_8FfTp1_hIHJ0TJNxxtP9PrLYPCClMr2Qy7Yw92nH6xAA23n6Zp3Rq_ZSIvQ9TnfuLFdUvCG11ITzZ7Co85qN1jWEm1j7RLCwCqVjKENVwjsmEUSYUdC">
+  </picture>
+</a>
+
 ## Project Lineage
 
 Pandamonium began as a fork of
