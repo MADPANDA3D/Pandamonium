@@ -213,6 +213,13 @@ def check_deps():
     elif os.name != "nt":
         print("  [ok] tmux installed")
 
+    missing_ocr = [name for name in ("tesseract", "pdftoppm") if shutil.which(name) is None]
+    if missing_ocr:
+        print(f"\n  [warn] Scanned-PDF OCR unavailable; missing: {', '.join(missing_ocr)}")
+        print("         Install Tesseract OCR and Poppler (see docs/setup.md).")
+    else:
+        print("  [ok] Scanned-PDF OCR installed")
+
 
 def check_arch():
     """Stop early, with guidance, if we're on Apple Silicon but running an

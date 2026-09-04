@@ -76,7 +76,7 @@ following maintained platform capabilities.
 - Owner-scoped long-term memory and document RAG with source provenance,
   compaction, prompt-injection boundaries, and optional Graphify code graphs.
 - Owner-scoped Books library with PDF ingestion, page-aware retrieval, source
-  attribution, reindexing, deletion, and explicit OCR-needed status.
+  attribution, reindexing, deletion, and bundled Tesseract OCR for scanned PDFs.
 - Documents, attachments, email, notes, tasks, calendar and CalDAV, gallery,
   Deep Research, model comparison, and the hardware-aware model Cookbook.
 - Pandamonium branding, configurable themes, and authenticated preference sync

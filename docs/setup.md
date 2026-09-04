@@ -52,7 +52,10 @@ pip install -r requirements.txt
 python setup.py
 python -m uvicorn app:app --host 127.0.0.1 --port 7000
 ```
-Requirements: Python 3.11+. Cookbook also needs `tmux` for background model
+Requirements: Python 3.11+. Scanned-PDF OCR requires `tesseract` and `pdftoppm`
+(`tesseract-ocr`, `tesseract-ocr-eng`, and `poppler-utils` on Debian/Ubuntu;
+`brew install tesseract poppler` on macOS). They are already bundled in the
+Docker image. Cookbook also needs `tmux` for background model
 downloads and serves. The app itself is lightweight; local model serving is the
 heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
 connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.

@@ -86,6 +86,8 @@ done
 # System dependencies (each installed only if missing, so re-runs stay fast and
 # don't re-hit Homebrew over the network):
 #    - tmux      : Cookbook runs model downloads/serves in the background
+#    - tesseract : OCR engine for scanned Books PDFs
+#    - poppler   : provides pdftoppm so scanned PDF pages can reach Tesseract
 #    - llama.cpp : a prebuilt, Metal-enabled llama-server so Cookbook can serve
 #                  GGUF models on the GPU with no compile step
 #    - python@3.11 : installed only if no suitable (arm64) Python was found above
@@ -118,6 +120,8 @@ else
     PY="$(command -v /opt/homebrew/bin/python3.11 || command -v python3.11 || true)"
 fi
 brew_ensure tmux tmux
+brew_ensure tesseract tesseract
+brew_ensure pdftoppm poppler
 brew_ensure llama-server llama.cpp
 brew_ensure apfel apfel
 

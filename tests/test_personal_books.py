@@ -1,5 +1,6 @@
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from fastapi import BackgroundTasks
 
 from routes import personal_routes
 from src import agent_loop
+from src import personal_docs
 from src.agent_identity import runtime_model_fact
 from src.rag_vector import _generate_doc_id
 from src.tools.system import do_manage_books
@@ -130,6 +132,41 @@ def test_books_upload_uses_owner_catalog_and_source_aware_batch(tmp_path, monkey
         assert metadata["page"] == page_number
         assert metadata["source_id"].startswith(f"book:{books[0]['id']}:page:{page_number}:")
     assert personal_routes._load_book_catalog("bob") == []
+
+
+def test_native_pdf_ocr_rasterizes_each_page_and_reads_tesseract_output(tmp_path, monkeypatch):
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nfixture")
+    commands = []
+
+    monkeypatch.setattr(personal_docs.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(personal_docs, "extract_pdf_pages", lambda _path: ["", ""])
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[0].endswith("tesseract"):
+            return subprocess.CompletedProcess(command, 0, stdout=f"OCR page {len(commands) // 2}\n")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(personal_docs.subprocess, "run", fake_run)
+
+    pages, status = personal_docs.ocr_pdf_pages(str(pdf))
+
+    assert status == "complete"
+    assert pages == ["OCR page 1\n", "OCR page 2\n"]
+    assert [command[1:6] for command in commands[::2]] == [
+        ["-f", "1", "-l", "1", "-r"],
+        ["-f", "2", "-l", "2", "-r"],
+    ]
+    assert all(command[-3:] == ["stdout", "-l", "eng"] for command in commands[1::2])
+
+
+def test_docker_image_bundles_scanned_pdf_ocr_dependencies():
+    dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "tesseract-ocr" in dockerfile
+    assert "tesseract-ocr-eng" in dockerfile
+    assert "poppler-utils" in dockerfile
 
 
 def test_image_only_book_is_kept_as_needs_ocr_when_native_ocr_is_unavailable(tmp_path, monkeypatch):
