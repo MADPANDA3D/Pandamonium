@@ -137,6 +137,13 @@ def test_non_streaming_chat_has_no_unbound_hermes_flag():
     assert not hermes_reads or hermes_writes
 
 
+def test_text_chat_forwards_authority_approval_events():
+    source = _CHAT_ROUTES.read_text(encoding="utf-8")
+
+    assert '"authority_approval_required"' in source
+    assert '_forced_tools.add("ui_control")' in source
+
+
 # ── Functional tests of the disabled-tools logic ───────────────
 
 

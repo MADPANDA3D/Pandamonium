@@ -2113,6 +2113,71 @@ export function removeAskUserCards(root) {
   scope.querySelectorAll('.ask-user-card').forEach((node) => node.remove());
 }
 
+export function renderAuthorityApprovalCard(payload) {
+  const decisionId = String(payload?.decision_id || '');
+  const capability = String(payload?.capability?.name || 'requested action');
+  const chatBox = document.getElementById('chat-history');
+  if (!decisionId || !chatBox) return null;
+
+  chatBox.querySelectorAll('.authority-approval-card').forEach(node => node.remove());
+  const card = document.createElement('div');
+  card.className = 'ask-user-card authority-approval-card';
+  card.setAttribute('role', 'group');
+  card.setAttribute('aria-label', `Approval required for ${capability}`);
+
+  const question = document.createElement('div');
+  question.className = 'ask-user-question';
+  question.textContent = `Approval required: ${capability}`;
+  card.appendChild(question);
+
+  const preview = document.createElement('pre');
+  preview.className = 'authority-approval-preview';
+  preview.textContent = JSON.stringify(payload?.preview || {}, null, 2);
+  card.appendChild(preview);
+
+  const actions = document.createElement('div');
+  actions.className = 'authority-approval-actions';
+  const resolve = async (choice) => {
+    actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    try {
+      const response = await fetch(`/api/authority/decisions/${encodeURIComponent(decisionId)}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice, scope: 'once' }),
+      });
+      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+      question.textContent = choice === 'approve'
+        ? `Approved once: ${capability}. Repeat the command to run it.`
+        : `Denied: ${capability}`;
+      preview.remove();
+      actions.remove();
+      if (choice === 'approve') {
+        const input = uiModule.el('message');
+        if (input) {
+          input.value = `Retry the approved ${capability} command with the same arguments.`;
+          input.focus();
+        }
+      }
+    } catch (error) {
+      actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      uiModule.showError(`Approval failed: ${error.message || error}`);
+    }
+  };
+  for (const [choice, label] of [['approve', 'Approve once'], ['deny', 'Deny']]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ask-user-option';
+    button.textContent = label;
+    button.addEventListener('click', () => resolve(choice));
+    actions.appendChild(button);
+  }
+  card.appendChild(actions);
+  chatBox.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  return card;
+}
+
 /**
  * Render an ask_user payload as a durable choice card.
  *

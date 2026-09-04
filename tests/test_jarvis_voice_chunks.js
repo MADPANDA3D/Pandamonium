@@ -15,7 +15,7 @@ const workerAdaptersSource = fs.readFileSync(path.join(__dirname, '../src/agent_
 const chatStreamSource = fs.readFileSync(path.join(__dirname, '../static/js/chatStream.js'), 'utf8');
 const chatSource = fs.readFileSync(path.join(__dirname, '../static/js/chat.js'), 'utf8');
 
-assert.match(index, /id="extension-surface-panel"[\s\S]*?id="extension-surface-frame"[\s\S]*?camera 'none'; microphone 'none'; display-capture 'none'/);
+assert.match(index, /id="extension-surface-panel"[\s\S]*?id="extension-surface-chat"[\s\S]*?id="extension-surface-close"[\s\S]*?id="extension-surface-frame"[\s\S]*?camera 'none'; microphone 'none'; display-capture 'none'/);
 assert.match(style, /\.extension-surface-panel[\s\S]*?inset: 0;[\s\S]*?z-index: 10001;[\s\S]*?transition: opacity 200ms ease, transform 200ms ease/);
 assert.match(style, /\.jarvis-call-panel[\s\S]*?z-index: 10002;/);
 assert.match(style, /html\.extension-surface-active \.jarvis-call-panel[\s\S]*?left: clamp\(24px, 4vw, 72px\)[\s\S]*?width: clamp\(170px, 12vw, 220px\)/);
@@ -32,9 +32,14 @@ assert.match(source, /clientState\.extensions = \{[\s\S]*?\[surface\.extension_i
 assert.match(source, /function oracleProtocolResultMessage\(pending, result = \{\}\)/);
 assert.match(source, /function extensionBridgeClientState\(\)[\s\S]*?clientState\.oracle = oracle/);
 assert.match(source, /async function prepareExtensionTextTurn\(extensionId = 'oracle', chatSessionId = null\)[\s\S]*?String\(chatSessionId \|\| currentChatSessionId\(\) \|\| ''\)/);
+assert.match(source, /prepareExtensionTextTurn[\s\S]*?prepareExtensionSurface\(extensionId\)/);
+assert.match(source, /function showChatFromExtension\(message = ''\)/);
+assert.match(source, /event\.key === 'Escape'[\s\S]*?disengageExtensionSurface\(\)/);
 assert.match(source, /window\.jarvisVoice = \{[\s\S]*?prepareExtensionTextTurn/);
 assert.match(chatSource, /const streamSessionId = sessionModule\.getCurrentSessionId\(\)[\s\S]*?prepareExtensionTextTurn\('oracle', streamSessionId\)/);
 assert.match(chatSource, /json\.extension_call[\s\S]*?applyExtensionSurfaceControl/);
+assert.match(chatSource, /json\.type === 'authority_approval_required'[\s\S]*?renderAuthorityApprovalCard/);
+assert.match(rendererSource, /renderAuthorityApprovalCard[\s\S]*?\/api\/authority\/decisions\/[\s\S]*?Approve once/);
 assert.doesNotMatch(chatSource, /thinking-toggle live-think-toggle expanded/);
 assert.match(source, /configureExtensionSurfaces\(config\.extension_surfaces\)/);
 assert.match(source, /compatibility: 'oracle-v1'/);
@@ -227,12 +232,12 @@ assert.match(index, /title="End voice — task continues" aria-label="End voice 
 assert.match(index, /id="jarvis-call-view-chat"[^>]*>View chat<\/button>/);
 assert.match(index, /<button[^>]*data-worker="hermes"[^>]*>\s*<span>Gordon<\/span><small>Hermes laptop · gated<\/small>\s*<\/button>/);
 assert.match(index, /<button[^>]*data-worker="pc-codex"[^>]*>\s*<span>Friday<\/span><small>Local workstation · checking<\/small>\s*<\/button>/);
-assert.match(index, /style\.css\?v=20260722T162202Z/);
+assert.match(index, /style\.css\?v=20260903T210000Z/);
 assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260902T020000Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260903T210000Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v369'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v371'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
@@ -254,7 +259,7 @@ assert.match(source, /const previousAudio = turnAudioPromise \|\| Promise\.resol
 assert.match(source, /includes\('chatgpt\.com\/backend-api\/codex'\)/);
 assert.match(sessionsSource, /if \(_pendingChat && _pendingChat\.modelId\) return _pendingChat\.modelId/);
 assert.match(source, /document\.querySelectorAll\('\.jarvis-call-name'\)/);
-assert.match(source, /label\.textContent = VOICE_TARGET_LABELS\[worker\] \|\| worker/);
+assert.match(source, /label\.textContent = voiceTargetLabel\(worker\)/);
 assert.match(source, /const queuedUpdate = targetUpdatePromise\s*\.catch\(\(\) => \{\}\)/);
 assert.match(source, /persistVoiceTarget\(payload, voiceSessionId\)/);
 assert.match(source, /if \(!voiceSessionId \|\| !voiceSessionReady\) return targetUpdatePromise/);
@@ -498,7 +503,11 @@ const executableSource = source
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",
     "let testCameraOpen = false; const voiceOrbMedia = { getState: () => ({ cameraOpen: testCameraOpen }), captureFrame: () => ({ captured: true }), openCamera: async () => ({}), closeCamera: () => ({}), playClip: async () => ({}), stopMedia: () => ({}) };",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, engageExtensionSurface, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
+  )
+  .replace(
+    "import { getBrandName } from './brand.js';",
+    "const getBrandName = () => 'Pandamonium';",
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, prepareExtensionSurface, engageExtensionSurface, showChatFromExtension, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
 assert.equal(
@@ -524,10 +533,16 @@ placement.configureExtensionSurfaces([{
   url: 'https://atlas.example.test/runtime/ui/index.html',
   origin: 'https://atlas.example.test',
 }]);
+assert.equal(placement.prepareExtensionSurface('atlas'), true);
+assert.equal(extensionPanel.hidden, true, 'preparing a text turn must not open the surface');
 assert.equal(placement.engageExtensionSurface('atlas'), true);
 assert.equal(extensionFrame.attributes.src, 'https://atlas.example.test/runtime/ui/index.html');
 assert.equal(extensionName.textContent, 'Atlas Fixture');
 assert.equal(extensionPanel.hidden, false);
+assert.equal(placement.showChatFromExtension(), true);
+assert.equal(extensionPanel.hidden, true);
+assert.equal(placement.getExtensionSurfaceState().extensionSurfaceId, 'atlas', 'returning to chat preserves the bridge');
+assert.equal(placement.engageExtensionSurface('atlas'), true);
 assert.equal(mediaRequests, 0, 'engaging an extension must not request camera or microphone access');
 placement.handleExtensionSurfaceMessage({
   source: extensionFrameWindow,

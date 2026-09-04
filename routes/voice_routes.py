@@ -1009,17 +1009,18 @@ def _extension_tool_schemas(tool_specs: list[dict[str, Any]]) -> list[dict[str, 
 def _extension_context(
     voice_session: dict[str, Any], tool_specs: list[dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
-    counts: dict[str, int] = {}
+    names: dict[str, list[str]] = {}
     for tool in tool_specs:
         extension_id = tool["extension_id"]
-        counts[extension_id] = counts.get(extension_id, 0) + 1
+        names.setdefault(extension_id, []).append(tool["name"])
     return {
         extension_id: {
             "engaged": True,
             "state_mounted": True,
-            "tool_count": count,
+            "tool_count": len(tool_names),
+            "tool_names": tool_names,
         }
-        for extension_id, count in counts.items()
+        for extension_id, tool_names in names.items()
     }
 
 

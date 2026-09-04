@@ -694,7 +694,7 @@ async function prepareExtensionTextTurn(extensionId = 'oracle', chatSessionId = 
     configureExtensionSurfaces(session.extension_surfaces);
     configureOracleProtocol(session.oracle_protocol_url);
   }
-  if (!engageExtensionSurface(extensionId)) {
+  if (!prepareExtensionSurface(extensionId)) {
     throw new Error(`${extensionId.toUpperCase()} is not configured on this Pandamonium host.`);
   }
 
@@ -1060,7 +1060,7 @@ function handleExtensionSurfaceMessage(event) {
   }
 }
 
-function engageExtensionSurface(extensionId) {
+function prepareExtensionSurface(extensionId) {
   const config = extensionSurfaceConfigs.get(extensionId);
   const panel = $('extension-surface-panel');
   const frame = $('extension-surface-frame');
@@ -1082,11 +1082,30 @@ function engageExtensionSurface(extensionId) {
   const name = $('extension-surface-name');
   if (name) name.textContent = config.name;
   frame.setAttribute('title', `${config.name} extension surface`);
+  return true;
+}
+
+function engageExtensionSurface(extensionId) {
+  if (!prepareExtensionSurface(extensionId)) return false;
+  const panel = $('extension-surface-panel');
+  if (!panel) return false;
   panel.hidden = false;
   panel.setAttribute('aria-hidden', 'false');
   document.body?.classList.add('extension-surface-active');
   document.documentElement?.classList.add('extension-surface-active');
   window.requestAnimationFrame(() => panel.classList.add('is-open'));
+  return true;
+}
+
+function showChatFromExtension(message = '') {
+  const panel = $('extension-surface-panel');
+  if (!panel || panel.hidden) return false;
+  panel.classList.remove('is-open');
+  panel.hidden = true;
+  panel.setAttribute('aria-hidden', 'true');
+  document.body?.classList.remove('extension-surface-active');
+  document.documentElement?.classList.remove('extension-surface-active');
+  if (message) showToast(message);
   return true;
 }
 
@@ -3092,6 +3111,8 @@ function bind() {
   cancelTaskBtn?.addEventListener('click', () => {
     cancelActiveWorkerTask().catch(error => showToast(error.message || 'Could not cancel the task.'));
   });
+  $('extension-surface-chat')?.addEventListener('click', () => showChatFromExtension());
+  $('extension-surface-close')?.addEventListener('click', () => disengageExtensionSurface());
   targetButtons.forEach(button => {
     button.addEventListener('click', () => {
       if (!button.disabled) {
@@ -3104,7 +3125,12 @@ function bind() {
     if (!agentSelector?.contains(event.target)) setAgentMenuOpen(false);
   });
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') setAgentMenuOpen(false);
+    if (event.key === 'Escape' && extensionSurfaceId && !$('extension-surface-panel')?.hidden) {
+      event.preventDefault();
+      disengageExtensionSurface();
+    } else if (event.key === 'Escape') {
+      setAgentMenuOpen(false);
+    }
   });
   window.addEventListener('odysseus:session-rendered', event => {
     restoreSessionTasks(event.detail?.sessionId).catch(error => {
@@ -3145,4 +3171,5 @@ window.jarvisVoice = {
   restoreSessionTasks,
   applyExtensionSurfaceControl,
   prepareExtensionTextTurn,
+  showChatForApproval: () => showChatFromExtension('Approval required in chat.'),
 };

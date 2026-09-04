@@ -2780,6 +2780,11 @@ import { getBrandName } from './brand.js';
                 if (_isBg) continue;
                 chatStream.handleUIControl(json.data || {});
 
+              } else if (json.type === 'authority_approval_required') {
+                if (_isBg) continue;
+                window.jarvisVoice?.showChatForApproval?.();
+                chatRenderer.renderAuthorityApprovalCard(json.data || {});
+
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;
                 // The agent posed a multiple-choice question; the turn has ended.

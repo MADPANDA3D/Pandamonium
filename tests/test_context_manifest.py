@@ -248,6 +248,65 @@ async def test_agent_caps_native_schemas_and_reports_the_omission(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_production_dispatcher_prioritizes_requested_oracle_tool_under_realistic_cap(monkeypatch):
+    captured = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"Observed."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    def fake_setting(key, default=None):
+        if key == "agent_input_token_budget":
+            return 8208
+        return default
+
+    names = ["fly_to_location", "get_current_view_state"] + [f"oracle_tool_{index}" for index in range(26)]
+    schemas = [{
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": ("Read current visible Cesium view state" if name == "get_current_view_state" else "ORACLE capability " + name) * 12,
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    } for name in names]
+    capabilities = {
+        name: {"extension_id": "oracle", "permission_mode": "read_only"}
+        for name in names
+    }
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "get_setting", fake_setting)
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Read the current Cesium view state and report exactly what is visible."}],
+        context_length=8208,
+        max_tokens=2048,
+        relevant_tools=set(names) | {"ui_control"},
+        forced_tools=set(names) | {"ui_control"},
+        extra_tool_schemas=schemas,
+        extension_capabilities=capabilities,
+        context_extensions={"oracle": {
+            "engaged": True,
+            "state_mounted": True,
+            "tool_count": len(names),
+            "tool_names": names,
+        }},
+    ):
+        pass
+
+    mounted = [schema["function"]["name"] for schema in captured["tools"]]
+    assert "ui_control" in mounted
+    assert "get_current_view_state" in mounted
+    assert "oracle_tool_25" in json.dumps(captured["messages"])
+
+
+@pytest.mark.asyncio
 async def test_current_domain_tool_is_prioritized_before_schema_cap(monkeypatch):
     captured = {}
     real_cap = agent_loop.cap_tool_schemas

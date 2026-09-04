@@ -1599,6 +1599,7 @@ def setup_chat_routes(
                         _forced_tools = set(WEB_TOOL_NAMES)
                     if text_extension_bridge:
                         _forced_tools.update(text_extension_bridge["tool_names"])
+                        _forced_tools.add("ui_control")
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1652,6 +1653,7 @@ def setup_chat_routes(
                                     "rounds_exhausted", "budget_exceeded",
                                     "loop_breaker_triggered",
                                     "intent_nudge_exhausted",
+                                    "authority_approval_required",
                                     "ask_user",
                                     "plan_update",
                                 ):

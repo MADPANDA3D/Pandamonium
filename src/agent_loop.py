@@ -857,6 +857,67 @@ def _insert_before_latest_user(messages: List[Dict], context_msg: Dict) -> List[
     return out
 
 
+def _rank_extra_tool_schemas(schemas: List[Dict], request: str) -> List[Dict]:
+    """Keep request-matching extension tools first when the catalog is capped."""
+    query_tokens = set(re.findall(r"[a-z0-9]+", str(request).lower()))
+
+    def score(schema: Dict) -> int:
+        function = schema.get("function") if isinstance(schema.get("function"), dict) else {}
+        name_tokens = set(re.findall(r"[a-z0-9]+", str(function.get("name") or "").lower()))
+        detail_tokens = set(re.findall(
+            r"[a-z0-9]+",
+            json.dumps({
+                "description": function.get("description") or "",
+                "parameters": function.get("parameters") or {},
+            }, sort_keys=True, default=str).lower(),
+        ))
+        # ponytail: lexical ranking is enough for bounded catalogs; use embeddings
+        # only if real extension vocabulary stops matching ordinary requests.
+        return len(name_tokens & query_tokens) * 16 + len(detail_tokens & query_tokens)
+
+    return [
+        schema for _index, schema in sorted(
+            enumerate(schemas),
+            key=lambda item: (-score(item[1]), item[0]),
+        )
+    ]
+
+
+def _extension_catalog_context_message(context_extensions: Dict[str, Dict[str, Any]]) -> Optional[Dict]:
+    lines = []
+    for extension_id, state in sorted(context_extensions.items()):
+        names = state.get("tool_names") if isinstance(state, dict) else None
+        if isinstance(names, list) and names:
+            lines.append(f"{extension_id}: {', '.join(str(name) for name in names[:64])}")
+    if not lines:
+        return None
+    return untrusted_context_message(
+        "extension.catalog",
+        "Mounted extension capability inventory (names only; call only tools whose schemas are available this turn):\n"
+        + "\n".join(lines),
+    )
+
+
+def _oracle_ui_control_schema() -> Dict:
+    """Return the small ORACLE lifecycle surface used during bridge turns."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "ui_control",
+            "description": "Open or close the embedded ORACLE interface.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["oracle_protocol"]},
+                    "name": {"type": "string", "enum": ["engage", "shutdown"]},
+                },
+                "required": ["action", "name"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 def _uploaded_files_context_message(uploaded_files: Optional[List[Dict]]) -> Optional[Dict]:
     if not uploaded_files:
         return None
@@ -2718,6 +2779,7 @@ async def stream_agent_loop(
     _t0 = time.time()
     _needs_admin = _detect_admin_intent(messages)
     _last_user = _extract_last_user_message(messages)
+    extra_tool_schemas = _rank_extra_tool_schemas(extra_tool_schemas, _last_user)
     record_operational_event(
         request_id=_action_request_id,
         session_id=session_id,
@@ -3233,6 +3295,9 @@ async def stream_agent_loop(
         suppress_skills=_low_signal_turn,
         active_email=active_email,
     )
+    _extension_catalog_message = _extension_catalog_context_message(context_extensions)
+    if _extension_catalog_message:
+        messages = _insert_before_latest_user(messages, _extension_catalog_message)
     if _ody_doc_finetune_mode and not plan_mode and not approved_plan and not guide_only:
         messages = _minimal_odysseus_doc_messages(
             messages,
@@ -3510,6 +3575,13 @@ async def stream_agent_loop(
                     if t.get("function", {}).get("name") not in disabled_tools
                     and t.get("name") not in disabled_tools
                 ]
+            if context_extensions.get("oracle", {}).get("engaged"):
+                all_tool_schemas = [
+                    _oracle_ui_control_schema()
+                    if schema.get("function", {}).get("name") == "ui_control"
+                    else schema
+                    for schema in all_tool_schemas
+                ]
         else:
             # Local: only MCP schemas when message suggests MCP tool usage
             _last_content = _last_user.lower()
@@ -3531,6 +3603,33 @@ async def stream_agent_loop(
             for name in _extension_names
         }
         _schema_priority = set(forced_tools or set()) | _extension_names
+        _priority_order: List[str] = []
+        if "ui_control" in _schema_priority:
+            _priority_order.append("ui_control")
+        _priority_order.extend(
+            name for name in (
+                schema.get("function", {}).get("name")
+                for schema in extra_tool_schemas
+            )
+            if name and name in _schema_priority and name not in _priority_order
+        )
+        _priority_order.extend(
+            name for name in sorted(_schema_priority)
+            if name not in _priority_order
+        )
+        _priority_rank = {name: index for index, name in enumerate(_priority_order)}
+        all_tool_schemas = [
+            schema for _index, schema in sorted(
+                enumerate(all_tool_schemas),
+                key=lambda item: (
+                    _priority_rank.get(
+                        item[1].get("function", {}).get("name"),
+                        len(_priority_rank),
+                    ),
+                    item[0],
+                ),
+            )
+        ]
         # Keep deterministic tools for the current request ahead of unrelated
         # admin schemas when the provider-context budget caps the catalog.
         # Otherwise an explicit Books request can receive prose describing

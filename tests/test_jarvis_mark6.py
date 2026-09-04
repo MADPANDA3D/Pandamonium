@@ -1422,7 +1422,12 @@ def test_registered_extension_catalog_is_authoritative_and_disable_removes_it(tm
         ("create_mesh", "atlas", "bounded_write")
     ]
     assert voice_routes._extension_context(session, specs) == {
-        "atlas": {"engaged": True, "state_mounted": True, "tool_count": 1}
+        "atlas": {
+            "engaged": True,
+            "state_mounted": True,
+            "tool_count": 1,
+            "tool_names": ["create_mesh"],
+        }
     }
     registry.disable("atlas")
     assert voice_routes._extension_tool_specs(session) == []
@@ -1653,6 +1658,10 @@ async def test_oracle_requests_use_jarvis_native_tool_loop_and_actual_reply(monk
         "engaged": True,
         "state_mounted": True,
         "tool_count": 5,
+        "tool_names": [
+            "set_visual_style", "fly_to_location", "control_cctv",
+            "analyst_query", "control_cockpit",
+        ],
     }
     assert "Moons out, Goons out" in calls[0]["messages"][0]["content"]
 
