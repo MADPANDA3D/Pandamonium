@@ -19,6 +19,9 @@ assert.match(voice, /'X-Tz-Offset': String\(-new Date\(\)\.getTimezoneOffset\(\)
 assert.match(voice, /'X-Tz-Name': name/);
 assert.match(voice, /function applyVoiceUIControl\(event\)[\s\S]*?VOICE_UI_CONTROL_ALLOWLIST\.has\(viewControl\)[\s\S]*?handleUIControl\(event\)/);
 assert.match(voice, /navigator\.mediaDevices\.getUserMedia/);
+assert.match(voice, /function startSphereStream\(stream\)[\s\S]*?createMediaStreamSource\(stream\)/);
+assert.match(voice, /mediaStream = requestedStream;\s*startSphereStream\(mediaStream\);/);
+assert.match(voice, /type: 'jarvis-audio-levels'[\s\S]*?volume: shaped\.volume[\s\S]*?levels: shaped\.levels/);
 assert.match(voice, /\/api\/stt\/transcribe/);
 assert.match(voice, /\/api\/voice\/sessions\/\$\{encodeURIComponent\(turnSessionId\)\}\/respond\/stream/);
 assert.match(voice, /voiceOrbMedia\.stopMedia\(\)/);

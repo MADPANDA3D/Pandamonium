@@ -775,7 +775,8 @@ def _set_user_time_from_request(request: Request) -> None:
 
 def _asks_read_all(text: str) -> bool:
     return bool(re.search(
-        r"\b(?:read|speak|say)\s+(?:it\s+all|all\s+of\s+it|everything|the\s+(?:whole|full)\s+(?:thing|response|answer))\b",
+        r"\b(?:read|speak|say)\s+(?:it\s+all|all\s+of\s+it|everything|"
+        r"the\s+(?:whole|full)\s+(?:thing|response|answer|file|document|report)(?:\s+aloud)?)\b",
         text,
         re.IGNORECASE,
     ))
@@ -812,6 +813,26 @@ def _requested_artifact_kind(prompt: str) -> str | None:
         ("presentation", r"\b(?:presentation|slide deck|slides)\b"),
     )
     return next((kind for kind, pattern in kinds if re.search(pattern, prompt, re.IGNORECASE)), None)
+
+
+def _requested_file_handoff(prompt: str) -> bool:
+    return bool(
+        re.search(r"\b(?:find|list|show|open|get|read|inspect|check|locate|fetch|send|give)\b", prompt, re.IGNORECASE)
+        and re.search(r"\b(?:files?|documents?|reports?|attachments?)\b", prompt, re.IGNORECASE)
+    )
+
+
+def _file_spoken_handoff(prompt: str, response_text: str) -> str | None:
+    if not _requested_file_handoff(prompt):
+        return None
+    if re.search(
+        r"\b(?:could not|couldn't|cannot|can't|not found|failed to|unavailable)\b",
+        response_text,
+        re.IGNORECASE,
+    ):
+        return "I couldn't complete that file request. The details are in the chat."
+    plural = bool(re.search(r"\b(?:files|documents|reports|attachments)\b", prompt, re.IGNORECASE))
+    return "I found the files. They're available in the chat." if plural else "I found the file. It's available in the chat."
 
 
 def _structured_artifact_kind(response_text: str) -> str | None:
@@ -852,6 +873,9 @@ async def _select_spoken_text(prompt: str, response_text: str) -> str:
     response_text = response_text.strip()
     if _asks_read_all(prompt):
         return speech_text(response_text)
+    file_handoff = _file_spoken_handoff(prompt, response_text)
+    if file_handoff:
+        return speech_text(file_handoff)
     artifact_handoff = _artifact_spoken_handoff(prompt, response_text)
     if artifact_handoff:
         return speech_text(artifact_handoff)
@@ -860,7 +884,26 @@ async def _select_spoken_text(prompt: str, response_text: str) -> str:
 
 async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
     response_text = str(final["assistant_text"]).strip()
+    if not _asks_read_all(prompt):
+        diagnostics = final.get("diagnostics") or {}
+        guard_reason = str(diagnostics.get("guard_reason") or "").lower()
+        task_ids = final.get("task_ids") or diagnostics.get("task_ids") or []
+        if any(marker in guard_reason for marker in ("failed", "blocked", "cancelled", "not_connected")):
+            return "The agent hit an issue. The details are in the chat."
+        if "completed" in guard_reason or (task_ids and len(response_text) > 420):
+            return "Roger that. The full agent result is in the chat."
     return await _select_spoken_text(prompt, response_text)
+
+
+def _should_stream_spoken_response(prompt: str, voice_session: dict[str, Any]) -> bool:
+    """Stream conversational speech, but wait for bounded handoff policy turns."""
+    if _asks_read_all(prompt):
+        return True
+    if _requested_artifact_kind(prompt) or _requested_file_handoff(prompt):
+        return False
+    if str(voice_session.get("target") or "jarvis") not in DIRECT_MODEL_TARGETS:
+        return False
+    return _background_delegation(prompt) is None
 
 
 def _tts_voice_for_final(final: dict[str, Any]) -> str | None:
@@ -3944,7 +3987,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                 final: dict[str, Any] | None = None
                 handoff_greetings: list[dict[str, Any]] = []
                 audio_announced = False
-                stream_speech = _requested_artifact_kind(text) is None
+                stream_speech = _should_stream_spoken_response(text, turn_session)
                 yield f"data: {json.dumps({'type': 'state', 'state': 'thinking'})}\n\n"
                 async for event in _voice_events_with_heartbeats(
                     _jarvis_events(chat_session_id, text, owner, turn_session)

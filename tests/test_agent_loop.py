@@ -74,6 +74,23 @@ def test_polish_internet_search_request_classifies_as_web():
     assert "web" in intent["domains"]
 
 
+def test_explicit_run_command_request_classifies_as_files():
+    prompt = "Run the command uname -a and show me the output."
+
+    intent = _classify_agent_request([], prompt)
+
+    assert intent["low_signal"] is False
+    assert "files" in intent["domains"]
+
+
+def test_explanatory_run_command_question_does_not_classify_as_files():
+    prompt = "How do I run uname -a?"
+
+    intent = _classify_agent_request([], prompt)
+
+    assert "files" not in intent["domains"]
+
+
 def test_insert_before_latest_user_places_context_before_last_user_turn():
     messages = [
         {"role": "user", "content": "first"},

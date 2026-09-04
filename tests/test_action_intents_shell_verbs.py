@@ -33,3 +33,14 @@ def test_imperative_shell_commands_still_promote_to_agent():
 def test_can_you_shell_requests_still_promote_to_agent():
     assert message_needs_tools("can you grep the logs for 500 errors")
     assert message_needs_tools("could you tail the access log")
+
+
+def test_explicit_run_command_requests_promote_to_agent():
+    assert message_needs_tools("Run the command uname -a and show me the output.")
+    assert message_needs_tools("Execute uname -a")
+    assert message_needs_tools("please run pytest tests/test_action_intents.py")
+
+
+def test_explanatory_run_command_questions_stay_plain_chat():
+    assert not message_needs_tools("How do I run uname -a?")
+    assert not message_needs_tools("What happens when I execute uname -a?")

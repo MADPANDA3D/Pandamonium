@@ -1223,6 +1223,14 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("sessions")
     if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b"):
         domains.add("files")
+    if re.match(
+        r"^\s*(?:(?:please|ok(?:ay)?|alright|right|sure|cool|great|thanks)[\s,.!-]+)*"
+        r"(?:(?:execute|exec)\b\s+\S+|"
+        r"run\b(?!\s+(?:this|it)\b.{0,40}\b(?:in\s+the\s+)?background\b)\s+\S+)",
+        text,
+        re.IGNORECASE,
+    ):
+        domains.add("files")
     if has(
         r"\b(run|execute|test|debug|fix|save|create|edit|read|open)\b.{0,40}\b("
         r"python|javascript|typescript|java|c\+\+|cpp|c#|csharp|rust|go|golang|"
