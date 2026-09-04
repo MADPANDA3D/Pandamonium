@@ -1,0 +1,36 @@
+name: GHCR v1.0.1 tag repair
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  repair:
+    name: restore v1.0.1 image tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee  # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore and verify tag
+        env:
+          IMAGE: ghcr.io/madpanda3d/pandamonium
+          SOURCE_DIGEST: sha256:6e3fa3c197a37a8833534589613f19a4b93e76f3c466bf2d1ed24fdbb445c76c
+          TARGET_TAG: 1.0.1
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${TARGET_TAG}" \
+            "${IMAGE}@${SOURCE_DIGEST}"
+          actual=$(docker buildx imagetools inspect "${IMAGE}:${TARGET_TAG}" |
+            awk '/^Digest:/ {print $2; exit}')
+          test "$actual" = "$SOURCE_DIGEST"
