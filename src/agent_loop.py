@@ -4561,6 +4561,17 @@ async def stream_agent_loop(
             )
             _action_started_at = utc_now()
             _action_started_monotonic = time.monotonic()
+            record_operational_event(
+                request_id=_action_request_id,
+                session_id=session_id,
+                call_id=_action_call["call_id"],
+                operator_id=operator_identity(owner),
+                actor=_action_call["actor"],
+                component=_action_call["target"],
+                event_type="started",
+                status="requested",
+                metadata={"capability": _action_call["name"]},
+            )
             _validation_error = validate_action_call(_action_call, _action_catalog)
             _authority_decision = None
             if not _validation_error:
@@ -4577,6 +4588,7 @@ async def stream_agent_loop(
                         block.tool_type in {"send_email", "reply_to_email", "bulk_email"}
                         and bool(get_setting("agent_email_confirm", True))
                     ),
+                    configured_workspace=workspace,
                 )
                 _action_call["authority_ref"] = _authority_decision["decision_id"]
                 record_operational_event(
@@ -4587,12 +4599,14 @@ async def stream_agent_loop(
                     actor="odysseus:authority",
                     component="control_plane",
                     event_type="approval",
-                    status={"allow": "succeeded", "deny": "denied"}.get(
+                    status={"allow": "authorized", "deny": "denied"}.get(
                         _authority_decision["decision"], "approval_required"
                     ),
                     evidence_refs=[{"decision_id": _authority_decision["decision_id"]}],
                     metadata={
                         "permission_mode": _authority_decision["permission_mode"],
+                        "action_effect": _authority_decision["action_effect"],
+                        "gate_reason": _authority_decision["gate_reason"],
                         "policy_basis": _authority_decision["policy_basis"],
                     },
                 )
@@ -4652,6 +4666,20 @@ async def stream_agent_loop(
                 )
                 logger.info("Tool blocked before start by policy: %s", block.tool_type)
             else:
+                record_operational_event(
+                    request_id=_action_request_id,
+                    session_id=session_id,
+                    call_id=_action_call["call_id"],
+                    operator_id=operator_identity(owner),
+                    actor=_action_call["actor"],
+                    component=_action_call["target"],
+                    event_type="progress",
+                    status="executed",
+                    evidence_refs=[{"decision_id": _action_decision_id}]
+                    if (_action_decision_id := _action_call.get("authority_ref"))
+                    else [],
+                    metadata={"capability": _action_call["name"]},
+                )
                 yield (
                     f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": _safe_cmd_display, "full_command": _safe_full_command, "round": round_num, "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "capability_version": _action_call["capability_version"], "authority_ref": _action_call["authority_ref"]})}\n\n'
                 )

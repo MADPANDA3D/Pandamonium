@@ -5,6 +5,7 @@ import pytest
 import src.operational_protocol as operational
 import src.agent_identity as agent_identity
 from src.operational_protocol import (
+    AUDIT_STATES,
     OUTCOME_STATES,
     ProtocolEventStore,
     RollbackRegistry,
@@ -53,6 +54,14 @@ def test_all_outcome_states_remain_distinct_in_storage(tmp_path):
     for status in sorted(OUTCOME_STATES):
         store.record(actor="test", component="tool", event_type="result", status=status)
     assert [row["status"] for row in store.query(limit=20)] == sorted(OUTCOME_STATES)
+
+
+def test_authority_audit_states_remain_distinct_before_terminal_outcomes(tmp_path):
+    store = ProtocolEventStore(tmp_path / "events.jsonl")
+    for status in ("requested", "authorized", "executed"):
+        store.record(actor="test", component="tool", event_type="progress", status=status)
+    assert AUDIT_STATES == {"requested", "authorized", "executed"}
+    assert [row["status"] for row in store.query(limit=10)] == ["requested", "authorized", "executed"]
 
 
 def test_event_envelope_redacts_secrets_and_controls_exceptions(tmp_path):

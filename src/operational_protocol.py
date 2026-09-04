@@ -23,6 +23,7 @@ ROLLBACK_FILE = Path(DATA_DIR) / "component_rollbacks.json"
 OUTCOME_STATES = frozenset(
     {"succeeded", "failed", "denied", "cancelled", "timed_out", "unknown", "degraded", "unavailable"}
 )
+AUDIT_STATES = frozenset({"requested", "authorized", "executed"})
 PROTOCOL_VERSIONS = {
     "JOS-P0": "0.1",
     "JOS-P1": "0.1",
@@ -88,7 +89,7 @@ class ProtocolEventStore:
     ) -> dict[str, Any]:
         if event_type not in _EVENT_TYPES:
             raise ValueError("invalid_operational_event_type")
-        if status not in OUTCOME_STATES and status not in {"running", "approval_required", "healthy"}:
+        if status not in OUTCOME_STATES and status not in AUDIT_STATES | {"running", "approval_required", "healthy"}:
             raise ValueError("invalid_operational_status")
         event = {
             "event_id": str(uuid.uuid4()),

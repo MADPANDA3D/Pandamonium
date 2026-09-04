@@ -899,6 +899,88 @@ async def test_selected_friday_conversation_uses_voice_model_without_task_tools(
 
 
 @pytest.mark.asyncio
+async def test_voice_forwards_the_canonical_authority_decision_and_speaks_one_summary(monkeypatch):
+    decision = {
+        "decision_id": "decision-voice-1",
+        "decision": "approval_required",
+        "action_effect": "destructive_or_difficult_to_recover",
+        "gate_reason": "destructive_or_difficult_to_recover",
+        "capability": {"name": "delete_email", "target": "tool"},
+        "preview": {"uid": "7"},
+    }
+
+    async def model_stream(*_args, **_kwargs):
+        yield "data: " + json.dumps({"type": "authority_approval_required", "data": decision})
+        yield 'data: {"delta":"A second confirmation should not be spoken."}'
+        yield 'data: {"type":"metrics","data":{}}'
+        yield "data: [DONE]"
+
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(
+            endpoint_url="http://jarvis.test/v1/chat/completions",
+            model="jarvis-model",
+            headers={},
+            get_context_messages=lambda: [],
+        )),
+    )
+
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Delete email seven", "leo", {"target": "jarvis"},
+        )
+    ]
+
+    assert events[0] == {"type": "authority_approval_required", "data": decision}
+    assert events[1]["text"] == "Approval required for delete_email. I opened the exact decision in chat."
+    assert events[-1]["assistant_text"] == events[1]["text"]
+    assert events[-1]["diagnostics"]["guard_reason"] == "authority_approval_required"
+
+
+@pytest.mark.asyncio
+async def test_voice_oracle_language_uses_the_shared_ui_control_action(monkeypatch):
+    captured = {"calls": 0}
+
+    async def model_stream(*_args, **_kwargs):
+        captured["calls"] += 1
+        yield 'data: {"type":"ui_control","data":{"ui_event":"oracle_protocol_engage"}}'
+        yield 'data: {"delta":"ORACLE protocol engaged."}'
+        yield 'data: {"type":"metrics","data":{}}'
+        yield "data: [DONE]"
+
+    monkeypatch.setattr(voice_routes, "stream_agent_loop", model_stream)
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(
+            endpoint_url="http://jarvis.test/v1/chat/completions",
+            model="jarvis-model",
+            headers={},
+            get_context_messages=lambda: [],
+        )),
+    )
+    monkeypatch.setattr(
+        voice_routes,
+        "_oracle_protocol_intent",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("legacy phrase shortcut was used")),
+    )
+    session = {"target": "jarvis"}
+
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1", "Engage the ORACLE protocol", "leo", session,
+        )
+    ]
+
+    assert captured["calls"] == 1
+    assert events[0] == {"type": "ui_control", "ui_event": "oracle_protocol_engage"}
+    assert events[-1]["assistant_text"] == "ORACLE protocol engaged."
+    assert session["oracle_protocol_active"] is True
+
+
+@pytest.mark.asyncio
 async def test_old_worker_question_does_not_capture_direct_gordon_turn(monkeypatch):
     monkeypatch.setattr(jarvis_agent, "get_task", lambda _task_id: {
         "task_id": "pc-question",
@@ -994,7 +1076,9 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
                 "decision_id": "decision-1",
                 "decision": "allow",
                 "permission_mode": "bounded_write",
-                "policy_basis": "existing_scoped_policy",
+                "action_effect": "reversible_write",
+                "gate_reason": None,
+                "policy_basis": "authenticated_explicit_request",
             }
 
     monkeypatch.setattr(jarvis_agent, "find_active_task", lambda *_args: None)
@@ -1035,7 +1119,12 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
     assert captured["codex_thread_id"] is None
     assert captured["action_call"]["target"] == "worker"
     assert captured["action_call"]["agent_id"] == "assistant"
-    assert [event["event_type"] for event in operational_events] == ["approval", "result"]
+    assert [event["event_type"] for event in operational_events] == [
+        "started", "approval", "progress", "result",
+    ]
+    assert [event["status"] for event in operational_events] == [
+        "requested", "authorized", "executed", "succeeded",
+    ]
     assert operational_events[0]["request_id"] == operational_events[1]["request_id"]
 
 

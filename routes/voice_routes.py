@@ -2567,6 +2567,17 @@ async def _dispatch_worker_request(
     )
     catalog = compose_capability_catalog(fallback_names={"start_agent_task"})
     call["capability_version"] = catalog["version"]
+    record_operational_event(
+        request_id=request_id,
+        session_id=chat_session_id,
+        call_id=call["call_id"],
+        operator_id=operator_identity(owner),
+        actor=call["actor"],
+        component=call["target"],
+        event_type="started",
+        status="requested",
+        metadata={"capability": call["name"]},
+    )
     validation_error = validate_action_call(call, catalog)
     if validation_error:
         raise PermissionError(validation_error["category"])
@@ -2584,12 +2595,29 @@ async def _dispatch_worker_request(
         actor="odysseus:authority",
         component="control_plane",
         event_type="approval",
-        status={"allow": "succeeded", "deny": "denied"}.get(decision["decision"], "approval_required"),
+        status={"allow": "authorized", "deny": "denied"}.get(decision["decision"], "approval_required"),
         evidence_refs=[{"decision_id": decision["decision_id"]}],
-        metadata={"permission_mode": decision["permission_mode"], "policy_basis": decision["policy_basis"]},
+        metadata={
+            "permission_mode": decision["permission_mode"],
+            "action_effect": decision["action_effect"],
+            "gate_reason": decision["gate_reason"],
+            "policy_basis": decision["policy_basis"],
+        },
     )
     if decision["decision"] != "allow":
         raise PermissionError("worker_dispatch_not_authorized")
+    record_operational_event(
+        request_id=request_id,
+        session_id=chat_session_id,
+        call_id=call["call_id"],
+        operator_id=operator_identity(owner),
+        actor=call["actor"],
+        component=call["target"],
+        event_type="progress",
+        status="executed",
+        evidence_refs=[{"decision_id": decision["decision_id"]}],
+        metadata={"capability": call["name"]},
+    )
 
     started = time.monotonic()
     action = "blocked"
@@ -3252,8 +3280,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         selected_target == "pc-codex" and _selected_pc_codex_task_request(text)
     )
     if (
-        _oracle_protocol_intent(text, voice_session)
-        or _media_command(text)
+        _media_command(text)
         or _foreground_command(text)
         or _calendar_read_args(text)
         or _setup_status_command(text)
@@ -3294,6 +3321,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     full_response = ""
     task_ids: list[str] = []
     extension_tools_used: list[str] = []
+    pending_authority: dict[str, Any] | None = None
     started = time.perf_counter()
     first_token_ms: int | None = None
     metrics: dict[str, Any] = {}
@@ -3346,7 +3374,30 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             data = json.loads(payload)
         except json.JSONDecodeError:
             continue
-        if "delta" in data and not data.get("thinking"):
+        if data.get("type") == "authority_approval_required" and isinstance(data.get("data"), dict):
+            pending_authority = data["data"]
+            capability = str((pending_authority.get("capability") or {}).get("name") or "this action")
+            summary = f"Approval required for {capability}. I opened the exact decision in chat."
+            full_response = summary
+            if first_token_ms is None:
+                first_token_ms = int((time.perf_counter() - started) * 1000)
+            yield {"type": "authority_approval_required", "data": pending_authority}
+            yield {"type": "assistant_delta", "text": summary}
+        elif data.get("type") == "ui_control" and isinstance(data.get("data"), dict):
+            control = dict(data["data"])
+            ui_event = str(control.get("ui_event") or "")
+            if ui_event in {"oracle_protocol_engage", "oracle_protocol_shutdown"}:
+                active = ui_event == "oracle_protocol_engage"
+                voice_session["oracle_protocol_pending"] = False
+                voice_session["oracle_protocol_active"] = active
+                _set_extension_engaged(voice_session, "oracle", active)
+                voice_session_id = str(voice_session.get("id") or "")
+                if voice_session_id:
+                    _set_oracle_protocol_state(voice_session_id, pending=False, active=active)
+            yield {"type": "ui_control", **control}
+        elif "delta" in data and not data.get("thinking"):
+            if pending_authority:
+                continue
             delta = str(data.get("delta") or "")
             if delta and first_token_ms is None:
                 first_token_ms = int((time.perf_counter() - started) * 1000)
@@ -3392,7 +3443,8 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         "num_predict": _num_predict_for_text(text),
         "inference": True,
         "guard_reason": (
-            "friday_conversation" if selected_target == "pc-codex"
+            "authority_approval_required" if pending_authority
+            else "friday_conversation" if selected_target == "pc-codex"
             else "extension_native_tools" if extension_tools_used
             else None
         ),

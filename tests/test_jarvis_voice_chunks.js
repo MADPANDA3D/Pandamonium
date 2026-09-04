@@ -40,6 +40,8 @@ assert.match(chatSource, /const streamSessionId = sessionModule\.getCurrentSessi
 assert.match(chatSource, /json\.extension_call[\s\S]*?applyExtensionSurfaceControl/);
 assert.match(chatSource, /json\.type === 'authority_approval_required'[\s\S]*?renderAuthorityApprovalCard/);
 assert.match(rendererSource, /renderAuthorityApprovalCard[\s\S]*?\/api\/authority\/decisions\/[\s\S]*?Approve once/);
+assert.match(source, /event\.type === 'authority_approval_required'[\s\S]*?showChatFromExtension[\s\S]*?renderAuthorityApprovalCard/);
+assert.match(rendererSource, /restorePendingAuthorityDecision[\s\S]*?\/api\/authority/);
 assert.doesNotMatch(chatSource, /thinking-toggle live-think-toggle expanded/);
 assert.match(source, /configureExtensionSurfaces\(config\.extension_surfaces\)/);
 assert.match(source, /compatibility: 'oracle-v1'/);
@@ -234,10 +236,10 @@ assert.match(index, /<button[^>]*data-worker="hermes"[^>]*disabled>\s*<span>Herm
 assert.match(index, /<button[^>]*data-worker="pc-codex"[^>]*disabled>\s*<span>PC Codex<\/span><small>Local workstation · gated<\/small>\s*<\/button>/);
 assert.match(index, /style\.css\?v=20260903T210000Z/);
 assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260904T151500Z/);
+assert.match(index, /jarvisVoice\.js\?v=20260904T235900Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v373'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v374'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
@@ -500,6 +502,10 @@ const executableSource = source
   .replace(
     "import { collectClientState, handleUIControl } from './chatStream.js';",
     "const collectClientState = () => ({ active_view: 'chat' }); const handleUIControl = () => {};",
+  )
+  .replace(
+    "import { renderAuthorityApprovalCard, restorePendingAuthorityDecision } from './chatRenderer.js';",
+    "const renderAuthorityApprovalCard = () => {}; const restorePendingAuthorityDecision = async () => null;",
   )
   .replace(
     "import voiceOrbMedia from './voiceOrbMedia.js';",

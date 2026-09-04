@@ -3,6 +3,7 @@
 
 import markdownModule from './markdown.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
+import { renderAuthorityApprovalCard, restorePendingAuthorityDecision } from './chatRenderer.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
 import { getBrandName } from './brand.js';
 
@@ -2210,6 +2211,10 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
       else if (event.type === 'ui_control' && isCurrentVoiceCall(callGeneration)) {
         applyVoiceUIControl({ ...event, voice_session_id: turnSessionId });
       }
+      else if (event.type === 'authority_approval_required' && isCurrentVoiceCall(callGeneration)) {
+        showChatFromExtension('Approval required in chat.');
+        renderAuthorityApprovalCard(event.data || {});
+      }
       else if (event.type === 'agent_task') {
         const currentCall = isCurrentVoiceCall(callGeneration);
         const taskWorkspace = event.workspace || (currentCall ? activeWorkspace : 'home-lab');
@@ -3147,6 +3152,9 @@ function bind() {
   window.addEventListener('odysseus:session-rendered', event => {
     restoreSessionTasks(event.detail?.sessionId).catch(error => {
       console.warn('Could not restore Jarvis task activity:', error);
+    });
+    restorePendingAuthorityDecision(event.detail?.sessionId).catch(error => {
+      console.warn('Could not restore authority decision:', error);
     });
   });
   window.addEventListener('instance-brand-changed', () => {
