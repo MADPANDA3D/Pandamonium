@@ -147,8 +147,14 @@ async function _ensureDefaultPendingChat() {
       const res = await fetch(`${API_BASE}/api/default-chat`, { credentials: 'same-origin' });
       if (res.ok) dc = await res.json();
     } catch (_) {}
+    // New Chat deliberately resolves discovery after the visible navigation.
+    // Do not let that late response overwrite a session/model the user picked
+    // while discovery was in flight.
+    if (_deps.getCurrentSessionId && _deps.getCurrentSessionId()) return;
+    const latestPending = _deps.getPendingChat && _deps.getPendingChat();
+    if (latestPending && latestPending.source === 'manual') return;
     if (dc && dc.endpoint_url && dc.model && _modelExists(dc.model, dc.endpoint_url)) {
-      const pendingUrl = String((pending && pending.url) || '').replace(/\/+$/, '');
+      const pendingUrl = String((latestPending && latestPending.url) || '').replace(/\/+$/, '');
       const defaultUrl = String(dc.endpoint_url || '').replace(/\/+$/, '');
       _deps.setPendingChat({
         url: dc.endpoint_url,
@@ -157,12 +163,12 @@ async function _ensureDefaultPendingChat() {
         source: 'default',
       });
       try { window.__odysseusDefaultChat = dc; } catch (_) {}
-      if (!pending || pending.modelId !== dc.model || pendingUrl !== defaultUrl || pending.source !== 'default') {
+      if (!latestPending || latestPending.modelId !== dc.model || pendingUrl !== defaultUrl || latestPending.source !== 'default') {
         updateModelPicker();
       }
       return;
     }
-    if (pending && pending.modelId) return;
+    if (latestPending && latestPending.modelId) return;
     // No configured default, or the configured default is gone/offline:
     // preserve the convenience fallback and keep the picker usable.
     const fallback = _firstAvailableModel();
@@ -597,7 +603,7 @@ function _initModelPickerDropdown() {
       return;
     } else if (!currentSessionId) {
       // No session yet — create one with this model
-      await _deps.createDirectChat(m.url, m.mid, m.endpointId);
+      await _deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual');
     } else {
       // Existing session with no model — PATCH it
       const fd = new FormData();

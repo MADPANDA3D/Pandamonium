@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 APP_JS = Path("static/app.js")
+SESSIONS_JS = Path("static/js/sessions.js")
 
 
 def _slice(source, start_marker, end_marker):
@@ -10,26 +11,34 @@ def _slice(source, start_marker, end_marker):
     return source[start:end]
 
 
-def test_new_chat_prefers_pending_and_current_model_before_default():
+def test_new_chat_navigation_does_not_wait_for_model_discovery():
     source = APP_JS.read_text(encoding="utf-8")
-    helper = _slice(
+    shared_handler = _slice(
         source,
-        "async function _createDirectChatFromPreferredModel()",
-        "// ============================================",
+        "function _handleNewChatAction",
+        "// New session button on icon rail",
     )
 
-    default_pos = helper.index("const dc = await _refreshDefaultChat();")
-    assert helper.index("sessionModule.getPendingChat") < default_pos
-    assert helper.index("current.endpoint_url") < default_pos
-    assert default_pos < helper.index("const withModel = sessions.filter")
+    assert "sessionModule.createBlankChat()" in shared_handler
+    assert "await " not in shared_handler
+    assert "_refreshDefaultChat()" not in shared_handler
 
 
-def test_desktop_new_chat_actions_use_shared_preference_helper():
+def test_app_uses_the_canonical_unversioned_session_module():
+    source = APP_JS.read_text(encoding="utf-8")
+    index = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert "from './js/sessions.js';" in source
+    assert "sessions.js?v=" not in source
+    assert "/static/js/sessions.js?v=" not in index
+
+
+def test_desktop_new_chat_actions_use_shared_immediate_handler():
     source = APP_JS.read_text(encoding="utf-8")
 
     shared_handler = _slice(
         source,
-        "async function _handleNewChatAction",
+        "function _handleNewChatAction",
         "// New session button on icon rail",
     )
     rail_handler = _slice(
@@ -43,8 +52,36 @@ def test_desktop_new_chat_actions_use_shared_preference_helper():
         "const sidebarNewChatBtn = el('sidebar-new-chat-btn');",
     )
 
-    assert "if (preferModel && await _createDirectChatFromPreferredModel()) return;" in shared_handler
-    assert "await _handleNewChatAction();" in rail_handler
-    assert "await _handleNewChatAction();" in brand_handler
+    assert "sessionModule.createBlankChat()" in shared_handler
+    assert "_handleNewChatAction();" in rail_handler
+    assert "_handleNewChatAction();" in brand_handler
     assert "const dc = await _refreshDefaultChat();" not in rail_handler
     assert "const dc = await _refreshDefaultChat();" not in brand_handler
+
+
+def test_blank_chat_uses_the_shared_session_reset_without_fake_pending_model():
+    source = SESSIONS_JS.read_text(encoding="utf-8")
+    blank = _slice(
+        source,
+        "export function createBlankChat()",
+        "export function createDirectChat",
+    )
+    prepare = _slice(
+        source,
+        "function _prepareNewChat(pendingChat)",
+        "export function createBlankChat()",
+    )
+
+    assert "_prepareNewChat(null)" in blank
+    assert "_pendingChat = pendingChat" in prepare
+    assert "currentSessionId = null" in prepare
+    assert "history.replaceState(null, '', window.location.pathname)" in prepare
+
+
+def test_manual_model_choice_is_marked_against_late_default_discovery():
+    sessions = SESSIONS_JS.read_text(encoding="utf-8")
+    picker = Path("static/js/modelPicker.js").read_text(encoding="utf-8")
+
+    assert "createDirectChat(url, modelId, endpointId, source = '')" in sessions
+    assert "_deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual')" in picker
+    assert "latestPending.source === 'manual'" in picker

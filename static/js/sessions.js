@@ -2131,7 +2131,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
 // Pending session — stored locally until the first message is sent
 let _pendingChat = null; // { url, modelId, endpointId }
 
-export function createDirectChat(url, modelId, endpointId) {
+function _prepareNewChat(pendingChat) {
   _sessionNavToken++;
   // Detach any active stream so it doesn't interfere with the new chat
   if (window.chatModule && window.chatModule.detachCurrentStream) {
@@ -2144,8 +2144,10 @@ export function createDirectChat(url, modelId, endpointId) {
     if (window._syncGroupIndicator) window._syncGroupIndicator(false);
   }
 
-  // Don't hit the API — just store the model info and prepare the UI
-  _pendingChat = { url, modelId, endpointId };
+  // Don't hit the API. A direct model selection supplies pendingChat; the
+  // ordinary New Chat action starts blank and lets the model picker resolve
+  // the current default asynchronously without delaying navigation.
+  _pendingChat = pendingChat;
   _skipAutoSelect = true;
   _suppressNextSessionLoading = true;
   currentSessionId = null;
@@ -2186,6 +2188,14 @@ export function createDirectChat(url, modelId, endpointId) {
   // Enable input
   const msgInput = document.getElementById('message');
   if (msgInput) { msgInput.disabled = false; msgInput.value = ''; msgInput.focus(); }
+}
+
+export function createBlankChat() {
+  _prepareNewChat(null);
+}
+
+export function createDirectChat(url, modelId, endpointId, source = '') {
+  _prepareNewChat({ url, modelId, endpointId, ...(source ? { source } : {}) });
 }
 
 /** Actually create the session in the DB. Called on first message send. */
@@ -3497,6 +3507,7 @@ const sessionModule = {
   renderSessionList,
   loadSessions,
   selectSession,
+  createBlankChat,
   createDirectChat,
   materializePendingSession,
   hasPendingChat,

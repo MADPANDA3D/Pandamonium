@@ -17,7 +17,10 @@ import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
-import sessionModule from './js/sessions.js?v=20260719T024058Z';
+// Keep this specifier identical to every other sessions.js import. Adding a
+// cache-busting query here creates a second module instance with separate
+// current-session/pending-chat state.
+import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
@@ -240,39 +243,6 @@ async function _refreshDefaultChat() {
 // Prime the cache once at load for initial paint paths that read _defaultChat
 // synchronously; later reads should call _refreshDefaultChat() first.
 _refreshDefaultChat();
-
-async function _createDirectChatFromPreferredModel() {
-  if (!sessionModule) return false;
-
-  const pending = sessionModule.getPendingChat && sessionModule.getPendingChat();
-  if (pending && pending.url && pending.modelId && pending.endpointId) {
-    sessionModule.createDirectChat(pending.url, pending.modelId, pending.endpointId);
-    return true;
-  }
-
-  const sessions = sessionModule.getSessions();
-  const currentId = sessionModule.getCurrentSessionId();
-  const current = sessions.find(s => s.id === currentId);
-  if (current && current.endpoint_url && current.model && current.endpoint_id) {
-    sessionModule.createDirectChat(current.endpoint_url, current.model, current.endpoint_id);
-    return true;
-  }
-
-  const dc = await _refreshDefaultChat();
-  if (dc) {
-    sessionModule.createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
-    return true;
-  }
-
-  const withModel = sessions.filter(s => s.endpoint_url && s.model);
-  if (withModel.length > 0) {
-    const last = withModel[0]; // sessions are sorted by recent
-    sessionModule.createDirectChat(last.endpoint_url, last.model, last.endpoint_id);
-    return true;
-  }
-
-  return false;
-}
 
 async function _hasUsableChatModel() {
   try {
@@ -3301,7 +3271,7 @@ function initializeEventListeners() {
     }, { passive: true });
   })();
 
-  async function _handleNewChatAction({ preferModel = true, focus = true } = {}) {
+  function _handleNewChatAction({ focus = true } = {}) {
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
       _deactivateIncognito();
@@ -3310,9 +3280,11 @@ function initializeEventListeners() {
       // Clear research mode if active
       const _resChk = el('research-toggle');
       if (_resChk && _resChk.checked) _syncResearchIndicator(false);
-      if (preferModel && await _createDirectChatFromPreferredModel()) return;
-      // No models at all — show welcome screen
-      _startFreshChat();
+      // Navigation is immediate. Model/default discovery is intentionally
+      // handled by updateModelPicker after the blank chat is visible, so a
+      // slow or stalled discovery request can never make this button inert.
+      if (sessionModule.createBlankChat) sessionModule.createBlankChat();
+      else _startFreshChat();
       const docBtn3 = el('overflow-doc-btn');
       if (docBtn3) docBtn3.classList.remove('active', 'has-docs');
       document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
@@ -3325,9 +3297,9 @@ function initializeEventListeners() {
   // New session button on icon rail
   const railNewSession = el('rail-new-session');
   if (railNewSession) {
-    railNewSession.addEventListener('click', async (e) => {
+    railNewSession.addEventListener('click', (e) => {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-      await _handleNewChatAction();
+      _handleNewChatAction();
     });
   }
 
@@ -3354,17 +3326,17 @@ function initializeEventListeners() {
   // Logo click → new chat (same logic as rail new-session button)
   const brandBtn = el('sidebar-brand-btn');
   if (brandBtn) {
-    brandBtn.addEventListener('click', async (e) => {
+    brandBtn.addEventListener('click', (e) => {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-      await _handleNewChatAction();
+      _handleNewChatAction();
     });
   }
 
   const sidebarNewChatBtn = el('sidebar-new-chat-btn');
   if (sidebarNewChatBtn) {
-    sidebarNewChatBtn.addEventListener('click', async (e) => {
+    sidebarNewChatBtn.addEventListener('click', (e) => {
       if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
-      await _handleNewChatAction();
+      _handleNewChatAction();
     });
   }
 

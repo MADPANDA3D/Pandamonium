@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v374';
+const CACHE_NAME = 'pandamonium-v375';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -23,6 +23,7 @@ const PRECACHE = [
   '/static/js/markdown.js',
   '/static/js/dragSort.js',
   '/static/js/sessions.js',
+  '/static/js/modelPicker.js',
   '/static/js/memory.js',
   '/static/js/skills.js',
   '/static/js/tourHints.js',
