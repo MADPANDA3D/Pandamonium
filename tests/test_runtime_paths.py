@@ -58,6 +58,13 @@ def test_extension_checkout_default_moves_outside_source(monkeypatch, tmp_path):
     assert result == str(tmp_path / "xdg" / "odysseus" / "extensions")
 
 
+def test_extension_checkout_default_uses_nested_data_mount(monkeypatch):
+    data_root = os.path.join(get_app_root(), "data")
+    monkeypatch.setattr(os.path, "ismount", lambda path: path == data_root)
+
+    assert get_default_extensions_dir(data_root) == os.path.join(data_root, "extensions")
+
+
 def test_extension_checkout_default_reuses_external_data_root(tmp_path):
     data_root = tmp_path / "odysseus-data"
 

@@ -318,7 +318,15 @@ class ExtensionLifecycleManager:
 
     def _validate_root(self) -> None:
         app_root = Path(get_app_root()).resolve()
-        if self.root == app_root or self.root.is_relative_to(app_root):
+        inside_source = self.root == app_root or self.root.is_relative_to(app_root)
+        nested_mount = False
+        candidate = self.root
+        while inside_source and candidate != app_root:
+            if candidate.is_mount():
+                nested_mount = True
+                break
+            candidate = candidate.parent
+        if inside_source and not nested_mount:
             raise ExtensionLifecycleError("extension_root_must_be_outside_source")
         if self.root == self.root.parent or self.root == Path.home().resolve():
             raise ExtensionLifecycleError("extension_root_too_broad")

@@ -117,6 +117,30 @@ def _manager(tmp_path: Path, repo: Path, *, adapters=None, source_url: str = SOU
     return manager, authority, registry
 
 
+def test_extension_root_accepts_nested_mount_but_rejects_source_directory(monkeypatch, tmp_path):
+    app_root = tmp_path / "app"
+    data_root = app_root / "data"
+    extensions_root = data_root / "extensions"
+    data_root.mkdir(parents=True)
+    monkeypatch.setattr(installer, "get_app_root", lambda: str(app_root))
+    real_is_mount = Path.is_mount
+    monkeypatch.setattr(
+        Path,
+        "is_mount",
+        lambda path: path.resolve() == data_root.resolve() or real_is_mount(path),
+    )
+
+    ExtensionLifecycleManager(
+        root=extensions_root,
+        registry=ExtensionRegistry(tmp_path / "mounted-registry.json"),
+    )
+    with pytest.raises(ExtensionLifecycleError, match="extension_root_must_be_outside_source"):
+        ExtensionLifecycleManager(
+            root=app_root / "extensions",
+            registry=ExtensionRegistry(tmp_path / "source-registry.json"),
+        )
+
+
 def _approve_and_execute(manager, authority, plan, *, operator="operator"):
     decision = plan["authority_decision"]
     assert decision["decision"] == "approval_required"

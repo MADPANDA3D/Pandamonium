@@ -38,7 +38,7 @@ def get_default_extensions_dir(data_dir: str) -> str:
         data_is_in_source = os.path.commonpath((app_root, resolved_data)) == app_root
     except ValueError:
         data_is_in_source = False
-    if not data_is_in_source:
+    if os.path.ismount(resolved_data) or not data_is_in_source:
         return os.path.join(resolved_data, "extensions")
     xdg_data = os.getenv("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(xdg_data, "odysseus", "extensions")
