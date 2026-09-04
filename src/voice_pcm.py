@@ -13,12 +13,20 @@ from typing import Any
 
 TTS_INFERENCE_LOCK = asyncio.Lock()
 _SENTENCE_END = re.compile(r"[.!?][\"')\]]*(?=\s|$)")
+SHORT_RESULT_WORDS = 75
+SUMMARY_WORDS = 40
 
 
-def speech_text(text: str) -> str:
+def speech_text(text: str, *, preserve_code: bool = False) -> str:
     """Turn display Markdown into natural speech without changing the chat copy."""
+    from src.authority_protocol import redact_secret_text
+
+    text = redact_secret_text(text)
     text = re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"```[\s\S]*?```|~~~[\s\S]*?~~~", "", text)
+    if preserve_code:
+        text = re.sub(r"(?:```|~~~)[^\n]*\n?([\s\S]*?)(?:```|~~~)", r"\1", text)
+    else:
+        text = re.sub(r"```[\s\S]*?```|~~~[\s\S]*?~~~", "", text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"https?://\S+|www\.\S+", "", text, flags=re.IGNORECASE)
@@ -40,6 +48,97 @@ def speech_text(text: str) -> str:
         if lines:
             paragraphs.append(" ".join(lines))
     return "\n\n".join(paragraphs).strip()
+
+
+def asks_read_all(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:read|speak|say)\s+(?:it\s+all|all(?:\s+of\s+it)?|everything|"
+        r"the\s+(?:whole|full)\s+(?:thing|response|result|answer|file|document|report)(?:\s+aloud)?)\b",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def speakable_word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w']+\b", text, flags=re.UNICODE))
+
+
+def _limit_words(text: str, limit: int) -> str:
+    words = text.split()
+    if len(words) <= limit:
+        return text
+    return " ".join(words[:limit]).rstrip(" ,;:-") + "."
+
+
+def structured_speech_kind(text: str) -> str | None:
+    value = str(text or "")
+    if re.search(r"(?m)^\s*(?:```|~~~)", value):
+        return "code"
+    if re.search(r"(?m)^\s*\|.+\|\s*$\n\s*\|\s*:?-{3,}", value):
+        return "table"
+    if value.lstrip().startswith(("{", "[")):
+        try:
+            if isinstance(json.loads(value), (dict, list)):
+                return "structured result"
+        except (TypeError, ValueError):
+            pass
+    if len(re.findall(r"(?m)^\s*(?:\d{4}-\d{2}-\d{2}|\[[A-Z]+\]|(?:DEBUG|INFO|WARN|ERROR)\b)", value)) >= 2:
+        return "logs"
+    if re.search(r"(?m)^Traceback \(most recent call last\):|^\s*File \".+\", line \d+|\b(?:Exception|Error):", value):
+        return "logs"
+    if len(re.findall(r"(?m)^\s*[-*+]\s+\[[ xX]\]\s+", value)) >= 2:
+        return "checklist"
+    if len(re.findall(r"(?m)^\s*#{1,6}\s+", value)) >= 2:
+        return "document"
+    return None
+
+
+def result_speech(
+    text: str,
+    *,
+    kind: str,
+    label: str = "The tool",
+    explicit_read_all: bool = False,
+    provided_spoken_text: str | None = None,
+    provided_speech_mode: str | None = None,
+    handoff_text: str | None = None,
+) -> dict[str, str]:
+    """Apply the deterministic spoken-result contract without another model call."""
+    structured = structured_speech_kind(text)
+    cleaned = speech_text(text, preserve_code=explicit_read_all)
+    if explicit_read_all:
+        return {"spoken_text": cleaned, "speech_mode": "verbatim"}
+
+    if kind == "approval":
+        return {"spoken_text": cleaned, "speech_mode": "verbatim"}
+
+    if kind == "conversation" and not structured:
+        return {"spoken_text": cleaned, "speech_mode": "verbatim"}
+
+    if kind == "failure":
+        if not cleaned or structured:
+            cleaned = f"{label} failed. Review the useful error in chat, fix the reported issue, and try again."
+        elif not re.search(r"\b(?:try|retry|reconnect|fix|check|review|open|choose|wait)\b", cleaned, re.IGNORECASE):
+            cleaned += " Fix the reported issue and try again."
+        return {"spoken_text": _limit_words(cleaned, SUMMARY_WORDS), "speech_mode": "error"}
+
+    if structured or handoff_text:
+        spoken = speech_text(handoff_text or f"{label} finished. The complete {structured or 'result'} is in chat.")
+        return {"spoken_text": _limit_words(spoken, SUMMARY_WORDS), "speech_mode": "handoff"}
+
+    if speakable_word_count(cleaned) <= SHORT_RESULT_WORDS:
+        return {"spoken_text": cleaned, "speech_mode": "verbatim"}
+
+    provided = speech_text(provided_spoken_text or "")
+    if (
+        provided
+        and provided_speech_mode in {"summary", "handoff"}
+        and speakable_word_count(provided) <= SUMMARY_WORDS
+    ):
+        return {"spoken_text": provided, "speech_mode": provided_speech_mode}
+
+    spoken = speech_text(handoff_text or f"{label} finished. The complete result is in chat.")
+    return {"spoken_text": _limit_words(spoken, SUMMARY_WORDS), "speech_mode": "handoff"}
 
 
 def speech_blocks(text: str, *, first_max_chars: int = 280, max_chars: int = 360) -> list[str]:

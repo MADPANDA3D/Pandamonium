@@ -45,7 +45,16 @@ from src.llm_core import llm_call_async
 from src.settings import load_settings
 from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
-from src.voice_pcm import TTS_INFERENCE_LOCK, pcm_frames, speech_blocks, speech_text, wav_to_pcm16
+from src.voice_pcm import (
+    TTS_INFERENCE_LOCK,
+    asks_read_all,
+    pcm_frames,
+    result_speech,
+    speech_blocks,
+    speech_text,
+    structured_speech_kind,
+    wav_to_pcm16,
+)
 
 VOICE_STATE_FILE = Path(DATA_DIR) / "voice_sessions.json"
 ACTION_BRIDGE_URL = os.getenv("ODYSSEUS_ACTION_BRIDGE_URL", "http://127.0.0.1:8010/actions")
@@ -774,12 +783,7 @@ def _set_user_time_from_request(request: Request) -> None:
 
 
 def _asks_read_all(text: str) -> bool:
-    return bool(re.search(
-        r"\b(?:read|speak|say)\s+(?:it\s+all|all\s+of\s+it|everything|"
-        r"the\s+(?:whole|full)\s+(?:thing|response|answer|file|document|report)(?:\s+aloud)?)\b",
-        text,
-        re.IGNORECASE,
-    ))
+    return asks_read_all(text)
 
 
 def _bounded_spoken_text(text: str, limit: int = 1200) -> str:
@@ -871,28 +875,49 @@ def _artifact_spoken_handoff(prompt: str, response_text: str) -> str | None:
 
 async def _select_spoken_text(prompt: str, response_text: str) -> str:
     response_text = response_text.strip()
-    if _asks_read_all(prompt):
-        return speech_text(response_text)
     file_handoff = _file_spoken_handoff(prompt, response_text)
-    if file_handoff:
-        return speech_text(file_handoff)
     artifact_handoff = _artifact_spoken_handoff(prompt, response_text)
-    if artifact_handoff:
-        return speech_text(artifact_handoff)
-    return speech_text(response_text)
+    kind = "tool" if file_handoff or artifact_handoff or structured_speech_kind(response_text) else "conversation"
+    return result_speech(
+        response_text,
+        kind=kind,
+        explicit_read_all=_asks_read_all(prompt),
+        handoff_text=file_handoff or artifact_handoff,
+    )["spoken_text"]
+
+
+def _speech_contract_for_final(prompt: str, final: dict[str, Any]) -> dict[str, str]:
+    response_text = str(final["assistant_text"]).strip()
+    diagnostics = final.get("diagnostics") or {}
+    guard_reason = str(diagnostics.get("guard_reason") or "").lower()
+    task_ids = final.get("task_ids") or diagnostics.get("task_ids") or []
+    tool_names = diagnostics.get("tool_names") or []
+    failure = any(marker in guard_reason for marker in ("failed", "blocked", "cancelled", "not_connected"))
+    approval = "approval_required" in guard_reason
+    worker = bool(task_ids) or "completed" in guard_reason
+    intent = classify_tool_intent(prompt)
+    prompted_tool = bool(
+        _requested_artifact_kind(prompt)
+        or _requested_file_handoff(prompt)
+        or (intent and intent.needs_tools)
+    )
+    kind = "approval" if approval else "failure" if failure else "worker" if worker else "tool" if tool_names or prompted_tool else "conversation"
+    label = "The agent" if worker or failure else "The tool"
+    file_handoff = _file_spoken_handoff(prompt, response_text) if kind == "tool" else None
+    artifact_handoff = _artifact_spoken_handoff(prompt, response_text) if kind == "tool" else None
+    return result_speech(
+        response_text,
+        kind=kind,
+        label=label,
+        explicit_read_all=_asks_read_all(prompt),
+        provided_spoken_text=str(final.get("spoken_text") or "") or None,
+        provided_speech_mode=str(final.get("speech_mode") or "") or None,
+        handoff_text=file_handoff or artifact_handoff,
+    )
 
 
 async def _spoken_text_for_final(prompt: str, final: dict[str, Any]) -> str:
-    response_text = str(final["assistant_text"]).strip()
-    if not _asks_read_all(prompt):
-        diagnostics = final.get("diagnostics") or {}
-        guard_reason = str(diagnostics.get("guard_reason") or "").lower()
-        task_ids = final.get("task_ids") or diagnostics.get("task_ids") or []
-        if any(marker in guard_reason for marker in ("failed", "blocked", "cancelled", "not_connected")):
-            return "The agent hit an issue. The details are in the chat."
-        if "completed" in guard_reason or (task_ids and len(response_text) > 420):
-            return "Roger that. The full agent result is in the chat."
-    return await _select_spoken_text(prompt, response_text)
+    return _speech_contract_for_final(prompt, final)["spoken_text"]
 
 
 def _should_stream_spoken_response(prompt: str, voice_session: dict[str, Any]) -> bool:
@@ -900,6 +925,11 @@ def _should_stream_spoken_response(prompt: str, voice_session: dict[str, Any]) -
     if _asks_read_all(prompt):
         return True
     if _requested_artifact_kind(prompt) or _requested_file_handoff(prompt):
+        return False
+    intent = classify_tool_intent(prompt)
+    if intent and intent.needs_tools:
+        return False
+    if re.search(r"\b(?:code|logs?|tables?|raw\s+files?|file\s+contents?)\b", prompt, re.IGNORECASE):
         return False
     if str(voice_session.get("target") or "jarvis") not in DIRECT_MODEL_TARGETS:
         return False
@@ -3316,6 +3346,26 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
+    operator_text = text
+    approval_reply = authority_store.resolve_natural_reply(
+        text,
+        operator_id=str(operator_identity(owner) or ""),
+        session_id=chat_session_id,
+    )
+    if approval_reply and approval_reply["choice"] == "deny":
+        capability = str((approval_reply["decision"].get("capability") or {}).get("name") or "action")
+        reply = f"Denied: {capability}. I will not run it."
+        yield {"type": "assistant_delta", "text": reply}
+        yield _server_final_event(operator_text, reply, "authority_denied")
+        return
+    if approval_reply:
+        decision = approval_reply["decision"]
+        capability = str((decision.get("capability") or {}).get("name") or "the pending action")
+        text = (
+            f"Proceed with the exact previously requested {capability} action now. "
+            f"The authenticated operator approved decision {decision['decision_id']} once. "
+            "Reissue the original call with unchanged target and arguments; do not broaden it."
+        )
     voice_session["_protocol_request_id"] = str(uuid.uuid4())
     selected_target = str(voice_session.get("target") or "jarvis")
     origin_target = _voice_origin_target(voice_session, chat_session)
@@ -3364,6 +3414,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     full_response = ""
     task_ids: list[str] = []
     extension_tools_used: list[str] = []
+    tools_used: list[str] = []
     pending_authority: dict[str, Any] | None = None
     started = time.perf_counter()
     first_token_ms: int | None = None
@@ -3373,6 +3424,8 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         if selected_target == "pc-codex"
         else JARVIS_TOOLS
     )
+    if approval_reply:
+        voice_tools = voice_tools | {capability}
     extension_specs = _extension_tool_specs(voice_session) if selected_target == "jarvis" else []
     extension_names = {tool["name"] for tool in extension_specs}
     extension_schemas = _extension_tool_schemas(extension_specs)
@@ -3460,6 +3513,8 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             }
         elif data.get("type") == "tool_output":
             tool = str(data.get("tool") or "")
+            if tool and tool not in tools_used:
+                tools_used.append(tool)
             if tool in extension_names:
                 extension_tools_used.append(tool)
             if tool == "start_agent_task":
@@ -3492,6 +3547,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             else None
         ),
         "agent_metrics": metrics,
+        "tool_names": tools_used,
         "character_name": _voice_character_name(voice_session),
         "task_ids": task_ids,
     }
@@ -4048,8 +4104,12 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                     elif final_text.startswith(speech_turn.raw_text):
                         speech_turn.feed(final_text[len(speech_turn.raw_text):])
                     await speech_turn.complete()
+                    final["spoken_text"] = speech_turn.text
+                    final["speech_mode"] = "verbatim"
                 else:
-                    await speech_turn.complete(await _spoken_text_for_final(text, final))
+                    speech_contract = _speech_contract_for_final(text, final)
+                    final.update(speech_contract)
+                    await speech_turn.complete(speech_contract["spoken_text"])
                 spoken_text = speech_turn.text
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 if not audio_announced:

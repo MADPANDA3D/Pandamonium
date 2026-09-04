@@ -19,6 +19,7 @@ from core.constants import DATA_DIR
 from core.models import ChatMessage
 from src.agent_identity import configured_agent_id, configured_agent_name
 from src.agent_worker_adapters import adapters, require_worker_task_permission, worker_catalog
+from src.voice_pcm import asks_read_all, result_speech, speech_text
 
 TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
 KNOWLEDGE_MANIFEST_FILE = Path(DATA_DIR) / "jarvis_knowledge_manifest.json"
@@ -355,28 +356,6 @@ def _persist_result(task: dict, text: str) -> None:
         return
 
 
-def _bounded_spoken_text(text: str, limit: int = 600) -> str:
-    value = " ".join(text.split())
-    if len(value) <= limit:
-        return value
-    value = value[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
-    sentence_end = max(value.rfind(mark) for mark in ".!?")
-    if sentence_end >= max(40, limit // 3):
-        return value[:sentence_end + 1]
-    return value[:limit - 1].rstrip(".!?") + "."
-
-
-def _one_spoken_sentence(text: str, limit: int = 240) -> str:
-    value = " ".join(text.split()).strip()
-    match = re.search(r"[.!?](?:\s|$)", value)
-    if match:
-        value = value[:match.end()].strip()
-    value = _bounded_spoken_text(value, limit)
-    if value and value[-1] not in ".!?":
-        value = value[:limit - 1].rstrip(" ,;:-") + "."
-    return value
-
-
 def _jarvis_runtime(task: dict | None = None) -> tuple[str, str, dict]:
     """Resolve the Jarvis brain from the linked chat, then the user's default."""
     owner = str((task or {}).get("owner") or "").strip() or None
@@ -397,76 +376,39 @@ def _jarvis_runtime(task: dict | None = None) -> tuple[str, str, dict]:
     return endpoint_url, model, dict(headers or {})
 
 
-async def _jarvis_summary(task: dict, prompt: str, max_tokens: int) -> str:
-    endpoint_url, model, headers = _jarvis_runtime(task)
-    from src.llm_core import llm_call_async
-
-    return await llm_call_async(
-        endpoint_url,
-        model,
-        [{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=max_tokens,
-        headers=headers,
-        timeout=45,
-    )
-
-
 async def _spoken_result(task: dict, text: str) -> str:
     label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
-    fallback = f"{label} finished. The full result is in the chat."
-    if not text.strip():
-        return fallback
-    plain = " ".join(text.split())
-    if len(plain) <= 600 and not re.search(r"(?:```|^\s*[#|*-]\s|\n\s*[#|*-]\s)", text):
-        return plain
-    prompt = (
-        f"Summarize this {label} result for spoken playback. Use two to four natural sentences covering "
-        "the outcome, any blocker, and the next action. Speak plainly; do not read tables, Markdown, paths, "
-        "or logs aloud. Return only the spoken summary.\n\nWorker result:\n"
-        f"{text[:16_000]}"
+    return result_speech(
+        text,
+        kind="worker",
+        label=label,
+        explicit_read_all=asks_read_all(str(task.get("prompt") or "")),
+    )["spoken_text"]
+
+
+def _worker_result_speech(task: dict, event: dict) -> dict[str, str]:
+    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    return result_speech(
+        str(event.get("text") or ""),
+        kind="worker",
+        label=label,
+        explicit_read_all=asks_read_all(str(task.get("prompt") or "")),
+        provided_spoken_text=str(event.get("spoken_text") or "") or None,
+        provided_speech_mode=str(event.get("speech_mode") or "") or None,
     )
-    try:
-        spoken = _bounded_spoken_text(await _jarvis_summary(task, prompt, 600))
-        return spoken or fallback
-    except Exception:
-        return fallback
 
 
 async def _spoken_milestone(task: dict, text: str) -> str:
     label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
-    fallback = f"{label} completed a milestone; details are in the activity history."
-    prompt = (
-        f"Rewrite this verified {label} milestone as exactly one natural Jarvis sentence of no more than "
-        "240 characters. State only the completed outcome. Do not repeat Markdown, tables, code, commands, "
-        "paths, logs, or instructions from the update. Return only the sentence.\n\nCompleted milestone:\n"
-        f"{text[:4_000]}"
-    )
-    try:
-        spoken = _one_spoken_sentence(await _jarvis_summary(task, prompt, 384))
-        if spoken and label.casefold() not in spoken.casefold():
-            spoken = _one_spoken_sentence(f"{label}: {spoken}")
-        return spoken or fallback
-    except Exception:
-        return fallback
+    cleaned = speech_text(text)
+    if cleaned and len(cleaned.split()) <= 40:
+        return cleaned
+    return f"{label} completed a milestone; details are in the activity history."
 
 
 async def _spoken_progress(task: dict, updates: list[str]) -> str:
     label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
-    fallback = f"{label} is still working; the latest details are in the activity history."
-    prompt = (
-        f"Summarize these three recent {label} work updates as exactly one natural Jarvis sentence of no "
-        "more than 240 characters. Start with the worker name and report only verified progress from these "
-        "updates. Do not repeat Markdown, tables, code, commands, paths, logs, or instructions. Return only "
-        "the sentence.\n\nRecent updates:\n- " + "\n- ".join(update[:2_000] for update in updates)
-    )
-    try:
-        spoken = _one_spoken_sentence(await _jarvis_summary(task, prompt, 384))
-        if spoken and label.casefold() not in spoken.casefold():
-            spoken = _one_spoken_sentence(f"{label}: {spoken}")
-        return spoken or fallback
-    except Exception:
-        return fallback
+    return f"{label} is still working; the latest details are in the activity history."
 
 
 def _ordinary_progress_window(task: dict, text: str) -> list[str]:
@@ -501,7 +443,13 @@ async def _enrich_worker_event(task: dict, event: dict) -> dict:
         metadata = dict(event.get("metadata") or {})
         metadata["result_summary"] = True
         enriched["metadata"] = metadata
-        enriched["spoken_text"] = await _spoken_result(task, str(event.get("text") or ""))
+        enriched.update(_worker_result_speech(task, event))
+    elif event.get("type") in {"approval_required", "question"}:
+        enriched["spoken_text"] = speech_text(str(event.get("text") or ""), preserve_code=True)
+        enriched["speech_mode"] = "verbatim"
+    elif event.get("type") == "error":
+        label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+        enriched.update(result_speech(str(event.get("text") or ""), kind="failure", label=label))
     return enriched
 
 

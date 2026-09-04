@@ -1,11 +1,11 @@
-"""Issue #3229 and explicit web-toggle regressions.
+"""Adaptive tool discovery and legacy caller constraints.
 
 Bug: allow_bash and allow_web_search were only read from form_data, so JSON
 API callers (Content-Type: application/json) always had bash disabled.
 
-Fix: (1) Read from JSON body as fallback.
+Fix: (1) Read true and false JSON values without collapsing false.
      (2) Keep bash on the privilege fallback when unset.
-     (3) Require an explicit per-turn web setting before exposing web tools.
+     (3) Let prompt intent expose healthy web schemas when no legacy deny exists.
 """
 
 import ast
@@ -39,19 +39,8 @@ def test_allow_bash_reads_from_body_as_fallback():
             break
     assert chat_stream_func is not None, "chat_stream function not found"
 
-    # Look for an assignment to allow_bash that references 'body'
-    found_body_fallback = False
-    for node in ast.walk(chat_stream_func):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "allow_bash":
-                    # Check if 'body' appears in the value
-                    src_segment = ast.get_source_segment(source, node)
-                    if src_segment and "body" in src_segment:
-                        found_body_fallback = True
-    assert found_body_fallback, (
-        "allow_bash assignment in chat_stream must fall back to JSON body"
-    )
+    assert 'if allow_bash is None and "allow_bash" in body:' in source
+    assert 'allow_bash = body["allow_bash"]' in source
 
 
 def test_allow_web_search_reads_from_body_as_fallback():
@@ -66,22 +55,11 @@ def test_allow_web_search_reads_from_body_as_fallback():
             break
     assert chat_stream_func is not None
 
-    found_body_fallback = False
-    for node in ast.walk(chat_stream_func):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "allow_web_search":
-                    src_segment = ast.get_source_segment(source, node)
-                    if src_segment and "body" in src_segment:
-                        found_body_fallback = True
-    assert found_body_fallback, (
-        "allow_web_search assignment in chat_stream must fall back to JSON body"
-    )
+    assert 'if allow_web_search is None and "allow_web_search" in body:' in source
+    assert 'allow_web_search = body["allow_web_search"]' in source
 
 
-def test_disabled_tools_respects_missing_vs_explicit_toggles():
-    """Bash still defers to privileges, but web is an explicit per-turn opt-in.
-    """
+def test_disabled_tools_respects_adaptive_defaults_and_legacy_denies():
     source = _CHAT_ROUTES.read_text(encoding="utf-8")
 
     # The fix changes:
@@ -91,14 +69,12 @@ def test_disabled_tools_respects_missing_vs_explicit_toggles():
     assert "allow_bash is not None" in source, (
         "disabled_tools check must guard against allow_bash being None"
     )
-    assert "web_search_enabled_for_turn(allow_web_search, use_web)" in source, (
-        "web tools must be gated through the explicit per-turn web setting"
-    )
+    assert "is_web_search_explicitly_denied(allow_web_search)" in source
     assert "disabled_tools.update(WEB_TOOL_NAMES)" in source, (
-        "disabled_tools must add web_search/web_fetch when web is not explicitly enabled"
+        "explicit legacy denial must still add web_search/web_fetch"
     )
     assert "_forced_tools = set(WEB_TOOL_NAMES)" in source, (
-        "web tools should only be forced visible from the explicit web setting"
+        "web intent must present the relevant web schemas"
     )
 
 
@@ -106,7 +82,7 @@ def test_hermes_agent_api_bypasses_local_context_preface():
     """Hermes owns its context; the local harness sends only the latest user turn."""
     source = _CHAT_ROUTES.read_text(encoding="utf-8")
     assert "messages = _hermes_agent_context_messages(sess)" in source
-    assert "messages = _ensure_current_request_is_latest_user(ctx.messages, message)" in source
+    assert "messages = _ensure_current_request_is_latest_user(ctx.messages, _model_message)" in source
 
 
 def test_non_streaming_chat_has_no_unbound_hermes_flag():
@@ -166,7 +142,8 @@ def _build_disabled_tools(
     if allow_bash is not None and str(allow_bash).lower() != "true":
         disabled_tools.add("bash")
     search_enabled = web_search_enabled_for_turn(allow_web_search, use_web)
-    if is_web_search_explicitly_denied(allow_web_search) or not search_enabled:
+    web_explicitly_denied = is_web_search_explicitly_denied(allow_web_search)
+    if web_explicitly_denied:
         disabled_tools.update(WEB_TOOL_NAMES)
     if explicit_web_intent:
         disabled_tools.update({
@@ -178,7 +155,7 @@ def _build_disabled_tools(
             "manage_notes", "manage_calendar", "read_calendar", "manage_tasks",
             "api_call", "builtin_browser",
         })
-        if search_enabled:
+        if not web_explicitly_denied:
             disabled_tools.difference_update(WEB_TOOL_NAMES)
         else:
             disabled_tools.update(WEB_TOOL_NAMES)
@@ -259,8 +236,8 @@ def test_explicit_false_disables_web_despite_prompt_web_intent(message):
     assert "web_fetch" in disabled
 
 
-def test_prompt_web_intent_does_not_enable_web_without_setting():
-    """Prompt-derived web intent alone must not expose web tools."""
+def test_prompt_web_intent_enables_web_without_legacy_setting():
+    """Prompt intent presents configured web schemas without composer flags."""
     intent = classify_tool_intent("look up the latest docs")
     assert intent is not None
     assert intent.category == "web"
@@ -270,8 +247,8 @@ def test_prompt_web_intent_does_not_enable_web_without_setting():
         use_web=None,
         explicit_web_intent=True,
     )
-    assert "web_search" in disabled
-    assert "web_fetch" in disabled
+    assert "web_search" not in disabled
+    assert "web_fetch" not in disabled
 
 
 def test_admin_user_gets_bash_enabled_by_default():
@@ -282,11 +259,11 @@ def test_admin_user_gets_bash_enabled_by_default():
     assert "bash" not in disabled
 
 
-def test_web_search_disabled_by_default_without_explicit_turn_setting():
-    """Missing web settings must not expose web tools by default."""
+def test_missing_web_setting_does_not_mask_discovery():
+    """Missing first-party flags are not an implicit deny."""
     disabled = _build_disabled_tools(allow_web_search=None)
-    assert "web_search" in disabled
-    assert "web_fetch" in disabled
+    assert "web_search" not in disabled
+    assert "web_fetch" not in disabled
 
 
 def test_non_privileged_user_without_explicit_flag_still_disabled():
@@ -315,19 +292,14 @@ def test_global_disabled_web_wins_over_explicit_web_enable():
     assert "web_fetch" in disabled
 
 
-def test_form_data_none_body_true_works():
-    """Simulates: form_data has no allow_bash, body has allow_bash=true.
-    After the fallback (`form_data.get(...) or body.get(...)`), allow_bash
-    should be "true".
-    """
-    # Simulate the fallback logic
-    form_data_val = None  # not in form_data
-    body_val = "true"     # from JSON body
-    allow_bash = form_data_val or body_val
-    assert str(allow_bash).lower() == "true"
-
-    disabled = _build_disabled_tools(allow_bash=allow_bash)
-    assert "bash" not in disabled
+def test_json_false_remains_an_explicit_legacy_deny():
+    body = {"allow_bash": False, "allow_web_search": False}
+    disabled = _build_disabled_tools(
+        allow_bash=body["allow_bash"],
+        allow_web_search=body["allow_web_search"],
+    )
+    assert "bash" in disabled
+    assert WEB_TOOL_NAMES <= disabled
 
 
 def test_explicit_false_disables_even_for_admin():
@@ -343,19 +315,14 @@ def test_explicit_false_disables_even_for_admin():
 _CHAT_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "chat.js"
 
 
-def test_frontend_always_sends_explicit_allow_bash():
-    """chat.js must always send allow_bash (both true and false), not only on toggle ON."""
+def test_adaptive_frontend_omits_per_turn_bash_flag():
     source = _CHAT_JS.read_text(encoding="utf-8")
-    # Must not only append 'true' — must also handle the false case
-    assert "allow_bash', el('bash-toggle').checked ? 'true' : 'false'" in source or \
-           "allow_bash', 'false'" in source, (
-        "Frontend must send explicit allow_bash=false when toggle is off"
-    )
+    assert "allow_bash" not in source
 
 
-def test_frontend_sends_explicit_allow_web_search_false_in_adaptive_mode():
-    """Adaptive chat must send false when the web capability is not enabled."""
+def test_adaptive_frontend_omits_per_turn_web_flag_and_controls():
     source = _CHAT_JS.read_text(encoding="utf-8")
-    assert "fd.append('allow_web_search', el('web-toggle').checked ? 'true' : 'false')" in source, (
-        "Frontend must send explicit allow_web_search=false when the toggle is off"
-    )
+    index = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
+    assert "allow_web_search" not in source
+    assert 'id="web-toggle-btn"' not in index
+    assert 'id="bash-toggle-btn"' not in index

@@ -1879,15 +1879,17 @@ function enqueueSpeech(text, type = 'speech', source = 'jarvis', timings = {}) {
 
 function workerSpeech(event) {
   const label = WORKER_LABELS[event.worker] || event.worker || 'Worker';
-  if (event.type === 'approval_required') return `${label} is requesting approval. Please take a look.`;
-  if (event.type === 'question') return `${label} has a question. Please take a look.`;
-  if (event.type === 'error') return `${label} hit a problem. Please take a look.`;
-  const source = event.type === 'result'
-    ? (event.spoken_text || `${label} finished. The full result is in chat.`)
-    : event.type === 'progress'
-      ? (event.spoken_text || '')
-      : '';
+  const fallback = {
+    approval_required: `${label} is requesting approval. Approve or deny the exact request in chat.`,
+    question: `${label} has a question. The complete question is in chat.`,
+    error: `${label} failed. Review the useful error and next action in chat.`,
+    result: `${label} finished. The full result is in chat.`,
+  }[event.type] || '';
+  const source = event.type === 'error'
+    ? (event.spoken_text || fallback)
+    : (event.spoken_text || event.text || fallback);
   const clean = (window.aiTTSManager?.extractPlainText?.(source) || source).trim();
+  if (event.speech_mode === 'verbatim') return clean;
   if (clean.length <= WORKER_SPEECH_MAX_CHARS) return clean;
   const clipped = clean.slice(0, WORKER_SPEECH_MAX_CHARS - 1);
   const boundary = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf(' '));

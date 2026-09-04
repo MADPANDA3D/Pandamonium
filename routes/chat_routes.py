@@ -53,7 +53,7 @@ from src.tool_policy import (
     is_web_search_explicitly_denied,
     web_search_enabled_for_turn,
 )
-from src.authority_protocol import operator_identity
+from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
 
 logger = logging.getLogger(__name__)
@@ -647,8 +647,13 @@ def setup_chat_routes(
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
-        allow_bash = form_data.get("allow_bash") or (body or {}).get("allow_bash")
-        allow_web_search = form_data.get("allow_web_search") or (body or {}).get("allow_web_search")
+        allow_bash = form_data.get("allow_bash")
+        allow_web_search = form_data.get("allow_web_search")
+        if isinstance(body, dict):
+            if allow_bash is None and "allow_bash" in body:
+                allow_bash = body["allow_bash"]
+            if allow_web_search is None and "allow_web_search" in body:
+                allow_web_search = body["allow_web_search"]
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -806,6 +811,11 @@ def setup_chat_routes(
                     _tool_intent.category,
                     _tool_intent.reason,
                 )
+            _approval_reply = authority_store.resolve_natural_reply(
+                message,
+                operator_id=str(operator_identity(owner) or ""),
+                session_id=session,
+            )
         except SessionNotFoundError as e:
             raise HTTPException(404, str(e))
         except (ValueError, ValidationError):
@@ -877,6 +887,15 @@ def setup_chat_routes(
         )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
+        _model_message = message
+        if _approval_reply and _approval_reply["choice"] == "approve":
+            _decision = _approval_reply["decision"]
+            _capability = str((_decision.get("capability") or {}).get("name") or "the pending action")
+            _model_message = (
+                f"Proceed with the exact previously requested {_capability} action now. "
+                f"The authenticated operator approved decision {_decision['decision_id']} once. "
+                "Reissue the original call with unchanged target and arguments; do not broaden it."
+            )
 
         # Query active document — prefer explicit ID from frontend, fall back to session lookup
         active_doc = None
@@ -967,22 +986,22 @@ def setup_chat_routes(
         finally:
             _doc_db.close()
 
-        # Build disabled-tools set from frontend toggles + user privileges
+        # Build disabled-tools from legacy caller constraints and privileges.
+        # First-party adaptive requests omit per-turn Web/Shell flags; prompt
+        # intent selects schemas while these explicit legacy flags only narrow.
         disabled_tools = set()
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
-        # Web search is per-turn opt-in: either the chat pre-search setting
-        # (`use_web=true`) or agent web toggle (`allow_web_search=true`) must
-        # explicitly enable it.
         if allow_bash is not None and str(allow_bash).lower() != "true":
             disabled_tools.add("bash")
         _explicit_web_intent = bool(_tool_intent and _tool_intent.category == "web")
-        if is_web_search_explicitly_denied(allow_web_search) or not _search_enabled:
+        _web_explicitly_denied = is_web_search_explicitly_denied(allow_web_search)
+        if _web_explicitly_denied:
             disabled_tools.update(WEB_TOOL_NAMES)
         if _explicit_web_intent:
             # A direct lookup/search request should not drift into personal
             # tools or shell fallbacks. It can only use web_search/web_fetch
-            # when the request's explicit web setting enabled them.
+            # when configured policy has not explicitly denied them.
             disabled_tools.update({
                 "bash", "python",
                 "search_chats", "manage_skills", "manage_memory",
@@ -992,7 +1011,7 @@ def setup_chat_routes(
                 "manage_notes", "manage_calendar", "read_calendar", "manage_tasks",
                 "api_call", "builtin_browser",
             })
-            if _search_enabled:
+            if not _web_explicitly_denied:
                 disabled_tools.difference_update(WEB_TOOL_NAMES)
             else:
                 disabled_tools.update(WEB_TOOL_NAMES)
@@ -1158,6 +1177,38 @@ def setup_chat_routes(
             if ctx.used_memories:
                 yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
 
+            if _approval_reply and _approval_reply["choice"] == "deny":
+                _capability = str((_approval_reply["decision"].get("capability") or {}).get("name") or "action")
+                reply = f"Denied: {_capability}. I will not run it."
+                metrics = {
+                    "model": "pandamonium-authority",
+                    "requested_model": sess.model,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_time": 0,
+                    "response_time": 0,
+                    "agent_rounds": 0,
+                    "tool_calls": 0,
+                }
+                yield f'data: {json.dumps({"type": "model_info", "model": sess.model})}\n\n'
+                yield f'data: {json.dumps({"delta": reply})}\n\n'
+                _saved_id = save_assistant_response(
+                    sess,
+                    session_manager,
+                    session,
+                    reply,
+                    metrics,
+                    character_name=ctx.preset.character_name,
+                    incognito=incognito,
+                )
+                if _saved_id:
+                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
+                yield f'data: {json.dumps({"type": "metrics", "data": metrics})}\n\n'
+                yield "data: [DONE]\n\n"
+                _stream_set(session, status="done")
+                _active_streams.pop(session, None)
+                return
+
             # Run research as a background task (survives page refresh)
             if effective_do_research:
                 _r_ep, _r_model, _r_headers = _resolve_research_endpoint(sess)
@@ -1282,12 +1333,12 @@ def setup_chat_routes(
             if hermes_agent_api:
                 raw_history_count = len(sess.get_context_messages())
                 messages = _hermes_agent_context_messages(sess)
-                messages = _ensure_current_request_is_latest_user(messages, message)
+                messages = _ensure_current_request_is_latest_user(messages, _model_message)
                 logger.info(
                     "Hermes API passthrough: stripped Pandamonium context preface and local-chat assistant turns (%d ctx -> %d raw -> %d sent messages)",
                     len(ctx.messages), raw_history_count, len(messages))
             else:
-                messages = _ensure_current_request_is_latest_user(ctx.messages, message)
+                messages = _ensure_current_request_is_latest_user(ctx.messages, _model_message)
             if text_extension_bridge:
                 messages = [
                     *messages[:-1],
@@ -1600,6 +1651,9 @@ def setup_chat_routes(
                     if text_extension_bridge:
                         _forced_tools.update(text_extension_bridge["tool_names"])
                         _forced_tools.add("ui_control")
+                    if _approval_reply and _approval_reply["choice"] == "approve":
+                        _forced_tools.add(str((_approval_reply["decision"].get("capability") or {}).get("name") or ""))
+                        _forced_tools.discard("")
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,

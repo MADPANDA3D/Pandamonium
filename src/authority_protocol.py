@@ -20,6 +20,22 @@ from core.constants import DATA_DIR
 
 AUTHORITY_FILE = Path(DATA_DIR) / "authority_receipts.json"
 APPROVAL_SCOPES = frozenset({"once", "session", "time_bounded", "persistent"})
+NATURAL_APPROVAL_REPLIES = {
+    "yes": "approve",
+    "yeah": "approve",
+    "yep": "approve",
+    "approved": "approve",
+    "approve": "approve",
+    "go ahead": "approve",
+    "do it": "approve",
+    "proceed": "approve",
+    "no": "deny",
+    "nope": "deny",
+    "deny": "deny",
+    "denied": "deny",
+    "cancel": "deny",
+    "stop": "deny",
+}
 ACTION_EFFECTS = frozenset(
     {
         "read",
@@ -142,6 +158,16 @@ def operator_identity(owner: str | None) -> str | None:
     if os.getenv("AUTH_ENABLED", "true").lower() == "false":
         return "local-operator"
     return None
+
+
+def natural_approval_choice(text: str) -> str | None:
+    """Map one unambiguous ordinary reply to approve-once or deny."""
+    value = " ".join(re.sub(r"[^a-z ]", " ", str(text or "").lower()).split())
+    if value.startswith("please "):
+        value = value[7:]
+    if value.endswith(" please"):
+        value = value[:-7]
+    return NATURAL_APPROVAL_REPLIES.get(value)
 
 
 def argument_fingerprint(call: Mapping[str, Any]) -> str:
@@ -405,6 +431,65 @@ class AuthorityStore:
             self._write(state)
         return sorted(matches, key=lambda row: str(row.get("issued_at") or ""), reverse=True)[0] if matches else None
 
+    def _active_pending(
+        self,
+        state: dict[str, Any],
+        *,
+        operator_id: str,
+        session_id: str,
+        now: datetime,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        active = []
+        dirty = False
+        for decision in state["decisions"].values():
+            if (
+                decision.get("operator_id") != operator_id
+                or str(decision.get("session_id") or "") != session_id
+                or decision.get("decision") != "approval_required"
+                or decision.get("status") in {"resolved", "expired"}
+            ):
+                continue
+            expires = _parse_time(decision.get("expires_at"))
+            if not expires or expires <= now:
+                decision["status"] = "expired"
+                dirty = True
+                continue
+            active.append(decision)
+        active.sort(key=lambda row: str(row.get("created_at") or ""))
+        return active, dirty
+
+    def resolve_natural_reply(
+        self,
+        text: str,
+        *,
+        operator_id: str,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Resolve exactly one active decision from a natural reply, once."""
+        choice = natural_approval_choice(text)
+        if not choice:
+            return None
+        with self._lock:
+            state = self._read()
+            active, dirty = self._active_pending(
+                state,
+                operator_id=operator_id,
+                session_id=session_id,
+                now=_now(),
+            )
+            if dirty:
+                self._write(state)
+            if len(active) != 1:
+                return None
+            decision = dict(active[0])
+            receipt = self.resolve(
+                decision["decision_id"],
+                operator_id=operator_id,
+                choice=choice,
+                scope="once",
+            )
+        return {"choice": choice, "decision": decision, "receipt": receipt}
+
     def decide(
         self,
         call: Mapping[str, Any],
@@ -469,7 +554,24 @@ class AuthorityStore:
                             receipt["consumed_at"] = _iso(now)
                             self._write(state)
                 else:
-                    decision, basis = "approval_required", "exact_operator_approval"
+                    active, dirty = self._active_pending(
+                        state,
+                        operator_id=operator,
+                        session_id=session,
+                        now=now,
+                    )
+                    if dirty:
+                        self._write(state)
+                    matching = next(
+                        (row for row in active if row.get("argument_fingerprint") == fingerprint),
+                        None,
+                    )
+                    if matching:
+                        return dict(matching)
+                    if active:
+                        decision, basis = "deny", "authority_decision_already_pending"
+                    else:
+                        decision, basis = "approval_required", "exact_operator_approval"
 
         record = {
             "decision_id": decision_id,

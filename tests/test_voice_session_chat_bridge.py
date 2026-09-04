@@ -345,7 +345,21 @@ def test_completed_worker_result_uses_concise_spoken_handoff():
 
     spoken = asyncio.run(voice_routes._spoken_text_for_final("Ask PC Codex to audit the repo", final))
 
-    assert spoken == "Roger that. The full agent result is in the chat."
+    assert spoken == "The agent finished. The complete result is in chat."
+    assert len(spoken.split()) <= 40
+
+
+def test_short_plain_worker_result_is_verbatim():
+    response = "The audit passed. CT103 is healthy and no restart occurred."
+    final = {
+        "assistant_text": response,
+        "diagnostics": {"guard_reason": "selected_completed_pc-codex"},
+        "task_ids": ["task-1"],
+    }
+
+    contract = voice_routes._speech_contract_for_final("Ask PC Codex to audit the repo", final)
+
+    assert contract == {"spoken_text": response, "speech_mode": "verbatim"}
 
 
 def test_failed_worker_result_reports_issue_without_reading_details():
@@ -357,7 +371,22 @@ def test_failed_worker_result_reports_issue_without_reading_details():
 
     spoken = asyncio.run(voice_routes._spoken_text_for_final("Ask PC Codex to audit the repo", final))
 
-    assert spoken == "The agent hit an issue. The details are in the chat."
+    assert spoken.startswith("PC Codex could not complete the request")
+    assert "try again" in spoken
+    assert len(spoken.split()) <= 40
+
+
+def test_approval_question_is_verbatim_and_actionable():
+    response = "Approve deleting only archive 42, or deny it."
+    final = {
+        "assistant_text": response,
+        "diagnostics": {"guard_reason": "authority_approval_required"},
+        "task_ids": [],
+    }
+
+    contract = voice_routes._speech_contract_for_final("Delete archive 42", final)
+
+    assert contract == {"spoken_text": response, "speech_mode": "verbatim"}
 
 
 def test_streaming_speech_waits_for_file_and_worker_handoff_policy():
