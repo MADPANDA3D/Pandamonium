@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pandamonium:schema:discovery:v1",
+  "title": "Pandamonium model-neutral discovery v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "entities"],
+  "properties": {
+    "schema_version": {"const": "pandamonium.discovery.v1"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "entities": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {"$ref": "#/$defs/entity"}
+    }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind", "id", "display_name", "availability", "ownership",
+        "health", "permissions", "source", "actions"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "model", "agent", "worker", "workspace", "knowledge_source",
+            "connection", "plugin", "tool"
+          ]
+        },
+        "id": {"$ref": "#/$defs/id"},
+        "display_name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "availability": {
+          "enum": ["available", "configured", "disabled", "unavailable", "planned"]
+        },
+        "ownership": {"$ref": "#/$defs/ownership"},
+        "health": {"$ref": "#/$defs/health"},
+        "permissions": {"$ref": "#/$defs/permissions"},
+        "source": {"$ref": "#/$defs/source"},
+        "actions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/action"}
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 200,
+      "pattern": "^[a-z][a-z0-9_.:-]*$"
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "id"],
+      "properties": {
+        "scope": {
+          "enum": ["platform", "installation", "owner", "workspace", "connection", "plugin", "worker"]
+        },
+        "id": {"$ref": "#/$defs/id"}
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {"enum": ["healthy", "degraded", "unavailable", "unknown", "not_applicable"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+        "checked_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requires_authenticated_request", "configured_scopes", "delegation"],
+      "properties": {
+        "requires_authenticated_request": {"const": true},
+        "configured_scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "delegation": {"enum": ["none", "narrower_only"]}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "ref"],
+      "properties": {
+        "type": {
+          "enum": [
+            "builtin", "configuration", "runtime_discovery", "connection",
+            "plugin", "worker", "knowledge_source"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^[A-Za-z0-9._/-]+(?:#[A-Za-z0-9._:-]+)?$",
+          "not": {"pattern": "^(?:/|.*(?:^|/)\\.\\.(?:/|$))"}
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "effect", "authorization", "reversible"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.:-]{0,199}$"},
+        "effect": {
+          "enum": [
+            "read",
+            "reversible_write",
+            "destructive_or_difficult_to_recover",
+            "external_publication_or_communication",
+            "purchase",
+            "credential_or_auth_change",
+            "privilege_expansion",
+            "outside_workspace_boundary"
+          ]
+        },
+        "authorization": {"enum": ["explicit_request", "separate_gate", "denied"]},
+        "reversible": {"type": "boolean"}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "pandamonium.discovery.v1",
+      "generated_at": "2026-09-04T12:00:00Z",
+      "entities": [
+        {
+          "kind": "model",
+          "id": "model:configured:primary",
+          "display_name": "Configured primary model",
+          "availability": "configured",
+          "ownership": {"scope": "connection", "id": "connection:model:local"},
+          "health": {"state": "unknown"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["owner:current"], "delegation": "none"},
+          "source": {"type": "runtime_discovery", "ref": "core/database.py#ModelEndpoint"},
+          "actions": [
+            {"name": "infer", "effect": "read", "authorization": "explicit_request", "reversible": true}
+          ]
+        },
+        {
+          "kind": "agent",
+          "id": "agent:assistant",
+          "display_name": "Configured assistant",
+          "availability": "available",
+          "ownership": {"scope": "owner", "id": "owner:current"},
+          "health": {"state": "healthy"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["owner:current"], "delegation": "narrower_only"},
+          "source": {"type": "configuration", "ref": "src/agent_identity.py#resolve_agent_identity"},
+          "actions": [
+            {"name": "coordinate", "effect": "read", "authorization": "explicit_request", "reversible": true}
+          ]
+        },
+        {
+          "kind": "worker",
+          "id": "worker:pc-codex",
+          "display_name": "PC Codex worker",
+          "availability": "configured",
+          "ownership": {"scope": "installation", "id": "installation:current"},
+          "health": {"state": "unknown"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["workspace:home-lab"], "delegation": "narrower_only"},
+          "source": {"type": "worker", "ref": "src/agent_worker_adapters.py#worker_catalog"},
+          "actions": [
+            {"name": "start_task", "effect": "reversible_write", "authorization": "explicit_request", "reversible": true}
+          ]
+        },
+        {
+          "kind": "workspace",
+          "id": "workspace:home-lab",
+          "display_name": "Home Lab",
+          "availability": "configured",
+          "ownership": {"scope": "installation", "id": "installation:current"},
+          "health": {"state": "not_applicable"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["workspace:home-lab"], "delegation": "narrower_only"},
+          "source": {"type": "configuration", "ref": "src/agent_worker_adapters.py#configured_worker_workspaces"},
+          "actions": [
+            {"name": "access", "effect": "read", "authorization": "explicit_request", "reversible": true}
+          ]
+        },
+        {
+          "kind": "knowledge_source",
+          "id": "knowledge:books",
+          "display_name": "Books",
+          "availability": "available",
+          "ownership": {"scope": "owner", "id": "owner:current"},
+          "health": {"state": "healthy"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["owner:current"], "delegation": "none"},
+          "source": {"type": "knowledge_source", "ref": "routes/personal_routes.py#list_books"},
+          "actions": [
+            {"name": "search", "effect": "read", "authorization": "explicit_request", "reversible": true}
+          ]
+        },
+        {
+          "kind": "connection",
+          "id": "connection:mad-mcp",
+          "display_name": "MAD MCP",
+          "availability": "configured",
+          "ownership": {"scope": "owner", "id": "owner:current"},
+          "health": {"state": "unknown"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["owner:current"], "delegation": "none"},
+          "source": {"type": "connection", "ref": "core/database.py#McpServer"},
+          "actions": [
+            {"name": "rotate_credentials", "effect": "credential_or_auth_change", "authorization": "separate_gate", "reversible": false}
+          ]
+        },
+        {
+          "kind": "plugin",
+          "id": "plugin:oracle",
+          "display_name": "ORACLE",
+          "availability": "configured",
+          "ownership": {"scope": "installation", "id": "installation:current"},
+          "health": {"state": "unknown"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["owner:current"], "delegation": "narrower_only"},
+          "source": {"type": "plugin", "ref": "src/extension_registry.py#ExtensionRegistry"},
+          "actions": [
+            {"name": "remove", "effect": "destructive_or_difficult_to_recover", "authorization": "separate_gate", "reversible": false}
+          ]
+        },
+        {
+          "kind": "tool",
+          "id": "tool:read-file",
+          "display_name": "Read file",
+          "availability": "available",
+          "ownership": {"scope": "platform", "id": "platform:pandamonium"},
+          "health": {"state": "healthy"},
+          "permissions": {"requires_authenticated_request": true, "configured_scopes": ["workspace:home-lab"], "delegation": "narrower_only"},
+          "source": {"type": "builtin", "ref": "src/tool_index.py#ToolIndex"},
+          "actions": [
+            {"name": "read", "effect": "read", "authorization": "explicit_request", "reversible": true}
+          ]
+        }
+      ]
+    }
+  ]
+}
