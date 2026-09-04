@@ -237,7 +237,7 @@ assert.match(index, /sessions\.js\?v=20260719T024058Z/);
 assert.match(index, /jarvisVoice\.js\?v=20260903T210000Z/);
 assert.match(index, /app\.js\?v=20260719T024058Z/);
 assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v371'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v372'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);

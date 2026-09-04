@@ -51,3 +51,11 @@ def test_authenticated_server_theme_replaces_a_stale_browser_theme():
     assert "const serverTheme = await _loadFromServer();" in init
     assert "JSON.stringify(serverTheme) !== JSON.stringify(getSaved())" in init
     assert "if (!getSaved())" not in init
+
+
+def test_wide_desktop_chat_uses_more_of_the_available_display():
+    styles = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+
+    assert "@media (min-width: 1600px)" in styles
+    assert ".chat-history { --chat-max: 1400px; }" in styles
+    assert ".attach-strip { max-width: 1400px; }" in styles

@@ -1881,6 +1881,11 @@ body.bg-pattern-sparkles {
       padding-left: max(0px, calc((100% - var(--chat-max)) / 2));
       padding-right: max(12px, calc((100% - var(--chat-max)) / 2 + 12px));
     }
+    /* Give wide desktop displays more useful reading room without turning
+       ordinary laptop-sized replies into edge-to-edge walls of text. */
+    @media (min-width: 1600px) {
+      .chat-history { --chat-max: 1400px; }
+    }
     .chat-history > * {
       flex: 0 0 auto;
     }
@@ -8725,6 +8730,12 @@ button.hamburger {
   box-sizing: border-box;
 }
 .attach-strip:empty { display: none; }
+
+@media (min-width: 1600px) {
+  .chat-input-bar,
+  .chat-container.welcome-active .chat-input-bar,
+  .attach-strip { max-width: 1400px; }
+}
 
 /* Upload-in-progress feedback: the message bubble shows immediately, so while
    the files are still uploading we put a whirlpool ON each attachment chip and

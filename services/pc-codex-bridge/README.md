@@ -9,11 +9,14 @@ The runtime bundle is exactly two Python files: copy
 directory (the latter as `atomic_io.py`). The bridge intentionally remains
 usable without importing the rest of the Odysseus application.
 
-PC Codex sessions run from one dedicated interaction workspace instead of the selected source project, so their persistent App Server threads stay grouped away from normal Codex work. The logical workspace selects the source tree Codex may read. Public worker delegation is strictly read-only; write roots and preapproved tasks are rejected. Configure local paths and optional model overrides in the private service environment:
+PC Codex sessions run directly from the selected allowlisted workspace, so
+their persistent App Server threads appear under the correct Codex project.
+Public worker delegation is strictly read-only; write-capable tasks require the
+private worker profile and explicit preapproval. Configure local paths and
+optional model overrides in the private service environment:
 
 ```env
 JARVIS_CODEX_WORKSPACES_JSON='{"project":"/absolute/path/to/project"}'
-JARVIS_CODEX_INTERACTION_WORKSPACE='/absolute/path/to/worker-interactions'
 JARVIS_CODEX_MODEL=your-model-id
 JARVIS_CODEX_REASONING_EFFORT=high
 ```

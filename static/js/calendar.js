@@ -3636,6 +3636,11 @@ function getViewState() {
   };
 }
 
+registerClientStateProvider('calendar', () => ({
+  version: CLIENT_STATE_VERSION,
+  ...getViewState(),
+}));
+
 // ── Persistent cache (localStorage) ──
 const LS_KEY = 'odysseus-calendar-cache';
 const LS_TTL = 10 * 60 * 1000; // 10 min

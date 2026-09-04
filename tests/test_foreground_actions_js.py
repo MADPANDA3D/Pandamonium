@@ -134,6 +134,7 @@ def test_core_wiring_uses_registry_without_action_specific_stream_branches():
     for action in ("OPEN_CALENDAR", "CLOSE_DOCUMENT", "MINIMIZE_DOCUMENT"):
         assert f"registerForegroundAction(FOREGROUND_ACTIONS.{action}" in app
     calendar = (ROOT / "static" / "js" / "calendar.js").read_text(encoding="utf-8")
+    assert "registerClientStateProvider('calendar'" in calendar
     assert calendar.index("Modals.isMinimized('calendar-modal')") < calendar.index(
         "if (_open) return;"
     )
