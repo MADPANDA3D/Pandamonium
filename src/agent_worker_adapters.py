@@ -28,6 +28,13 @@ def _enabled(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _worker_label(name: str, default: str) -> str:
+    """Return a bounded installation-owned label for a fixed adapter slot."""
+    value = str(os.getenv(name) or default).strip()
+    value = " ".join(value.split())
+    return value[:80] or default
+
+
 def configured_worker_workspaces() -> dict[str, list[str]]:
     """Return installation-owned workspace aliases; public defaults are empty."""
     raw = os.getenv("ODYSSEUS_WORKER_WORKSPACES_JSON", "").strip()
@@ -524,11 +531,13 @@ def adapters() -> dict[str, WorkerAdapter]:
             PC_TOKEN_FILE,
             enabled=_enabled("ODYSSEUS_PC_CODEX_ENABLED", False),
             machine="Local workstation",
+            label=_worker_label("ODYSSEUS_PC_CODEX_LABEL", "PC Codex"),
         ),
         "hermes": HermesRunsAdapter(
             os.getenv("ODYSSEUS_HERMES_URL", "http://127.0.0.1:8642"),
             HERMES_TOKEN_FILE,
             enabled=_enabled("ODYSSEUS_HERMES_ENABLED", False),
+            label=_worker_label("ODYSSEUS_HERMES_LABEL", "Hermes"),
         ),
         "vps-codex": CodexBridgeAdapter(
             "vps-codex",
@@ -536,6 +545,7 @@ def adapters() -> dict[str, WorkerAdapter]:
             VPS_TOKEN_FILE,
             enabled=_enabled("ODYSSEUS_VPS_CODEX_ENABLED", False),
             machine="Remote server",
+            label=_worker_label("ODYSSEUS_VPS_CODEX_LABEL", "VPS Codex"),
         ),
     }
 

@@ -26,6 +26,17 @@ def test_public_worker_defaults_are_empty_and_private_topology_is_opt_in(monkeyp
     assert "home-lab" not in json.dumps(catalog).casefold()
 
 
+def test_worker_labels_are_installation_owned_and_bounded(monkeypatch):
+    monkeypatch.setenv("ODYSSEUS_PC_CODEX_LABEL", "  Friday   Desktop  ")
+    monkeypatch.setenv("ODYSSEUS_HERMES_LABEL", "Gordon")
+
+    catalog = worker_catalog()
+
+    assert catalog["pc-codex"]["label"] == "Friday Desktop"
+    assert catalog["hermes"]["label"] == "Gordon"
+    assert len(catalog["vps-codex"]["label"]) <= 80
+
+
 @pytest.mark.parametrize(
     "value",
     ["not-json", "[]", '{"unknown":["project"]}', '{"pc-codex":["../project"]}'],

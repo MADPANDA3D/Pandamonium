@@ -79,6 +79,16 @@ def test_catalog_fingerprint_tracks_dynamic_catalog_and_excludes_conflicts():
     assert conflicted["conflicts"] == ["read_file"]
 
 
+def test_builtin_function_catalog_has_one_authoritative_schema_per_name():
+    names = [
+        schema.get("function", {}).get("name")
+        for schema in agent_loop.FUNCTION_TOOL_SCHEMAS
+    ]
+
+    assert len(names) == len(set(names))
+    assert compose_capability_catalog(agent_loop.FUNCTION_TOOL_SCHEMAS)["conflicts"] == []
+
+
 def test_unknown_malformed_oversized_and_schema_invalid_calls_fail_closed():
     catalog = compose_capability_catalog([_schema()])
     assert validate_action_call(_call(name="missing"), catalog)["category"] == "unknown_capability"
@@ -202,6 +212,80 @@ async def test_agent_loop_streams_and_persists_the_same_action_correlation(monke
     assert persisted["action_call"]["call_id"] == "native-call-7"
     assert persisted["action_result"]["call_id"] == "native-call-7"
     assert persisted["action_result"]["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_engaged_oracle_uses_one_ui_control_schema_for_model_and_validator(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    rounds = {"count": 0}
+
+    async def fake_stream(*args, **kwargs):
+        rounds["count"] += 1
+        if rounds["count"] == 1:
+            call = {
+                "id": "oracle-open-1",
+                "name": "ui_control",
+                "arguments": json.dumps({
+                    "action": "oracle_protocol",
+                    "name": "engage",
+                }),
+            }
+            yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
+        else:
+            yield 'data: {"delta":"ORACLE opened."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    async def fake_execute(*args, **kwargs):
+        return "ui_control", {
+            "ui_event": "oracle_protocol_engage",
+            "output": "opened",
+            "exit_code": 0,
+        }
+
+    oracle_read_schema = _schema("get_current_view_state", "scope")
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+    monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
+
+    events = []
+    async for chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1",
+        "gpt-4o",
+        [{"role": "user", "content": "Engage ORACLE, then read the current view."}],
+        relevant_tools={"ui_control", "get_current_view_state"},
+        forced_tools={"ui_control", "get_current_view_state"},
+        extra_tool_schemas=[oracle_read_schema],
+        extension_capabilities={
+            "get_current_view_state": {
+                "extension_id": "oracle",
+                "permission_mode": "read_only",
+            }
+        },
+        context_extensions={
+            "oracle": {
+                "engaged": True,
+                "state_mounted": True,
+                "tool_count": 1,
+                "tool_names": ["get_current_view_state"],
+            }
+        },
+        max_rounds=2,
+    ):
+        if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+            events.append(json.loads(chunk[6:]))
+
+    outputs = [event for event in events if event.get("type") == "tool_output"]
+    assert outputs
+    assert outputs[0]["status"] == "succeeded"
+    assert outputs[0]["call_id"] == "oracle-open-1"
+    assert not any(
+        (event.get("data") or {}).get("category") == "catalog_conflict"
+        for event in events
+    )
 
 
 @pytest.mark.asyncio
