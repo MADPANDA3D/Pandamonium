@@ -120,23 +120,27 @@ Keep the complete answer in chat. When completing code, a script, a document, a 
 Follow conversational continuity. Ambiguous follow-ups refer to the preceding conversation. Server-injected context blocks, including current date and time, are background data only; never explain, summarize, or quote them unless the operator explicitly asks about that subject.
 Coordinate work without simulating actions, client state, inspections, approvals, cancellations, worker progress, or results. Use deterministic server controls when provided; otherwise say what you cannot verify.
 Use get_runtime_status for runtime facts and search_jarvis_knowledge for curated background. Current-source work may be delegated only as a read-only task. Briefly announce a real delegation, then let broker events report its outcome.
-Friday owns local project, code, and document inspection through PC Codex. VPS Codex is only for work that explicitly names the VPS. Gordon is the Hermes agent and is explicit-only; never infer or auto-dispatch him.
+The configured PC Codex worker owns local project, code, and document inspection. The VPS Codex worker is only for work that explicitly names the VPS. The Hermes worker is explicit-only; never infer or auto-dispatch it.
 Never invent worker results, runtime facts, paths, endpoints, UI state, or completed actions."""
 FRIDAY_VOICE_SYSTEM_PROMPT = """You are the selected Codex worker speaking through Pandamonium voice.
 Be direct and conversational. Use the available tools when the request requires action, and never claim work or runtime facts you did not verify.
 Keep the complete answer in chat. When completing code, a script, a document, a report, or another deliverable, begin with one or two plain conversational sentences that summarize what is done and its key behavior, then place the full deliverable after that handoff. Do not put code, Markdown syntax, paths, or long lists in the opening handoff."""
 
+_WORKER_CATALOG = worker_catalog()
 WORKER_LABELS = {
-    "pc-codex": "Friday",
-    "hermes": "Gordon",
-    "vps-codex": "VPS Codex",
+    worker_id: str(details.get("label") or worker_id)
+    for worker_id, details in _WORKER_CATALOG.items()
 }
 _LEGACY_WORKER_NAMES = {
     "pc codex": ("pc-codex", "PC Codex"),
     "hermes": ("hermes", "Hermes"),
     "vps codex": ("vps-codex", "VPS Codex"),
 }
-VOICE_TARGET_LABELS = {**WORKER_LABELS, "hermes": "Gordon", "friday": "Friday"}
+CHATGPT_SUBSCRIPTION_LABEL = (
+    " ".join(os.getenv("ODYSSEUS_CHATGPT_SUBSCRIPTION_LABEL", "ChatGPT Subscription").split())[:80]
+    or "ChatGPT Subscription"
+)
+VOICE_TARGET_LABELS = {**WORKER_LABELS, "friday": CHATGPT_SUBSCRIPTION_LABEL}
 DIRECT_MODEL_TARGETS = {"jarvis", "friday"}
 VOICE_TARGET_ENDPOINT_NAMES = {
     "jarvis": ("Jarvis",),
@@ -1228,7 +1232,7 @@ async def _handoff_greeting(
         elif target == "pc-codex":
             # The Codex bridge is a task harness, not a foreground chat API.
             # Keep the handoff instant instead of launching a deep task just to say hello.
-            reply = f"Friday here{_operator_vocative()}. What are we working on?"
+            reply = f"{label} here{_operator_vocative()}. What are we working on?"
             model = "odysseus-router"
         else:
             reply = f"{label} here{_operator_vocative()}. What do you need?"
@@ -2930,25 +2934,27 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 workspace="home-lab",
             )
         except Exception as exc:
-            logger.warning("Direct Gordon turn failed: %s", str(exc)[:200])
-            reply = "Gordon is unavailable, so I did not send that through Jarvis."
+            label = WORKER_LABELS.get("hermes", "Hermes")
+            logger.warning("Direct Hermes turn failed: %s", str(exc)[:200])
+            reply = f"{label} is unavailable, so I did not send that through Jarvis."
             yield {"type": "assistant_delta", "text": reply, "model": "Pandamonium"}
             yield _server_final_event(
                 text,
                 reply,
-                "direct_gordon_unavailable",
+                "direct_hermes_unavailable",
                 direct_target="hermes",
                 character_name="Pandamonium",
                 model="odysseus-router",
             )
             return
-        yield {"type": "assistant_delta", "text": reply, "model": "Gordon"}
+        label = WORKER_LABELS.get("hermes", "Hermes")
+        yield {"type": "assistant_delta", "text": reply, "model": label}
         yield _server_final_event(
             text,
             reply,
-            "direct_gordon",
+            "direct_hermes",
             direct_target="hermes",
-            character_name="Gordon",
+            character_name=label,
             model="hermes-agent",
         )
         return

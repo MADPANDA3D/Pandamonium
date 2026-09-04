@@ -324,7 +324,7 @@ def test_spoken_text_policy_uses_a_human_fallback_for_an_artifact_without_a_summ
     ("target", "endpoint", "model", "character"),
     [
         ("jarvis", "http://freetoken.test/v1/chat/completions", "jarvis", "Assistant"),
-        ("friday", "https://chatgpt.com/backend-api/codex/responses", "gpt-5-codex", "Friday"),
+        ("friday", "https://chatgpt.com/backend-api/codex/responses", "gpt-5-codex", "ChatGPT Subscription"),
     ],
 )
 def test_voice_uses_selected_chat_brain(monkeypatch, target, endpoint, model, character):
@@ -408,7 +408,7 @@ def test_transferred_voice_uses_the_target_agent_endpoint(monkeypatch):
         "model": "gpt-5-codex",
         "headers": {"Authorization": "Bearer friday"},
     }
-    assert events[-1]["diagnostics"]["character_name"] == "Friday"
+    assert events[-1]["diagnostics"]["character_name"] == "ChatGPT Subscription"
 
 
 async def _collect_voice_events(chat_session_id, target, origin_target=None):

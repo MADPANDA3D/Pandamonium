@@ -33,7 +33,10 @@ STREAM_RECONCILE_POLL_SECONDS = max(
     0.1, float(os.getenv("ODYSSEUS_WORKER_RECONCILE_POLL_SECONDS", "2"))
 )
 WORKERS = worker_catalog()
-WORKER_LABELS = {"pc-codex": "Friday", "hermes": "Gordon", "vps-codex": "VPS Codex"}
+WORKER_LABELS = {
+    worker_id: str(details.get("label") or worker_id)
+    for worker_id, details in WORKERS.items()
+}
 
 _LOCK = threading.RLock()
 _MIRRORS: dict[str, asyncio.Task] = {}

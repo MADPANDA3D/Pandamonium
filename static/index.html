@@ -1059,11 +1059,11 @@
             <button type="button" class="jarvis-target is-active" data-worker="jarvis" role="menuitemradio" aria-checked="true">
               <span>Jarvis</span><small>Self-hosted · conversational brain</small>
             </button>
-            <button type="button" class="jarvis-target" data-worker="pc-codex" role="menuitemradio" aria-checked="false">
-              <span>Friday</span><small>Local workstation · checking</small>
+            <button type="button" class="jarvis-target" data-worker="pc-codex" role="menuitemradio" aria-checked="false" disabled>
+              <span>PC Codex</span><small>Local workstation · gated</small>
             </button>
             <button type="button" class="jarvis-target" data-worker="hermes" role="menuitemradio" aria-checked="false" disabled>
-              <span>Gordon</span><small>Hermes laptop · gated</small>
+              <span>Hermes</span><small>Remote agent · gated</small>
             </button>
             <button type="button" class="jarvis-target" data-worker="vps-codex" role="menuitemradio" aria-checked="false" disabled>
               <span>VPS Codex</span><small>Remote server · gated</small>
@@ -1760,8 +1760,8 @@
                 <label class="settings-label" style="padding-top:5px;">Agent voices</label>
                 <div style="display:flex;flex:1;flex-direction:column;gap:0.35rem;">
                   <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Jarvis</span><select id="set-ttsJarvisVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
-                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Gordon</span><select id="set-ttsGordonVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
-                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Friday</span><select id="set-ttsFridayVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
+                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span id="set-ttsHermesLabel" style="width:90px;">Hermes</span><select id="set-ttsGordonVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
+                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span id="set-ttsPcCodexLabel" style="width:90px;">PC Codex</span><select id="set-ttsFridayVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
                 </div>
               </div>
               <div id="set-ttsSpeedRow" style="display:flex;align-items:center;gap:0.75rem;">
@@ -2704,7 +2704,7 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/jarvisVoice.js?v=20260903T210000Z"></script>
+<script type="module" src="/static/js/jarvisVoice.js?v=20260904T151500Z"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260903T210000Z"></script>

@@ -37,6 +37,43 @@ def test_worker_labels_are_installation_owned_and_bounded(monkeypatch):
     assert len(catalog["vps-codex"]["label"]) <= 80
 
 
+def test_voice_worker_defaults_are_public_and_neutral():
+    env = os.environ.copy()
+    for prefix in ("ODYSSEUS_", "PANDAMONIUM_"):
+        for suffix in (
+            "PC_CODEX_LABEL",
+            "HERMES_LABEL",
+            "VPS_CODEX_LABEL",
+            "CHATGPT_SUBSCRIPTION_LABEL",
+        ):
+            env.pop(prefix + suffix, None)
+    env["DATABASE_URL"] = "sqlite:///:memory:"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json; from routes.voice_routes import WORKER_LABELS, "
+                "CHATGPT_SUBSCRIPTION_LABEL; from src.jarvis_agent import WORKER_LABELS as task_labels; "
+                "print(json.dumps({'voice': WORKER_LABELS, 'task': task_labels, "
+                "'subscription': CHATGPT_SUBSCRIPTION_LABEL}, sort_keys=True))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    labels = json.loads(result.stdout)
+    assert labels["voice"] == labels["task"] == {
+        "hermes": "Hermes",
+        "pc-codex": "PC Codex",
+        "vps-codex": "VPS Codex",
+    }
+    assert labels["subscription"] == "ChatGPT Subscription"
+
+
 @pytest.mark.parametrize(
     "value",
     ["not-json", "[]", '{"unknown":["project"]}', '{"pc-codex":["../project"]}'],

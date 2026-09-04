@@ -185,8 +185,8 @@ async def test_compound_voice_request_starts_pc_and_hermes_as_scoped_tasks(monke
         ("hermes", "home-lab"),
     ]
     pc_prompt, hermes_prompt = calls[0][2], calls[1][2]
-    assert "Handle only the work explicitly assigned to Friday" in pc_prompt
-    assert "Handle only the work explicitly assigned to Gordon" in hermes_prompt
+    assert "Handle only the work explicitly assigned to PC Codex" in pc_prompt
+    assert "Handle only the work explicitly assigned to Hermes" in hermes_prompt
     assert "ODYSSEUS_ARTIFACT" in pc_prompt
     assert "ODYSSEUS_ARTIFACT" not in hermes_prompt
     assert [event["worker"] for event in events if event["type"] == "agent_task"] == [
@@ -196,8 +196,8 @@ async def test_compound_voice_request_starts_pc_and_hermes_as_scoped_tasks(monke
     assert events[-1]["diagnostics"]["guard_reason"] == (
         "delegation_multi_pc-codex_started_hermes_started"
     )
-    assert "Friday is opening the document in Pandamonium" in events[-1]["assistant_text"]
-    assert "Gordon is handling its part" in events[-1]["assistant_text"]
+    assert "PC Codex is opening the document in Pandamonium" in events[-1]["assistant_text"]
+    assert "Hermes is handling its part" in events[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio
@@ -223,8 +223,8 @@ async def test_compound_dispatch_failure_does_not_block_the_other_worker(monkeyp
     assert calls == ["pc-codex", "hermes"]
     assert [event["task_id"] for event in events if event["type"] == "agent_task"] == ["hermes-task"]
     assert events[-1]["task_ids"] == ["hermes-task"]
-    assert "Friday is not connected" in events[-1]["assistant_text"]
-    assert "Gordon is handling its part" in events[-1]["assistant_text"]
+    assert "PC Codex is not connected" in events[-1]["assistant_text"]
+    assert "Hermes is handling its part" in events[-1]["assistant_text"]
 
 
 @pytest.mark.asyncio
@@ -520,12 +520,12 @@ async def test_selected_hermes_talks_directly_to_gordon_without_broker_task(monk
     assert events[0] == {
         "type": "assistant_delta",
         "text": "Good evening, Leo. This is Gordon.",
-        "model": "Gordon",
+        "model": "Hermes",
     }
     assert events[-1]["task_ids"] == []
-    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon"
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_hermes"
     assert events[-1]["diagnostics"]["direct_target"] == "hermes"
-    assert events[-1]["diagnostics"]["character_name"] == "Gordon"
+    assert events[-1]["diagnostics"]["character_name"] == "Hermes"
 
 
 @pytest.mark.asyncio
@@ -552,7 +552,7 @@ async def test_selected_hermes_greeting_reaches_gordon(monkeypatch):
 
     assert calls == [("chat-1", "Good evening, how are you?", "leo", "home-lab")]
     assert events[-1]["assistant_text"] == "Good evening, Leo. Gordon here."
-    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon"
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_hermes"
 
 
 @pytest.mark.asyncio
@@ -577,7 +577,7 @@ async def test_direct_gordon_failure_does_not_fall_back_to_jarvis_broker(monkeyp
     assert [event["type"] for event in events] == ["assistant_delta", "final"]
     assert all(event["type"] != "agent_task" for event in events)
     assert events[-1]["task_ids"] == []
-    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon_unavailable"
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_hermes_unavailable"
     assert events[-1]["diagnostics"]["character_name"] == "Pandamonium"
     assert "did not send that through Jarvis" in events[-1]["assistant_text"]
 
@@ -772,7 +772,7 @@ async def test_target_switch_precedes_active_worker_dispatch(monkeypatch):
     assert [event["type"] for event in events] == [
         "assistant_delta", "target_changed", "handoff_greeting", "final",
     ]
-    assert events[0]["text"] == "Transferring you to Gordon now—one moment, please."
+    assert events[0]["text"] == "Transferring you to Hermes now—one moment, please."
     assert events[1]["target"] == "hermes"
     assert events[-1]["task_ids"] == []
 
@@ -809,9 +809,9 @@ async def test_friday_handoff_greeting_does_not_launch_a_deep_codex_task():
         "pc-codex", "chat-1", "leo", "home-lab",
     )
 
-    assert greeting["text"] == "Friday here, Leo. What are we working on?"
+    assert greeting["text"] == "PC Codex here, Leo. What are we working on?"
     assert greeting["target"] == "pc-codex"
-    assert greeting["diagnostics"]["character_name"] == "Friday"
+    assert greeting["diagnostics"]["character_name"] == "PC Codex"
     assert greeting["diagnostics"]["model"] == "odysseus-router"
 
 
@@ -892,7 +892,7 @@ async def test_selected_friday_conversation_uses_voice_model_without_task_tools(
 
     assert events[-1]["assistant_text"] == "I am up and running, Leo."
     assert events[-1]["diagnostics"]["guard_reason"] == "friday_conversation"
-    assert events[-1]["diagnostics"]["character_name"] == "Friday"
+    assert events[-1]["diagnostics"]["character_name"] == "PC Codex"
     assert captured["messages"][0]["content"] == voice_routes.FRIDAY_VOICE_SYSTEM_PROMPT
     assert "start_agent_task" not in captured["relevant_tools"]
     assert "read_agent_task" not in captured["relevant_tools"]
@@ -938,7 +938,7 @@ async def test_old_worker_question_does_not_capture_direct_gordon_turn(monkeypat
 
     assert all(event["type"] != "agent_task" for event in events)
     assert events[-1]["assistant_text"] == "I have this, Leo."
-    assert events[-1]["diagnostics"]["guard_reason"] == "direct_gordon"
+    assert events[-1]["diagnostics"]["guard_reason"] == "direct_hermes"
 
 
 @pytest.mark.asyncio
@@ -1878,7 +1878,7 @@ async def test_voice_cancel_uses_named_broker_task_not_browser_task_id(monkeypat
 
     assert calls == [("hermes-live", "cancel", None, False, "leo")]
     assert events[-1]["diagnostics"]["guard_reason"] == "worker_cancel_requested"
-    assert events[-1]["assistant_text"].startswith("Cancellation requested for Gordon")
+    assert events[-1]["assistant_text"].startswith("Cancellation requested for Hermes")
 
 
 @pytest.mark.asyncio
@@ -2072,9 +2072,9 @@ async def test_cancellation_failure_warns_task_may_still_run(monkeypatch):
 
 
 def test_voice_system_prompt_assigns_workers_without_inference():
-    assert "Friday owns local project, code, and document inspection through PC Codex" in voice_routes.VOICE_SYSTEM_PROMPT
-    assert "VPS Codex is only for work that explicitly names the VPS" in voice_routes.VOICE_SYSTEM_PROMPT
-    assert "Gordon is the Hermes agent and is explicit-only" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "configured PC Codex worker owns local project, code, and document inspection" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "VPS Codex worker is only for work that explicitly names the VPS" in voice_routes.VOICE_SYSTEM_PROMPT
+    assert "Hermes worker is explicit-only" in voice_routes.VOICE_SYSTEM_PROMPT
     assert "Ambiguous follow-ups refer to the preceding conversation" in voice_routes.VOICE_SYSTEM_PROMPT
 
 

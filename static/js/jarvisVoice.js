@@ -113,15 +113,15 @@ const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
 ]);
 const WORKER_LABELS = {
   jarvis: 'Jarvis',
-  'pc-codex': 'Friday',
-  hermes: 'Gordon',
+  'pc-codex': 'PC Codex',
+  hermes: 'Hermes',
   'vps-codex': 'VPS Codex',
 };
-const VOICE_TARGET_LABELS = { ...WORKER_LABELS, hermes: 'Gordon', friday: 'Friday' };
+const VOICE_TARGET_LABELS = { ...WORKER_LABELS, friday: 'ChatGPT Subscription' };
 let workerCatalog = {
   jarvis: { enabled: true, machine: 'Self-hosted', connection: { state: 'connected' } },
-  'pc-codex': { enabled: true, machine: 'Local workstation', connection: { state: 'checking' } },
-  hermes: { enabled: false, machine: 'Hermes laptop', connection: { state: 'gated' } },
+  'pc-codex': { enabled: false, machine: 'Local workstation', connection: { state: 'gated' } },
+  hermes: { enabled: false, machine: 'Remote agent', connection: { state: 'gated' } },
   'vps-codex': { enabled: false, machine: 'Remote server', connection: { state: 'gated' } },
 };
 
@@ -137,7 +137,9 @@ function $(id) {
 }
 
 function voiceTargetLabel(target = voiceTarget) {
-  return target === 'jarvis' ? getBrandName() : (VOICE_TARGET_LABELS[target] || target);
+  return target === 'jarvis'
+    ? getBrandName()
+    : (workerCatalog[target]?.label || VOICE_TARGET_LABELS[target] || target);
 }
 
 function isCurrentVoiceCall(callGeneration) {
@@ -1305,6 +1307,16 @@ async function loadWorkerCatalog() {
   try {
     const workers = await fetchJson('/api/agent-workers');
     workerCatalog = { ...workerCatalog, ...workers };
+    Object.entries(workers || {}).forEach(([worker, details]) => {
+      if (details?.label) {
+        WORKER_LABELS[worker] = details.label;
+        VOICE_TARGET_LABELS[worker] = details.label;
+      }
+    });
+    const pcLabel = $('set-ttsPcCodexLabel');
+    const hermesLabel = $('set-ttsHermesLabel');
+    if (pcLabel) pcLabel.textContent = voiceTargetLabel('pc-codex');
+    if (hermesLabel) hermesLabel.textContent = voiceTargetLabel('hermes');
   } catch (error) {
     console.warn('Could not load Jarvis worker status:', error);
   }

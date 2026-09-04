@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import uuid
 from typing import Dict, Optional
 
@@ -20,6 +21,13 @@ from src import chatgpt_subscription
 logger = logging.getLogger(__name__)
 
 _DEVICE_FLOW_STORE = PendingDeviceFlowStore()
+
+
+def _subscription_label() -> str:
+    value = " ".join(
+        os.getenv("ODYSSEUS_CHATGPT_SUBSCRIPTION_LABEL", "ChatGPT Subscription").split()
+    )[:80]
+    return value or "ChatGPT Subscription"
 
 
 def _provision_endpoint(tokens: Dict, owner: Optional[str]) -> Dict:
@@ -70,14 +78,14 @@ def _provision_endpoint(tokens: Dict, owner: Optional[str]) -> Dict:
         if ep is None:
             ep = ModelEndpoint(
                 id=str(uuid.uuid4())[:8],
-                name="Friday",
+                name=_subscription_label(),
                 base_url=base,
                 model_type="llm",
                 endpoint_kind="api",
                 owner=owner,
             )
             db.add(ep)
-        ep.name = "Friday"
+        ep.name = _subscription_label()
         ep.base_url = base
         ep.api_key = None
         ep.provider_auth_id = auth.id
