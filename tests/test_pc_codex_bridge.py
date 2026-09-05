@@ -250,6 +250,15 @@ def test_catalog_http_endpoint_requires_auth_and_returns_safe_page(tmp_path, mon
     thread.start()
     try:
         connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        assert response.status == 200
+        health = json.loads(response.read())
+        assert health["protocol_version"] == "pandamonium.codex-bridge.v2"
+        assert health["features"] == {"project_catalog": True, "task_control": True}
+        connection.close()
+
+        connection = http.client.HTTPConnection(*server.server_address, timeout=2)
         connection.request("GET", "/v1/catalog/projects")
         assert connection.getresponse().status == 401
         connection.close()

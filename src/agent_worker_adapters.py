@@ -15,6 +15,7 @@ from src.agent_identity import configured_agent_name
 MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
 WORKER_IDS = ("pc-codex", "hermes", "vps-codex")
 _WORKSPACE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+CODEX_BRIDGE_PROTOCOL = "pandamonium.codex-bridge.v2"
 
 
 class WorkerUnavailable(RuntimeError):
@@ -329,11 +330,25 @@ class CodexBridgeAdapter:
             response.raise_for_status()
             payload = response.json()
             payload = payload if isinstance(payload, dict) else {}
+            features = payload.get("features") if isinstance(payload.get("features"), dict) else {}
+            protocol_ready = (
+                payload.get("protocol_version") == CODEX_BRIDGE_PROTOCOL
+                and features.get("project_catalog") is True
+                and features.get("task_control") is True
+            )
+            if not protocol_ready:
+                return {
+                    "state": "incompatible",
+                    "reason": "bridge_update_required",
+                    "machine": self.machine,
+                    "protocol": "codex-bridge",
+                    "protocol_ready": False,
+                }
             return {
                 "state": "connected",
                 "machine": self.machine,
                 "protocol": "codex-bridge",
-                "protocol_ready": bool(payload.get("app_server")),
+                "protocol_ready": True,
             }
         except Exception as exc:
             return {"machine": self.machine, **_health_failure(exc)}

@@ -71,7 +71,8 @@ test('Codex browser loads allowlisted projects lazily and paginates a large task
   await page.locator('#model-picker-btn').click();
   await expect(page.locator('#codex-browser-toggle')).toBeVisible();
   expect(taskRequests).toBe(0);
-  await page.locator('#codex-browser-toggle').click();
+  await page.locator('#model-picker-list').getByText('Friday', { exact: true }).click();
+  await expect(page.locator('#codex-workspace-browser')).toBeVisible();
   await expect(page.locator('#codex-project-list')).toContainText('1,001 tasks · workspace:test-project');
   await expect(page.locator('#codex-project-list').getByText('Missing Project').locator('..')).toBeDisabled();
   expect(taskRequests).toBe(0);

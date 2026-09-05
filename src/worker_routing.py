@@ -12,7 +12,11 @@ _PROJECT_WORK_ACTION_RE = re.compile(
     re.I,
 )
 _PROJECT_WORK_NEGATOR_RE = re.compile(r"\b(?:do\s+not|don[’']t|dont|never|not\s+to)\b", re.I)
-_CLAUSE_BOUNDARY_RE = re.compile(r"[.!?;,\n]|\b(?:but|however)\b", re.I)
+# A period ends a clause only when it is followed by whitespace or the end of
+# the turn. Splitting every period breaks ordinary project artifact names such
+# as README.md into separate clauses, separating the requested action from its
+# project scope and silently leaving the selected worker unused.
+_CLAUSE_BOUNDARY_RE = re.compile(r"[!?;,\n]|\.(?=\s|$)|\b(?:but|however)\b", re.I)
 _PROJECT_WORK_SCOPE_RE = re.compile(
     r"\b(?:apis?|branches?|bugs?|code|commits?|configurations?|containers?|deployments?|files?|git|hosts?|issues?|"
     r"projects?|pull requests?|repos?|repositor(?:y|ies)|scripts?|services?|servers?|sources?|systemd|tests?)\b",

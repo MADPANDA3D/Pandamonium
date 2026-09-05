@@ -24,6 +24,10 @@ def test_selected_friday_defaults_to_home_lab_without_inheriting_business(monkey
 
 
 def test_selected_friday_delegates_explicit_project_work():
+    assert _selected_worker_request(
+        "Inspect README.md in the selected project. Change nothing. "
+        "Summarize it in three bullets and cite README.md as a read-only artifact."
+    )
     assert _selected_worker_request("Inspect the active project's source configuration")
     assert _selected_worker_request("Run the repository tests")
     assert _selected_worker_request("Review the Books service source code")

@@ -774,6 +774,7 @@ function _initModelPickerDropdown() {
   async function _pick(m) {
     const currentSessionId = _deps.getCurrentSessionId();
     const _pendingChat = _deps.getPendingChat();
+    const opensCodexBrowser = m?.kind === 'worker' && m?.target === 'pc-codex';
 
     // Remember this pick so it surfaces under "Recent" next time the picker
     // opens — the whole point of quick-switch.
@@ -789,9 +790,9 @@ function _initModelPickerDropdown() {
 
     // Blur search input before closing to dismiss keyboard on mobile
     if (document.activeElement) document.activeElement.blur();
-    _close();
+    if (!opensCodexBrowser) _close();
     // Refocus main textarea — skip on mobile to avoid keyboard bounce
-    if (window.innerWidth >= 768) {
+    if (!opensCodexBrowser && window.innerWidth >= 768) {
       const _ta = document.getElementById('message');
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
@@ -805,7 +806,12 @@ function _initModelPickerDropdown() {
       });
       _saveAgentSelections();
       updateModelPicker();
-      uiModule.showToast(`Talking to ${m.display}`);
+      if (opensCodexBrowser) {
+        window.codexWorkspaceBrowser?.open?.();
+        uiModule.showToast(`${m.display} selected — choose an approved project or task`);
+      } else {
+        uiModule.showToast(`Talking to ${m.display}`);
+      }
       return;
     }
     const agentSelectionKey = _agentSelectionKey();

@@ -95,6 +95,56 @@ async def test_worker_health_redacts_transport_details(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected_state"),
+    [
+        ({"app_server": True}, "incompatible"),
+        ({
+            "app_server": True,
+            "protocol_version": "pandamonium.codex-bridge.v2",
+            "features": {"project_catalog": True, "task_control": True},
+        }, "connected"),
+    ],
+)
+async def test_codex_bridge_requires_the_catalog_and_task_protocol(
+    tmp_path, monkeypatch, payload, expected_state
+):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            return Response()
+
+    token = tmp_path / "token"
+    token.write_text("secret", encoding="utf-8")
+    adapter = CodexBridgeAdapter(
+        "pc-codex", "http://worker.test", token, enabled=True, machine="test"
+    )
+    monkeypatch.setattr(agent_worker_adapters.httpx, "AsyncClient", Client)
+
+    health = await adapter.health()
+
+    assert health["state"] == expected_state
+    assert health["protocol_ready"] is (expected_state == "connected")
+    if expected_state == "incompatible":
+        assert health["reason"] == "bridge_update_required"
+
+
+@pytest.mark.asyncio
 async def test_worker_status_reports_configuration_and_readiness(monkeypatch):
     class Adapter:
         enabled = True

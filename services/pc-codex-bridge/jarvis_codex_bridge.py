@@ -31,6 +31,7 @@ CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
 WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
+BRIDGE_PROTOCOL_VERSION = "pandamonium.codex-bridge.v2"
 CODEX_MODEL = os.getenv(
     "JARVIS_CODEX_MODEL",
     "gpt-5.6-terra" if WORKER_ID == "pc-codex" else "",
@@ -905,6 +906,11 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "worker": WORKER_ID,
                 "app_server": True,
+                "protocol_version": BRIDGE_PROTOCOL_VERSION,
+                "features": {
+                    "project_catalog": True,
+                    "task_control": True,
+                },
                 "task_execution_enabled": _task_execution_enabled(),
                 "workspaces": sorted(WORKSPACES),
             })
