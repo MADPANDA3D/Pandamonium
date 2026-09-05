@@ -162,8 +162,12 @@ async function _refreshAgentCatalog() {
           _selectedAgents.set(key, { ...selection, label: _agentItems[0].display });
         }
       }
-      _saveAgentSelections();
+    } else {
+      for (const [key, selection] of _selectedAgents.entries()) {
+        if (selection.target === 'pc-codex') _selectedAgents.delete(key);
+      }
     }
+    _saveAgentSelections();
   } catch (_) { /* keep the last verified catalog */ }
 }
 

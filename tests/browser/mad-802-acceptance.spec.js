@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 
 test('sidebar reports version status and ordinary chat can select configured Friday', async ({ page }) => {
+  let fridayConfigured = true;
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/version') {
@@ -14,6 +15,7 @@ test('sidebar reports version status and ordinary chat can select configured Fri
       } });
     }
     if (path === '/api/agent-workers') {
+      if (!fridayConfigured) return route.fulfill({ json: {} });
       return route.fulfill({ json: {
         'pc-codex': {
           id: 'pc-codex', label: 'Friday', configured: true, ready: true,
@@ -95,6 +97,15 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
+
+  fridayConfigured = false;
+  await page.locator('#model-picker-btn').click();
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('');
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    localStorage.getItem('odysseus-agent-selections') || '{}',
+  )['session-friday'])).toBeUndefined();
 
   await page.evaluate(async () => {
     const sessions = await import('/static/js/sessions.js');

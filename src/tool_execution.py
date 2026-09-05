@@ -961,7 +961,7 @@ async def _execute_tool_block_impl(
         except Exception as exc:
             result = {"error": str(exc), "exit_code": 1}
     elif tool == "read_agent_task":
-        from src.jarvis_agent import consume_task_result, refresh_task
+        from src.jarvis_agent import refresh_task
 
         desc = "read_agent_task"
         try:
@@ -969,8 +969,6 @@ async def _execute_tool_block_impl(
                 raise PermissionError("owner_required")
             args = json.loads(content or "{}")
             task = await refresh_task(str(args.get("task_id") or ""), owner=owner)
-            if task.get("status") == "completed":
-                task = consume_task_result(str(task.get("task_id") or ""), owner=owner)
             result = {**task, "output": json.dumps(task, ensure_ascii=False), "exit_code": 0}
         except Exception as exc:
             result = {"error": str(exc), "exit_code": 1}

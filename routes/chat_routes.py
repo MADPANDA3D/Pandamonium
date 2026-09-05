@@ -79,6 +79,24 @@ def _selected_agent_context(label: str) -> str:
     )
 
 
+def _retire_synthesized_worker_results(metrics: dict, owner: str) -> None:
+    """Remove provisional raw worker messages only after Jarvis is durably saved."""
+    from src.jarvis_agent import consume_task_result
+
+    task_ids = {
+        str(event.get("task_id") or "")
+        for event in (metrics.get("tool_events") or [])
+        if event.get("tool") == "read_agent_task"
+        and event.get("task_status") == "completed"
+        and event.get("task_id")
+    }
+    for task_id in task_ids:
+        try:
+            consume_task_result(task_id, owner=owner)
+        except Exception:
+            logger.exception("Could not retire synthesized worker result %s", task_id)
+
+
 def _resolve_hermes_agent_backend(owner: Optional[str] = None):
     db = SessionLocal()
     try:
@@ -1806,6 +1824,8 @@ def setup_chat_routes(
                                     incognito=incognito,
                                 )
                                 if _saved_id:
+                                    if full_response:
+                                        _retire_synthesized_worker_results(_metrics_to_save, _user)
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
                                 run_post_response_tasks(
                                     sess, session_manager, session, message, _response_to_save,

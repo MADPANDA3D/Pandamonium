@@ -5086,6 +5086,9 @@ async def stream_agent_loop(
             if result.get("doc_id"):
                 tool_event["doc_id"] = result["doc_id"]
                 tool_event["doc_title"] = result.get("title", "")
+            if block.tool_type == "read_agent_task" and result.get("task_id"):
+                tool_event["task_id"] = result["task_id"]
+                tool_event["task_status"] = result.get("status")
             # Persist the file-write/edit diff so it re-renders on reload — without
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):
