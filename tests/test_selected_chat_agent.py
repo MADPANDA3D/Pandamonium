@@ -29,6 +29,9 @@ def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("Debug the API")
     assert not _selected_worker_request("Do not run the repository tests")
     assert not _selected_worker_request("Don't deploy the service")
+    assert not _selected_worker_request("I don't want you to run the repository tests")
+    assert not _selected_worker_request("Don't ever under any circumstances deploy the service")
+    assert _selected_worker_request("I don't know why it failed, but fix the API bug")
 
 
 def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch):

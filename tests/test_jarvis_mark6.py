@@ -913,6 +913,15 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
     assert voice_routes._selected_pc_codex_task_request("Debug the API.")
     assert not voice_routes._selected_pc_codex_task_request("Do not run the repository tests.")
     assert not voice_routes._selected_pc_codex_task_request("Don't deploy the service.")
+    assert not voice_routes._selected_pc_codex_task_request(
+        "I don't want you to run the repository tests.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Don't ever under any circumstances deploy the service.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "I don't know why it failed, but fix the API bug.",
+    )
     assert not voice_routes._selected_pc_codex_task_request("Update this scheduled task.")
     assert not voice_routes._selected_pc_codex_task_request("Fix that todo.")
     assert not voice_routes._selected_pc_codex_task_request("Change this reminder.")
