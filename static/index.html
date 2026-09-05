@@ -225,7 +225,7 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=20260903T210000Z">
+  <link rel="stylesheet" href="/static/style.css?v=20260905T022733Z">
   <link rel="modulepreload" href="/static/app.js?v=20260904T235228Z">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -967,6 +967,13 @@
         </div>
       </div>
     </div>
+    <section class="sidebar-update-status" id="sidebar-update-status" aria-live="polite" aria-label="Checking application version">
+      <div class="sidebar-update-copy">
+        <span class="sidebar-update-version" id="sidebar-update-version">Version —</span>
+        <span class="sidebar-update-state is-checking" id="sidebar-update-state">Checking for updates…</span>
+      </div>
+      <a class="sidebar-update-action" id="sidebar-update-action" href="#" target="_blank" rel="noopener noreferrer" hidden>Update</a>
+    </section>
     <div class="sidebar-user-bar" id="sidebar-user-bar">
       <div class="user-bar-left" id="user-bar-profile">
         <div class="user-bar-avatar" id="user-bar-avatar"></div>
@@ -1028,7 +1035,35 @@
       }
       fetch('/api/version').then(function(r){return r.json()}).then(function(d){
         if (d.version) window._appVersion = d.version;
-      }).catch(function(){});
+        var widget = document.getElementById('sidebar-update-status');
+        var version = document.getElementById('sidebar-update-version');
+        var state = document.getElementById('sidebar-update-state');
+        var action = document.getElementById('sidebar-update-action');
+        if (!widget || !version || !state || !action) return;
+        version.textContent = 'Version ' + (d.version ? 'v' + d.version : 'unknown');
+        state.classList.remove('is-checking', 'is-current', 'is-available', 'is-unknown');
+        if (d.update_available && d.latest_version && d.update_url) {
+          state.textContent = 'v' + d.latest_version + ' available';
+          state.classList.add('is-available');
+          action.href = d.update_url;
+          action.hidden = false;
+          widget.setAttribute('aria-label', 'Version ' + d.version + '; update ' + d.latest_version + ' available');
+        } else {
+          var known = d.update_status === 'current';
+          state.textContent = known ? 'Up to date' : 'Update check unavailable';
+          state.classList.add(known ? 'is-current' : 'is-unknown');
+          action.hidden = true;
+          action.removeAttribute('href');
+          widget.setAttribute('aria-label', 'Version ' + (d.version || 'unknown') + '; ' + state.textContent);
+        }
+      }).catch(function(){
+        var state = document.getElementById('sidebar-update-state');
+        if (state) {
+          state.textContent = 'Update check unavailable';
+          state.classList.remove('is-checking');
+          state.classList.add('is-unknown');
+        }
+      });
     })();
     </script>
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
@@ -1114,11 +1149,11 @@
         <textarea id="message" placeholder="Message Pandamonium..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
-          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model or agent"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <div class="model-picker-search-row">
               <div class="model-picker-search-wrap">
-                <input type="text" id="model-picker-search" placeholder="Search models..." autocomplete="off" aria-label="Search models">
+                <input type="text" id="model-picker-search" placeholder="Search models and agents..." autocomplete="off" aria-label="Search models and agents">
                 <button type="button" class="model-picker-refresh-btn" id="model-picker-refresh-btn" title="Refresh model picker" aria-label="Refresh model picker">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 </button>
@@ -2682,13 +2717,13 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/jarvisVoice.js?v=20260904T235900Z"></script>
+<script type="module" src="/static/js/jarvisVoice.js?v=20260905T022733Z"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260904T235900Z"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260903T210000Z"></script>
+<script type="module" src="/static/js/chat.js?v=20260905T022733Z"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>

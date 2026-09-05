@@ -37,6 +37,9 @@ assert.match(source, /function showChatFromExtension\(message = ''\)/);
 assert.match(source, /event\.key === 'Escape'[\s\S]*?disengageExtensionSurface\(\)/);
 assert.match(source, /window\.jarvisVoice = \{[\s\S]*?prepareExtensionTextTurn/);
 assert.match(chatSource, /const streamSessionId = sessionModule\.getCurrentSessionId\(\)[\s\S]*?prepareExtensionTextTurn\('oracle', streamSessionId\)/);
+assert.match(chatSource, /const streamAgentTarget = sessionModule\?\.getChatAgentTarget\?\.\(\) \|\| ''/);
+assert.equal((chatSource.match(/getChatAgentTarget\?\.\(\)/g) || []).length, 1);
+assert.match(chatSource, /if \(streamAgentTarget\) fd\.append\('agent_target', streamAgentTarget\)/);
 assert.match(chatSource, /json\.extension_call[\s\S]*?applyExtensionSurfaceControl/);
 assert.match(chatSource, /json\.type === 'authority_approval_required'[\s\S]*?renderAuthorityApprovalCard/);
 assert.match(rendererSource, /renderAuthorityApprovalCard[\s\S]*?\/api\/authority\/decisions\/[\s\S]*?Approve once/);
@@ -149,10 +152,10 @@ assert.match(source, /TERMINAL_TASK_STATES\.has\(task\.status \|\| ''\)/);
 assert.match(source, /events\.forEach\(event => \{\s*renderActivityEvent\(event\);\s*renderWorkerSummary\(event, task\);\s*if \(event\.event_id\) handledWorkerEventIds\.add/);
 assert.match(source, /taskMessageElements\(taskId\)\.find\(item => item\.dataset\.source === 'agent_worker'\)/);
 assert.match(source, /item\.dataset\.source === 'jarvis_worker_summary'/);
-assert.match(source, /const isResultSummary = event\.type === 'result'/);
+assert.doesNotMatch(source, /const isResultSummary = event\.type === 'result'/);
 assert.match(source, /metadata\.progress_summary === true \|\| metadata\.milestone === true/);
 assert.match(source, /source: 'jarvis_worker_summary'/);
-assert.match(source, /character_name: 'Jarvis'/);
+assert.match(source, /character_name: task\.presenter \|\| 'Jarvis'/);
 assert.match(source, /summary\.dataset\.workerEventId = eventId/);
 assert.match(source, /if \(eventId\) return item\.dataset\.workerEventId === eventId/);
 assert.match(source, /if \(afterResult\)/);
@@ -163,7 +166,14 @@ assert.match(source, /querySelectorAll\('\.jarvis-task-approval-actions button'\
 assert.doesNotMatch(source, /history\.setAttribute\('role', 'log'\)/);
 assert.doesNotMatch(source, /history\.setAttribute\('aria-live', 'polite'\)/);
 assert.match(source, /window\.chatModule\?\.addMessage\?\.\('assistant', event\.text, '', \{/);
-assert.match(source, /character_name: WORKER_LABELS\[event\.worker\] \|\| event\.worker \|\| 'Worker'/);
+assert.match(source, /character_name: task\.presenter \|\| 'Jarvis'/);
+assert.match(source, /renderWorkerResult\(completed, task, liveAssistantMessage\)/);
+assert.match(source, /Could not load completed foreground worker result/);
+assert.match(source, /replaceMessage\.remove\(\)/);
+assert.doesNotMatch(source, /setVoiceTarget\(event\.worker \|\| 'pc-codex', false\)/);
+assert.match(source, /task\?\.foreground !== true/);
+assert.match(source, /event\.diagnostics\?\.task_delivery_pending === true/);
+assert.match(source, /taskSnapshots\.get\(finalTaskId\) \|\| turnTasks\.find/);
 assert.match(source, /full result is in chat/i);
 assert.match(source, /END_VOICE_LABEL = 'End voice — task continues'/);
 assert.match(source, /window\.confirm\('Cancel the active task\?'\)/);
@@ -234,12 +244,12 @@ assert.match(index, /title="End voice — task continues" aria-label="End voice 
 assert.match(index, /id="jarvis-call-view-chat"[^>]*>View chat<\/button>/);
 assert.match(index, /<button[^>]*data-worker="hermes"[^>]*disabled>\s*<span>Hermes<\/span><small>Remote agent · gated<\/small>\s*<\/button>/);
 assert.match(index, /<button[^>]*data-worker="pc-codex"[^>]*disabled>\s*<span>PC Codex<\/span><small>Local workstation · gated<\/small>\s*<\/button>/);
-assert.match(index, /style\.css\?v=20260903T210000Z/);
-assert.match(index, /sessions\.js\?v=20260719T024058Z/);
-assert.match(index, /jarvisVoice\.js\?v=20260904T235900Z/);
-assert.match(index, /app\.js\?v=20260719T024058Z/);
-assert.match(appSource, /sessions\.js\?v=20260719T024058Z/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v374'/);
+assert.match(index, /style\.css\?v=20260905T022733Z/);
+assert.match(index, /src="\/static\/js\/sessions\.js"/);
+assert.match(index, /jarvisVoice\.js\?v=20260905T022733Z/);
+assert.match(index, /app\.js\?v=20260904T235228Z/);
+assert.match(appSource, /from '\.\/js\/sessions\.js'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v380'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
@@ -514,9 +524,32 @@ const executableSource = source
   .replace(
     "import { getBrandName } from './brand.js';",
     "const getBrandName = () => 'Pandamonium';",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, prepareExtensionSurface, engageExtensionSurface, showChatFromExtension, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, renderWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, prepareExtensionSurface, engageExtensionSurface, showChatFromExtension, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
+let foregroundHandoffRemoved = false;
+let foregroundResultRender = null;
+sandbox.chatModule = {
+  addMessage(role, text, model, metadata) {
+    foregroundResultRender = { role, text, model, metadata };
+    return { dataset: { ...metadata }, parentElement: chat };
+  },
+};
+placement.renderWorkerResult(
+  { type: 'result', task_id: 'foreground-task', worker: 'pc-codex', text: 'The complete structured result.' },
+  { task_id: 'foreground-task', worker: 'pc-codex', presenter: 'Jarvis' },
+  { remove() { foregroundHandoffRemoved = true; } },
+);
+assert.equal(foregroundHandoffRemoved, true, 'the short foreground handoff must be replaced in live chat');
+assert.equal(JSON.stringify(foregroundResultRender), JSON.stringify({
+  role: 'assistant',
+  text: 'The complete structured result.',
+  model: '',
+  metadata: {
+    source: 'agent_worker', worker: 'pc-codex', task_id: 'foreground-task', character_name: 'Jarvis',
+  },
+}));
+delete sandbox.chatModule;
 assert.equal(
   placement.oracleProtocolResultMessage(
     { tool: 'set_visual_style', arguments: { style: 'thermal' } },

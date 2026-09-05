@@ -184,9 +184,8 @@ async def test_live_result_keeps_raw_chat_text_and_adds_spoken_summary(tmp_path,
     assert saved["events"][0]["spoken_text"].startswith("PC Codex finished")
     assert saved["events"][0]["metadata"]["result_summary"] is True
     assert manager.messages[0][1].content == raw
-    assert manager.messages[0][1].metadata["character_name"] == "PC Codex"
-    assert manager.messages[1][1].content == "PC Codex finished. The complete table is in chat."
-    assert manager.messages[1][1].metadata["character_name"] == "Jarvis"
+    assert manager.messages[0][1].metadata["character_name"] == jarvis_agent.configured_agent_name()
+    assert len(manager.messages) == 1
 
 
 def test_broker_progress_summaries_persist_once_with_jarvis_attribution(tmp_path, monkeypatch):
@@ -249,7 +248,6 @@ def test_broker_progress_summaries_persist_once_with_jarvis_attribution(tmp_path
         "PC Codex has verified the three highest-priority client items.",
         "PC Codex finished reviewing the current Business ledger.",
         "| Client | Status |\n| --- | --- |\n| Acme | Ready |",
-        "PC Codex finished. The full report is in chat.",
     ]
     summary_metadata = manager.session.history[1].metadata
     assert {key: value for key, value in summary_metadata.items() if key != "_db_id"} == {
@@ -257,11 +255,85 @@ def test_broker_progress_summaries_persist_once_with_jarvis_attribution(tmp_path
         "worker": "pc-codex",
         "task_id": "task-1",
         "worker_event_id": "progress-summary-1",
-        "character_name": "Jarvis",
+        "character_name": jarvis_agent.configured_agent_name(),
     }
-    assert manager.session.history[-2].metadata["source"] == "agent_worker"
-    assert manager.session.history[-1].metadata["source"] == "jarvis_worker_summary"
-    assert manager.session.history[-1].metadata["worker_event_id"] == "result-1"
+    assert manager.session.history[-1].metadata["source"] == "agent_worker"
+    assert manager.session.history[-1].metadata["character_name"] == jarvis_agent.configured_agent_name()
+
+
+def test_worker_result_uses_explicit_conversational_presenter(tmp_path, monkeypatch):
+    class SessionManager:
+        def __init__(self):
+            self.messages = []
+
+        def add_message(self, _session_id, message):
+            self.messages.append(message)
+
+    manager = SessionManager()
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
+    jarvis_agent._save_task(_task(presenter="Friday"))
+
+    jarvis_agent._append_event("task-1", {
+        "event_id": "result-presenter",
+        "type": "result",
+        "text": "The requested inspection is complete.",
+        "metadata": {},
+    })
+
+    assert manager.messages[0].metadata["character_name"] == "Friday"
+    assert jarvis_agent.get_task("task-1")["events"][0]["presenter"] == "Friday"
+
+
+def test_orchestrated_worker_result_waits_for_one_presenter_response(tmp_path, monkeypatch):
+    class SessionManager:
+        def __init__(self):
+            self.messages = []
+            self.session = type("Session", (), {"history": self.messages, "message_count": 0})()
+
+        def get_session(self, _session_id):
+            return self.session
+
+        def add_message(self, _session_id, message):
+            self.messages.append(message)
+            message.metadata["_db_id"] = "raw-result"
+
+        def delete_message(self, _session_id, message_id):
+            self.messages[:] = [
+                message for message in self.messages
+                if (message.metadata or {}).get("_db_id") != message_id
+            ]
+            return True
+
+    manager = SessionManager()
+    monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
+    monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
+    jarvis_agent._save_task(_task(presenter="Jarvis", persist_result=True))
+
+    jarvis_agent._append_event("task-1", {
+        "event_id": "result-orchestrated",
+        "type": "result",
+        "text": "Raw worker result for the orchestrator to synthesize.",
+        "metadata": {},
+    })
+
+    assert len(manager.messages) == 1
+    assert jarvis_agent.get_task("task-1")["result_persisted"] is True
+
+    not_consumed = jarvis_agent.consume_task_result(
+        "task-1", owner="leo", session_id="another-session",
+    )
+
+    assert len(manager.messages) == 1
+    assert not not_consumed.get("result_consumed")
+
+    consumed = jarvis_agent.consume_task_result(
+        "task-1", owner="leo", session_id="session-1",
+    )
+
+    assert manager.messages == []
+    assert consumed["result_consumed"] is True
+    assert consumed["persist_result"] is False
 
 
 def test_progress_summary_retries_after_transient_persistence_failure(tmp_path, monkeypatch):

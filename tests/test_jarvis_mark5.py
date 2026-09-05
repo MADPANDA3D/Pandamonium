@@ -1,4 +1,5 @@
 from routes.voice_routes import (
+    JARVIS_TOOLS,
     _asks_current_business,
     _asks_runtime_status,
     _delegation_route,
@@ -43,3 +44,4 @@ def test_agent_tools_and_worker_defaults_are_narrow():
     payload = TaskCreate(worker="pc-codex", session_id="s", workspace="home-lab", prompt="inspect")
     assert payload.permission_mode == "read_only"
     assert payload.approved is False
+    assert "manage_books" in JARVIS_TOOLS

@@ -453,10 +453,12 @@ async def test_business_then_hermes_runs_as_distinct_background_tasks_with_jarvi
     assert business_task == {
         "type": "agent_task", "task_id": "pc-codex-task", "worker": "pc-codex",
         "workspace": "business", "foreground": False,
+        "presenter": voice_routes.configured_agent_name(),
     }
     assert hermes_task == {
         "type": "agent_task", "task_id": "hermes-task", "worker": "hermes",
         "workspace": "home-lab", "foreground": False,
+        "presenter": voice_routes.configured_agent_name(),
     }
     assert "not current enough" in business[-1]["assistant_text"]
     assert all(event["type"] != "target_changed" for event in business + hermes)
@@ -612,6 +614,7 @@ async def test_jarvis_selected_ask_hermes_stays_background_brokered(monkeypatch)
         "worker": "hermes",
         "workspace": "home-lab",
         "foreground": False,
+        "presenter": voice_routes.configured_agent_name(),
     }
     assert events[-1]["diagnostics"]["guard_reason"] == "delegation_started_hermes"
     assert "direct_target" not in events[-1]["diagnostics"]
@@ -842,7 +845,36 @@ async def test_foreground_friday_result_becomes_the_spoken_reply(monkeypatch):
 
     assert events[-1]["assistant_text"] == "Good evening, Leo. I’m ready."
     assert events[-1]["diagnostics"]["guard_reason"] == "selected_completed_pc-codex"
+    assert events[-1]["diagnostics"]["task_delivery_pending"] is False
     assert any(event.get("type") == "agent_task" and event.get("foreground") for event in events)
+
+
+@pytest.mark.asyncio
+async def test_timed_out_friday_task_is_released_for_later_delivery(monkeypatch):
+    async def dispatch(*_args, **_kwargs):
+        return {"task_id": "friday-task"}, "started"
+
+    async def foreground(_task_id, _owner):
+        return "timeout", ""
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(voice_routes, "_foreground_worker_result", foreground)
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Friday, inspect the active project configuration.",
+            "leo",
+            {"target": "pc-codex", "workspace": "home-lab"},
+        )
+    ]
+
+    assert events[-1]["assistant_text"] == "PC Codex is still working. I’ll deliver the result here when it finishes."
+    assert events[-1]["diagnostics"]["task_delivery_pending"] is True
 
 
 def test_selected_friday_only_dispatches_explicit_work_requests():
@@ -852,9 +884,99 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
     assert not voice_routes._selected_pc_codex_task_request(
         "We're getting there one piece at a time. It's all teamwork, wouldn't you say?",
     )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Check my Books library and list every title.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Find the book in my library that still needs OCR.",
+    )
     assert voice_routes._selected_pc_codex_task_request(
         "Friday, inspect the active project's protocol configuration.",
     )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Review the Books service source code.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Check the server configuration.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Search the repository for this symbol.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Find the configuration file.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Read the repository file.",
+    )
+    assert voice_routes._selected_pc_codex_task_request("Friday, fix the tests.")
+    assert voice_routes._selected_pc_codex_task_request("Review these files.")
+    assert voice_routes._selected_pc_codex_task_request("Inspect the containers.")
+    assert voice_routes._selected_pc_codex_task_request("Create a repository script.")
+    assert voice_routes._selected_pc_codex_task_request("Start the project server.")
+    assert voice_routes._selected_pc_codex_task_request("Stop the project service.")
+    assert voice_routes._selected_pc_codex_task_request("Compare these files.")
+    assert voice_routes._selected_pc_codex_task_request("Fix the authentication bug.")
+    assert voice_routes._selected_pc_codex_task_request("Debug the API.")
+    assert not voice_routes._selected_pc_codex_task_request("Do not run the repository tests.")
+    assert not voice_routes._selected_pc_codex_task_request("Don't deploy the service.")
+    assert not voice_routes._selected_pc_codex_task_request(
+        "I don't want you to run the repository tests.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Don't ever under any circumstances deploy the service.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "I don't know why it failed, but fix the API bug.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Don't run tests, but fix the API bug.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request("Read the book Clean Code.")
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Read the email about the API bug.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request("Update this scheduled task.")
+    assert not voice_routes._selected_pc_codex_task_request("Fix that todo.")
+    assert not voice_routes._selected_pc_codex_task_request("Change this reminder.")
+
+
+@pytest.mark.asyncio
+async def test_selected_friday_contextual_followup_steers_active_task(monkeypatch):
+    dispatched = []
+
+    monkeypatch.setattr(
+        jarvis_agent,
+        "find_active_task",
+        lambda *_args, **_kwargs: {"task_id": "friday-task", "status": "running"},
+    )
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
+
+    async def dispatch(*args, **_kwargs):
+        dispatched.append(args)
+        return {"task_id": "friday-task"}, "steered"
+
+    async def foreground(_task_id, _owner):
+        return "completed", "I applied that follow-up."
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(voice_routes, "_foreground_worker_result", foreground)
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1",
+            "Fix that.",
+            "leo",
+            {"target": "pc-codex", "origin_target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+
+    assert dispatched
+    assert events[-1]["assistant_text"] == "I applied that follow-up."
+    assert events[-1]["diagnostics"]["guard_reason"] == "selected_completed_pc-codex"
 
 
 @pytest.mark.asyncio
@@ -1089,7 +1211,17 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
         lambda **values: operational_events.append(values) or {"event_id": f"event-{len(operational_events)}"},
     )
 
-    async def start_task(worker, session_id, workspace, prompt, permission_mode, approved, owner, codex_thread_id=None):
+    async def start_task(
+        worker,
+        session_id,
+        workspace,
+        prompt,
+        permission_mode,
+        approved,
+        owner,
+        codex_thread_id=None,
+        presenter=None,
+    ):
         captured.update(
             worker=worker,
             session_id=session_id,
@@ -1099,6 +1231,7 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
             approved=approved,
             owner=owner,
             codex_thread_id=codex_thread_id,
+            presenter=presenter,
         )
         return {"task_id": "business-task", "status": "queued"}
 
@@ -1117,6 +1250,7 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
     assert result == "started"
     assert captured["workspace"] == "business"
     assert captured["codex_thread_id"] is None
+    assert captured["presenter"] == voice_routes.configured_agent_name()
     assert captured["action_call"]["target"] == "worker"
     assert captured["action_call"]["agent_id"] == "assistant"
     assert [event["event_type"] for event in operational_events] == [

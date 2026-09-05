@@ -18,6 +18,8 @@ const RECENT_MAX = 5;
 // Catalogs at or below this size are small enough that hiding everything
 // behind search would be a regression — keep listing them in browse mode.
 const BROWSE_ALL_LIMIT = 12;
+const AGENT_SELECTIONS_KEY = 'odysseus-agent-selections';
+const AGENT_SELECTIONS_MAX = 100;
 
 function _loadList(key) {
   try {
@@ -78,6 +80,99 @@ function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
 let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
+let _agentItems = [];
+let _agentCatalogVerified = false;
+const _PENDING_AGENT_KEY = '__pending__';
+
+function _loadAgentSelections() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AGENT_SELECTIONS_KEY) || '{}');
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return new Map();
+    return new Map(Object.entries(saved).slice(-AGENT_SELECTIONS_MAX).flatMap(([key, selection]) => {
+      const sessionId = String(key || '').trim();
+      if (!sessionId || sessionId === _PENDING_AGENT_KEY || selection?.target !== 'pc-codex') return [];
+      return [[sessionId, {
+        target: 'pc-codex',
+        label: String(selection.label || 'Friday').slice(0, 80),
+      }]];
+    }));
+  } catch { return new Map(); }
+}
+
+function _saveAgentSelections() {
+  try {
+    const saved = Object.fromEntries(
+      [..._selectedAgents.entries()]
+        .filter(([key]) => key !== _PENDING_AGENT_KEY)
+        .slice(-AGENT_SELECTIONS_MAX),
+    );
+    localStorage.setItem(AGENT_SELECTIONS_KEY, JSON.stringify(saved));
+  } catch { /* quota / private mode */ }
+}
+
+const _selectedAgents = _loadAgentSelections();
+
+function _agentSelectionKey() {
+  return (_deps && _deps.getCurrentSessionId && _deps.getCurrentSessionId()) || _PENDING_AGENT_KEY;
+}
+
+function _selectedAgent() {
+  if (!_agentCatalogVerified) return null;
+  return _selectedAgents.get(_agentSelectionKey()) || null;
+}
+
+export function getSelectedAgentTarget() {
+  return _selectedAgent()?.target || '';
+}
+
+export function clearPendingAgentTarget() {
+  _selectedAgents.delete(_PENDING_AGENT_KEY);
+}
+
+export function movePendingAgentTarget(sessionId) {
+  const id = String(sessionId || '').trim();
+  const pending = _selectedAgents.get(_PENDING_AGENT_KEY);
+  if (!id || !pending) return;
+  _selectedAgents.set(id, pending);
+  _selectedAgents.delete(_PENDING_AGENT_KEY);
+  _saveAgentSelections();
+}
+
+async function _refreshAgentCatalog() {
+  try {
+    const response = await fetch(`${API_BASE}/api/agent-workers`, { credentials: 'same-origin' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const catalog = payload?.workers && typeof payload.workers === 'object'
+      ? payload.workers
+      : payload;
+    const friday = catalog && catalog['pc-codex'];
+    _agentCatalogVerified = true;
+    _agentItems = friday && friday.configured !== false ? [{
+      kind: 'agent',
+      target: 'pc-codex',
+      mid: 'agent:pc-codex',
+      display: String(friday.label || 'Friday'),
+      epName: 'Agent',
+      providerText: `agent worker ${friday.machine || ''}`,
+      stale: friday.ready !== true,
+      staleReason: String(friday.connection?.error || friday.connection?.state || 'not connected'),
+      offline: friday.ready !== true,
+    }] : [];
+    if (_agentItems[0]) {
+      for (const [key, selection] of _selectedAgents.entries()) {
+        if (selection.target === 'pc-codex') {
+          _selectedAgents.set(key, { ...selection, label: _agentItems[0].display });
+        }
+      }
+    } else {
+      for (const [key, selection] of _selectedAgents.entries()) {
+        if (selection.target === 'pc-codex') _selectedAgents.delete(key);
+      }
+    }
+    _saveAgentSelections();
+  } catch (_) { /* keep the last verified catalog */ }
+}
 
 function _isChatEndpoint(item) {
   return (item && (item.model_type || 'llm')) === 'llm';
@@ -193,6 +288,7 @@ async function _ensureDefaultPendingChat() {
 export function initModelPicker(deps) {
   _deps = deps;
   _initModelPickerDropdown();
+  _refreshAgentCatalog().then(() => updateModelPicker()).catch(() => {});
 }
 
 function _initModelPickerDropdown() {
@@ -207,26 +303,34 @@ function _initModelPickerDropdown() {
   if (wrap.dataset.modelPickerBound === 'true') return;
   wrap.dataset.modelPickerBound = 'true';
 
+  let _closeFallbackTimer = null;
+  let _closeAnimationHandler = null;
+
+  function _cancelPendingClose() {
+    if (_closeFallbackTimer) clearTimeout(_closeFallbackTimer);
+    _closeFallbackTimer = null;
+    if (_closeAnimationHandler) menu.removeEventListener('animationend', _closeAnimationHandler);
+    _closeAnimationHandler = null;
+  }
+
+  function _finishClose() {
+    _cancelPendingClose();
+    menu.classList.remove('closing');
+    menu.classList.add('hidden');
+    search.value = '';
+  }
+
   function _close() {
     if (menu.classList.contains('hidden')) return;
+    _cancelPendingClose();
     // Restore scroll button
     const _scrollBtn = document.getElementById('scroll-bottom-btn');
     if (_scrollBtn) _scrollBtn.style.display = '';
     menu.classList.add('closing');
-    menu.addEventListener('animationend', function _onDone() {
-      menu.removeEventListener('animationend', _onDone);
-      menu.classList.remove('closing');
-      menu.classList.add('hidden');
-      search.value = '';
-    }, { once: true });
+    _closeAnimationHandler = _finishClose;
+    menu.addEventListener('animationend', _closeAnimationHandler, { once: true });
     // Fallback if animationend doesn't fire
-    setTimeout(() => {
-      if (!menu.classList.contains('hidden')) {
-        menu.classList.remove('closing');
-        menu.classList.add('hidden');
-        search.value = '';
-      }
-    }, 200);
+    _closeFallbackTimer = setTimeout(_finishClose, 200);
   }
 
   function _openPickerShortcut(kind) {
@@ -314,7 +418,7 @@ function _initModelPickerDropdown() {
         });
       });
     });
-    return sortModelObjects(result);
+    return [..._agentItems, ...sortModelObjects(result)];
   }
 
   // ── Provider display names and grouping ──
@@ -369,17 +473,17 @@ function _initModelPickerDropdown() {
     listEl.innerHTML = '';
     const all = _getAllModels();
     const q = (filter || '').trim().toLowerCase();
-    const hasAnyModel = all.length > 0;
-    listEl.classList.toggle('is-empty', !hasAnyModel);
-    menu.classList.toggle('no-models', !hasAnyModel);
+    const hasAnyChoice = all.length > 0;
+    listEl.classList.toggle('is-empty', !hasAnyChoice);
+    menu.classList.toggle('no-models', !hasAnyChoice);
     if (search) {
-      search.placeholder = hasAnyModel ? 'Search models…' : 'No models connected';
+      search.placeholder = hasAnyChoice ? 'Search models and agents…' : 'No models or agents connected';
     }
     if (searchRow) {
       searchRow.classList.toggle('searching', !!q);
     }
 
-    if (!hasAnyModel) return; // collapsed empty list — nothing to render
+    if (!hasAnyChoice) return; // collapsed empty list — nothing to render
 
     // Unique lookup so Recent/Favorites (stored as bare model IDs) can be
     // resolved back to full model objects; drops anything no longer offered.
@@ -435,40 +539,42 @@ function _initModelPickerDropdown() {
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
 
-      // Inline favorite dot — toggles favorite, never picks the model.
-      const favDot = document.createElement('button');
-      favDot.type = 'button';
-      favDot.className = 'mp-fav-dot' + (favs.includes(m.mid) ? ' active' : '');
-      favDot.textContent = '●';
-      const _setFavState = (on) => {
-        favDot.classList.toggle('active', on);
-        favDot.title = on ? 'Remove from favorites' : 'Add to favorites';
-        favDot.setAttribute('aria-label', on ? 'Remove from favorites' : 'Add to favorites');
-        favDot.setAttribute('aria-pressed', on ? 'true' : 'false');
-      };
-      _setFavState(favs.includes(m.mid));
-      favDot.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const nowFav = _toggleFavorite(m.mid);
-        _setFavState(nowFav);
-        favDot.classList.remove('pulse');
-        void favDot.offsetWidth;
-        favDot.classList.add('pulse');
-        // Keep our in-memory copy aligned so a follow-up re-render is correct.
-        const idx = favs.indexOf(m.mid);
-        if (nowFav && idx < 0) favs.push(m.mid);
-        else if (!nowFav && idx >= 0) favs.splice(idx, 1);
-        if (uiModule && uiModule.showToast) uiModule.showToast(nowFav ? 'Favorited' : 'Unfavorited');
-        // In browse mode the Favorites section membership changed — rebuild
-        // (cheap: Recent + Favorites). In search mode the row stays put, so
-        // the in-place favorite update above is enough.
-        if (!q) {
-          const st = listEl.scrollTop;
-          _populate('');
-          listEl.scrollTop = st;
-        }
-      });
-      row.appendChild(favDot);
+      if (m.kind !== 'agent') {
+        // Inline favorite dot — toggles favorite, never picks the model.
+        const favDot = document.createElement('button');
+        favDot.type = 'button';
+        favDot.className = 'mp-fav-dot' + (favs.includes(m.mid) ? ' active' : '');
+        favDot.textContent = '●';
+        const _setFavState = (on) => {
+          favDot.classList.toggle('active', on);
+          favDot.title = on ? 'Remove from favorites' : 'Add to favorites';
+          favDot.setAttribute('aria-label', on ? 'Remove from favorites' : 'Add to favorites');
+          favDot.setAttribute('aria-pressed', on ? 'true' : 'false');
+        };
+        _setFavState(favs.includes(m.mid));
+        favDot.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const nowFav = _toggleFavorite(m.mid);
+          _setFavState(nowFav);
+          favDot.classList.remove('pulse');
+          void favDot.offsetWidth;
+          favDot.classList.add('pulse');
+          // Keep our in-memory copy aligned so a follow-up re-render is correct.
+          const idx = favs.indexOf(m.mid);
+          if (nowFav && idx < 0) favs.push(m.mid);
+          else if (!nowFav && idx >= 0) favs.splice(idx, 1);
+          if (uiModule && uiModule.showToast) uiModule.showToast(nowFav ? 'Favorited' : 'Unfavorited');
+          // In browse mode the Favorites section membership changed — rebuild
+          // (cheap: Recent + Favorites). In search mode the row stays put, so
+          // the in-place favorite update above is enough.
+          if (!q) {
+            const st = listEl.scrollTop;
+            _populate('');
+            listEl.scrollTop = st;
+          }
+        });
+        row.appendChild(favDot);
+      }
 
       row.addEventListener('click', () => _pick(m));
       listEl.appendChild(row);
@@ -496,6 +602,11 @@ function _initModelPickerDropdown() {
     //      list fits below as "All models" and a separate Recent
     //      section just duplicates rows.
     const shown = new Set();
+    const agentRows = all.filter(m => m.kind === 'agent');
+    if (agentRows.length) {
+      _addSection('Agents');
+      agentRows.forEach(m => { shown.add(m.mid); _addRow(m); });
+    }
     const favModels = favs.map(id => byId.get(id)).filter(Boolean);
     if (favModels.length) {
       _addSection('Favorites');
@@ -580,7 +691,7 @@ function _initModelPickerDropdown() {
 
     // Remember this pick so it surfaces under "Recent" next time the picker
     // opens — the whole point of quick-switch.
-    if (m && m.mid) _pushRecent(m.mid);
+    if (m && m.mid && m.kind !== 'agent') _pushRecent(m.mid);
 
     // Broadcast immediately so listeners (e.g. the tour) can advance without
     // waiting for the async session-create/PATCH that follows.
@@ -594,9 +705,22 @@ function _initModelPickerDropdown() {
       const _ta = document.getElementById('message');
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
+    if (m.kind === 'agent') {
+      _selectedAgents.set(_agentSelectionKey(), { target: m.target, label: m.display });
+      _saveAgentSelections();
+      updateModelPicker();
+      uiModule.showToast(`Talking to ${m.display}`);
+      return;
+    }
+    const agentSelectionKey = _agentSelectionKey();
+    const clearSelectedAgent = () => {
+      _selectedAgents.delete(agentSelectionKey);
+      _saveAgentSelections();
+    };
     if (!currentSessionId && _pendingChat) {
       // Already have a deferred session — just update the model
       _deps.setPendingChat({ url: m.url, modelId: m.mid, endpointId: m.endpointId, source: 'manual' });
+      clearSelectedAgent();
       // Header stays as session name — model switch only updates picker
       updateModelPicker();
       uiModule.showToast(`Using ${m.display}`);
@@ -604,6 +728,7 @@ function _initModelPickerDropdown() {
     } else if (!currentSessionId) {
       // No session yet — create one with this model
       await _deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual');
+      clearSelectedAgent();
     } else {
       // Existing session with no model — PATCH it
       const fd = new FormData();
@@ -619,6 +744,7 @@ function _initModelPickerDropdown() {
         const sessions = _deps.getSessions();
         const s = sessions.find(x => x.id === currentSessionId);
         if (s) { s.model = m.mid; s.endpoint_url = m.url; }
+        clearSelectedAgent();
         // Header stays as session name — model info shown in picker only
       } catch (e) {
         uiModule.showError('Failed to set model: ' + e);
@@ -680,6 +806,7 @@ function _initModelPickerDropdown() {
     e.stopPropagation();
     if (menu.classList.contains('hidden') || menu.classList.contains('closing')) {
       // Force-clear any in-progress close animation
+      _cancelPendingClose();
       menu.classList.remove('closing', 'hidden');
       _populate('');
       if (window.modelsModule && window.modelsModule.refreshModels) {
@@ -688,6 +815,10 @@ function _initModelPickerDropdown() {
           updateModelPicker();
         }).catch(() => {});
       }
+      _refreshAgentCatalog().then(() => {
+        if (!menu.classList.contains('hidden')) _populate(search.value || '');
+        updateModelPicker();
+      }).catch(() => {});
       if (window.innerWidth >= 768) search.focus();
       // Hide scroll button so it doesn't overlap
       const _scrollBtn = document.getElementById('scroll-bottom-btn');
@@ -709,6 +840,7 @@ function _initModelPickerDropdown() {
           await window.modelsModule.refreshModels(true);
         }
         await _refreshLocalProbe();
+        await _refreshAgentCatalog();
         if (!menu.classList.contains('hidden')) _populate(search.value || '');
         updateModelPicker();
       } catch (_) {
@@ -761,6 +893,13 @@ export function updateModelPicker() {
   const sessions = _deps.getSessions();
   const _pendingChat = _deps.getPendingChat();
   const s = sessions.find(x => x.id === currentSessionId);
+  const selectedAgent = _selectedAgent();
+  if (selectedAgent) {
+    if (!currentSessionId && !_deps.getPendingChat()) _ensureDefaultPendingChat();
+    label.title = selectedAgent.label;
+    label.textContent = selectedAgent.label || 'Friday';
+    return;
+  }
   let modelId = null;
   if (s && s.model) {
     modelId = s.model;

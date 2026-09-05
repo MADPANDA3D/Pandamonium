@@ -73,6 +73,7 @@ def test_blank_chat_uses_shared_reset_with_non_materializable_navigation_sentine
     )
 
     assert "_prepareNewChat({ source: 'discovering' })" in blank
+    assert "clearPendingAgentTarget()" in blank
     assert "_pendingChat = pendingChat" in prepare
     assert "currentSessionId = null" in prepare
     assert "history.replaceState(null, '', window.location.pathname)" in prepare
@@ -84,6 +85,7 @@ def test_manual_model_choice_is_marked_against_late_default_discovery():
     picker = Path("static/js/modelPicker.js").read_text(encoding="utf-8")
 
     assert "createDirectChat(url, modelId, endpointId, source = '')" in sessions
+    assert "if (source === 'manual') clearPendingAgentTarget();" in sessions
     assert "_deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual')" in picker
     assert "sessionModule.createDirectChat(url, mid, endpointId, 'manual')" in Path(
         "static/js/models.js"

@@ -575,6 +575,7 @@ async def execute_tool_block(
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
     tool_policy: Optional[Any] = None,
+    presenter: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -591,6 +592,7 @@ async def execute_tool_block(
             owner=owner,
             progress_cb=progress_cb,
             tool_policy=tool_policy,
+            presenter=presenter,
         )
         return output
     finally:
@@ -604,6 +606,7 @@ async def _execute_tool_block_impl(
     owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     tool_policy: Optional[Any] = None,
+    presenter: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -951,6 +954,8 @@ async def _execute_tool_block_impl(
                 permission_mode="read_only",
                 approved=False,
                 owner=owner,
+                presenter=presenter,
+                persist_result=True,
             )
             result = {**task, "output": json.dumps(task, ensure_ascii=False), "exit_code": 0}
         except Exception as exc:

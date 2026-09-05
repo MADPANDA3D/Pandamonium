@@ -46,6 +46,7 @@ from src.authority_protocol import (
     redact_secrets,
 )
 from src.operational_protocol import record_operational_event
+from src.worker_routing import is_explicit_project_work_request
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
@@ -2818,6 +2819,7 @@ async def stream_agent_loop(
     tool_executor=None,
     base_context_manifest: Optional[Dict[str, Any]] = None,
     context_extensions: Optional[Dict[str, Dict[str, Any]]] = None,
+    presenter: Optional[str] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -3134,12 +3136,18 @@ async def stream_agent_loop(
     if not guide_only and _relevant_tools is not None:
         for _domain in (_intent.get("domains") or set()):
             _relevant_tools.update(_DOMAIN_TOOL_MAP.get(str(_domain), set()))
-        if "books" in (_intent.get("domains") or set()):
+        if (
+            "books" in (_intent.get("domains") or set())
+            and not is_explicit_project_work_request(_last_user)
+        ):
             # Books are application-owned private data. Keep generic filesystem
             # and editor-document tools out of explicit Books turns so the
-            # model cannot fall back to guessed local paths.
+            # model cannot fall back to guessed local paths. Explicit source-
+            # code work about the Books service still retains worker tools.
             _relevant_tools.difference_update(
-                _DOMAIN_TOOL_MAP["files"] | _DOMAIN_TOOL_MAP["documents"]
+                _DOMAIN_TOOL_MAP["files"]
+                | _DOMAIN_TOOL_MAP["documents"]
+                | _DOMAIN_TOOL_MAP["workers"]
             )
             _relevant_tools.add("manage_books")
         if "cookbook" in (_intent.get("domains") or set()):
@@ -4715,6 +4723,7 @@ async def stream_agent_loop(
                             owner=owner,
                             progress_cb=_push_progress,
                             workspace=workspace,
+                            presenter=presenter,
                         )
                     finally:
                         # Sentinel so the drainer knows to stop.
@@ -5077,6 +5086,9 @@ async def stream_agent_loop(
             if result.get("doc_id"):
                 tool_event["doc_id"] = result["doc_id"]
                 tool_event["doc_title"] = result.get("title", "")
+            if block.tool_type == "read_agent_task" and result.get("task_id"):
+                tool_event["task_id"] = result["task_id"]
+                tool_event["task_status"] = result.get("status")
             # Persist the file-write/edit diff so it re-renders on reload — without
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):

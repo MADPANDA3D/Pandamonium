@@ -166,6 +166,8 @@ def test_login_branding_is_first_run_only_and_fail_open_after_successful_login()
     assert "setupBrandGroup.hidden = m !== 'setup'" in login
     assert "brandModule = await import('/static/js/brand.js')" in login
     assert "[login-brand] using defaults" in login
+    assert "await fetch('/api/version')" not in login
+    assert "fetch('/api/version')\n    .then" in login
     save_start = login.index("if (setupBrandDraft) {")
     finish = login.index("finishLogin();", save_start)
     save_block = login[save_start:finish]

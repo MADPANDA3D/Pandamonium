@@ -5,7 +5,13 @@ import Storage from './storage.js';
 import uiModule, { autoResize, styledPrompt } from './ui.js';
 import chatRenderer from './chatRenderer.js';
 import { providerLogo } from './providers.js';
-import { initModelPicker, updateModelPicker } from './modelPicker.js';
+import {
+  clearPendingAgentTarget,
+  getSelectedAgentTarget,
+  initModelPicker,
+  movePendingAgentTarget,
+  updateModelPicker,
+} from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
 import { getBrandChatName } from './brand.js';
@@ -1793,6 +1799,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
   try {
     // An explicit session navigation supersedes any blank/pending New Chat.
     // Clearing this also makes late default discovery harmless.
+    clearPendingAgentTarget();
     _pendingChat = null;
     const navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
@@ -2197,10 +2204,12 @@ export function createBlankChat() {
   // Keep a navigation sentinel until discovery or an explicit model choice
   // supplies a usable pending chat. loadSessions() treats any pending object
   // as authoritative, while hasPendingChat() below only reports usable models.
+  clearPendingAgentTarget();
   _prepareNewChat({ source: 'discovering' });
 }
 
 export function createDirectChat(url, modelId, endpointId, source = '') {
+  if (source === 'manual') clearPendingAgentTarget();
   _prepareNewChat({ url, modelId, endpointId, ...(source ? { source } : {}) });
 }
 
@@ -2254,6 +2263,7 @@ export async function materializePendingSession() {
   if (window.documentModule?.clearSelection) {
     try { window.documentModule.clearSelection(); } catch {}
   }
+  movePendingAgentTarget(payload.id);
   currentSessionId = payload.id;
   Storage.set('lastSessionId', payload.id);
   history.replaceState(null, '', '#' + payload.id);
@@ -2301,6 +2311,7 @@ export function setCurrentSessionId(id) {
   _sessionNavToken++;
   currentSessionId = id;
   if (!id) {
+    clearPendingAgentTarget();
     _suppressNextSessionLoading = true;
     Storage.remove('lastSessionId');
     history.replaceState(null, '', window.location.pathname);
@@ -3509,6 +3520,10 @@ export function setSessionHasDocs(sessionId, hasDocs) {
   }
 }
 
+export function getChatAgentTarget() {
+  return getSelectedAgentTarget();
+}
+
 // Export all functions to window for use in main app
 const sessionModule = {
   initDependencies,
@@ -3524,6 +3539,7 @@ const sessionModule = {
   getSessions,
   getCurrentModel,
   getCurrentEndpointUrl,
+  getChatAgentTarget,
   setCurrentSessionId,
   initDragSort,
   updateModelPicker,

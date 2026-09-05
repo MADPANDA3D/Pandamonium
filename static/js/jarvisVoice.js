@@ -1577,6 +1577,27 @@ function positionWorkerResult(result, taskId) {
   if (group && result && group.parentElement !== result.parentElement) group.after(result);
 }
 
+function renderWorkerResult(event, task, replaceMessage = null) {
+  const taskId = String(task?.task_id || event?.task_id || '');
+  if (!taskId || !event?.text) return null;
+  let result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
+  if (!result) {
+    result = window.chatModule?.addMessage?.('assistant', event.text, '', {
+      source: 'agent_worker',
+      worker: event.worker || task?.worker,
+      task_id: taskId,
+      character_name: task?.presenter || 'Jarvis',
+    }) || null;
+  }
+  if (result && replaceMessage && replaceMessage !== result) {
+    replaceMessage.remove();
+    if (liveAssistantMessage === replaceMessage) liveAssistantMessage = null;
+  }
+  positionWorkerResult(result, taskId);
+  window.uiModule?.scrollHistory?.();
+  return result;
+}
+
 function setActivityStatus(group, task, status) {
   if (!group || !task) return;
   const previous = group.dataset.status || '';
@@ -1805,18 +1826,15 @@ function positionWorkerSummary(summary, taskId, afterResult = false) {
 function renderWorkerSummary(event, task) {
   const metadata = event.metadata || {};
   const text = String(event.spoken_text || '').trim();
-  const isResultSummary = event.type === 'result';
-  const isBrokerSummary = isResultSummary || (
-    event.type === 'progress'
-    && (metadata.progress_summary === true || metadata.milestone === true)
-  );
+  const isBrokerSummary = event.type === 'progress'
+    && (metadata.progress_summary === true || metadata.milestone === true);
   if (!isBrokerSummary || !text || !taskVisible(task)) return null;
 
   const eventId = String(event.event_id || '').trim();
   const existing = findWorkerSummary(event.task_id, eventId, text);
   if (existing) {
-    existing.dataset.summaryType = isResultSummary ? 'result' : 'progress';
-    positionWorkerSummary(existing, event.task_id, isResultSummary);
+    existing.dataset.summaryType = 'progress';
+    positionWorkerSummary(existing, event.task_id);
     return existing;
   }
 
@@ -1825,11 +1843,11 @@ function renderWorkerSummary(event, task) {
     worker: event.worker,
     task_id: event.task_id,
     worker_event_id: eventId,
-    character_name: 'Jarvis',
+    character_name: task.presenter || 'Jarvis',
   }) || null;
   if (summary && eventId) summary.dataset.workerEventId = eventId;
-  if (summary) summary.dataset.summaryType = isResultSummary ? 'result' : 'progress';
-  positionWorkerSummary(summary, event.task_id, isResultSummary);
+  if (summary) summary.dataset.summaryType = 'progress';
+  positionWorkerSummary(summary, event.task_id);
   window.uiModule?.scrollHistory?.();
   return summary;
 }
@@ -1946,6 +1964,7 @@ async function handleWorkerEvent(event) {
     ...prior,
     task_id: taskId,
     worker: event.worker || prior.worker,
+    presenter: event.presenter || prior.presenter,
     events,
     updated_at: event.created_at || Date.now() / 1000,
   });
@@ -1963,23 +1982,14 @@ async function handleWorkerEvent(event) {
   }
   if (event.type === 'artifact' && isActive) await openWorkerArtifact(event);
   if (event.type === 'result'
+      && task?.foreground !== true
       && event.text
       && taskVisible(task)) {
-    let result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
-    if (!result) {
-      result = window.chatModule?.addMessage?.('assistant', event.text, '', {
-        source: 'agent_worker',
-        worker: event.worker,
-        task_id: taskId,
-        character_name: WORKER_LABELS[event.worker] || event.worker || 'Worker',
-      });
-    }
-    positionWorkerResult(result, taskId);
-    renderWorkerSummary(event, task);
-    window.uiModule?.scrollHistory?.();
+    renderWorkerResult(event, task);
   }
   if (isActive
       && SPOKEN_WORKER_EVENTS.has(event.type)
+      && task?.foreground !== true
       && (event.type !== 'progress' || Boolean(event.spoken_text))) {
     enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
   }
@@ -2226,6 +2236,8 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
           task_id: event.task_id,
           session_id: turnChatSessionId,
           worker: event.worker || 'pc-codex',
+          presenter: event.presenter || existingTask?.presenter,
+          foreground: event.foreground === true,
           workspace: taskWorkspace,
           status: 'running',
           created_at: existingTask?.created_at || Date.now() / 1000,
@@ -2237,8 +2249,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
         if (currentCall) {
           activeWorkerTaskId = event.task_id;
           activeWorkspace = taskWorkspace;
-          if (event.foreground !== false) setVoiceTarget(event.worker || 'pc-codex', false);
-          else setAgentWorkspaceActive(true);
+          setAgentWorkspaceActive(true);
           queueVoiceTargetUpdate(
             { task_id: activeWorkerTaskId },
             { failSafe: event.foreground !== false },
@@ -2250,7 +2261,29 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
       else if (event.type === 'final') {
         final = event;
         const finalTaskId = (event.task_ids || [])[0];
-        const task = turnTasks.find(item => item.task_id === finalTaskId) || taskSnapshots.get(finalTaskId) || turnTasks[0];
+        let task = taskSnapshots.get(finalTaskId) || turnTasks.find(item => item.task_id === finalTaskId) || turnTasks[0];
+        if (task && event.diagnostics?.task_delivery_pending === true) {
+          task.foreground = false;
+          rememberTask(task);
+          const buffered = [...(task.events || [])].reverse().find(item => item.type === 'result');
+          if (buffered) {
+            const bufferedId = String(buffered.event_id || '').trim();
+            if (bufferedId) handledWorkerEventIds.delete(bufferedId);
+            queueWorkerEvent(buffered);
+          }
+        }
+        if (task?.foreground === true && event.diagnostics?.task_delivery_pending === false) {
+          let completed = [...(task.events || [])].reverse().find(item => item.type === 'result');
+          if (!completed) {
+            try {
+              task = rememberTask(await fetchJson(`/api/agent-tasks/${encodeURIComponent(task.task_id)}`)) || task;
+              completed = [...(task.events || [])].reverse().find(item => item.type === 'result');
+            } catch (error) {
+              console.warn('Could not load completed foreground worker result:', error);
+            }
+          }
+          if (completed && taskVisible(task)) renderWorkerResult(completed, task, liveAssistantMessage);
+        }
         if (isCurrentVoiceCall(callGeneration)) applyLiveTaskMetadata(liveAssistantMessage, task);
       }
       else if (event.type === 'error') throw new Error(event.text || 'Jarvis brain request failed');

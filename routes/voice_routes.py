@@ -45,6 +45,7 @@ from src.llm_core import llm_call_async
 from src.settings import load_settings
 from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
+from src.worker_routing import is_contextual_project_work_followup, is_explicit_project_work_request
 from src.voice_pcm import (
     TTS_INFERENCE_LOCK,
     asks_read_all,
@@ -112,6 +113,7 @@ JARVIS_TOOLS = {
     "read_agent_task",
     "search_jarvis_knowledge",
     "read_calendar",
+    "manage_books",
     "ui_control",
 }
 EXTENSION_TOOL_TIMEOUT_SECONDS = 45
@@ -1597,16 +1599,8 @@ def _background_delegation(text: str) -> tuple[str, str] | None:
 
 
 def _selected_pc_codex_task_request(text: str) -> bool:
-    """Keep selected Friday conversational unless the operator clearly requests work."""
-    value = _voice_command_words(text)
-    return bool(re.match(
-        r"^(?:(?:task|job)(?: for)? friday(?: to| with)? )?"
-        r"(?:analy[sz]e|audit|build|change|check|compare|create|debug|deploy|diagnose|edit|"
-        r"find|fix|implement|inspect|investigate|load|open|patch|pull|push|read|restart|review|"
-        r"run|search|start|stop|test|update|verify|write)\b",
-        value,
-        re.IGNORECASE,
-    ))
+    """Use the same project-work boundary as selected Friday text chat."""
+    return is_explicit_project_work_request(text)
 
 
 def _is_document_open_request(text: str) -> bool:
@@ -2720,6 +2714,7 @@ async def _dispatch_worker_request(
                 permission_mode,
                 False,
                 owner,
+                presenter=_voice_character_name(voice_session),
             )
             action = "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
     except Exception as exc:
@@ -3149,6 +3144,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                     "worker": worker,
                     "workspace": workspace,
                     "foreground": False,
+                    "presenter": task.get("presenter") or _voice_character_name(voice_session),
                 }
 
         if not compound:
@@ -3275,6 +3271,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "worker": worker,
                 "workspace": workspace,
                 "foreground": True,
+                "presenter": task.get("presenter") or _voice_character_name(voice_session),
             }
         foreground_status = ""
         foreground_reply = ""
@@ -3295,7 +3292,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         else:
             reply = f"{label} is not connected, so I could not start the request."
         yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(text, reply, f"selected_{action}_{worker}", task_ids)
+        yield _server_final_event(
+            text,
+            reply,
+            f"selected_{action}_{worker}",
+            task_ids,
+            task_delivery_pending=action in {"started", "steered"},
+        )
         return
 
     if _asks_current_business(text):
@@ -3329,6 +3332,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "worker": "pc-codex",
                 "workspace": "business",
                 "foreground": False,
+                "presenter": task.get("presenter") or _voice_character_name(voice_session),
             }
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(
@@ -3372,6 +3376,22 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     selected_pc_codex_task = (
         selected_target == "pc-codex" and _selected_pc_codex_task_request(text)
     )
+    if (
+        selected_target == "pc-codex"
+        and not selected_pc_codex_task
+        and is_contextual_project_work_followup(text)
+    ):
+        try:
+            from src.jarvis_agent import find_active_task
+
+            selected_pc_codex_task = find_active_task(
+                chat_session_id,
+                "pc-codex",
+                str(voice_session.get("workspace") or "home-lab"),
+                owner,
+            ) is not None
+        except Exception:
+            selected_pc_codex_task = False
     if (
         _media_command(text)
         or _foreground_command(text)
@@ -3460,6 +3480,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             else None
         ),
         context_extensions=extension_context,
+        presenter=_voice_character_name(voice_session),
     ):
         if not chunk.startswith("data: "):
             continue
@@ -3523,7 +3544,12 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
                     task_id = str(tool_data.get("task_id") or "")
                     if task_id and task_id not in task_ids:
                         task_ids.append(task_id)
-                        yield {"type": "agent_task", "task_id": task_id, "worker": tool_data.get("worker")}
+                        yield {
+                            "type": "agent_task",
+                            "task_id": task_id,
+                            "worker": tool_data.get("worker"),
+                            "presenter": tool_data.get("presenter") or _voice_character_name(voice_session),
+                        }
                 except json.JSONDecodeError:
                     pass
         elif data.get("type") == "metrics":
@@ -3606,6 +3632,25 @@ def _append_chat_message(session_manager, session: dict, role: str, text: str, *
         **{k: v for k, v in metadata.items() if v is not None},
     }
     try:
+        task_id = str(safe_metadata.get("task_id") or "")
+        if role == "assistant" and task_id and hasattr(session_manager, "get_session"):
+            try:
+                chat_session = session_manager.get_session(chat_session_id)
+                diagnostics = safe_metadata.get("diagnostics") or {}
+                foreground_result_consumed = (
+                    str(diagnostics.get("guard_reason") or "") == "selected_completed_pc-codex"
+                    and diagnostics.get("task_delivery_pending") is False
+                )
+                if any(
+                    message.role == "assistant"
+                    and str((message.metadata or {}).get("task_id") or "") == task_id
+                    and str((message.metadata or {}).get("source") or "") == "agent_worker"
+                    and (message.content == text or foreground_result_consumed)
+                    for message in (getattr(chat_session, "history", []) or [])[-8:]
+                ):
+                    return
+            except Exception:
+                pass
         session_manager.add_message(chat_session_id, ChatMessage(role, text, metadata=safe_metadata))
     except Exception as exc:
         logger.warning("Failed to append Jarvis voice turn to chat session %s: %s", chat_session_id, exc)
