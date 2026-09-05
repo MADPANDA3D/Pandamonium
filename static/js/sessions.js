@@ -1791,6 +1791,9 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     return; // deactivate does a page reload
   }
   try {
+    // An explicit session navigation supersedes any blank/pending New Chat.
+    // Clearing this also makes late default discovery harmless.
+    _pendingChat = null;
     const navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
     _clearHistoryPager();
@@ -2131,7 +2134,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
 // Pending session — stored locally until the first message is sent
 let _pendingChat = null; // { url, modelId, endpointId }
 
-export function createDirectChat(url, modelId, endpointId) {
+function _prepareNewChat(pendingChat) {
   _sessionNavToken++;
   // Detach any active stream so it doesn't interfere with the new chat
   if (window.chatModule && window.chatModule.detachCurrentStream) {
@@ -2144,8 +2147,10 @@ export function createDirectChat(url, modelId, endpointId) {
     if (window._syncGroupIndicator) window._syncGroupIndicator(false);
   }
 
-  // Don't hit the API — just store the model info and prepare the UI
-  _pendingChat = { url, modelId, endpointId };
+  // Don't hit the API. A direct model selection supplies pendingChat; the
+  // ordinary New Chat action starts blank and lets the model picker resolve
+  // the current default asynchronously without delaying navigation.
+  _pendingChat = pendingChat;
   _skipAutoSelect = true;
   _suppressNextSessionLoading = true;
   currentSessionId = null;
@@ -2188,10 +2193,21 @@ export function createDirectChat(url, modelId, endpointId) {
   if (msgInput) { msgInput.disabled = false; msgInput.value = ''; msgInput.focus(); }
 }
 
+export function createBlankChat() {
+  // Keep a navigation sentinel until discovery or an explicit model choice
+  // supplies a usable pending chat. loadSessions() treats any pending object
+  // as authoritative, while hasPendingChat() below only reports usable models.
+  _prepareNewChat({ source: 'discovering' });
+}
+
+export function createDirectChat(url, modelId, endpointId, source = '') {
+  _prepareNewChat({ url, modelId, endpointId, ...(source ? { source } : {}) });
+}
+
 /** Actually create the session in the DB. Called on first message send. */
 export async function materializePendingSession() {
   const pending = _pendingChat;
-  if (!pending) return false;
+  if (!pending || !pending.url || !pending.modelId) return false;
   _pendingChat = null;
 
   const incognitoChk = document.getElementById('incognito-toggle');
@@ -2250,7 +2266,9 @@ export async function materializePendingSession() {
   return true;
 }
 
-export function hasPendingChat() { return !!_pendingChat; }
+export function hasPendingChat() {
+  return !!(_pendingChat && _pendingChat.url && _pendingChat.modelId);
+}
 export function getPendingChat() { return _pendingChat; }
 // Getters for external access
 export function getCurrentSessionId() {
@@ -3497,6 +3515,7 @@ const sessionModule = {
   renderSessionList,
   loadSessions,
   selectSession,
+  createBlankChat,
   createDirectChat,
   materializePendingSession,
   hasPendingChat,
