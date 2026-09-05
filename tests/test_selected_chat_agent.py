@@ -21,6 +21,10 @@ def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("Fix the tests")
     assert _selected_worker_request("Review these files")
     assert _selected_worker_request("Inspect the containers")
+    assert _selected_worker_request("Create a repository script")
+    assert _selected_worker_request("Start the project server")
+    assert _selected_worker_request("Stop the project service")
+    assert _selected_worker_request("Compare these files")
 
 
 def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch):
@@ -53,6 +57,12 @@ def test_selected_friday_routes_contextual_followup_only_with_active_task(monkey
     assert not _selected_worker_request("Fix that")
     assert _selected_worker_request(
         "Fix that",
+        session_id="chat-1",
+        owner="leo",
+        workspace="home-lab",
+    )
+    assert not _selected_worker_request(
+        "Read this book",
         session_id="chat-1",
         owner="leo",
         workspace="home-lab",
