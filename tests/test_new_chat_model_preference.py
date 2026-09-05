@@ -59,6 +59,18 @@ def test_desktop_new_chat_actions_use_shared_immediate_handler():
     assert "const dc = await _refreshDefaultChat();" not in brand_handler
 
 
+def test_mobile_new_chat_uses_shared_immediate_handler():
+    source = APP_JS.read_text(encoding="utf-8")
+    mobile_handler = _slice(
+        source,
+        "// Mobile new chat button",
+        "// Logo click \u2192 new chat",
+    )
+
+    assert "_handleNewChatAction();" in mobile_handler
+    assert "_startFreshChat();" not in mobile_handler
+
+
 def test_blank_chat_uses_shared_reset_with_non_materializable_navigation_sentinel():
     source = SESSIONS_JS.read_text(encoding="utf-8")
     blank = _slice(

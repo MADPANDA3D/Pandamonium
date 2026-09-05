@@ -330,7 +330,7 @@ function _normalizeSessionsList(fetched) {
     seen.add(id);
     unique.push(session);
   }
-  return unique;
+  return unique.sort(_compareSessionsByActivity);
 }
 
 // Initialize dependencies from app.js (no-op: dependencies now imported directly)
@@ -1001,6 +1001,15 @@ function _sessionBucketDate(s) {
   return s.last_message_at || s.updated_at || s.created_at || '';
 }
 
+function _compareSessionsByActivity(a, b) {
+  const activityDelta = (Date.parse(_sessionBucketDate(b)) || 0)
+    - (Date.parse(_sessionBucketDate(a)) || 0);
+  if (activityDelta) return activityDelta;
+  const createdDelta = (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+  if (createdDelta) return createdDelta;
+  return String(a.id).localeCompare(String(b.id));
+}
+
 function _createDateSectionHeader(label, kind = 'session') {
   const el = document.createElement('div');
   el.className = `date-section-header ${kind}-date-section-header`;
@@ -1016,14 +1025,6 @@ function _appendSessionItemsWithDateHeaders(frag, items) {
       frag.appendChild(_createDateSectionHeader(label, 'session'));
       lastLabel = label;
     }
-    frag.appendChild(createSessionItem(s));
-  }
-}
-
-function _appendFavoriteSessionItems(frag, items) {
-  if (!items.length) return;
-  frag.appendChild(_createDateSectionHeader('Favorites', 'session'));
-  for (const s of items) {
     frag.appendChild(createSessionItem(s));
   }
 }
@@ -1073,35 +1074,17 @@ function _renderSessionListImpl() {
   // for manual mode). This keeps the picker simple: a folder-grouped
   // view is one of the sort choices, alongside Last Active / Newest.
   if (_sortMode && _sortMode !== 'group') {
-    orderedSessions.sort((a, b) => {
-      if (_sortMode === 'newest') return (b.created_at || '').localeCompare(a.created_at || '');
-      // "Last active" sorts by the last actual MESSAGE, not updated_at —
-      // updated_at is bumped by renames / model swaps / folder moves, which
-      // made the order feel random. Fall back to updated_at/created_at for
-      // older rows that predate the last_message_at backfill.
-      if (_sortMode === 'active') {
-        const av = a.last_message_at || a.updated_at || a.created_at || '';
-        const bv = b.last_message_at || b.updated_at || b.created_at || '';
-        return bv.localeCompare(av);
-      }
-      return 0;
-    });
-    // Favorites are a global pinned block above date buckets, not just
-    // promoted within the day they belong to.
-    const allFlat = [
-      ...orderedSessions.filter(s => s.is_important),
-      ...orderedSessions.filter(s => !s.is_important),
-    ];
+    // Both chronological views use actual message activity. Renames, folder
+    // moves, old favorites, and creation time must not outrank a live chat.
+    orderedSessions.sort(_compareSessionsByActivity);
+    const allFlat = orderedSessions;
 
     const limit = _showAllSessions ? allFlat.length : SIDEBAR_MAX_VISIBLE;
     const visible = allFlat.slice(0, limit);
     const activeIdx = allFlat.findIndex(s => s.id === currentSessionId);
     if (!_showAllSessions && activeIdx >= limit) visible.push(allFlat[activeIdx]);
 
-    const visibleFavorites = visible.filter(s => s.is_important);
-    const visibleRegular = visible.filter(s => !s.is_important);
-    _appendFavoriteSessionItems(_frag, visibleFavorites);
-    _appendSessionItemsWithDateHeaders(_frag, visibleRegular);
+    _appendSessionItemsWithDateHeaders(_frag, visible);
 
     if (allFlat.length > SIDEBAR_MAX_VISIBLE) {
       const remaining = allFlat.length - SIDEBAR_MAX_VISIBLE;
@@ -1690,7 +1673,7 @@ export async function loadSessions() {
       // completions call loadSessions() later; without this guard that reload
       // sees no current session and auto-selects the previous chat.
       targetId = null;
-    } else if (hashId) {
+    } else if (hashId && activeSessions.some(s => String(s.id) === hashId)) {
       targetId = hashId;
     } else if (currentSessionId && activeSessions.some(s => s.id === currentSessionId)) {
       targetId = currentSessionId;
@@ -2411,8 +2394,11 @@ export function initDragSort() {
 window.addEventListener('hashchange', () => {
   const hashId = window.location.hash.replace('#', '');
   if (/^(document|note|image|email|event|task|skill|research)-/.test(hashId) || /^open=notes&note=/.test(hashId)) return;
-  if (hashId && hashId !== currentSessionId) {
+  const isActiveSession = sessions.some(s => String(s.id) === hashId && !s.archived);
+  if (hashId && isActiveSession && hashId !== currentSessionId) {
     selectSession(hashId);
+  } else if (hashId && !isActiveSession) {
+    history.replaceState(null, '', currentSessionId ? `#${currentSessionId}` : window.location.pathname);
   }
 });
 

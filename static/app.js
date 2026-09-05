@@ -1514,21 +1514,15 @@ function initializeEventListeners() {
     document.addEventListener('click', () => { sortDropdown.style.display = 'none'; });
     sortDropdown.addEventListener('click', (e) => e.stopPropagation());
 
-    // Sort mode options (newest, oldest, last active) — toggleable
+    // Sort mode options. Re-selecting the active chronology must remain a
+    // chronology; silently falling back to manual order hid date headings and
+    // left newly active chats at their old positions.
     sortDropdown.querySelectorAll('.sort-option').forEach(opt => {
       opt.addEventListener('click', () => {
         const mode = opt.dataset.sort;
-        const current = sessionModule.getSortMode();
-        // Toggle: clicking the active sort reverts to manual
-        if (current === mode) {
-          sessionModule.setSortMode(null);
-          sortDropdown.style.display = 'none';
-          uiModule.showToast('Manual order');
-        } else {
-          sessionModule.setSortMode(mode);
-          sortDropdown.style.display = 'none';
-          uiModule.showToast(`Sorted: ${opt.textContent.trim().toLowerCase()}`);
-        }
+        sessionModule.setSortMode(mode);
+        sortDropdown.style.display = 'none';
+        uiModule.showToast(`Sorted: ${opt.textContent.trim().toLowerCase()}`);
         _syncSortChecks();
       });
     });
@@ -3273,7 +3267,9 @@ function initializeEventListeners() {
 
   function _handleNewChatAction({ focus = true } = {}) {
       if (!sessionModule) return;
-      if (_closeCompareIfActive()) return;
+      // Compare teardown may wait on session cleanup. Start it, but do not let
+      // that delay the canonical blank-chat transition the user requested.
+      _closeCompareIfActive();
       _deactivateIncognito();
       // Clear character on new chat
       if (presetsModule && presetsModule.deactivateCharacter) presetsModule.deactivateCharacter();
@@ -3310,16 +3306,9 @@ function initializeEventListeners() {
   const mobileNewChat = el('mobile-new-chat-btn');
   if (mobileNewChat) {
     mobileNewChat.addEventListener('click', () => {
-      if (!sessionModule) return;
-      if (_closeCompareIfActive()) return;
-      _deactivateIncognito();
-      _startFreshChat();
-      document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
-      // Focus the composer synchronously so mobile keyboards pop open.
-      // iOS Safari only honours programmatic focus inside the original click
-      // callback — a setTimeout breaks the user-gesture chain.
-      const _input = el('message-input');
-      if (_input) { try { _input.focus(); } catch (_) {} }
+      // Keep mobile on the same pending-chat lifecycle as every other New Chat
+      // entry point. The synchronous focus preserves the iOS gesture chain.
+      _handleNewChatAction();
     });
   }
 
