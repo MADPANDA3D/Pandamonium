@@ -80,7 +80,10 @@ function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
 let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
-let _agentItems = [];
+let _selectorItems = [];
+let _selectorModels = new Map();
+let _selectorCatalogState = 'loading';
+let _selectorCatalogError = '';
 let _agentCatalogVerified = false;
 const _PENDING_AGENT_KEY = '__pending__';
 
@@ -90,10 +93,14 @@ function _loadAgentSelections() {
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return new Map();
     return new Map(Object.entries(saved).slice(-AGENT_SELECTIONS_MAX).flatMap(([key, selection]) => {
       const sessionId = String(key || '').trim();
-      if (!sessionId || sessionId === _PENDING_AGENT_KEY || selection?.target !== 'pc-codex') return [];
+      const target = String(selection?.target || '').trim();
+      if (!sessionId || sessionId === _PENDING_AGENT_KEY || !/^[a-z][a-z0-9_-]{0,63}$/.test(target)) return [];
       return [[sessionId, {
-        target: 'pc-codex',
-        label: String(selection.label || 'Friday').slice(0, 80),
+        target,
+        label: String(selection.label || target).slice(0, 80),
+        kind: selection.kind === 'worker' ? 'worker' : 'agent',
+        available: selection.available !== false,
+        reason: String(selection.reason || '').slice(0, 120),
       }]];
     }));
   } catch { return new Map(); }
@@ -138,40 +145,71 @@ export function movePendingAgentTarget(sessionId) {
   _saveAgentSelections();
 }
 
-async function _refreshAgentCatalog() {
+async function _refreshSelectorCatalog() {
+  if (!_agentCatalogVerified) _selectorCatalogState = 'loading';
   try {
-    const response = await fetch(`${API_BASE}/api/agent-workers`, { credentials: 'same-origin' });
-    if (!response.ok) return;
+    const response = await fetch(`${API_BASE}/api/selector-catalog`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`catalog_${response.status}`);
     const payload = await response.json();
-    const catalog = payload?.workers && typeof payload.workers === 'object'
-      ? payload.workers
-      : payload;
-    const friday = catalog && catalog['pc-codex'];
+    if (payload?.discovery?.schema_version !== 'pandamonium.discovery.v1') {
+      throw new Error('invalid_selector_catalog');
+    }
+    const entities = Array.isArray(payload?.discovery?.entities) ? payload.discovery.entities : [];
+    const selections = Array.isArray(payload?.selections) ? payload.selections : [];
+    const entityById = new Map(entities.map(entity => [entity.id, entity]));
+    _selectorModels = new Map();
+    _selectorItems = [];
+    selections.forEach(selection => {
+      const entity = entityById.get(selection.entity_id);
+      if (!entity || !['model', 'agent', 'worker'].includes(entity.kind)) return;
+      const item = {
+        kind: entity.kind,
+        target: String(selection.target || ''),
+        mid: entity.kind === 'model' ? String(selection.model_id || '') : `${entity.kind}:${selection.target}`,
+        modelId: String(selection.model_id || ''),
+        endpointId: String(selection.endpoint_id || ''),
+        display: String(entity.display_name || 'Configured choice'),
+        epName: entity.kind === 'model' ? '' : (entity.kind === 'agent' ? 'Agent' : 'Worker'),
+        providerText: `${entity.kind} ${entity.health?.state || ''} ${selection.reason || ''}`,
+        stale: selection.selectable !== true,
+        disabled: selection.selectable !== true,
+        staleReason: String(selection.reason || entity.health?.reason || 'unavailable').replace(/_/g, ' '),
+        offline: entity.health?.state === 'unavailable',
+      };
+      if (entity.kind === 'model') {
+        _selectorModels.set(`${item.endpointId}\0${item.modelId}`, item);
+      } else if (item.target) {
+        _selectorItems.push(item);
+      }
+    });
     _agentCatalogVerified = true;
-    _agentItems = friday && friday.configured !== false ? [{
-      kind: 'agent',
-      target: 'pc-codex',
-      mid: 'agent:pc-codex',
-      display: String(friday.label || 'Friday'),
-      epName: 'Agent',
-      providerText: `agent worker ${friday.machine || ''}`,
-      stale: friday.ready !== true,
-      staleReason: String(friday.connection?.error || friday.connection?.state || 'not connected'),
-      offline: friday.ready !== true,
-    }] : [];
-    if (_agentItems[0]) {
-      for (const [key, selection] of _selectedAgents.entries()) {
-        if (selection.target === 'pc-codex') {
-          _selectedAgents.set(key, { ...selection, label: _agentItems[0].display });
-        }
-      }
-    } else {
-      for (const [key, selection] of _selectedAgents.entries()) {
-        if (selection.target === 'pc-codex') _selectedAgents.delete(key);
-      }
+    _selectorCatalogState = 'ready';
+    _selectorCatalogError = '';
+    const byTarget = new Map(_selectorItems.map(item => [item.target, item]));
+    for (const [key, selection] of _selectedAgents.entries()) {
+      const current = byTarget.get(selection.target);
+      _selectedAgents.set(key, current ? {
+        ...selection,
+        label: current.display,
+        kind: current.kind,
+        available: !current.disabled,
+        reason: current.staleReason || '',
+      } : {
+        ...selection,
+        available: false,
+        reason: 'no longer configured',
+      });
     }
     _saveAgentSelections();
-  } catch (_) { /* keep the last verified catalog */ }
+    const codexBrowser = document.getElementById('codex-browser-toggle');
+    if (codexBrowser) {
+      const pcCodex = _selectorItems.find(item => item.target === 'pc-codex');
+      codexBrowser.hidden = !pcCodex;
+    }
+  } catch (_) {
+    _selectorCatalogState = 'error';
+    _selectorCatalogError = 'Selector discovery is unavailable. Existing choices were not rerouted.';
+  }
 }
 
 function _isChatEndpoint(item) {
@@ -288,7 +326,7 @@ async function _ensureDefaultPendingChat() {
 export function initModelPicker(deps) {
   _deps = deps;
   _initModelPickerDropdown();
-  _refreshAgentCatalog().then(() => updateModelPicker()).catch(() => {});
+  _refreshSelectorCatalog().then(() => updateModelPicker()).catch(() => {});
 }
 
 function _initModelPickerDropdown() {
@@ -318,6 +356,7 @@ function _initModelPickerDropdown() {
     menu.classList.remove('closing');
     menu.classList.add('hidden');
     search.value = '';
+    document.dispatchEvent(new CustomEvent('odysseus:model-picker-closed'));
   }
 
   function _close() {
@@ -398,7 +437,10 @@ function _initModelPickerDropdown() {
         // when the same model is exposed by both.
         if (seen.has(mid)) return;
         seen.add(mid);
+        const discovered = _selectorModels.get(`${item.endpoint_id || ''}\0${mid}`);
+        if (_selectorCatalogState === 'ready' && !discovered) return;
         result.push({
+          kind: 'model',
           mid,
           display: (allDisplay[i] || mid).split('/').pop(),
           url: item.url,
@@ -410,15 +452,16 @@ function _initModelPickerDropdown() {
             item.host || '',
             item.url || '',
           ].filter(Boolean).join(' '),
-          stale: isLocalDead || epOffline,
-          staleReason: epOffline
+          stale: discovered ? discovered.stale : (isLocalDead || epOffline),
+          disabled: discovered ? discovered.disabled : false,
+          staleReason: discovered?.staleReason || (epOffline
             ? (item.ping_error || 'endpoint offline')
-            : (isLocalDead ? (probeResult.error || 'not responding') : ''),
-          offline: epOffline,
+            : (isLocalDead ? (probeResult.error || 'not responding') : 'discovery unavailable')),
+          offline: discovered ? discovered.offline : epOffline,
         });
       });
     });
-    return [..._agentItems, ...sortModelObjects(result)];
+    return [..._selectorItems, ...sortModelObjects(result)];
   }
 
   // ── Provider display names and grouping ──
@@ -477,13 +520,42 @@ function _initModelPickerDropdown() {
     listEl.classList.toggle('is-empty', !hasAnyChoice);
     menu.classList.toggle('no-models', !hasAnyChoice);
     if (search) {
-      search.placeholder = hasAnyChoice ? 'Search models and agents…' : 'No models or agents connected';
+      search.placeholder = hasAnyChoice ? 'Search models, agents, and workers…' : 'No choices discovered';
     }
     if (searchRow) {
       searchRow.classList.toggle('searching', !!q);
     }
 
-    if (!hasAnyChoice) return; // collapsed empty list — nothing to render
+    if (_selectorCatalogState === 'loading') {
+      listEl.classList.remove('is-empty');
+      menu.classList.remove('no-models');
+      const loading = document.createElement('div');
+      loading.className = 'model-switch-status';
+      loading.setAttribute('role', 'status');
+      loading.textContent = 'Discovering configured models, agents, and workers…';
+      listEl.appendChild(loading);
+      return;
+    }
+    if (_selectorCatalogState === 'error') {
+      listEl.classList.remove('is-empty');
+      menu.classList.remove('no-models');
+      const failure = document.createElement('div');
+      failure.className = 'model-switch-status is-error';
+      failure.setAttribute('role', 'alert');
+      failure.textContent = _selectorCatalogError;
+      listEl.appendChild(failure);
+      if (!hasAnyChoice) return;
+    }
+    if (!hasAnyChoice) {
+      listEl.classList.remove('is-empty');
+      menu.classList.remove('no-models');
+      const empty = document.createElement('div');
+      empty.className = 'model-switch-status';
+      empty.setAttribute('role', 'status');
+      empty.textContent = 'No configured choices are available.';
+      listEl.appendChild(empty);
+      return;
+    }
 
     // Unique lookup so Recent/Favorites (stored as bare model IDs) can be
     // resolved back to full model objects; drops anything no longer offered.
@@ -507,10 +579,13 @@ function _initModelPickerDropdown() {
     function _addRow(m) {
       const row = document.createElement('div');
       row.className = 'model-switch-item';
+      row.dataset.kind = m.kind || 'model';
+      row.setAttribute('role', 'option');
+      row.tabIndex = m.disabled === true ? -1 : 0;
+      row.setAttribute('aria-disabled', m.disabled === true ? 'true' : 'false');
       if (m.stale) {
         row.classList.add('model-switch-stale');
-        row.style.opacity = '0.45';
-        row.title = `Local server appears offline: ${m.staleReason}. Click to try anyway, or relaunch in Cookbook.`;
+        row.title = `${m.display} is unavailable: ${m.staleReason}. Pandamonium will not reroute this choice.`;
       }
       const _mlogo = providerLogo(m.mid);
       if (_mlogo) {
@@ -539,7 +614,7 @@ function _initModelPickerDropdown() {
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
 
-      if (m.kind !== 'agent') {
+      if (m.kind === 'model') {
         // Inline favorite dot — toggles favorite, never picks the model.
         const favDot = document.createElement('button');
         favDot.type = 'button';
@@ -577,6 +652,12 @@ function _initModelPickerDropdown() {
       }
 
       row.addEventListener('click', () => _pick(m));
+      row.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          _pick(m);
+        }
+      });
       listEl.appendChild(row);
     }
 
@@ -587,7 +668,7 @@ function _initModelPickerDropdown() {
         return [m.mid, m.display, m.epName, m.providerText, provName]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
-      if (matches.length === 0) _addEmpty('No matching models');
+      if (matches.length === 0) _addEmpty('No matching choices');
       else matches.forEach(_addRow);
       return;
     }
@@ -606,6 +687,11 @@ function _initModelPickerDropdown() {
     if (agentRows.length) {
       _addSection('Agents');
       agentRows.forEach(m => { shown.add(m.mid); _addRow(m); });
+    }
+    const workerRows = all.filter(m => m.kind === 'worker');
+    if (workerRows.length) {
+      _addSection('Workers');
+      workerRows.forEach(m => { shown.add(m.mid); _addRow(m); });
     }
     const favModels = favs.map(id => byId.get(id)).filter(Boolean);
     if (favModels.length) {
@@ -691,7 +777,11 @@ function _initModelPickerDropdown() {
 
     // Remember this pick so it surfaces under "Recent" next time the picker
     // opens — the whole point of quick-switch.
-    if (m && m.mid && m.kind !== 'agent') _pushRecent(m.mid);
+    if (m?.disabled) {
+      uiModule.showToast(`${m.display} is unavailable: ${m.staleReason}`);
+      return;
+    }
+    if (m && m.mid && m.kind === 'model') _pushRecent(m.mid);
 
     // Broadcast immediately so listeners (e.g. the tour) can advance without
     // waiting for the async session-create/PATCH that follows.
@@ -705,8 +795,14 @@ function _initModelPickerDropdown() {
       const _ta = document.getElementById('message');
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
-    if (m.kind === 'agent') {
-      _selectedAgents.set(_agentSelectionKey(), { target: m.target, label: m.display });
+    if (m.kind === 'agent' || m.kind === 'worker') {
+      _selectedAgents.set(_agentSelectionKey(), {
+        target: m.target,
+        label: m.display,
+        kind: m.kind,
+        available: true,
+        reason: '',
+      });
       _saveAgentSelections();
       updateModelPicker();
       uiModule.showToast(`Talking to ${m.display}`);
@@ -762,7 +858,7 @@ function _initModelPickerDropdown() {
     const sessions = _deps.getSessions();
     const current = sessions.find(x => x.id === currentSessionId);
     const pending = _deps.getPendingChat();
-    if ((current && current.model) || (pending && pending.modelId)) return;
+    if (!detail.force && ((current && current.model) || (pending && pending.modelId))) return;
 
     if (window.modelsModule && window.modelsModule.refreshModels) {
       try { await window.modelsModule.refreshModels(false); } catch (_) {}
@@ -815,7 +911,7 @@ function _initModelPickerDropdown() {
           updateModelPicker();
         }).catch(() => {});
       }
-      _refreshAgentCatalog().then(() => {
+      _refreshSelectorCatalog().then(() => {
         if (!menu.classList.contains('hidden')) _populate(search.value || '');
         updateModelPicker();
       }).catch(() => {});
@@ -840,7 +936,7 @@ function _initModelPickerDropdown() {
           await window.modelsModule.refreshModels(true);
         }
         await _refreshLocalProbe();
-        await _refreshAgentCatalog();
+        await _refreshSelectorCatalog();
         if (!menu.classList.contains('hidden')) _populate(search.value || '');
         updateModelPicker();
       } catch (_) {
@@ -897,7 +993,10 @@ export function updateModelPicker() {
   if (selectedAgent) {
     if (!currentSessionId && !_deps.getPendingChat()) _ensureDefaultPendingChat();
     label.title = selectedAgent.label;
-    label.textContent = selectedAgent.label || 'Friday';
+    label.textContent = selectedAgent.label || selectedAgent.target;
+    if (selectedAgent.available === false) {
+      label.title = `${selectedAgent.label}: ${selectedAgent.reason || 'unavailable'}`;
+    }
     return;
   }
   let modelId = null;

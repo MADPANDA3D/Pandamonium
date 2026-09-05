@@ -2833,6 +2833,7 @@ async def stream_agent_loop(
     approved_action: Optional[Dict[str, Any]] = None,
     persist_worker_results: bool = True,
     worker_workspace: Optional[str] = None,
+    worker_target: Optional[str] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -4794,6 +4795,7 @@ async def stream_agent_loop(
                             presenter=presenter,
                             persist_worker_result=persist_worker_results,
                             worker_workspace=worker_workspace,
+                            worker_target=worker_target,
                         )
                     finally:
                         # Sentinel so the drainer knows to stop.

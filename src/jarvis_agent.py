@@ -9,7 +9,7 @@ import re
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -19,6 +19,8 @@ from core.constants import DATA_DIR
 from core.models import ChatMessage
 from src.agent_identity import configured_agent_id, configured_agent_name
 from src.agent_worker_adapters import adapters, require_worker_task_permission, worker_catalog
+from src.authority_protocol import operator_identity
+from src.operational_protocol import record_operational_event
 from src.voice_pcm import asks_read_all, result_speech, speech_text
 
 TASKS_FILE = Path(DATA_DIR) / "agent_tasks.json"
@@ -41,6 +43,7 @@ WORKER_LABELS = {
 
 _LOCK = threading.RLock()
 _MIRRORS: dict[str, asyncio.Task] = {}
+_START_LOCKS: dict[str, asyncio.Lock] = {}
 _SESSION_MANAGER = None
 
 
@@ -66,6 +69,12 @@ def _token() -> str:
         return BRIDGE_TOKEN_FILE.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+def worker_task_execution_enabled() -> bool:
+    return os.getenv("ODYSSEUS_CODEX_TASK_EXECUTION_ENABLED", "true").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 def internal_token_valid(authorization: str | None) -> bool:
@@ -139,6 +148,33 @@ def list_active_tasks(
     )
 
 
+def list_session_tasks(session_id: str, owner: str, limit: int = 100) -> list[dict]:
+    """Return a bounded, owner-safe reconnect view for one chat session."""
+    identity = str(owner or "").strip()
+    if not identity:
+        raise PermissionError("owner_required")
+    require_session_owner(session_id, identity)
+    with _LOCK:
+        matches = [
+            task
+            for task in (_tasks().get("tasks") or {}).values()
+            if task.get("session_id") == session_id and task.get("owner") == identity
+        ]
+    matches.sort(
+        key=lambda task: (task.get("updated_at", 0), task.get("created_at", 0)),
+        reverse=True,
+    )
+    safe_keys = {
+        "task_id", "worker", "session_id", "workspace", "permission_mode",
+        "status", "result", "error", "codex_thread_id", "presenter",
+        "artifacts", "created_at", "updated_at",
+    }
+    return [
+        {key: task.get(key) for key in safe_keys if key in task}
+        for task in matches[:max(1, min(int(limit), 100))]
+    ]
+
+
 def find_active_task(
     session_id: str,
     worker: str,
@@ -155,38 +191,105 @@ def task_events(task_id: str, after: int = -1) -> list[dict]:
     return [event for event in task.get("events", []) if int(event.get("seq", -1)) > after]
 
 
-def _binding_key(session_id: str, worker: str, workspace: str) -> str:
-    return f"{session_id}:{worker}:{workspace}"
+def _binding_key(owner: str, session_id: str, worker: str, workspace: str) -> str:
+    # A Codex conversation maps to exactly one task/thread across project-browser,
+    # text, voice, and reconnect callers. Other worker types retain workspace scope.
+    scope = "conversation" if worker in {"pc-codex", "vps-codex"} else workspace
+    return f"v2:{owner}:{session_id}:{worker}:{scope}"
 
 
-def get_worker_binding(session_id: str, worker: str, workspace: str) -> dict:
+def get_worker_binding(owner: str, session_id: str, worker: str, workspace: str) -> dict:
     with _LOCK:
-        return dict((_tasks().get("bindings") or {}).get(_binding_key(session_id, worker, workspace)) or {})
+        state = _tasks()
+        bindings = state.get("bindings") or {}
+        key = _binding_key(owner, session_id, worker, workspace)
+        binding = bindings.get(key)
+        if isinstance(binding, dict):
+            return dict(binding)
+
+        # Migrate only a legacy binding that can be tied to an owned task. This
+        # prevents an owner from inheriting another user's pre-M7 thread.
+        legacy_key = f"{session_id}:{worker}:{workspace}"
+        legacy = bindings.get(legacy_key)
+        if not isinstance(legacy, dict):
+            return {}
+        owned = any(
+            task.get("owner") == owner
+            and task.get("session_id") == session_id
+            and task.get("worker") == worker
+            and task.get("workspace") == workspace
+            and (
+                not legacy.get("codex_thread_id")
+                or task.get("codex_thread_id") == legacy.get("codex_thread_id")
+            )
+            for task in (state.get("tasks") or {}).values()
+        )
+        if not owned:
+            return {}
+        migrated = dict(legacy)
+        migrated.update(owner=owner, session_id=session_id, worker=worker, workspace=workspace)
+        bindings[key] = migrated
+        bindings.pop(legacy_key, None)
+        state["bindings"] = bindings
+        _write_json(TASKS_FILE, state)
+        return dict(migrated)
 
 
 def _save_worker_binding(task: dict, **values: Any) -> None:
     with _LOCK:
         state = _tasks()
-        key = _binding_key(task["session_id"], task["worker"], task["workspace"])
+        key = _binding_key(task["owner"], task["session_id"], task["worker"], task["workspace"])
         binding = state.setdefault("bindings", {}).setdefault(key, {})
-        binding.update({k: v for k, v in values.items() if v})
+        binding.update({
+            "owner": task["owner"],
+            "session_id": task["session_id"],
+            "worker": task["worker"],
+            "workspace": task["workspace"],
+        })
+        for name, value in values.items():
+            if value is None:
+                binding.pop(name, None)
+            elif value:
+                binding[name] = value
         binding["updated_at"] = int(time.time())
         _write_json(TASKS_FILE, state)
 
 
+def _start_lock(owner: str, session_id: str, worker: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    key = f"{id(loop)}:{owner}:{session_id}:{worker}"
+    with _LOCK:
+        return _START_LOCKS.setdefault(key, asyncio.Lock())
+
+
 def _save_task(task: dict) -> None:
+    persisted = dict(task)
+    persisted.pop("prompt", None)
     with _LOCK:
         state = _tasks()
-        state.setdefault("tasks", {})[task["task_id"]] = task
+        state.setdefault("tasks", {})[task["task_id"]] = persisted
         _write_json(TASKS_FILE, state)
 
 
 def _persist_artifact(task: dict, event: dict) -> dict:
     metadata = dict(event.get("metadata") or {})
     content = str(metadata.pop("content", ""))
-    if not content or len(content) > 2_000_000:
+    source_path = str(metadata.get("source_path") or "").strip()
+    normalized_source = source_path.replace("\\", "/")
+    logical_path = PurePosixPath(normalized_source)
+    unsafe_path = (
+        not normalized_source
+        or "\x00" in normalized_source
+        or logical_path.is_absolute()
+        or PureWindowsPath(source_path).is_absolute()
+        or ".." in logical_path.parts
+    )
+    if unsafe_path or not content or len(content) > 2_000_000:
+        event["type"] = "error"
+        event["text"] = "Worker artifact handoff failed the approved workspace boundary."
+        event["metadata"] = {"artifact_rejected": True}
         return event
-    source_path = str(metadata.get("source_path") or "")
+    source_path = logical_path.as_posix()
     artifact_key = str(metadata.get("artifact_key") or hashlib.sha256(
         f"{task['worker']}|{source_path}|{content}".encode()
     ).hexdigest())
@@ -232,6 +335,12 @@ def _persist_artifact(task: dict, event: dict) -> dict:
         "title": title,
         "language": language,
         "source_path": source_path,
+        "citation": f"workspace:{task.get('workspace')}/{source_path}",
+        "review_mode": (
+            "reversible_edit"
+            if task.get("permission_mode") == "workspace_write"
+            else "read_only_citation"
+        ),
         "href": f"#document-{doc_id}",
     }
     task.setdefault("artifacts", []).append(persisted)
@@ -281,7 +390,13 @@ def _append_event(task_id: str, event: dict) -> None:
         metadata = event.get("metadata") or {}
         if metadata.get("codex_thread_id"):
             task["codex_thread_id"] = metadata["codex_thread_id"]
-            _save_worker_binding(task, codex_thread_id=metadata["codex_thread_id"])
+            _save_worker_binding(
+                task,
+                codex_thread_id=metadata["codex_thread_id"],
+                active_task_id=None if event_type in TERMINAL_EVENTS else task_id,
+            )
+        elif event_type in TERMINAL_EVENTS:
+            _save_worker_binding(task, active_task_id=None)
         task["updated_at"] = int(time.time())
         if event_type == "result" and not task.get("result_persisted"):
             if task.get("persist_result", True):
@@ -290,6 +405,41 @@ def _append_event(task_id: str, event: dict) -> None:
         if event_type == "progress":
             _persist_worker_summary(task, event)
         _save_task(task)
+        if event_type == "artifact" or event_type in TERMINAL_EVENTS:
+            status = {
+                "result": "succeeded",
+                "error": "failed",
+                "cancelled": "cancelled",
+                "artifact": "executed",
+            }[event_type]
+            record_operational_event(
+                request_id=task.get("request_id"),
+                session_id=task.get("session_id"),
+                task_id=task_id,
+                call_id=task.get("call_id"),
+                operator_id=operator_identity(task.get("owner")),
+                actor=f"worker:{task.get('worker')}",
+                component="worker",
+                event_type="progress" if event_type == "artifact" else "result",
+                status=status,
+                evidence_refs=[{
+                    "task_id": task_id,
+                    "codex_thread_id": task.get("codex_thread_id"),
+                    "approved_root": f"workspace:{task.get('workspace')}",
+                    "artifacts": [
+                        {
+                            "document_id": row.get("document_id"),
+                            "citation": row.get("citation"),
+                            "review_mode": row.get("review_mode"),
+                        }
+                        for row in task.get("artifacts") or []
+                    ],
+                }],
+                metadata={
+                    "authority_ref": task.get("authority_ref"),
+                    "worker_event": event_type,
+                },
+            )
 
 
 def _persist_worker_summary(task: dict, event: dict) -> bool:
@@ -418,7 +568,10 @@ async def _spoken_result(task: dict, text: str) -> str:
         text,
         kind="worker",
         label=label,
-        explicit_read_all=asks_read_all(str(task.get("prompt") or "")),
+        explicit_read_all=(
+            task.get("read_all_requested") is True
+            or asks_read_all(str(task.get("prompt") or ""))
+        ),
     )["spoken_text"]
 
 
@@ -428,7 +581,10 @@ def _worker_result_speech(task: dict, event: dict) -> dict[str, str]:
         str(event.get("text") or ""),
         kind="worker",
         label=label,
-        explicit_read_all=asks_read_all(str(task.get("prompt") or "")),
+        explicit_read_all=(
+            task.get("read_all_requested") is True
+            or asks_read_all(str(task.get("prompt") or ""))
+        ),
         provided_spoken_text=str(event.get("spoken_text") or "") or None,
         provided_speech_mode=str(event.get("speech_mode") or "") or None,
     )
@@ -607,6 +763,10 @@ async def start_task(
     approved: bool = False,
     owner: str | None = None,
     codex_thread_id: str | None = None,
+    thread_title: str | None = None,
+    request_id: str | None = None,
+    call_id: str | None = None,
+    authority_ref: str | None = None,
     presenter: str | None = None,
     persist_result: bool = True,
 ) -> dict:
@@ -614,6 +774,8 @@ async def start_task(
     if not owner:
         raise PermissionError("owner_required")
     require_session_owner(session_id, owner)
+    if worker in {"pc-codex", "vps-codex"} and not worker_task_execution_enabled():
+        raise RuntimeError("codex_task_execution_disabled")
     catalog = worker_catalog()
     if worker not in catalog:
         raise ValueError("unknown_worker")
@@ -643,43 +805,93 @@ async def start_task(
         }
         _save_task(task)
         return task
-    binding = get_worker_binding(session_id, worker, workspace)
-    codex_thread_id = codex_thread_id or binding.get("codex_thread_id")
-    now = int(time.time())
-    task = {
-        "task_id": str(uuid.uuid4()),
-        "remote_task_id": None,
-        "worker": worker,
-        "session_id": session_id,
-        "workspace": workspace,
-        "prompt": prompt,
-        "permission_mode": permission_mode,
-        "approved": approved,
-        "codex_thread_id": codex_thread_id,
-        "worker_session_key": binding.get("worker_session_key"),
-        "status": "queued",
-        "result": None,
-        "error": None,
-        "owner": owner,
-        "presenter": str(presenter or configured_agent_name())[:80],
-        "persist_result": persist_result is True,
-        "events": [],
-        "artifacts": [],
-        "created_at": now,
-        "updated_at": now,
-    }
-    remote = await adapter.start(task)
-    task.update(remote)
-    _save_task(task)
-    _append_event(task["task_id"], {
-        "type": "accepted",
-        "text": f"{worker_catalog()[worker]['machine']} accepted the task.",
-        "metadata": {"remote_task_id": task.get("remote_task_id")},
-    })
-    if task.get("worker_session_key"):
-        _save_worker_binding(task, worker_session_key=task["worker_session_key"])
-    ensure_mirror(task["task_id"])
-    return get_task(task["task_id"]) or task
+    async with _start_lock(owner, session_id, worker):
+        active = find_active_task(session_id, worker, None, owner)
+        if active:
+            incompatible = (
+                active.get("workspace") != workspace
+                or (
+                    codex_thread_id
+                    and active.get("codex_thread_id")
+                    and active.get("codex_thread_id") != codex_thread_id
+                )
+            )
+            if incompatible:
+                raise RuntimeError("conversation_task_conflict")
+            return {**active, "reused": True}
+
+        binding = get_worker_binding(owner, session_id, worker, workspace)
+        bound_workspace = str(binding.get("workspace") or "")
+        if (
+            worker in {"pc-codex", "vps-codex"}
+            and binding.get("codex_thread_id")
+            and bound_workspace
+            and bound_workspace != workspace
+            and not codex_thread_id
+        ):
+            raise RuntimeError("conversation_project_mismatch")
+        codex_thread_id = codex_thread_id or binding.get("codex_thread_id")
+        now = int(time.time())
+        task = {
+            "task_id": str(uuid.uuid4()),
+            "remote_task_id": None,
+            "worker": worker,
+            "session_id": session_id,
+            "workspace": workspace,
+            "prompt": prompt,
+            "permission_mode": permission_mode,
+            "approved": approved,
+            "codex_thread_id": codex_thread_id,
+            "thread_title": " ".join(str(thread_title or "").split())[:200] or None,
+            "read_all_requested": asks_read_all(prompt),
+            "request_id": str(request_id or "").strip()[:200] or None,
+            "call_id": str(call_id or "").strip()[:200] or None,
+            "authority_ref": str(authority_ref or "").strip()[:200] or None,
+            "worker_session_key": binding.get("worker_session_key"),
+            "status": "queued",
+            "result": None,
+            "error": None,
+            "owner": owner,
+            "presenter": str(presenter or configured_agent_name())[:80],
+            "persist_result": persist_result is True,
+            "events": [],
+            "artifacts": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        _save_task(task)
+        _save_worker_binding(
+            task,
+            active_task_id=task["task_id"],
+            codex_thread_id=codex_thread_id,
+        )
+        try:
+            remote = await adapter.start(task)
+        except Exception as exc:
+            _append_event(task["task_id"], {
+                "type": "error",
+                "text": str(exc)[:1000] or "Worker task creation failed.",
+                "metadata": {"source": "worker_start"},
+            })
+            raise
+        task.update(remote)
+        _save_task(task)
+        _append_event(task["task_id"], {
+            "type": "accepted",
+            "text": f"{worker_catalog()[worker]['machine']} accepted the task.",
+            "metadata": {
+                "remote_task_id": task.get("remote_task_id"),
+                "codex_thread_id": task.get("codex_thread_id"),
+            },
+        })
+        _save_worker_binding(
+            task,
+            active_task_id=task["task_id"],
+            codex_thread_id=task.get("codex_thread_id"),
+            worker_session_key=task.get("worker_session_key"),
+        )
+        ensure_mirror(task["task_id"])
+        return get_task(task["task_id"]) or task
 
 
 async def refresh_task(
@@ -697,7 +909,11 @@ async def refresh_task(
         remote_status = str(remote.get("status") or "")
         if remote.get("codex_thread_id"):
             task["codex_thread_id"] = remote["codex_thread_id"]
-            _save_worker_binding(task, codex_thread_id=remote["codex_thread_id"])
+            _save_worker_binding(
+                task,
+                codex_thread_id=remote["codex_thread_id"],
+                active_task_id=task_id if remote_status not in TERMINAL else None,
+            )
         if remote_status in {"completed", "failed", "cancelled"} and task.get("status") not in TERMINAL:
             event_type = {"completed": "result", "failed": "error", "cancelled": "cancelled"}[remote_status]
             text = str(remote.get("output") or remote.get("result") or remote.get("error") or f"{task['worker']} {remote_status}.")

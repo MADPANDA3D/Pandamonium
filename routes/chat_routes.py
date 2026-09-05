@@ -73,6 +73,7 @@ def _selected_worker_request(
     *,
     session_id: str = "",
     owner: str = "",
+    worker: str = "pc-codex",
 ) -> bool:
     """Delegate explicit project/source work, not small app-data lookups."""
     if is_explicit_project_work_request(message):
@@ -82,21 +83,30 @@ def _selected_worker_request(
     try:
         from src.jarvis_agent import find_active_task
 
-        return find_active_task(session_id, "pc-codex", None, owner) is not None
+        return find_active_task(session_id, worker, None, owner) is not None
     except Exception:
         return False
 
 
-def _selected_agent_context(label: str, workspace: str | None = None) -> str:
+def _selected_agent_context(
+    label: str,
+    workspace: str | None = None,
+    worker: str = "pc-codex",
+) -> str:
+    if worker == "jarvis":
+        return (
+            f"The operator explicitly selected {label} for this conversation. Present every response as {label}; "
+            "the configured reasoning model remains a replaceable inference engine and does not change identity."
+        )
     routing = (
-        f" For pc-codex delegation, use the server-selected `{workspace}` workspace unless the operator "
+        f" For {worker} delegation, use the server-selected `{workspace}` workspace unless the operator "
         "explicitly names another allowed workspace in this turn."
         if workspace else ""
     )
     return (
         f"The operator explicitly selected {label} for this conversation. Present every response as {label}, "
         "while using this chat's configured reasoning model. Use native Pandamonium tools directly for small "
-        "application-data requests such as Books, calendar, email, notes, and tasks. Delegate to the pc-codex "
+        f"application-data requests such as Books, calendar, email, notes, and tasks. Delegate to the {worker} "
         "worker only for genuine project, source-code, file, or host work; return one coherent answer and never "
         f"emit polling filler or a second completion notice.{routing}"
     )
@@ -846,14 +856,21 @@ def setup_chat_routes(
             owner = effective_user(request)
             selected_agent_label = ""
             selected_agent_workspace = None
+            selected_agent_worker = ""
             if agent_target:
                 from src.agent_worker_adapters import worker_catalog
+                from src.agent_identity import configured_agent_name
 
                 details = worker_catalog().get(agent_target)
-                if agent_target != "pc-codex" or not details or not details.get("configured"):
+                if agent_target == "jarvis":
+                    selected_agent_label = configured_agent_name()
+                    selected_agent_worker = "jarvis"
+                elif not details or not details.get("configured"):
                     raise HTTPException(400, "Selected agent is not configured")
-                selected_agent_label = str(details.get("label") or "Friday")[:80]
-                selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
+                else:
+                    selected_agent_label = str(details.get("label") or agent_target)[:80]
+                    selected_agent_worker = agent_target
+                    selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
@@ -1413,7 +1430,11 @@ def setup_chat_routes(
             if selected_agent_label:
                 messages = [
                     *messages[:-1],
-                    {"role": "system", "content": _selected_agent_context(selected_agent_label, selected_agent_workspace)},
+                    {"role": "system", "content": _selected_agent_context(
+                        selected_agent_label,
+                        selected_agent_workspace,
+                        selected_agent_worker or "jarvis",
+                    )},
                     messages[-1],
                 ]
             if text_extension_bridge:
@@ -1731,10 +1752,11 @@ def setup_chat_routes(
                     if _approval_reply and _approval_reply["choice"] == "approve":
                         _forced_tools.add(str((_approval_reply["decision"].get("capability") or {}).get("name") or ""))
                         _forced_tools.discard("")
-                    if agent_target == "pc-codex" and _selected_worker_request(
+                    if selected_agent_worker and selected_agent_worker != "jarvis" and _selected_worker_request(
                         str(message or ""),
                         session_id=session,
                         owner=_user,
+                        worker=selected_agent_worker,
                     ):
                         _forced_tools.update({"start_agent_task", "read_agent_task"})
 
@@ -1770,6 +1792,11 @@ def setup_chat_routes(
                         approved_action=_approved_action,
                         persist_worker_results=not bool(selected_agent_label),
                         worker_workspace=selected_agent_workspace,
+                        worker_target=(
+                            selected_agent_worker
+                            if selected_agent_worker and selected_agent_worker != "jarvis"
+                            else None
+                        ),
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

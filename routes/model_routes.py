@@ -1518,6 +1518,15 @@ def setup_model_routes(model_discovery):
             _refresh_caches_bg(force=refresh)
         return result
 
+    @router.get("/selector-catalog")
+    async def selector_catalog(request: Request, refresh: bool = False):
+        """Return one owner-scoped taxonomy for the text and voice selectors."""
+        from src.jarvis_agent import worker_statuses
+        from src.selector_catalog import build_selector_catalog
+
+        models = api_models(request, refresh=refresh, background=refresh)
+        return build_selector_catalog(models, await worker_statuses())
+
     # Brief cache for local-probe results so picker-open doesn't hammer
     # endpoint health checks every time. 8s TTL — long enough to amortize cost,
     # short enough that a freshly-killed local server shows as offline

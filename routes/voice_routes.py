@@ -2730,6 +2730,9 @@ async def _dispatch_worker_request(
                 False,
                 owner,
                 presenter=_voice_character_name(voice_session),
+                request_id=request_id,
+                call_id=call["call_id"],
+                authority_ref=call["authority_ref"],
             )
             action = "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
     except Exception as exc:

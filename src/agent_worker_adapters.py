@@ -208,6 +208,8 @@ class CodexBridgeAdapter:
             "permission_mode": task["permission_mode"],
             "approved": task.get("approved", False),
             "codex_thread_id": task.get("codex_thread_id"),
+            "thread_title": task.get("thread_title"),
+            "request_id": task.get("request_id"),
         }
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(f"{self.url}/v1/tasks", json=payload, headers=self._headers())
@@ -223,6 +225,45 @@ class CodexBridgeAdapter:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
                 f"{self.url}/v1/tasks/{task['remote_task_id']}",
+                headers=self._headers(),
+            )
+        response.raise_for_status()
+        return response.json()
+
+    async def catalog_projects(
+        self,
+        *,
+        query: str = "",
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        if not self.enabled:
+            raise WorkerUnavailable("codex_bridge_not_configured")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.url}/v1/catalog/projects",
+                params={"query": query, "cursor": cursor, "limit": limit},
+                headers=self._headers(),
+            )
+        response.raise_for_status()
+        return response.json()
+
+    async def catalog_tasks(
+        self,
+        project_id: str,
+        *,
+        query: str = "",
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if not self.enabled:
+            raise WorkerUnavailable("codex_bridge_not_configured")
+        if not _WORKSPACE_NAME.fullmatch(project_id):
+            raise ValueError("invalid_project_id")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.url}/v1/catalog/projects/{project_id}/tasks",
+                params={"query": query, "cursor": cursor, "limit": limit},
                 headers=self._headers(),
             )
         response.raise_for_status()

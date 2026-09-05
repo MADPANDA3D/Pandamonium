@@ -1095,18 +1095,7 @@
             <svg class="jarvis-agent-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div id="jarvis-agent-menu" class="jarvis-agent-menu" role="menu" hidden>
-            <button type="button" class="jarvis-target is-active" data-worker="jarvis" role="menuitemradio" aria-checked="true">
-              <span>Jarvis</span><small>Self-hosted · conversational brain</small>
-            </button>
-            <button type="button" class="jarvis-target" data-worker="pc-codex" role="menuitemradio" aria-checked="false" disabled>
-              <span>PC Codex</span><small>Local workstation · gated</small>
-            </button>
-            <button type="button" class="jarvis-target" data-worker="hermes" role="menuitemradio" aria-checked="false" disabled>
-              <span>Hermes</span><small>Remote agent · gated</small>
-            </button>
-            <button type="button" class="jarvis-target" data-worker="vps-codex" role="menuitemradio" aria-checked="false" disabled>
-              <span>VPS Codex</span><small>Remote server · gated</small>
-            </button>
+            <div class="jarvis-selector-status" role="status">Discovering configured choices…</div>
             <button type="button" id="jarvis-agent-cancel" class="jarvis-agent-cancel" role="menuitem" hidden disabled>Cancel active task</button>
           </div>
         </div>
@@ -1153,11 +1142,11 @@
         <textarea id="message" placeholder="Message Pandamonium..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
-          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model or agent"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model, agent, or worker" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <div class="model-picker-search-row">
               <div class="model-picker-search-wrap">
-                <input type="text" id="model-picker-search" placeholder="Search models and agents..." autocomplete="off" aria-label="Search models and agents">
+                <input type="text" id="model-picker-search" placeholder="Search models, agents, and workers..." autocomplete="off" aria-label="Search models, agents, and workers">
                 <button type="button" class="model-picker-refresh-btn" id="model-picker-refresh-btn" title="Refresh model picker" aria-label="Refresh model picker">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 </button>
@@ -1166,7 +1155,47 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
               </button>
             </div>
-            <div class="model-picker-list" id="model-picker-list"></div>
+            <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured models, agents, and workers"></div>
+            <button type="button" id="codex-browser-toggle" class="codex-browser-toggle" aria-expanded="false" aria-controls="codex-workspace-browser" hidden>Browse Codex projects and tasks</button>
+            <section id="codex-workspace-browser" class="codex-workspace-browser" aria-label="Codex projects and tasks" hidden>
+              <div class="codex-browser-head">
+                <button type="button" id="codex-browser-back" aria-label="Back to selector">←</button>
+                <strong id="codex-browser-title">Codex projects</strong>
+              </div>
+              <div id="codex-project-view">
+                <input type="search" id="codex-project-search" placeholder="Search projects" autocomplete="off" aria-label="Search allowlisted Codex projects">
+                <div id="codex-project-list" class="codex-browser-list" role="list"></div>
+                <button type="button" id="codex-project-more" class="codex-browser-more" hidden>Load more projects</button>
+              </div>
+              <div id="codex-task-view" hidden>
+                <button type="button" id="codex-project-return" class="codex-project-return">← Projects</button>
+                <input type="search" id="codex-task-search" placeholder="Search tasks" autocomplete="off" aria-label="Search tasks in selected Codex project">
+                <button type="button" id="codex-new-task" class="codex-browser-primary">New task in this project</button>
+                <div id="codex-task-list" class="codex-browser-list" role="list"></div>
+                <button type="button" id="codex-task-more" class="codex-browser-more" hidden>Load more tasks</button>
+              </div>
+              <div id="codex-action-view" hidden>
+                <button type="button" id="codex-task-return" class="codex-project-return">← Tasks</button>
+                <p id="codex-task-identity" class="codex-task-identity"></p>
+                <label class="codex-task-label" for="codex-task-prompt">Request</label>
+                <textarea id="codex-task-prompt" rows="4" maxlength="50000" placeholder="Describe the bounded work for the selected worker"></textarea>
+                <label class="codex-write-consent">
+                  <input type="checkbox" id="codex-task-write-consent">
+                  <span>Allow the explicitly requested reversible edit inside this project</span>
+                </label>
+                <button type="button" id="codex-task-run" class="codex-browser-primary">Start read-only task</button>
+                <div id="codex-task-live" class="codex-task-live" hidden>
+                  <p id="codex-task-status" role="status" aria-live="polite"></p>
+                  <div id="codex-task-events" class="codex-task-events" aria-label="Codex task progress"></div>
+                  <label class="codex-task-label" for="codex-task-steer-prompt">Steer running task</label>
+                  <textarea id="codex-task-steer-prompt" rows="2" maxlength="50000" placeholder="Add a bounded correction or follow-up"></textarea>
+                  <div class="codex-task-actions">
+                    <button type="button" id="codex-task-steer">Steer</button>
+                    <button type="button" id="codex-task-cancel">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -2735,6 +2764,7 @@
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/jarvisVoice.js?v=20260905T022733Z"></script>
+<script type="module" src="/static/js/codexWorkspace.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260904T235900Z"></script>

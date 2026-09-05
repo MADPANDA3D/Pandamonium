@@ -578,6 +578,7 @@ async def execute_tool_block(
     presenter: Optional[str] = None,
     persist_worker_result: bool = True,
     worker_workspace: Optional[str] = None,
+    worker_target: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -597,6 +598,7 @@ async def execute_tool_block(
             presenter=presenter,
             persist_worker_result=persist_worker_result,
             worker_workspace=worker_workspace,
+            worker_target=worker_target,
         )
         return output
     finally:
@@ -613,6 +615,7 @@ async def _execute_tool_block_impl(
     presenter: Optional[str] = None,
     persist_worker_result: bool = True,
     worker_workspace: Optional[str] = None,
+    worker_target: Optional[str] = None,
 ) -> Tuple[str, Dict]:
     """Execute a single tool block. Returns (description, result_dict).
 
@@ -953,8 +956,10 @@ async def _execute_tool_block_impl(
                 raise PermissionError("owner_required")
             args = json.loads(content or "{}")
             requested_worker = str(args.get("worker") or "pc-codex")
+            if worker_target:
+                requested_worker = worker_target
             requested_workspace = str(args.get("workspace") or "home-lab")
-            if requested_worker == "pc-codex" and worker_workspace:
+            if worker_workspace:
                 requested_workspace = worker_workspace
             task = await start_task(
                 worker=requested_worker,
