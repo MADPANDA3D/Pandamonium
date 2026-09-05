@@ -176,9 +176,6 @@ try {
   }));
 } finally {
   await deleteCreatedSessions().catch(() => {});
-  if (!page.isClosed()) {
-    await context.request.post(`${baseUrl}/api/auth/logout`).catch(() => {});
-  }
   await context.close();
   await browser.close();
 }
