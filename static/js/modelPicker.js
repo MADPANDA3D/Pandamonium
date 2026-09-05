@@ -264,26 +264,34 @@ function _initModelPickerDropdown() {
   if (wrap.dataset.modelPickerBound === 'true') return;
   wrap.dataset.modelPickerBound = 'true';
 
+  let _closeFallbackTimer = null;
+  let _closeAnimationHandler = null;
+
+  function _cancelPendingClose() {
+    if (_closeFallbackTimer) clearTimeout(_closeFallbackTimer);
+    _closeFallbackTimer = null;
+    if (_closeAnimationHandler) menu.removeEventListener('animationend', _closeAnimationHandler);
+    _closeAnimationHandler = null;
+  }
+
+  function _finishClose() {
+    _cancelPendingClose();
+    menu.classList.remove('closing');
+    menu.classList.add('hidden');
+    search.value = '';
+  }
+
   function _close() {
     if (menu.classList.contains('hidden')) return;
+    _cancelPendingClose();
     // Restore scroll button
     const _scrollBtn = document.getElementById('scroll-bottom-btn');
     if (_scrollBtn) _scrollBtn.style.display = '';
     menu.classList.add('closing');
-    menu.addEventListener('animationend', function _onDone() {
-      menu.removeEventListener('animationend', _onDone);
-      menu.classList.remove('closing');
-      menu.classList.add('hidden');
-      search.value = '';
-    }, { once: true });
+    _closeAnimationHandler = _finishClose;
+    menu.addEventListener('animationend', _closeAnimationHandler, { once: true });
     // Fallback if animationend doesn't fire
-    setTimeout(() => {
-      if (!menu.classList.contains('hidden')) {
-        menu.classList.remove('closing');
-        menu.classList.add('hidden');
-        search.value = '';
-      }
-    }, 200);
+    _closeFallbackTimer = setTimeout(_finishClose, 200);
   }
 
   function _openPickerShortcut(kind) {
@@ -751,6 +759,7 @@ function _initModelPickerDropdown() {
     e.stopPropagation();
     if (menu.classList.contains('hidden') || menu.classList.contains('closing')) {
       // Force-clear any in-progress close animation
+      _cancelPendingClose();
       menu.classList.remove('closing', 'hidden');
       _populate('');
       if (window.modelsModule && window.modelsModule.refreshModels) {
