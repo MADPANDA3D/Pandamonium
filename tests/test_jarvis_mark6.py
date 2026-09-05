@@ -884,8 +884,17 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
     assert not voice_routes._selected_pc_codex_task_request(
         "We're getting there one piece at a time. It's all teamwork, wouldn't you say?",
     )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Check my Books library and list every title.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Find the book in my library that still needs OCR.",
+    )
     assert voice_routes._selected_pc_codex_task_request(
         "Friday, inspect the active project's protocol configuration.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Review the Books service source code.",
     )
 
 

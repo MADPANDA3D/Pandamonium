@@ -45,6 +45,7 @@ from src.llm_core import llm_call_async
 from src.settings import load_settings
 from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
+from src.worker_routing import is_explicit_project_work_request
 from src.voice_pcm import (
     TTS_INFERENCE_LOCK,
     asks_read_all,
@@ -1598,16 +1599,8 @@ def _background_delegation(text: str) -> tuple[str, str] | None:
 
 
 def _selected_pc_codex_task_request(text: str) -> bool:
-    """Keep selected Friday conversational unless the operator clearly requests work."""
-    value = _voice_command_words(text)
-    return bool(re.match(
-        r"^(?:(?:task|job)(?: for)? friday(?: to| with)? )?"
-        r"(?:analy[sz]e|audit|build|change|check|compare|create|debug|deploy|diagnose|edit|"
-        r"find|fix|implement|inspect|investigate|load|open|patch|pull|push|read|restart|review|"
-        r"run|search|start|stop|test|update|verify|write)\b",
-        value,
-        re.IGNORECASE,
-    ))
+    """Use the same project-work boundary as selected Friday text chat."""
+    return is_explicit_project_work_request(text)
 
 
 def _is_document_open_request(text: str) -> bool:
