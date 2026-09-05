@@ -2257,10 +2257,17 @@ export function renderAskUserCard(payload, options) {
   closeBtn.className = 'modal-close ask-user-close';
   closeBtn.setAttribute('aria-label', 'Dismiss question');
   closeBtn.textContent = '×';
-  closeBtn.addEventListener('click', () => {
+  const closeCard = () => {
     card.remove();
     const input = uiModule.el('message');
     if (input) input.focus();
+  };
+  closeBtn.addEventListener('click', closeCard);
+  card.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeCard();
   });
   head.appendChild(closeBtn);
   card.appendChild(head);
@@ -2297,16 +2304,19 @@ export function renderAskUserCard(payload, options) {
       checkbox.value = label;
       row.appendChild(checkbox);
     }
+    const copy = document.createElement('span');
+    copy.className = 'ask-user-option-copy';
     const labelText = document.createElement('span');
     labelText.className = 'ask-user-option-label';
     labelText.innerHTML = emojiText(label);
-    row.appendChild(labelText);
+    copy.appendChild(labelText);
     if (description) {
       const descriptionText = document.createElement('span');
       descriptionText.className = 'ask-user-option-desc';
       descriptionText.innerHTML = emojiText(description);
-      row.appendChild(descriptionText);
+      copy.appendChild(descriptionText);
     }
+    row.appendChild(copy);
     if (!multi) {
       row.type = 'button';
       row.addEventListener('click', () => send(label));

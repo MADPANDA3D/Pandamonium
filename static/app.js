@@ -291,13 +291,13 @@ async function _syncWelcomeModelHint() {
 const FIRST_RUN_DISMISS_KEY = 'pandamonium-first-run-dismissed';
 
 async function _renderFirstRunGuide(identityStatus, options = {}) {
-  const guide = document.getElementById('welcome-setup');
+  const guide = document.getElementById(options.targetId || 'welcome-setup');
   if (!guide || !window._isAdmin) return;
   const identityConfigured = identityStatus?.source === 'configured';
   const hasModel = await _hasUsableChatModel();
   let dismissed = false;
   try { dismissed = sessionStorage.getItem(FIRST_RUN_DISMISS_KEY) === '1'; } catch (_) {}
-  if ((identityConfigured && hasModel) || (dismissed && !options.force)) {
+  if (!options.force && ((identityConfigured && hasModel) || dismissed)) {
     guide.style.display = 'none';
     guide.className = '';
     guide.replaceChildren();
@@ -319,10 +319,11 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
   const dismiss = document.createElement('button');
   dismiss.type = 'button';
   dismiss.className = 'first-run-dismiss';
-  dismiss.textContent = 'Explore first';
+  dismiss.textContent = options.dismissLabel || (options.force ? 'Skip for now' : 'Explore first');
   dismiss.addEventListener('click', () => {
     try { sessionStorage.setItem(FIRST_RUN_DISMISS_KEY, '1'); } catch (_) {}
     guide.style.display = 'none';
+    options.onDismiss?.();
   });
   copy.append(copyText, dismiss);
 
@@ -364,6 +365,7 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
     state.textContent = definition.state;
     button.append(indexEl, label, state);
     button.addEventListener('click', () => {
+      options.onNavigate?.();
       settingsModule.open(definition.tab);
       if (definition.target) {
         setTimeout(() => document.getElementById(definition.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
@@ -371,7 +373,30 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
     });
     steps.append(button);
   });
-  guide.append(copy, steps);
+
+  const actions = document.createElement('div');
+  actions.className = 'first-run-actions';
+  const launchCommand = options.onCommand || ((command) => {
+    const messageInput = document.getElementById('message');
+    const chatForm = document.getElementById('chat-form');
+    if (!messageInput || !chatForm) return;
+    messageInput.value = command;
+    messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+    chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  });
+  const continueSetup = document.createElement('button');
+  continueSetup.type = 'button';
+  continueSetup.className = 'first-run-action';
+  continueSetup.textContent = 'Continue setup';
+  continueSetup.addEventListener('click', () => launchCommand('/setup'));
+  const restartTour = document.createElement('button');
+  restartTour.type = 'button';
+  restartTour.className = 'first-run-action first-run-action-primary';
+  restartTour.textContent = 'Restart product tour';
+  restartTour.addEventListener('click', () => launchCommand('/tour'));
+  actions.append(continueSetup, restartTour);
+
+  guide.append(copy, steps, actions);
 }
 
 async function initPluginSidebar() {
@@ -859,6 +884,7 @@ function initializeEventListeners() {
       // Close one modal at a time (last in DOM = topmost)
       // Map modal id → sidebar list-item id to clear active state
       const modalItemMap = {
+        'guide-modal': null,
         'cookbook-modal': null,
         'rename-session-modal': null,
         'rename-ai-modal': null,
@@ -918,6 +944,8 @@ function initializeEventListeners() {
   const _dynamicModalIds = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal'];
   function dismissModal(modal) {
     if (!modal || modal.classList.contains('hidden')) return;
+    const dismissRun = Symbol('modal-dismiss');
+    modal._dismissRun = dismissRun;
     if (modal.id === 'gallery-modal') {
       const editor = document.getElementById('gallery-editor-container');
       const editing = !!window.__galleryEditLive || !!(
@@ -934,6 +962,7 @@ function initializeEventListeners() {
       content.style.transition = '';
       content.classList.add('modal-closing');
       content.addEventListener('animationend', () => {
+        if (modal._dismissRun !== dismissRun) return;
         if (_dynamicModalIds.includes(modal.id)) {
           modal.remove();
         } else {
@@ -943,6 +972,7 @@ function initializeEventListeners() {
       }, { once: true });
       // Fallback in case animationend doesn't fire
       setTimeout(() => {
+        if (modal._dismissRun !== dismissRun) return;
         if (modal.parentElement && !modal.classList.contains('hidden')) {
           if (_dynamicModalIds.includes(modal.id)) modal.remove();
           else { modal.classList.add('hidden'); content.classList.remove('modal-closing'); }
@@ -1423,12 +1453,50 @@ function initializeEventListeners() {
 
   // Sidebar user bar — settings, admin, profile
   const userBarSettings = el('user-bar-settings');
+  const userBarGuide = el('user-bar-guide');
   const userBarProfile = el('user-bar-profile');
   const userBarAdmin = el('user-bar-admin');
+
+  const guideModal = el('guide-modal');
+  let guideFocusTimer = null;
+  const closeGuideModal = (restoreFocus = true) => {
+    if (guideFocusTimer) clearTimeout(guideFocusTimer);
+    dismissModal(guideModal);
+    if (restoreFocus) guideFocusTimer = setTimeout(() => userBarGuide?.focus(), 260);
+  };
+  const runGuideCommand = (command) => {
+    closeGuideModal(false);
+    setTimeout(() => {
+      if (command === '/tour') window.cancelActiveTour?.();
+      const messageInput = el('message');
+      const chatForm = el('chat-form');
+      if (!messageInput || !chatForm) return;
+      messageInput.value = command;
+      messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+      chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    }, 260);
+  };
 
   if (userBarSettings) {
     userBarSettings.addEventListener('click', () => settingsModule.open());
   }
+  if (userBarGuide) {
+    userBarGuide.addEventListener('click', async () => {
+      if (guideFocusTimer) clearTimeout(guideFocusTimer);
+      if (guideModal) guideModal._dismissRun = null;
+      guideModal?.classList.remove('hidden');
+      await _renderFirstRunGuide(window._agentIdentityStatus || {}, {
+        targetId: 'guide-panel',
+        force: true,
+        dismissLabel: 'Skip for now',
+        onDismiss: () => closeGuideModal(),
+        onNavigate: () => closeGuideModal(false),
+        onCommand: runGuideCommand,
+      });
+      guideModal?.querySelector('.first-run-step, .first-run-action, .first-run-dismiss')?.focus();
+    });
+  }
+  el('close-guide-modal')?.addEventListener('click', () => closeGuideModal());
   if (userBarProfile) {
     // Clicking the user (avatar + name) jumps straight to the Account tab
     // instead of landing on whatever was last selected.
@@ -1445,6 +1513,7 @@ function initializeEventListeners() {
       window._isAdmin = !!d.is_admin;
       window._agentIdentityStatus = d.agent_identity || null;
       if (d.is_admin) _renderFirstRunGuide(window._agentIdentityStatus);
+      if (d.is_admin && userBarGuide) userBarGuide.hidden = false;
       if (d.is_admin && userBarAdmin) userBarAdmin.style.display = '';
       const userBarName = el('user-bar-name');
       const userBarAvatar = el('user-bar-avatar');
