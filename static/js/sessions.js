@@ -1791,6 +1791,9 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     return; // deactivate does a page reload
   }
   try {
+    // An explicit session navigation supersedes any blank/pending New Chat.
+    // Clearing this also makes late default discovery harmless.
+    _pendingChat = null;
     const navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
     _clearHistoryPager();
@@ -2191,7 +2194,10 @@ function _prepareNewChat(pendingChat) {
 }
 
 export function createBlankChat() {
-  _prepareNewChat(null);
+  // Keep a navigation sentinel until discovery or an explicit model choice
+  // supplies a usable pending chat. loadSessions() treats any pending object
+  // as authoritative, while hasPendingChat() below only reports usable models.
+  _prepareNewChat({ source: 'discovering' });
 }
 
 export function createDirectChat(url, modelId, endpointId, source = '') {
@@ -2201,7 +2207,7 @@ export function createDirectChat(url, modelId, endpointId, source = '') {
 /** Actually create the session in the DB. Called on first message send. */
 export async function materializePendingSession() {
   const pending = _pendingChat;
-  if (!pending) return false;
+  if (!pending || !pending.url || !pending.modelId) return false;
   _pendingChat = null;
 
   const incognitoChk = document.getElementById('incognito-toggle');
@@ -2260,7 +2266,9 @@ export async function materializePendingSession() {
   return true;
 }
 
-export function hasPendingChat() { return !!_pendingChat; }
+export function hasPendingChat() {
+  return !!(_pendingChat && _pendingChat.url && _pendingChat.modelId);
+}
 export function getPendingChat() { return _pendingChat; }
 // Getters for external access
 export function getCurrentSessionId() {

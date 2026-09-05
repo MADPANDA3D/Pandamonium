@@ -59,7 +59,7 @@ def test_desktop_new_chat_actions_use_shared_immediate_handler():
     assert "const dc = await _refreshDefaultChat();" not in brand_handler
 
 
-def test_blank_chat_uses_the_shared_session_reset_without_fake_pending_model():
+def test_blank_chat_uses_shared_reset_with_non_materializable_navigation_sentinel():
     source = SESSIONS_JS.read_text(encoding="utf-8")
     blank = _slice(
         source,
@@ -72,10 +72,11 @@ def test_blank_chat_uses_the_shared_session_reset_without_fake_pending_model():
         "export function createBlankChat()",
     )
 
-    assert "_prepareNewChat(null)" in blank
+    assert "_prepareNewChat({ source: 'discovering' })" in blank
     assert "_pendingChat = pendingChat" in prepare
     assert "currentSessionId = null" in prepare
     assert "history.replaceState(null, '', window.location.pathname)" in prepare
+    assert "_pendingChat.url && _pendingChat.modelId" in source
 
 
 def test_manual_model_choice_is_marked_against_late_default_discovery():
@@ -84,4 +85,7 @@ def test_manual_model_choice_is_marked_against_late_default_discovery():
 
     assert "createDirectChat(url, modelId, endpointId, source = '')" in sessions
     assert "_deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual')" in picker
+    assert "sessionModule.createDirectChat(url, mid, endpointId, 'manual')" in Path(
+        "static/js/models.js"
+    ).read_text(encoding="utf-8")
     assert "latestPending.source === 'manual'" in picker

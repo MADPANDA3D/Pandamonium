@@ -81,7 +81,7 @@ function _startChat(url, mid, endpointId) {
   if (window.compareModule && window.compareModule.isActive()) return;
   _trackUsage(mid);
   if (sessionModule) {
-    sessionModule.createDirectChat(url, mid, endpointId);
+    sessionModule.createDirectChat(url, mid, endpointId, 'manual');
   } else if (uiModule) {
     uiModule.showError('Session module not loaded');
   }

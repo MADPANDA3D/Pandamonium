@@ -73,6 +73,7 @@ test('sidebar New Chat leaves the active session before discovery finishes', asy
 
   await expect(page.locator('#current-meta')).toHaveText('New Chat', { timeout: 750 });
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getPendingChat()?.source)).toBe('discovering');
 
   await page.evaluate(() => window.sessionModule.selectSession('session-one'));
   releaseDefaultChat();
