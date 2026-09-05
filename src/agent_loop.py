@@ -13,7 +13,7 @@ import re
 import time
 import logging
 import uuid
-from typing import Any, AsyncGenerator, List, Dict, Optional, Set
+from typing import Any, AsyncGenerator, List, Dict, Mapping, Optional, Set
 from urllib.parse import urlparse
 
 from src.llm_core import (
@@ -67,6 +67,12 @@ from src.agent_tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _empty_async_chunks():
+    """An empty async iterator used when authority injects a retained call."""
+    if False:  # pragma: no cover - keeps this an async generator
+        yield ""
 
 
 def _looks_like_notes_list_request(text: str) -> bool:
@@ -355,6 +361,7 @@ _DOMAIN_RULES = {
     "integrations": """\
 ## Integration/API rules
 - When the user asks what tools, integrations, plugins, or capabilities you can see, call `manage_mcp` with `action=inventory` before answering. Treat that result as current truth; never answer from model memory or this prompt alone.
+- For an overall integration health/status request, inventory every configured surface first. Use each provider's declared read-only status/health tool when one exists, use `api_call` GET only for a configured API integration with a documented health path, and then give one overall summary. Do not sample two arbitrary Portal calls and present them as system-wide health.
 - Lead with connected MCP providers, installed extensions/plugins, and configured API integrations. Summarize capability names into useful groups. Keep core workspace functions separate and expand them only when asked.
 - Preserve the inventory's status exactly. A configured or enabled integration is unverified until a live operation succeeds; never describe inventory presence alone as confirmed access or reachability.
 - Report MAD MCP Portal or ORACLE only when the inventory says they are present; never infer availability from documentation.
@@ -369,6 +376,8 @@ _DOMAIN_RULES = {
     "platform": """\
 ## Pandamonium platform truth rules
 - Questions about Pandamonium's own architecture or protocols require evidence. Use `get_runtime_status` for live model/runtime facts, `manage_mcp action=inventory` for current tool/integration inventory, and a configured read-only worker for source-code inspection when available.
+- Report the running `application_version` from `get_runtime_status`; never infer a Pandamonium version from a worker, model alias, package, or stale source file.
+- For local-model memory or context-capacity explanations, distinguish parameter weights from KV cache, sliding-window-attention cache, and MoE expert cache. Mention a component only when runtime/log/source evidence reports it; never invent an embedding-matrix allocation.
 - Do not extrapolate frameworks, databases, message buses, isolation boundaries, or capabilities from generic software patterns. Distinguish verified runtime facts, verified source facts, and unverified design intent.""",
 }
 
@@ -407,6 +416,7 @@ TOOL_SECTIONS = {
 <shell command>
 ```
 Run any shell command. Output is returned to you. Use for: installing packages, checking files, git, system info, process management, etc.
+When a missing binary must be installed to finish the user's shell task, emit one exact `bash` call that checks for the binary, detects a supported package manager, checks non-interactive sudo before privileged installation, installs, verifies the binary with `command -v`, and only then runs the original command against the exact requested target. Chain failure paths so the original command cannot run after unsupported package manager, unavailable sudo, or failed installation. Let the authority service request approval for that concrete Bash call; do not substitute `ask_user` or ask the model to recreate it after approval.
 Do NOT use bash/curl for web lookup/search/latest/current requests when `web_search` or `web_fetch` is available.
 NEVER use bash to create or change files — no `>`/`>>` redirects, no heredocs (`cat > f << 'EOF'`), no `tee`, `sed -i`, `awk -i`, no `python -c` that writes. To CREATE or fully rewrite a file use `write_file`; to change part of an existing file use `edit_file`. Those show a diff and are the ONLY allowed way to write files. (bash is for read-only inspection: `ls`, `cat` to READ, `grep`, `git status`/`git diff`, builds, installs.)
 For LONG-running commands (package installs, pip/npm, ffmpeg, model downloads, training, builds — anything that may take more than ~20s), make the FIRST line `#!bg` to run it in the BACKGROUND. You get a job id back immediately and are automatically re-invoked with the full output when it finishes — so you never block the chat waiting. Example:
@@ -577,7 +587,7 @@ For a RECURRING event pass `rrule` as an iCalendar RRULE string, e.g. `"FREQ=WEE
 If the user asks for a reminder/alarm before the event, pass `reminder_minutes` as an integer; do not write reminder text into the event description and do NOT also call `manage_notes` for the same reminder because calendar reminders are routed through Notes automatically. \
 `calendar` accepts a name ("Main") or short-id prefix.""",
     "read_calendar": "- ```read_calendar``` — Admin-only: refresh and read the authenticated user's Calendar without event mutations. Args (JSON): {\"action\":\"list_events|list_calendars\", \"start\":\"ISO datetime\"?, \"end\":\"ISO datetime\"?, \"calendar\":\"name or id\"?, \"max_results\":50?}. `list_events` requires explicit start/end no more than 366 days apart. Results are owner-scoped and bounded; if freshness could not be confirmed, say so explicitly. This tool is unavailable in plan mode because its CalDAV pull may update the local cache.",
-    "get_runtime_status": "- ```get_runtime_status``` — Read server-verified model, context, voice, and configured-worker runtime facts. Use this for claims about what is actually running; do not infer provider or architecture from a display alias.",
+    "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version plus server-verified model, context, voice, and configured-worker runtime facts. Use this for claims about what is actually running; do not infer application version, provider, or architecture from a worker/model display alias.",
     "start_agent_task": """\
 ```start_agent_task
 {"worker":"<runtime worker id>","workspace":"<allowed alias>","prompt":"<self-contained read-only task>"}
@@ -2820,6 +2830,10 @@ async def stream_agent_loop(
     base_context_manifest: Optional[Dict[str, Any]] = None,
     context_extensions: Optional[Dict[str, Dict[str, Any]]] = None,
     presenter: Optional[str] = None,
+    approved_action: Optional[Dict[str, Any]] = None,
+    persist_worker_results: bool = True,
+    worker_workspace: Optional[str] = None,
+    worker_target: Optional[str] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -2845,6 +2859,22 @@ async def stream_agent_loop(
     _request_trace_started = time.monotonic()
     base_context_manifest = dict(base_context_manifest or {})
     context_extensions = dict(context_extensions or {})
+    approved_action = dict(approved_action or {})
+    _approved_call = approved_action.get("call")
+    if approved_action and not isinstance(_approved_call, Mapping):
+        approved_action = {}
+        _approved_call = None
+    if approved_action:
+        _approved_binding = approved_action.get("binding") or {}
+        workspace = str(_approved_binding.get("workspace") or "").strip() or workspace
+        messages = _insert_before_latest_user(messages, {
+            "role": "system",
+            "content": (
+                "The authority service has retained the exact operator-approved action for this turn. "
+                "Pandamonium will execute that retained call directly before model generation. Use its "
+                "result to continue the original user task; do not recreate, broaden, or repeat the approved call."
+            ),
+        })
     disabled_tools = set(disabled_tools or [])
     if tool_policy:
         disabled_tools.update(tool_policy.all_disabled_names())
@@ -3395,6 +3425,11 @@ async def stream_agent_loop(
         suppress_skills=_low_signal_turn,
         active_email=active_email,
     )
+    _mcp_action_policies = (
+        mcp_mgr.get_readonly_action_policies()
+        if mcp_mgr and hasattr(mcp_mgr, "get_readonly_action_policies")
+        else {}
+    )
     _extension_catalog_message = _extension_catalog_context_message(context_extensions)
     if _extension_catalog_message:
         messages = _insert_before_latest_user(messages, _extension_catalog_message)
@@ -3619,7 +3654,20 @@ async def stream_agent_loop(
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
 
-    for round_num in range(1, max_rounds + 1):
+    _approved_execution_pending = bool(approved_action)
+    _web_synthesis_reserve = False
+    _model_rounds_used = 0
+    for round_num in range(1, max_rounds + 3):
+        _resume_approved_this_round = _approved_execution_pending
+        if _resume_approved_this_round:
+            _approved_execution_pending = False
+        elif _web_synthesis_reserve:
+            _web_synthesis_reserve = False
+        elif _model_rounds_used >= max_rounds:
+            _exhausted_rounds = True
+            break
+        else:
+            _model_rounds_used += 1
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         native_tool_calls = []  # populated if model uses function calling
@@ -3872,18 +3920,33 @@ async def stream_agent_loop(
             bool(all_tool_schemas),
             agent_stream_timeout,
         )
-        async for chunk in stream_llm_with_fallback(
-            _candidates,
-            messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            prompt_type=prompt_type if round_num == 1 else None,
-            tools=all_tool_schemas if all_tool_schemas else None,
-            tool_choice_none=_ody_doc_finetune_mode,
-            timeout=agent_stream_timeout,
-            session_id=session_id,
-            workload=workload,
-        ):
+        if _resume_approved_this_round:
+            _approved_arguments = _approved_call.get("arguments") or {}
+            native_tool_calls = [{
+                "id": str(_approved_call.get("call_id") or f"approved-{round_num}"),
+                "name": str(_approved_call.get("name") or ""),
+                "arguments": json.dumps(_approved_arguments, separators=(",", ":"), ensure_ascii=False),
+            }]
+            _model_chunks = _empty_async_chunks()
+            logger.info(
+                "[authority] resuming exact approved decision=%s capability=%s",
+                approved_action.get("decision_id"),
+                _approved_call.get("name"),
+            )
+        else:
+            _model_chunks = stream_llm_with_fallback(
+                _candidates,
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                prompt_type=prompt_type if _model_rounds_used == 1 else None,
+                tools=all_tool_schemas if all_tool_schemas else None,
+                tool_choice_none=_ody_doc_finetune_mode,
+                timeout=agent_stream_timeout,
+                session_id=session_id,
+                workload=workload,
+            )
+        async for chunk in _model_chunks:
             if not _round_first_event_logged:
                 _round_first_event_logged = True
                 logger.info(
@@ -4573,7 +4636,10 @@ async def stream_agent_loop(
                     "max_rounds": max_rounds,
                     "max_tool_calls": max_tool_calls,
                 },
-                capability_policy=extension_capabilities.get(block.tool_type),
+                capability_policy=(
+                    extension_capabilities.get(block.tool_type)
+                    or _mcp_action_policies.get(block.tool_type)
+                ),
             )
             _action_started_at = utc_now()
             _action_started_monotonic = time.monotonic()
@@ -4606,7 +4672,10 @@ async def stream_agent_loop(
                     ),
                     configured_workspace=workspace,
                 )
-                _action_call["authority_ref"] = _authority_decision["decision_id"]
+                _action_call["authority_ref"] = (
+                    _authority_decision.get("approval_decision_id")
+                    or _authority_decision["decision_id"]
+                )
                 record_operational_event(
                     request_id=_action_request_id,
                     session_id=session_id,
@@ -4724,6 +4793,9 @@ async def stream_agent_loop(
                             progress_cb=_push_progress,
                             workspace=workspace,
                             presenter=presenter,
+                            persist_worker_result=persist_worker_results,
+                            worker_workspace=worker_workspace,
+                            worker_target=worker_target,
                         )
                     finally:
                         # Sentinel so the drainer knows to stop.
@@ -5156,6 +5228,29 @@ async def stream_agent_loop(
         _append_tool_results(messages, round_response, converted_calls,
                              tool_results, tool_result_texts, used_native, round_num,
                              round_reasoning=round_reasoning)
+
+        if (
+            not _resume_approved_this_round
+            and _model_rounds_used >= max_rounds
+            and any(
+                event.get("tool") == "web_search"
+                and (event.get("action_result") or {}).get("status") == "succeeded"
+                for event in tool_events
+                if event.get("round") == round_num
+            )
+        ):
+            # A search on the final configured tool round still earns one
+            # schema-free synthesis pass. Otherwise the user sees a successful
+            # search card followed by the generic no-answer fallback.
+            _force_answer = True
+            _web_synthesis_reserve = True
+            messages.append({
+                "role": "system",
+                "content": (
+                    "Synthesize the successful web-search results into the user-facing answer now. "
+                    "Do not call another tool. Cite only sources present in the gathered result."
+                ),
+            })
 
         # Emit agent_step event
         yield (

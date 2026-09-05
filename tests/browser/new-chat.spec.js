@@ -14,10 +14,12 @@ function sessionFixture() {
   };
 }
 
-test('sidebar New Chat leaves the active session before discovery finishes', async ({ page }) => {
+test('sidebar New Chat preserves the active configuration and sends immediately', async ({ page }) => {
   let stallDefaultChat = false;
   let releaseDefaultChat;
   const defaultChatGate = new Promise(resolve => { releaseDefaultChat = resolve; });
+  let createdSession = false;
+  let streamedSession = '';
 
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
@@ -33,6 +35,21 @@ test('sidebar New Chat leaves the active session before discovery finishes', asy
     }
     if (url.pathname === '/api/sessions') {
       return route.fulfill({ json: [sessionFixture()] });
+    }
+    if (url.pathname === '/api/session' && route.request().method() === 'POST') {
+      createdSession = true;
+      return route.fulfill({ json: { id: 'session-new' } });
+    }
+    if (url.pathname === '/api/chat_stream') {
+      const body = await route.request().postDataBuffer();
+      streamedSession = body?.toString().match(/name="session"\r\n\r\n([^\r]+)/)?.[1] || '';
+      return route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: 'data: {"type":"model_info","model":"test/model","requested_model":"test/model"}\n\n'
+          + 'data: {"delta":"New conversation ready."}\n\n'
+          + 'data: [DONE]\n\n',
+      });
     }
     if (url.pathname === '/api/history/session-one') {
       return route.fulfill({
@@ -73,10 +90,78 @@ test('sidebar New Chat leaves the active session before discovery finishes', asy
 
   await expect(page.locator('#current-meta')).toHaveText('New Chat', { timeout: 750 });
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(null);
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getPendingChat()?.source)).toBe('discovering');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getPendingChat())).toMatchObject({
+    source: 'new_chat',
+    modelId: 'test/model',
+    url: 'http://model.test/v1/chat/completions',
+  });
+
+  await page.locator('#message:visible').fill('Start another conversation');
+  await page.locator('.send-btn:visible').click();
+  await expect.poll(() => createdSession).toBe(true);
+  await expect.poll(() => streamedSession).toBe('session-new');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-new');
 
   await page.evaluate(() => window.sessionModule.selectSession('session-one'));
   releaseDefaultChat();
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getPendingChat())).toBe(null);
+});
+
+test('New Chat clears the visible session immediately while Compare teardown is pending', async ({ page }) => {
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/sessions') {
+      return route.fulfill({ json: [sessionFixture()] });
+    }
+    if (url.pathname === '/api/history/session-one') {
+      return route.fulfill({
+        json: {
+          history: [
+            { role: 'user', content: 'Old conversation' },
+            { role: 'assistant', content: 'Still visible' },
+          ],
+          model: 'test/model',
+          name: 'Existing chat',
+          endpoint_url: 'http://model.test/v1/chat/completions',
+          offset: 0,
+          limit: 100,
+          total: 2,
+          has_more_before: false,
+        },
+      });
+    }
+    if (url.pathname === '/api/auth/status') {
+      return route.fulfill({ json: { username: 'tester', is_admin: false, privileges: {} } });
+    }
+    if (url.pathname === '/api/default-chat') {
+      return route.fulfill({ json: {} });
+    }
+    if (url.pathname === '/api/model-endpoints' || url.pathname === '/api/models') {
+      return route.fulfill({ json: [] });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto('/static/index.html#session-one');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await expect(page.locator('#chat-history .msg')).toHaveCount(2);
+  await page.locator('#message:visible').fill('unsent draft');
+
+  await page.evaluate(() => {
+    window.compareModule.isActive = () => true;
+    window.compareModule.deactivate = () => new Promise(() => {});
+  });
+  await page.locator('#sidebar-new-chat-btn').click();
+
+  await expect(page.locator('#current-meta')).toHaveText('New Chat', { timeout: 750 });
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getPendingChat()?.source)).toBe('new_chat');
+  await expect(page.locator('#chat-history .msg')).toHaveCount(0);
+  await expect(page.locator('#welcome-screen')).not.toHaveClass(/hidden/);
+  await expect(page.locator('#message:visible')).toHaveValue('');
+
+  await page.evaluate(() => window.sessionModule.loadSessions());
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(null);
+  await expect(page.locator('#current-meta')).toHaveText('New Chat');
 });

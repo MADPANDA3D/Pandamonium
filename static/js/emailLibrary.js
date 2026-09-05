@@ -1230,7 +1230,17 @@ function _mailboxCard(item, provider) {
     badges.appendChild(selectedBadge);
   }
 
-  card.append(providerMark, identity, badges);
+  card.append(providerMark, identity);
+  if (selectable) {
+    const action = document.createElement('span');
+    action.className = 'portal-mailbox-action';
+    action.setAttribute('aria-hidden', 'true');
+    action.textContent = _portalGoogleLoadingProfileId === item.id
+      ? 'Loading'
+      : (_selectedPortalGoogleProfileId === item.id ? 'Selected' : 'Open');
+    card.appendChild(action);
+  }
+  card.appendChild(badges);
   return card;
 }
 

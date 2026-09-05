@@ -2497,24 +2497,6 @@ async function _cmdDemo(args, ctx) {
   // Beat between the welcome line and the first hint so it doesn't snap in.
   await delay(900);
 
-  // Reset Web so the capability-permission step has something to do.
-  try {
-    // Keep old per-mode keys cleared while the adaptive preference takes over.
-    const _st = Storage.getJSON(Storage.KEYS.TOGGLES, {});
-    _st.web = false;
-    _st.web_chat = false;
-    _st.web_agent = false;
-    Storage.setJSON(Storage.KEYS.TOGGLES, _st);
-    // If the web button is currently on, click it to fully unwind it via the
-    // existing handler (covers any state the click handler tracks that we
-    // can't see from here).
-    const _wbtn = document.getElementById('web-toggle-btn');
-    if (_wbtn && _wbtn.classList.contains('active')) _wbtn.click();
-    _wbtn?.classList.remove('active');
-    const _webCb = document.getElementById('web-toggle');
-    if (_webCb) _webCb.checked = false;
-  } catch {}
-
   const sidebar = document.getElementById('sidebar');
 
   const steps = [
@@ -2522,7 +2504,7 @@ async function _cmdDemo(args, ctx) {
       before() { if (sidebar?.classList.contains('hidden')) sidebar.classList.remove('hidden'); } },
     { sel: '#model-picker-btn',   text: 'Pick your LLM, Local or API.', advanceOnClick: true },
     { sel: '.chat-input-bar',     text: 'Every conversation is adaptive. Ask normally and Pandamonium discovers approved tools only when the request needs them.' },
-    { sel: '#web-toggle-btn',     text: 'Capability permissions like <b>web search</b> stay under your control. Pandamonium includes private built-in <b>SearXNG</b> search.', mode: 'click' },
+    { sel: '#web-toggle-btn',     text: 'Capability permissions like <b>web search</b> stay under your control. Pandamonium includes private built-in <b>SearXNG</b> search.' },
     { sel: '#overflow-plus-btn',  text: 'More tools can be found here, or in your sidebar. <b>Click to peek.</b>',
       advanceOnClick: true, pulseNext: true, afterDelay: 2200 },
     { sel: '#message',            text: 'Write your prompt here. Drag and drop files to attach them. <b>/prompt</b> for random prompt, <b>/help</b> for more.',
@@ -5883,6 +5865,7 @@ const COMMANDS = {
     category: 'Getting started',
     help: 'Configure identity, models, and integrations',
     handler: _cmdSetup,
+    default: '_overview',
     usage: '/setup identity  ·  /setup models  ·  /setup integrations  ·  /setup local URL',
     // Provider subs so the autocomplete popup surfaces "/setup deepseek",
     // "/setup openai", etc. when the user types "/setup de". Each sub's
@@ -5892,6 +5875,7 @@ const COMMANDS = {
     // Without the explicit handler, the slash-dispatcher errors with
     // "subDef.handler is not a function".
     subs: {
+      _overview: { handler: (a, c) => _cmdSetup(a, c) },
       identity:   { help: 'Configure the persistent agent identity', usage: '/setup identity', handler: (a, c) => _cmdSetup(['identity', ...a], c) },
       models:     { help: 'Connect a local or hosted model', usage: '/setup models', handler: (a, c) => _cmdSetup(['models', ...a], c) },
       integrations: { help: 'Connect services and plugins', usage: '/setup integrations', handler: (a, c) => _cmdSetup(['integrations', ...a], c) },

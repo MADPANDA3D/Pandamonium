@@ -1221,6 +1221,7 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
         owner,
         codex_thread_id=None,
         presenter=None,
+        **trace,
     ):
         captured.update(
             worker=worker,
@@ -1232,6 +1233,7 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
             owner=owner,
             codex_thread_id=codex_thread_id,
             presenter=presenter,
+            trace=trace,
         )
         return {"task_id": "business-task", "status": "queued"}
 
@@ -1251,6 +1253,8 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
     assert captured["workspace"] == "business"
     assert captured["codex_thread_id"] is None
     assert captured["presenter"] == voice_routes.configured_agent_name()
+    assert captured["trace"]["request_id"] == operational_events[0]["request_id"]
+    assert captured["trace"]["authority_ref"] == "decision-1"
     assert captured["action_call"]["target"] == "worker"
     assert captured["action_call"]["agent_id"] == "assistant"
     assert [event["event_type"] for event in operational_events] == [

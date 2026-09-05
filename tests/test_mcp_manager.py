@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.authority_protocol import action_effect_for
 from src.mcp_manager import _format_mcp_connection_error, _static_http_headers, McpManager
 
 
@@ -104,3 +105,29 @@ def test_mcp_call_preserves_bounded_structured_content_for_native_consumers():
     assert result["structured_content"] == {
         "data": {"items": [{"id": "calendar"}]}
     }
+
+
+def test_readonly_mcp_health_tools_receive_authority_metadata_and_unknowns_fail_closed():
+    manager = McpManager()
+    manager._tools["portal"] = [
+        {"name": "get_health", "annotations": {"readOnlyHint": True}},
+        {"name": "status_services", "annotations": None},
+        {"name": "post_message", "annotations": None},
+    ]
+    manager._connections["portal"] = {"name": "MAD MCP Portal"}
+
+    policies = manager.get_readonly_action_policies()
+
+    assert policies == {
+        "mcp__portal__get_health": {"action_effect": "read"},
+        "mcp__portal__status_services": {"action_effect": "read"},
+    }
+    read_call = {
+        "name": "mcp__portal__get_health",
+        "target": "mcp",
+        "arguments": {},
+        "capability_policy": policies["mcp__portal__get_health"],
+    }
+    unknown_call = {"name": "mcp__portal__post_message", "target": "mcp", "arguments": {}}
+    assert action_effect_for(read_call) == "read"
+    assert action_effect_for(unknown_call) == "unclassified"

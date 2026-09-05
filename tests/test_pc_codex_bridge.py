@@ -90,6 +90,194 @@ def test_bridge_hosts_require_explicit_interfaces():
             raise AssertionError(f"wildcard host {wildcard} was accepted")
 
 
+def test_public_bridge_has_no_default_workspace_catalog():
+    assert bridge._workspace_configuration({}) == ({}, {})
+
+
+def test_workspace_catalog_configuration_supports_safe_display_data(tmp_path):
+    root = tmp_path / "project"
+    paths, names = bridge._workspace_configuration({
+        "test-project": {"path": str(root), "display_name": "Disposable Test Project"},
+        "plain-project": str(tmp_path / "plain"),
+    })
+
+    assert paths == {
+        "test-project": str(root.resolve()),
+        "plain-project": str((tmp_path / "plain").resolve()),
+    }
+    assert names == {
+        "test-project": "Disposable Test Project",
+        "plain-project": "Plain Project",
+    }
+    for invalid in (
+        {"../escape": str(root)},
+        {"project": {"path": "relative/path"}},
+        {"project": {"path": str(root), "secret": "nope"}},
+    ):
+        try:
+            bridge._workspace_configuration(invalid)
+        except RuntimeError as exc:
+            assert str(exc) == "invalid_workspace_configuration"
+        else:
+            raise AssertionError(f"invalid workspace config accepted: {invalid}")
+
+
+def test_catalog_tasks_uses_supported_app_server_and_projects_safe_metadata(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    captured = {}
+
+    def app_server_call(method, params):
+        captured.update(method=method, params=params)
+        return {
+            "data": [
+                {
+                    "id": "019f5022-a520-7de0-9208-018cd2d4d222",
+                    "name": "Safe fixture task",
+                    "preview": "must not be returned",
+                    "cwd": str(root),
+                    "status": {"type": "idle"},
+                    "createdAt": 10,
+                    "updatedAt": 20,
+                    "modelProvider": "private-provider",
+                },
+                {
+                    "id": "019f5022-a520-7de0-9208-018cd2d4d333",
+                    "name": "Outside root",
+                    "cwd": str(outside),
+                    "status": {"type": "idle"},
+                    "createdAt": 10,
+                    "updatedAt": 20,
+                },
+            ],
+            "nextCursor": "opaque-next",
+        }
+
+    monkeypatch.setattr(bridge, "WORKSPACES", {"test-project": str(root)})
+    monkeypatch.setattr(bridge, "WORKSPACE_NAMES", {"test-project": "Test Project"})
+    monkeypatch.setattr(bridge, "_app_server_call", app_server_call)
+
+    page = bridge.catalog_tasks("test-project", query="fixture", cursor="opaque-old", limit=500)
+
+    assert captured == {
+        "method": "thread/list",
+        "params": {
+            "cwd": str(root.resolve()),
+            "limit": 100,
+            "useStateDbOnly": True,
+            "searchTerm": "fixture",
+            "cursor": "opaque-old",
+        },
+    }
+    assert page == {
+        "project_id": "test-project",
+        "items": [{
+            "task_id": "019f5022-a520-7de0-9208-018cd2d4d222",
+            "project_id": "test-project",
+            "title": "Safe fixture task",
+            "status": "idle",
+            "created_at": 10,
+            "updated_at": 20,
+        }],
+        "next_cursor": "opaque-next",
+    }
+    assert "preview" not in json.dumps(page)
+    assert "private-provider" not in json.dumps(page)
+    assert str(root) not in json.dumps(page)
+
+
+def test_project_catalog_paginates_and_counts_without_exposing_roots(tmp_path, monkeypatch):
+    roots = {}
+    for workspace in ("alpha", "beta", "gamma"):
+        root = tmp_path / workspace
+        root.mkdir()
+        roots[workspace] = str(root)
+    monkeypatch.setattr(bridge, "WORKSPACES", roots)
+    monkeypatch.setattr(bridge, "WORKSPACE_NAMES", {
+        "alpha": "Alpha Project", "beta": "Beta Project", "gamma": "Gamma Project",
+    })
+    first = bridge.catalog_projects(query="project", limit=2)
+    second = bridge.catalog_projects(query="project", cursor=first["next_cursor"], limit=2)
+
+    assert [item["project_id"] for item in first["items"]] == ["alpha", "beta"]
+    assert all("task_count" not in item for item in first["items"])
+    assert first["next_cursor"] == "2"
+    assert [item["project_id"] for item in second["items"]] == ["gamma"]
+    assert second["next_cursor"] is None
+    assert first["items"][0]["approved_root"] == "workspace:alpha"
+    assert str(tmp_path) not in json.dumps([first, second])
+
+
+def test_catalog_failures_are_explicit(tmp_path, monkeypatch):
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(bridge, "WORKSPACES", {"missing": str(missing)})
+    monkeypatch.setattr(bridge, "WORKSPACE_NAMES", {"missing": "Missing"})
+
+    project = bridge.catalog_projects()["items"][0]
+    assert project == {
+        "project_id": "missing",
+        "display_name": "Missing",
+        "approved_root": "workspace:missing",
+        "availability": "unavailable",
+        "reason": "project_root_unavailable",
+    }
+    try:
+        bridge.catalog_tasks("denied")
+    except ValueError as exc:
+        assert str(exc) == "project_not_allowlisted"
+    else:
+        raise AssertionError("outside-allowlist project was accepted")
+
+
+def test_catalog_http_endpoint_requires_auth_and_returns_safe_page(tmp_path, monkeypatch):
+    token_file = tmp_path / "token"
+    token_file.write_text("catalog-token", encoding="utf-8")
+    monkeypatch.setattr(bridge, "TOKEN_FILE", token_file)
+    monkeypatch.setattr(bridge, "catalog_projects", lambda **_kwargs: {
+        "items": [{
+            "project_id": "test-project",
+            "display_name": "Test Project",
+            "approved_root": "workspace:test-project",
+            "availability": "available",
+            "task_count": 4,
+        }],
+        "next_cursor": None,
+    })
+    server = bridge.ThreadingHTTPServer(("127.0.0.1", 0), bridge.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        assert response.status == 200
+        health = json.loads(response.read())
+        assert health["protocol_version"] == "pandamonium.codex-bridge.v2"
+        assert health["features"] == {"project_catalog": True, "task_control": True}
+        connection.close()
+
+        connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+        connection.request("GET", "/v1/catalog/projects")
+        assert connection.getresponse().status == 401
+        connection.close()
+
+        connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+        connection.request(
+            "GET",
+            "/v1/catalog/projects?query=test&limit=10",
+            headers={"Authorization": "Bearer catalog-token"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read())["items"][0]["approved_root"] == "workspace:test-project"
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_bridge_resumes_after_stable_event_id(tmp_path):
     task = _task(tmp_path)
     task.data["events"] = [

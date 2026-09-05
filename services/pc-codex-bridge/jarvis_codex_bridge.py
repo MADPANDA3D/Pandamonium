@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import json
 import os
+import queue
 import re
 import subprocess
 import threading
@@ -30,6 +31,7 @@ CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
 WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
+BRIDGE_PROTOCOL_VERSION = "pandamonium.codex-bridge.v2"
 CODEX_MODEL = os.getenv(
     "JARVIS_CODEX_MODEL",
     "gpt-5.6-terra" if WORKER_ID == "pc-codex" else "",
@@ -39,15 +41,38 @@ CODEX_REASONING_EFFORT = os.getenv(
     "high" if WORKER_ID == "pc-codex" else "",
 ).strip()
 TERMINAL = {"completed", "failed", "cancelled"}
-DEFAULT_WORKSPACES = {"workspace": str(Path.home())}
-if WORKER_ID == "vps-codex":
-    DEFAULT_WORKSPACES = {"vps-ops": "/home/jarvis-worker/workspaces/vps-ops"}
+WORKSPACE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def _workspace_configuration(raw: object) -> tuple[dict[str, str], dict[str, str]]:
+    if not isinstance(raw, dict):
+        raise RuntimeError("invalid_workspace_configuration")
+    paths: dict[str, str] = {}
+    names: dict[str, str] = {}
+    for workspace, value in raw.items():
+        if not isinstance(workspace, str) or not WORKSPACE_ID_PATTERN.fullmatch(workspace):
+            raise RuntimeError("invalid_workspace_configuration")
+        if isinstance(value, str):
+            path = value
+            display_name = workspace.replace("-", " ").title()
+        elif isinstance(value, dict) and set(value) <= {"path", "display_name"}:
+            path = value.get("path")
+            display_name = value.get("display_name") or workspace.replace("-", " ").title()
+        else:
+            raise RuntimeError("invalid_workspace_configuration")
+        if not isinstance(path, str) or not Path(path).expanduser().is_absolute():
+            raise RuntimeError("invalid_workspace_configuration")
+        paths[workspace] = str(Path(path).expanduser().resolve())
+        names[workspace] = " ".join(str(display_name).split())[:120] or workspace
+    return paths, names
+
+
 try:
-    WORKSPACES = json.loads(os.getenv("JARVIS_CODEX_WORKSPACES_JSON", "{}")) or DEFAULT_WORKSPACES
+    WORKSPACES, WORKSPACE_NAMES = _workspace_configuration(
+        json.loads(os.getenv("JARVIS_CODEX_WORKSPACES_JSON", "{}"))
+    )
 except json.JSONDecodeError as exc:
     raise RuntimeError("invalid_workspace_configuration") from exc
-if not isinstance(WORKSPACES, dict) or not WORKSPACES:
-    raise RuntimeError("workspace_configuration_required")
 
 DEVELOPER_INSTRUCTIONS = os.getenv("JARVIS_CODEX_DEVELOPER_INSTRUCTIONS", "") or """You are PC Codex working for the authenticated operator through Pandamonium.
 Give short, useful commentary updates at meaningful milestones while you work.
@@ -70,6 +95,12 @@ ARTIFACT_MAX_BYTES = 2_000_000
 
 def _private_worker_mutations_enabled() -> bool:
     return os.getenv("JARVIS_CODEX_PRIVATE_WORKER_MUTATIONS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _task_execution_enabled() -> bool:
+    return os.getenv("JARVIS_CODEX_EXECUTION_ENABLED", "true").strip().lower() in {
         "1", "true", "yes", "on",
     }
 
@@ -152,6 +183,174 @@ def _configured_hosts(value: str | None = None) -> tuple[str, ...]:
     return hosts
 
 
+def _app_server_call(method: str, params: dict, timeout: float = 20) -> dict:
+    """Make one bounded request through Codex's supported stdio app-server."""
+    proc = subprocess.Popen(
+        _codex_command(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    messages: queue.Queue[str | None] = queue.Queue()
+
+    def _read_stdout() -> None:
+        assert proc.stdout
+        try:
+            for line in proc.stdout:
+                messages.put(line)
+        finally:
+            messages.put(None)
+
+    threading.Thread(target=_read_stdout, daemon=True).start()
+    threading.Thread(target=_drain_stderr, args=(proc,), daemon=True).start()
+
+    def _send(message: dict) -> None:
+        if not proc.stdin:
+            raise RuntimeError("codex_app_server_closed")
+        proc.stdin.write(json.dumps(message) + "\n")
+        proc.stdin.flush()
+
+    def _receive(request_id: int) -> dict:
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("codex_app_server_timeout")
+            try:
+                line = messages.get(timeout=remaining)
+            except queue.Empty as exc:
+                raise TimeoutError("codex_app_server_timeout") from exc
+            if line is None:
+                raise RuntimeError("codex_app_server_closed")
+            message = json.loads(line)
+            if message.get("id") != request_id:
+                continue
+            if message.get("error"):
+                raise RuntimeError("codex_app_server_request_failed")
+            return message.get("result") or {}
+
+    try:
+        _send({
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "jarvis-codex-catalog", "version": "1.0"},
+                "capabilities": {"experimentalApi": True},
+            },
+        })
+        _receive(1)
+        _send({"method": "initialized", "params": {}})
+        _send({"id": 2, "method": method, "params": params})
+        return _receive(2)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+def _workspace_root(workspace: str) -> Path:
+    configured = WORKSPACES.get(workspace)
+    if not configured:
+        raise ValueError("project_not_allowlisted")
+    root = Path(configured).resolve()
+    if not root.is_dir():
+        raise ValueError("project_root_unavailable")
+    return root
+
+
+def _safe_thread(thread: dict, workspace: str, root: Path) -> dict | None:
+    try:
+        if Path(str(thread.get("cwd") or "")).resolve() != root:
+            return None
+    except (OSError, ValueError):
+        return None
+    thread_id = str(thread.get("id") or "").strip()
+    if not thread_id or len(thread_id) > 100:
+        return None
+    status_value = thread.get("status")
+    status = status_value.get("type") if isinstance(status_value, dict) else status_value
+    status = re.sub(r"[^a-zA-Z0-9_-]", "", str(status or "unknown"))[:40] or "unknown"
+    title = " ".join(str(thread.get("name") or "Untitled task").split())[:200] or "Untitled task"
+    return {
+        "task_id": thread_id,
+        "project_id": workspace,
+        "title": title,
+        "status": status,
+        "created_at": int(thread.get("createdAt") or 0),
+        "updated_at": int(thread.get("updatedAt") or 0),
+    }
+
+
+def catalog_tasks(
+    workspace: str,
+    *,
+    query: str = "",
+    cursor: str | None = None,
+    limit: int = 50,
+) -> dict:
+    root = _workspace_root(workspace)
+    limit = max(1, min(int(limit), 100))
+    query = " ".join(str(query or "").split())[:200]
+    params: dict = {
+        "cwd": str(root),
+        "limit": limit,
+        "useStateDbOnly": True,
+    }
+    if query:
+        params["searchTerm"] = query
+    if cursor:
+        params["cursor"] = str(cursor)[:2000]
+    result = _app_server_call("thread/list", params)
+    tasks = [
+        safe
+        for item in result.get("data") or []
+        if isinstance(item, dict)
+        for safe in [_safe_thread(item, workspace, root)]
+        if safe is not None
+    ]
+    return {
+        "project_id": workspace,
+        "items": tasks,
+        "next_cursor": str(result.get("nextCursor") or "") or None,
+    }
+
+
+def catalog_projects(*, query: str = "", cursor: str | None = None, limit: int = 20) -> dict:
+    query = " ".join(str(query or "").split()).casefold()[:200]
+    limit = max(1, min(int(limit), 50))
+    projects = [
+        workspace for workspace in sorted(WORKSPACES)
+        if not query or query in workspace.casefold() or query in WORKSPACE_NAMES[workspace].casefold()
+    ]
+    try:
+        offset = max(0, int(cursor or 0))
+    except ValueError as exc:
+        raise ValueError("invalid_catalog_cursor") from exc
+    selected = projects[offset:offset + limit]
+    items = []
+    for workspace in selected:
+        root = Path(WORKSPACES[workspace]).resolve()
+        project = {
+            "project_id": workspace,
+            "display_name": WORKSPACE_NAMES[workspace],
+            "approved_root": f"workspace:{workspace}",
+            "availability": "available" if root.is_dir() else "unavailable",
+        }
+        if not root.is_dir():
+            project["reason"] = "project_root_unavailable"
+        items.append(project)
+    next_offset = offset + len(selected)
+    return {
+        "items": items,
+        "next_cursor": str(next_offset) if next_offset < len(projects) else None,
+    }
+
+
 def _resume_after(task: "Task", after: int, last_event_id: str) -> int:
     if not last_event_id:
         return after
@@ -181,7 +380,9 @@ class Task:
     def save(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         path = STATE_DIR / f"{self.task_id}.json"
-        atomic_write_json(str(path), self.data, indent=2)
+        persisted = dict(self.data)
+        persisted.pop("prompt", None)
+        atomic_write_json(str(path), persisted, indent=2)
 
     def event(self, event_type: str, text: str, metadata: dict | None = None) -> dict:
         with self.changed:
@@ -371,6 +572,11 @@ def _extract_artifacts(task: Task, text: str) -> str:
                 "content": content,
                 "codex_thread_id": task.data.get("codex_thread_id"),
                 "workspace": task.data.get("workspace"),
+                "review_mode": (
+                    "reversible_edit"
+                    if _approved_workspace_write(task)
+                    else "read_only_citation"
+                ),
             },
         )
         cleaned = cleaned.replace(match.group(0), "")
@@ -435,6 +641,29 @@ def _drain_stderr(proc: subprocess.Popen[str]) -> None:
             pass
 
 
+def _validate_resume_thread(task: Task, thread_id: str) -> None:
+    """Bind resume to the exact allowlisted root before starting a new turn."""
+    task.send({
+        "id": 19,
+        "method": "thread/read",
+        "params": {"threadId": thread_id, "includeTurns": False},
+    })
+    try:
+        result = _read_until(task, 19)
+    except Exception as exc:
+        raise RuntimeError("codex_thread_unavailable") from exc
+    thread = result.get("thread") if isinstance(result, dict) else None
+    if not isinstance(thread, dict) or str(thread.get("id") or "") != thread_id:
+        raise RuntimeError("codex_thread_identity_mismatch")
+    try:
+        thread_root = Path(str(thread.get("cwd") or "")).expanduser().resolve(strict=True)
+        approved_root = Path(task.data["source_root"]).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RuntimeError("codex_thread_project_unavailable") from exc
+    if thread_root != approved_root:
+        raise RuntimeError("codex_thread_project_mismatch")
+
+
 def _run_task(task: Task) -> None:
     try:
         _validate_task_permission(
@@ -457,12 +686,14 @@ def _run_task(task: Task) -> None:
         developer_instructions = _task_developer_instructions(task)
         resume_thread_id = task.data.get("codex_thread_id")
         if resume_thread_id:
+            _validate_resume_thread(task, resume_thread_id)
             task.send({
                 "id": 2,
                 "method": "thread/resume",
                 "params": {
                     "threadId": resume_thread_id,
                     "cwd": task.data["cwd"],
+                    "runtimeWorkspaceRoots": _runtime_workspace_roots(task),
                     "sandbox": sandbox,
                     "approvalPolicy": "never",
                     "developerInstructions": developer_instructions,
@@ -548,6 +779,8 @@ def _watch_task(task: Task) -> None:
 
 
 def create_task(payload: dict) -> Task:
+    if not _task_execution_enabled():
+        raise RuntimeError("codex_task_execution_disabled")
     workspace = str(payload.get("workspace") or "").strip()
     source_root = WORKSPACES.get(workspace)
     if not source_root:
@@ -571,6 +804,7 @@ def create_task(payload: dict) -> Task:
             raise ValueError("invalid_codex_thread_id") from exc
     now = int(time.time())
     thread_title = " ".join(str(payload.get("thread_title") or "").split())[:200] or None
+    request_id = " ".join(str(payload.get("request_id") or "").split())[:200] or None
     data = {
         "task_id": str(uuid.uuid4()),
         "worker": WORKER_ID,
@@ -582,6 +816,7 @@ def create_task(payload: dict) -> Task:
         "approved": approved,
         "prompt": prompt[:50000],
         "thread_title": thread_title,
+        "request_id": request_id,
         "codex_thread_id": codex_thread_id,
         "status": "queued",
         "result": None,
@@ -643,7 +878,7 @@ def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "JarvisCodexBridge/1.1"
+    server_version = "JarvisCodexBridge/1.2"
 
     def log_message(self, _fmt: str, *_args) -> None:
         return
@@ -667,11 +902,52 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            _json(self, 200, {"ok": True, "worker": WORKER_ID, "app_server": True, "workspaces": sorted(WORKSPACES)})
+            _json(self, 200, {
+                "ok": True,
+                "worker": WORKER_ID,
+                "app_server": True,
+                "protocol_version": BRIDGE_PROTOCOL_VERSION,
+                "features": {
+                    "project_catalog": True,
+                    "task_control": True,
+                },
+                "task_execution_enabled": _task_execution_enabled(),
+                "workspaces": sorted(WORKSPACES),
+            })
             return
         if not self._check_auth():
             return
         parts = parsed.path.strip("/").split("/")
+        if parts == ["v1", "catalog", "projects"]:
+            params = parse_qs(parsed.query)
+            try:
+                payload = catalog_projects(
+                    query=str((params.get("query") or [""])[0]),
+                    cursor=str((params.get("cursor") or [""])[0]) or None,
+                    limit=int((params.get("limit") or ["20"])[0]),
+                )
+                _json(self, 200, payload)
+            except ValueError as exc:
+                _json(self, 400, {"error": str(exc)})
+            except Exception:
+                _json(self, 503, {"error": "codex_catalog_unavailable"})
+            return
+        if len(parts) == 5 and parts[:3] == ["v1", "catalog", "projects"] and parts[4] == "tasks":
+            params = parse_qs(parsed.query)
+            try:
+                payload = catalog_tasks(
+                    parts[3],
+                    query=str((params.get("query") or [""])[0]),
+                    cursor=str((params.get("cursor") or [""])[0]) or None,
+                    limit=int((params.get("limit") or ["50"])[0]),
+                )
+                _json(self, 200, payload)
+            except ValueError as exc:
+                status = 404 if str(exc) in {"project_not_allowlisted", "project_root_unavailable"} else 400
+                _json(self, status, {"error": str(exc)})
+            except Exception:
+                _json(self, 503, {"error": "codex_catalog_unavailable"})
+            return
         if len(parts) not in {3, 4} or parts[:2] != ["v1", "tasks"]:
             _json(self, 404, {"error": "not_found"})
             return
@@ -765,6 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
             _json(self, 403, {"error": str(exc)})
         except (ValueError, json.JSONDecodeError) as exc:
             _json(self, 400, {"error": str(exc)})
+        except RuntimeError as exc:
+            status = 503 if str(exc) == "codex_task_execution_disabled" else 500
+            _json(self, status, {"error": str(exc)[:500]})
         except Exception as exc:
             _json(self, 500, {"error": str(exc)[:500]})
 
@@ -777,6 +1056,7 @@ def self_check() -> None:
     assert MAX_TASK_RUNTIME >= 60
     assert ARTIFACT_PATTERN.search('[[ODYSSEUS_ARTIFACT path="notes/Mark 5.md" title="Mark 5"]]')
     assert _configured_hosts("127.0.0.1,100.64.0.1,127.0.0.1") == ("127.0.0.1", "100.64.0.1")
+    assert _workspace_configuration({}) == ({}, {})
 
 
 if __name__ == "__main__":

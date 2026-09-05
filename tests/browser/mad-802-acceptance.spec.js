@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 
-test('sidebar reports version status and ordinary chat can select configured Friday', async ({ page }) => {
+test('New Chat preserves configured Friday as the conversation target', async ({ page }) => {
   let fridayConfigured = true;
   let agentCatalogGate = null;
   await page.route('**/api/**', route => {
@@ -15,16 +15,22 @@ test('sidebar reports version status and ordinary chat can select configured Fri
         update_status: 'available',
       } });
     }
-    if (path === '/api/agent-workers') {
+    if (path === '/api/selector-catalog') {
       if (agentCatalogGate) {
-        return agentCatalogGate.then(() => route.fulfill({ json: {} }));
+        return agentCatalogGate.then(() => route.fulfill({ json: {
+          discovery: { schema_version: 'pandamonium.discovery.v1', entities: [] },
+          selections: [],
+        } }));
       }
-      if (!fridayConfigured) return route.fulfill({ json: {} });
+      const entities = fridayConfigured ? [{
+        kind: 'worker', id: 'worker:friday', display_name: 'Friday',
+        health: { state: 'healthy' },
+      }] : [];
+      const selections = fridayConfigured ? [{
+        entity_id: 'worker:friday', kind: 'worker', target: 'pc-codex', selectable: true,
+      }] : [];
       return route.fulfill({ json: {
-        'pc-codex': {
-          id: 'pc-codex', label: 'Friday', configured: true, ready: true,
-          machine: 'Local workstation', connection: { state: 'connected' },
-        },
+        discovery: { schema_version: 'pandamonium.discovery.v1', entities }, selections,
       } });
     }
     if (path === '/api/auth/status') {
@@ -50,8 +56,8 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   const friday = page.locator('.model-switch-item').filter({ hasText: 'Friday' });
   await expect(friday).toBeVisible();
   await friday.click();
-  await expect(page.locator('#model-picker-menu')).toHaveClass(/hidden/);
   await expect(page.locator('#model-picker-label')).toHaveText('Friday');
+  await page.evaluate(() => window.codexWorkspaceBrowser?.close?.());
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
@@ -60,12 +66,6 @@ test('sidebar reports version status and ordinary chat can select configured Fri
     const sessions = await import('/static/js/sessions.js');
     sessions.createBlankChat();
   });
-  await expect.poll(() => page.evaluate(async () => (
-    await import('/static/js/modelPicker.js')
-  ).getSelectedAgentTarget())).toBe('');
-
-  await page.locator('#model-picker-btn').click();
-  await page.locator('.model-switch-item').filter({ hasText: 'Friday' }).click();
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
@@ -88,9 +88,19 @@ test('sidebar reports version status and ordinary chat can select configured Fri
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
 
+  await page.evaluate(async () => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.createBlankChat();
+  });
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('pc-codex');
+  await expect(page.locator('#model-picker-label')).toHaveText('Friday');
+
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('odysseus-agent-selections') || '{}',
   )['session-friday']?.target)).toBe('pc-codex');
+
   fridayConfigured = false;
   let releaseAgentCatalog;
   agentCatalogGate = new Promise(resolve => { releaseAgentCatalog = resolve; });
@@ -108,10 +118,10 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   agentCatalogGate = null;
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
-  ).getSelectedAgentTarget())).toBe('');
+  ).getSelectedAgentTarget())).toBe('pc-codex');
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('odysseus-agent-selections') || '{}',
-  )['session-friday'])).toBeUndefined();
+  )['session-friday']?.available)).toBe(false);
 
   await page.evaluate(async () => {
     const sessions = await import('/static/js/sessions.js');

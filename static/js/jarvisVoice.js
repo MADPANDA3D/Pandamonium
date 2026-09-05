@@ -125,6 +125,8 @@ let workerCatalog = {
   hermes: { enabled: false, machine: 'Remote agent', connection: { state: 'gated' } },
   'vps-codex': { enabled: false, machine: 'Remote server', connection: { state: 'gated' } },
 };
+let selectorEntries = [];
+let selectorCatalogState = 'loading';
 
 function voiceTargetForModel(modelId, endpointUrl = '') {
   const model = String(modelId || '').trim().toLowerCase().split('/').pop();
@@ -138,9 +140,8 @@ function $(id) {
 }
 
 function voiceTargetLabel(target = voiceTarget) {
-  return target === 'jarvis'
-    ? getBrandName()
-    : (workerCatalog[target]?.label || VOICE_TARGET_LABELS[target] || target);
+  return workerCatalog[target]?.label
+    || (target === 'jarvis' ? getBrandName() : (VOICE_TARGET_LABELS[target] || target));
 }
 
 function isCurrentVoiceCall(callGeneration) {
@@ -1277,6 +1278,60 @@ function refreshAgentControl() {
   });
 }
 
+function renderSelectorMenu() {
+  const menu = $('jarvis-agent-menu');
+  const cancel = $('jarvis-agent-cancel');
+  if (!menu || !cancel) return;
+  menu.querySelectorAll('.jarvis-selector-generated, .jarvis-selector-status').forEach(node => node.remove());
+  if (selectorCatalogState === 'loading' || selectorCatalogState === 'error' || !selectorEntries.length) {
+    const statusNode = document.createElement('div');
+    statusNode.className = `jarvis-selector-status${selectorCatalogState === 'error' ? ' is-error' : ''}`;
+    statusNode.setAttribute('role', selectorCatalogState === 'error' ? 'alert' : 'status');
+    statusNode.textContent = selectorCatalogState === 'loading'
+      ? 'Discovering configured choices…'
+      : (selectorCatalogState === 'error'
+        ? 'Selector discovery failed. The active target was not rerouted.'
+        : 'No configured choices are available.');
+    menu.insertBefore(statusNode, cancel);
+    if (!selectorEntries.length) return;
+  }
+  const kinds = [
+    ['agent', 'Agents'],
+    ['worker', 'Workers'],
+    ['model', 'Models'],
+  ];
+  kinds.forEach(([kind, label]) => {
+    const entries = selectorEntries.filter(entry => entry.kind === kind);
+    if (!entries.length) return;
+    const heading = document.createElement('div');
+    heading.className = 'jarvis-selector-section jarvis-selector-generated';
+    heading.textContent = label;
+    menu.insertBefore(heading, cancel);
+    entries.forEach(entry => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `${kind === 'model' ? 'jarvis-model-target' : 'jarvis-target'} jarvis-selector-generated`;
+      button.setAttribute('role', kind === 'model' ? 'menuitem' : 'menuitemradio');
+      if (kind !== 'model') {
+        button.dataset.worker = entry.target;
+        button.setAttribute('aria-checked', entry.target === voiceTarget ? 'true' : 'false');
+        button.classList.toggle('is-active', entry.target === voiceTarget);
+      } else {
+        button.dataset.modelId = entry.modelId;
+        button.dataset.endpointId = entry.endpointId;
+      }
+      button.disabled = !entry.selectable;
+      button.title = entry.selectable ? entry.display : `${entry.display} is unavailable: ${entry.reason}`;
+      const name = document.createElement('span');
+      name.textContent = entry.display;
+      const detail = document.createElement('small');
+      detail.textContent = entry.selectable ? kind : `${kind} · ${entry.reason.replace(/_/g, ' ')}`;
+      button.append(name, detail);
+      menu.insertBefore(button, cancel);
+    });
+  });
+}
+
 function refreshVoiceIdentity(refreshDetail = false) {
   const voiceName = voiceTargetLabel();
   document.querySelectorAll('.jarvis-call-name').forEach(element => {
@@ -1305,28 +1360,57 @@ function refreshVoiceIdentity(refreshDetail = false) {
 }
 
 async function loadWorkerCatalog() {
+  selectorCatalogState = 'loading';
+  renderSelectorMenu();
   try {
-    const workers = await fetchJson('/api/agent-workers');
-    workerCatalog = { ...workerCatalog, ...workers };
-    Object.entries(workers || {}).forEach(([worker, details]) => {
-      if (details?.label) {
-        WORKER_LABELS[worker] = details.label;
-        VOICE_TARGET_LABELS[worker] = details.label;
-      }
+    const payload = await fetchJson('/api/selector-catalog');
+    if (payload?.discovery?.schema_version !== 'pandamonium.discovery.v1') {
+      throw new Error('invalid_selector_catalog');
+    }
+    const entities = Array.isArray(payload?.discovery?.entities) ? payload.discovery.entities : [];
+    const entityById = new Map(entities.map(entity => [entity.id, entity]));
+    selectorEntries = (Array.isArray(payload?.selections) ? payload.selections : []).flatMap(selection => {
+      const entity = entityById.get(selection.entity_id);
+      if (!entity || !['model', 'agent', 'worker'].includes(entity.kind)) return [];
+      return [{
+        kind: entity.kind,
+        target: String(selection.target || ''),
+        modelId: String(selection.model_id || ''),
+        endpointId: String(selection.endpoint_id || ''),
+        display: String(entity.display_name || 'Configured choice'),
+        selectable: selection.selectable === true,
+        reason: String(selection.reason || entity.health?.reason || 'unavailable'),
+        health: String(entity.health?.state || 'unknown'),
+      }];
     });
+    selectorEntries.filter(entry => entry.kind !== 'model' && entry.target).forEach(entry => {
+      workerCatalog[entry.target] = {
+        ...(workerCatalog[entry.target] || {}),
+        label: entry.display,
+        enabled: entry.selectable,
+        configured: true,
+        machine: entry.kind === 'agent' ? 'Conversational agent' : 'Execution worker',
+        connection: { state: entry.selectable ? 'connected' : entry.reason },
+      };
+      WORKER_LABELS[entry.target] = entry.display;
+      VOICE_TARGET_LABELS[entry.target] = entry.display;
+    });
+    selectorCatalogState = 'ready';
     const pcLabel = $('set-ttsPcCodexLabel');
     const hermesLabel = $('set-ttsHermesLabel');
     if (pcLabel) pcLabel.textContent = voiceTargetLabel('pc-codex');
     if (hermesLabel) hermesLabel.textContent = voiceTargetLabel('hermes');
   } catch (error) {
-    console.warn('Could not load Jarvis worker status:', error);
+    selectorCatalogState = 'error';
+    console.warn('Could not load the shared selector catalog:', error);
   }
+  renderSelectorMenu();
   refreshAgentControl();
 }
 
 function setVoiceTarget(worker, persist = true) {
   const details = workerCatalog[worker];
-  if (worker !== 'jarvis' && details && !details.enabled) {
+  if (worker !== 'jarvis' && worker !== 'friday' && (!details || !details.enabled)) {
     showToast(`${voiceTargetLabel(worker)} is not connected yet.`);
     return false;
   }
@@ -1693,6 +1777,13 @@ function appendActivityAction(row, event) {
     row.appendChild(open);
   }
   if (event.type === 'artifact' && event.metadata?.document_id) {
+    const citation = document.createElement('code');
+    citation.className = 'jarvis-task-artifact-citation';
+    citation.textContent = String(event.metadata.citation || event.metadata.source_path || 'workspace artifact');
+    citation.title = event.metadata.review_mode === 'reversible_edit'
+      ? 'Reversible edit ready for review'
+      : 'Read-only workspace citation';
+    row.appendChild(citation);
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'jarvis-task-event-action';
@@ -2039,6 +2130,17 @@ function followWorkerTask(taskId, affectVoiceLayout = true) {
     } catch (error) { console.warn('Worker event parse failed:', error); }
   };
   stream.onerror = refreshAgentControl;
+}
+
+function trackExternalWorkerTask(task) {
+  task = rememberTask(task);
+  if (!task || !taskVisible(task)) return;
+  ensureActivityGroup(task);
+  if (!TERMINAL_TASK_STATES.has(String(task.status || ''))) {
+    followWorkerTask(task.task_id);
+    if (isActive) setAgentWorkspaceActive(true);
+  }
+  refreshAgentControl();
 }
 
 async function restoreSessionTasks(targetSessionId) {
@@ -3114,7 +3216,7 @@ function bind() {
   const agentChip = $('jarvis-agent-chip');
   const cancelTaskBtn = $('jarvis-agent-cancel');
   const agentSelector = document.querySelector('.jarvis-agent-selector');
-  const targetButtons = document.querySelectorAll('.jarvis-target');
+  const agentMenu = $('jarvis-agent-menu');
 
   if (railBtn) {
     railBtn.innerHTML = ICON_PHONE;
@@ -3165,13 +3267,21 @@ function bind() {
   });
   $('extension-surface-chat')?.addEventListener('click', () => showChatFromExtension());
   $('extension-surface-close')?.addEventListener('click', () => disengageExtensionSurface());
-  targetButtons.forEach(button => {
-    button.addEventListener('click', () => {
-      if (!button.disabled) {
-        activeWorkspace = button.dataset.workspace || activeWorkspace;
-        setVoiceTarget(button.dataset.worker || 'jarvis');
-      }
-    });
+  agentMenu?.addEventListener('click', event => {
+    const button = event.target.closest('.jarvis-target, .jarvis-model-target');
+    if (!button || button.disabled) return;
+    if (button.classList.contains('jarvis-model-target')) {
+      document.dispatchEvent(new CustomEvent('odysseus:auto-select-model', { detail: {
+        modelId: button.dataset.modelId || '',
+        endpointId: button.dataset.endpointId || '',
+        force: true,
+      } }));
+      setAgentMenuOpen(false);
+      showToast('The selected model will be used by chat and the next voice session.');
+      return;
+    }
+    activeWorkspace = button.dataset.workspace || activeWorkspace;
+    setVoiceTarget(button.dataset.worker || 'jarvis');
   });
   document.addEventListener('click', event => {
     if (!agentSelector?.contains(event.target)) setAgentMenuOpen(false);
@@ -3224,6 +3334,7 @@ window.jarvisVoice = {
   interrupt,
   isActive: isCallActive,
   restoreSessionTasks,
+  trackWorkerTask: trackExternalWorkerTask,
   applyExtensionSurfaceControl,
   prepareExtensionTextTurn,
   showChatForApproval: () => showChatFromExtension('Approval required in chat.'),

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import getpass
 import hashlib
 import json
 import os
 import re
+import socket
 import threading
 import uuid
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -350,7 +353,7 @@ def action_effect_for(call: Mapping[str, Any]) -> str:
         candidates.append("read")
     elif name in _DEFAULT_EFFECT_BY_CAPABILITY:
         candidates.append(_DEFAULT_EFFECT_BY_CAPABILITY[name])
-    elif not target.startswith("extension:"):
+    elif not candidates and not target.startswith("extension:"):
         return "unclassified"
     return max(candidates, key=lambda effect: _EFFECT_STRICTNESS[effect]) if candidates else "unclassified"
 
@@ -376,7 +379,57 @@ class AuthorityStore:
             and os.getenv("DATABASE_URL", "").lower() == "sqlite:///:memory:"
         )
         self._memory_state: dict[str, Any] = {"decisions": {}, "receipts": {}}
+        # Exact executable calls stay process-local. The durable ledger stores
+        # only the redacted preview + fingerprint; after a restart an old
+        # approval therefore fails stale instead of replaying secret-bearing
+        # arguments from disk.
+        self._pending_actions: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+
+    @staticmethod
+    def _runtime_binding(configured_workspace: str | None = None) -> dict[str, str | None]:
+        return {
+            "host": socket.gethostname(),
+            "user": getpass.getuser(),
+            "workspace": str(configured_workspace or "").strip() or None,
+        }
+
+    @staticmethod
+    def _binding_matches(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+        return all(str(left.get(key) or "") == str(right.get(key) or "") for key in ("host", "user"))
+
+    def _resumable_approval(
+        self,
+        state: Mapping[str, Any],
+        *,
+        operator_id: str,
+        session_id: str,
+        now: datetime,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+        matches = []
+        for decision in state.get("decisions", {}).values():
+            if (
+                decision.get("operator_id") != operator_id
+                or str(decision.get("session_id") or "") != session_id
+                or decision.get("status") != "resolved"
+            ):
+                continue
+            receipt = state.get("receipts", {}).get(str(decision.get("receipt_id") or ""))
+            pending = self._pending_actions.get(str(decision.get("decision_id") or ""))
+            if not receipt or not pending:
+                continue
+            expires = _parse_time(receipt.get("expires_at"))
+            if (
+                receipt.get("decision") != "allow"
+                or receipt.get("status") != "active"
+                or (expires and expires <= now)
+            ):
+                continue
+            matches.append((decision, receipt, pending))
+        if len(matches) != 1:
+            return None
+        decision, receipt, pending = matches[0]
+        return dict(decision), dict(receipt), deepcopy(pending)
 
     def _read(self) -> dict[str, Any]:
         if self._ephemeral:
@@ -407,6 +460,7 @@ class AuthorityStore:
         request_id: str,
         fingerprint: str,
         now: datetime,
+        execution_binding: Mapping[str, Any],
     ) -> dict[str, Any] | None:
         matches = []
         dirty = False
@@ -421,6 +475,10 @@ class AuthorityStore:
             if receipt.get("operator_id") != operator_id or receipt.get("agent_id") != agent_id:
                 continue
             if receipt.get("argument_fingerprint") != fingerprint:
+                continue
+            if not self._binding_matches(receipt.get("execution") or {}, execution_binding):
+                continue
+            if str((receipt.get("execution") or {}).get("workspace") or "") != str(execution_binding.get("workspace") or ""):
                 continue
             if receipt.get("decision") == "deny" and receipt.get("request_id") != request_id:
                 continue
@@ -479,16 +537,73 @@ class AuthorityStore:
             )
             if dirty:
                 self._write(state)
+            if not active and choice == "approve":
+                resumed = self._resumable_approval(
+                    state,
+                    operator_id=operator_id,
+                    session_id=session_id,
+                    now=_now(),
+                )
+                if resumed:
+                    decision, receipt, pending = resumed
+                    return {
+                        "choice": choice,
+                        "decision": decision,
+                        "receipt": receipt,
+                        "pending_action": pending,
+                    }
+                recently_resolved = []
+                explicit_repeat = " ".join(
+                    re.sub(r"[^a-z ]", " ", str(text or "").lower()).split()
+                ) in {"approve", "approved"}
+                if explicit_repeat:
+                    for row in state["decisions"].values():
+                        resolved_at = _parse_time(row.get("resolved_at"))
+                        if (
+                            row.get("operator_id") == operator_id
+                            and str(row.get("session_id") or "") == session_id
+                            and row.get("status") == "resolved"
+                            and row.get("decision") == "approval_required"
+                            and resolved_at
+                            and _now() - resolved_at <= timedelta(minutes=10)
+                        ):
+                            recently_resolved.append(row)
+                if recently_resolved:
+                    latest = max(recently_resolved, key=lambda row: str(row.get("resolved_at") or ""))
+                    return {
+                        "choice": "repeat",
+                        "decision": dict(latest),
+                        "error": "authority_decision_already_resolved",
+                    }
             if len(active) != 1:
                 return None
             decision = dict(active[0])
-            receipt = self.resolve(
-                decision["decision_id"],
-                operator_id=operator_id,
-                choice=choice,
-                scope="once",
-            )
-        return {"choice": choice, "decision": decision, "receipt": receipt}
+            try:
+                receipt = self.resolve(
+                    decision["decision_id"],
+                    operator_id=operator_id,
+                    choice=choice,
+                    scope="once",
+                )
+            except ValueError as exc:
+                if str(exc) in {
+                    "authority_execution_context_unavailable",
+                    "authority_execution_context_changed",
+                    "authority_decision_expired",
+                }:
+                    return {
+                        "choice": "stale",
+                        "decision": decision,
+                        "error": str(exc),
+                    }
+                raise
+            pending = deepcopy(self._pending_actions.get(decision["decision_id"]))
+        return {
+            "choice": choice,
+            "decision": decision,
+            "receipt": receipt,
+            **({"pending_action": pending} if pending else {}),
+        }
 
     def decide(
         self,
@@ -516,6 +631,7 @@ class AuthorityStore:
         decision = "allow"
         basis = "owner_scope"
         receipt_id = None
+        receipt = None
 
         if not operator and effect == "read" and str(call.get("name") or "") in _PUBLIC_READS:
             decision, basis = "allow", "public_non_owner_read"
@@ -542,6 +658,7 @@ class AuthorityStore:
                     request_id=str(call.get("request_id") or ""),
                     fingerprint=fingerprint,
                     now=now,
+                    execution_binding=self._runtime_binding(configured_workspace),
                 )
                 if receipt:
                     receipt_id = receipt["receipt_id"]
@@ -549,6 +666,7 @@ class AuthorityStore:
                         decision, basis = "deny", "denial_receipt"
                     else:
                         decision, basis = "allow", f"approval_receipt:{receipt.get('scope')}"
+                        self._pending_actions.pop(str(receipt.get("decision_id") or ""), None)
                         if receipt.get("scope") == "once":
                             receipt["status"] = "consumed"
                             receipt["consumed_at"] = _iso(now)
@@ -593,13 +711,23 @@ class AuthorityStore:
             "decision": decision,
             "policy_basis": basis,
             "receipt_id": receipt_id,
+            "approval_decision_id": (
+                receipt.get("decision_id") if receipt_id and receipt else None
+            ),
             "preview": safe_preview(call.get("arguments") or {}),
+            "execution": self._runtime_binding(configured_workspace),
             "created_at": _iso(now),
             "expires_at": _iso(now + timedelta(minutes=10)),
         }
         with self._lock:
             state = self._read()
             state["decisions"][decision_id] = record
+            if decision == "approval_required":
+                self._pending_actions[decision_id] = {
+                    "decision_id": decision_id,
+                    "call": deepcopy(dict(call)),
+                    "binding": self._runtime_binding(configured_workspace),
+                }
             self._write(state)
         return record
 
@@ -629,6 +757,20 @@ class AuthorityStore:
                 raise ValueError("invalid_authority_choice")
             if scope not in APPROVAL_SCOPES:
                 raise ValueError("invalid_authority_scope")
+            if choice == "approve":
+                pending = self._pending_actions.get(decision_id)
+                if not pending:
+                    decision["status"] = "expired"
+                    self._write(state)
+                    raise ValueError("authority_execution_context_unavailable")
+                current_binding = self._runtime_binding(
+                    (pending.get("binding") or {}).get("workspace")
+                )
+                if not self._binding_matches(pending.get("binding") or {}, current_binding):
+                    decision["status"] = "expired"
+                    self._pending_actions.pop(decision_id, None)
+                    self._write(state)
+                    raise ValueError("authority_execution_context_changed")
             receipt_id = str(uuid.uuid4())
             receipt_expires = None
             if scope == "time_bounded":
@@ -644,6 +786,7 @@ class AuthorityStore:
                 "call_id": decision.get("call_id"),
                 "capability": decision.get("capability"),
                 "argument_fingerprint": decision["argument_fingerprint"],
+                "execution": deepcopy(decision.get("execution") or {}),
                 "decision": "allow" if choice == "approve" else "deny",
                 "scope": scope,
                 "status": "active",
@@ -654,6 +797,8 @@ class AuthorityStore:
             decision["resolved_at"] = _iso(now)
             decision["receipt_id"] = receipt_id
             state["receipts"][receipt_id] = receipt
+            if choice == "deny":
+                self._pending_actions.pop(decision_id, None)
             self._write(state)
             return receipt
 

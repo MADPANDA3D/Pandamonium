@@ -55,6 +55,9 @@ following maintained platform capabilities.
   brings in tools only when the request needs them.
 - Local and API model support through configurable endpoints, with model
   switching that does not replace the agent's identity, memory, or sessions.
+- One owner-visible selector classifies inference models, conversational agents,
+  and execution workers from the same live discovery and health data in chat
+  and voice, including explicit unavailable states without silent rerouting.
 
 ### Governed agents, tools, and extensions
 
@@ -95,6 +98,9 @@ following maintained platform capabilities.
 - Optional concurrent read-only worker adapters with attributed progress,
   cancellation, session reconstruction, health gates, and disabled-by-default
   configuration.
+- The optional PC Codex bridge exposes only installation-allowlisted projects
+  and owner-safe task metadata through supported Codex App Server APIs, with
+  exact resume, create, steer, cancel, progress, and cited artifact handoff.
   See the [Voice Orb documentation](docs/voice-orb/README.md).
 
 ### Reliability, deployment, and security

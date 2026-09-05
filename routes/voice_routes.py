@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.constants import DATA_DIR
+from core.constants import APP_VERSION, DATA_DIR
 from core.atomic_io import atomic_write_json
 from core.middleware import require_admin
 from core.models import ChatMessage
@@ -1362,7 +1362,22 @@ def _num_predict_for_text(text: str) -> int:
 
 
 def _asks_runtime_status(text: str) -> bool:
-    return bool(re.search(r"\b(what|which|identify|runtime|model|architecture|quantization)\b.*\b(model|running|runtime|architecture|quantization)\b", text, re.IGNORECASE))
+    return bool(re.search(r"\b(what|which|identify|runtime|model|architecture|quantization|version)\b.*\b(model|running|runtime|architecture|quantization|version)\b", text, re.IGNORECASE))
+
+
+def _voice_runtime_status_reply(voice_session: dict[str, Any], chat_session: Any) -> str:
+    model = str(getattr(chat_session, "model", "") or "unknown model")
+    character = _voice_character_name(voice_session)
+    settings = load_settings()
+    provider = str(settings.get("tts_provider") or "disabled")
+    voice = (
+        _tts_voice_for_final({"diagnostics": {"character_name": character}})
+        or str(settings.get("tts_voice") or "default")
+    )
+    return (
+        f"Pandamonium is running version {APP_VERSION}. I am {character}, using {model} for this voice call. "
+        f"Speech is rendered through {provider}, using {voice}."
+    )
 
 
 def _asks_current_business(text: str) -> bool:
@@ -2715,6 +2730,9 @@ async def _dispatch_worker_request(
                 False,
                 owner,
                 presenter=_voice_character_name(voice_session),
+                request_id=request_id,
+                call_id=call["call_id"],
+                authority_ref=call["authority_ref"],
             )
             action = "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
     except Exception as exc:
@@ -3226,13 +3244,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         chat_session = _voice_chat_session(chat_session_id)
         model = str(getattr(chat_session, "model", "") or "unknown model")
         character = _voice_character_name(voice_session)
-        settings = load_settings()
-        provider = str(settings.get("tts_provider") or "disabled")
-        voice = _tts_voice_for_final({"diagnostics": {"character_name": character}}) or str(settings.get("tts_voice") or "default")
-        reply = (
-            f"I am {character}, using {model} for this voice call. "
-            f"Speech is rendered through {provider}, using {voice}."
-        )
+        reply = _voice_runtime_status_reply(voice_session, chat_session)
         yield {"type": "assistant_delta", "text": reply}
         yield {
             "type": "final",
@@ -3356,20 +3368,21 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         operator_id=str(operator_identity(owner) or ""),
         session_id=chat_session_id,
     )
-    if approval_reply and approval_reply["choice"] == "deny":
+    if approval_reply and approval_reply["choice"] in {"deny", "stale", "repeat"}:
         capability = str((approval_reply["decision"].get("capability") or {}).get("name") or "action")
-        reply = f"Denied: {capability}. I will not run it."
+        if approval_reply["choice"] == "deny":
+            reply = f"Denied: {capability}. I will not run it."
+        elif approval_reply["choice"] == "repeat":
+            reply = f"That approval for {capability} was already handled. Nothing ran again."
+        else:
+            reply = f"That approval for {capability} is stale. Nothing ran; request the action again."
         yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(operator_text, reply, "authority_denied")
+        yield _server_final_event(operator_text, reply, f"authority_{approval_reply['choice']}")
         return
+    approved_action = approval_reply.get("pending_action") if approval_reply else None
     if approval_reply:
         decision = approval_reply["decision"]
         capability = str((decision.get("capability") or {}).get("name") or "the pending action")
-        text = (
-            f"Proceed with the exact previously requested {capability} action now. "
-            f"The authenticated operator approved decision {decision['decision_id']} once. "
-            "Reissue the original call with unchanged target and arguments; do not broaden it."
-        )
     voice_session["_protocol_request_id"] = str(uuid.uuid4())
     selected_target = str(voice_session.get("target") or "jarvis")
     origin_target = _voice_origin_target(voice_session, chat_session)
@@ -3481,6 +3494,12 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         ),
         context_extensions=extension_context,
         presenter=_voice_character_name(voice_session),
+        approved_action=approved_action,
+        persist_worker_results=selected_target != "pc-codex",
+        worker_workspace=(
+            str(voice_session.get("workspace") or "home-lab")
+            if selected_target == "pc-codex" else None
+        ),
     ):
         if not chunk.startswith("data: "):
             continue
