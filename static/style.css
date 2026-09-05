@@ -525,7 +525,7 @@ body.bg-pattern-sparkles {
       background: currentColor;
     }
 
-    .sidebar-update-state.is-current { color: #55c98d; opacity: 0.85; }
+    .sidebar-update-state.is-current { color: var(--color-success); opacity: 0.85; }
     .sidebar-update-state.is-available { color: var(--accent, var(--red)); opacity: 1; }
     .sidebar-update-state.is-unknown { opacity: 0.45; }
 
@@ -534,7 +534,7 @@ body.bg-pattern-sparkles {
       padding: 5px 8px;
       border-radius: 6px;
       background: var(--accent, var(--red));
-      color: #fff;
+      color: var(--bg);
       font-size: 9px;
       font-weight: 700;
       line-height: 1;
