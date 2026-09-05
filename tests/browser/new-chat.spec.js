@@ -218,6 +218,9 @@ test('New Chat clears a completed tool conversation without a browser refresh', 
 
   await page.goto('/static/index.html#session-one');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await expect.poll(() => page.evaluate(() => (
+    typeof document.querySelector('#chat-form')?.onsubmit === 'function'
+  ))).toBe(true);
 
   await page.locator('#message:visible').fill('Run whoami and tell me the result');
   await page.locator('.send-btn:visible').click();
