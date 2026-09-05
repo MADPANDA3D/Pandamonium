@@ -357,10 +357,13 @@ def _persist_result(task: dict, text: str) -> None:
         return
 
 
-def consume_task_result(task_id: str, *, owner: str) -> dict:
+def consume_task_result(task_id: str, *, owner: str, session_id: str | None = None) -> dict:
     """Hand a completed worker result to the orchestrator without a raw duplicate."""
     with _LOCK:
         task = require_task_owner(task_id, owner)
+        expected_session_id = str(session_id or "").strip()
+        if expected_session_id and str(task.get("session_id") or "") != expected_session_id:
+            return task
         if task.get("status") != "completed":
             return task
 

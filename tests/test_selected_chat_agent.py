@@ -33,7 +33,7 @@ def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch)
     consumed = []
     monkeypatch.setattr(
         "src.jarvis_agent.consume_task_result",
-        lambda task_id, *, owner: consumed.append((task_id, owner)),
+        lambda task_id, *, owner, session_id: consumed.append((task_id, owner, session_id)),
     )
 
     _retire_synthesized_worker_results({
@@ -41,9 +41,9 @@ def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch)
             {"tool": "read_agent_task", "task_id": "running", "task_status": "running"},
             {"tool": "read_agent_task", "task_id": "complete", "task_status": "completed"},
         ],
-    }, "leo")
+    }, "leo", "chat-1")
 
-    assert consumed == [("complete", "leo")]
+    assert consumed == [("complete", "leo", "chat-1")]
 
 
 def test_selected_friday_routes_contextual_followup_only_with_active_task(monkeypatch):

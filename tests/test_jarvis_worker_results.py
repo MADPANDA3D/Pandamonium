@@ -320,7 +320,16 @@ def test_orchestrated_worker_result_waits_for_one_presenter_response(tmp_path, m
     assert len(manager.messages) == 1
     assert jarvis_agent.get_task("task-1")["result_persisted"] is True
 
-    consumed = jarvis_agent.consume_task_result("task-1", owner="leo")
+    not_consumed = jarvis_agent.consume_task_result(
+        "task-1", owner="leo", session_id="another-session",
+    )
+
+    assert len(manager.messages) == 1
+    assert not not_consumed.get("result_consumed")
+
+    consumed = jarvis_agent.consume_task_result(
+        "task-1", owner="leo", session_id="session-1",
+    )
 
     assert manager.messages == []
     assert consumed["result_consumed"] is True

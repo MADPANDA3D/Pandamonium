@@ -93,7 +93,7 @@ def _selected_agent_context(label: str) -> str:
     )
 
 
-def _retire_synthesized_worker_results(metrics: dict, owner: str) -> None:
+def _retire_synthesized_worker_results(metrics: dict, owner: str, session_id: str) -> None:
     """Remove provisional raw worker messages only after Jarvis is durably saved."""
     from src.jarvis_agent import consume_task_result
 
@@ -106,7 +106,7 @@ def _retire_synthesized_worker_results(metrics: dict, owner: str) -> None:
     }
     for task_id in task_ids:
         try:
-            consume_task_result(task_id, owner=owner)
+            consume_task_result(task_id, owner=owner, session_id=session_id)
         except Exception:
             logger.exception("Could not retire synthesized worker result %s", task_id)
 
@@ -1843,7 +1843,7 @@ def setup_chat_routes(
                                 )
                                 if _saved_id:
                                     if full_response:
-                                        _retire_synthesized_worker_results(_metrics_to_save, _user)
+                                        _retire_synthesized_worker_results(_metrics_to_save, _user, session)
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
                                 run_post_response_tasks(
                                     sess, session_manager, session, message, _response_to_save,
