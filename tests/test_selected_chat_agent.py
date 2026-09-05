@@ -38,3 +38,22 @@ def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch)
     }, "leo")
 
     assert consumed == [("complete", "leo")]
+
+
+def test_selected_friday_routes_contextual_followup_only_with_active_task(monkeypatch):
+    monkeypatch.setattr(
+        "src.jarvis_agent.find_active_task",
+        lambda session_id, worker, workspace, owner: {
+            "task_id": "active",
+        } if (session_id, worker, workspace, owner) == (
+            "chat-1", "pc-codex", "home-lab", "leo",
+        ) else None,
+    )
+
+    assert not _selected_worker_request("Fix that")
+    assert _selected_worker_request(
+        "Fix that",
+        session_id="chat-1",
+        owner="leo",
+        workspace="home-lab",
+    )

@@ -908,6 +908,45 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
 
 
 @pytest.mark.asyncio
+async def test_selected_friday_contextual_followup_steers_active_task(monkeypatch):
+    dispatched = []
+
+    monkeypatch.setattr(
+        jarvis_agent,
+        "find_active_task",
+        lambda *_args, **_kwargs: {"task_id": "friday-task", "status": "running"},
+    )
+    monkeypatch.setattr(jarvis_agent, "list_active_tasks", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        voice_routes,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
+
+    async def dispatch(*args, **_kwargs):
+        dispatched.append(args)
+        return {"task_id": "friday-task"}, "steered"
+
+    async def foreground(_task_id, _owner):
+        return "completed", "I applied that follow-up."
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(voice_routes, "_foreground_worker_result", foreground)
+    events = [
+        event async for event in voice_routes._jarvis_events(
+            "chat-1",
+            "Fix that.",
+            "leo",
+            {"target": "pc-codex", "origin_target": "jarvis", "workspace": "home-lab"},
+        )
+    ]
+
+    assert dispatched
+    assert events[-1]["assistant_text"] == "I applied that follow-up."
+    assert events[-1]["diagnostics"]["guard_reason"] == "selected_completed_pc-codex"
+
+
+@pytest.mark.asyncio
 async def test_selected_friday_conversation_uses_voice_model_without_task_tools(monkeypatch):
     captured = {}
 

@@ -85,6 +85,7 @@ def test_manual_model_choice_is_marked_against_late_default_discovery():
     picker = Path("static/js/modelPicker.js").read_text(encoding="utf-8")
 
     assert "createDirectChat(url, modelId, endpointId, source = '')" in sessions
+    assert "if (source === 'manual') clearPendingAgentTarget();" in sessions
     assert "_deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual')" in picker
     assert "sessionModule.createDirectChat(url, mid, endpointId, 'manual')" in Path(
         "static/js/models.js"

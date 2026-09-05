@@ -13,9 +13,16 @@ _PROJECT_WORK_SCOPE_RE = re.compile(
     r"projects?|pull requests?|repos?|repositories|scripts?|services?|servers?|sources?|systemd|tests?)\b",
     re.I,
 )
+_CONTEXTUAL_WORK_TARGET_RE = re.compile(r"\b(?:it|that|this|them|those|again)\b", re.I)
 
 
 def is_explicit_project_work_request(message: str) -> bool:
     """Return true only when a turn names both project work and its action."""
     text = str(message or "")
     return bool(_PROJECT_WORK_ACTION_RE.search(text) and _PROJECT_WORK_SCOPE_RE.search(text))
+
+
+def is_contextual_project_work_followup(message: str) -> bool:
+    """Return true for action-only follow-ups that still need an active task."""
+    text = str(message or "")
+    return bool(_PROJECT_WORK_ACTION_RE.search(text) and _CONTEXTUAL_WORK_TARGET_RE.search(text))

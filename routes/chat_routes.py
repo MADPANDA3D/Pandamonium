@@ -55,7 +55,7 @@ from src.tool_policy import (
 )
 from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
-from src.worker_routing import is_explicit_project_work_request
+from src.worker_routing import is_contextual_project_work_followup, is_explicit_project_work_request
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,24 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 _HERMES_AGENT_ENDPOINT_NAME = "Hermes API"
 _HERMES_AGENT_MODEL = "hermes-agent"
-def _selected_worker_request(message: str) -> bool:
+def _selected_worker_request(
+    message: str,
+    *,
+    session_id: str = "",
+    owner: str = "",
+    workspace: str | None = None,
+) -> bool:
     """Delegate explicit project/source work, not small app-data lookups."""
-    return is_explicit_project_work_request(message)
+    if is_explicit_project_work_request(message):
+        return True
+    if not session_id or not owner or not is_contextual_project_work_followup(message):
+        return False
+    try:
+        from src.jarvis_agent import find_active_task
+
+        return find_active_task(session_id, "pc-codex", workspace, owner) is not None
+    except Exception:
+        return False
 
 
 def _selected_agent_context(label: str) -> str:
@@ -1704,7 +1719,12 @@ def setup_chat_routes(
                     if _approval_reply and _approval_reply["choice"] == "approve":
                         _forced_tools.add(str((_approval_reply["decision"].get("capability") or {}).get("name") or ""))
                         _forced_tools.discard("")
-                    if agent_target == "pc-codex" and _selected_worker_request(str(message or "")):
+                    if agent_target == "pc-codex" and _selected_worker_request(
+                        str(message or ""),
+                        session_id=session,
+                        owner=_user,
+                        workspace=workspace or None,
+                    ):
                         _forced_tools.update({"start_agent_task", "read_agent_task"})
 
                     async for chunk in stream_agent_loop(

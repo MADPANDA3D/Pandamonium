@@ -2209,6 +2209,7 @@ export function createBlankChat() {
 }
 
 export function createDirectChat(url, modelId, endpointId, source = '') {
+  if (source === 'manual') clearPendingAgentTarget();
   _prepareNewChat({ url, modelId, endpointId, ...(source ? { source } : {}) });
 }
 

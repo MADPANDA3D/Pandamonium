@@ -45,7 +45,7 @@ from src.llm_core import llm_call_async
 from src.settings import load_settings
 from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
-from src.worker_routing import is_explicit_project_work_request
+from src.worker_routing import is_contextual_project_work_followup, is_explicit_project_work_request
 from src.voice_pcm import (
     TTS_INFERENCE_LOCK,
     asks_read_all,
@@ -3376,6 +3376,22 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
     selected_pc_codex_task = (
         selected_target == "pc-codex" and _selected_pc_codex_task_request(text)
     )
+    if (
+        selected_target == "pc-codex"
+        and not selected_pc_codex_task
+        and is_contextual_project_work_followup(text)
+    ):
+        try:
+            from src.jarvis_agent import find_active_task
+
+            selected_pc_codex_task = find_active_task(
+                chat_session_id,
+                "pc-codex",
+                str(voice_session.get("workspace") or "home-lab"),
+                owner,
+            ) is not None
+        except Exception:
+            selected_pc_codex_task = False
     if (
         _media_command(text)
         or _foreground_command(text)
