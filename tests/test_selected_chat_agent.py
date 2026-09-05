@@ -18,6 +18,9 @@ def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("Fix the calendar integration code")
     assert _selected_worker_request("Check the server configuration")
     assert _selected_worker_request("Read the repository file")
+    assert _selected_worker_request("Fix the tests")
+    assert _selected_worker_request("Review these files")
+    assert _selected_worker_request("Inspect the containers")
 
 
 def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch):

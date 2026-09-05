@@ -81,6 +81,32 @@ def test_voice_final_does_not_duplicate_a_worker_result_for_the_same_task():
     assert len(manager.messages["chat-1"]) == 1
 
 
+def test_foreground_summary_does_not_duplicate_full_worker_result():
+    manager = FakeSessionManager()
+    manager.messages["chat-1"] = [
+        SimpleNamespace(
+            role="assistant",
+            content="The complete structured worker result with all details.",
+            metadata={"task_id": "task-1", "source": "agent_worker"},
+        ),
+    ]
+
+    voice_routes._append_chat_message(
+        manager,
+        {"chat_session_id": "chat-1"},
+        "assistant",
+        "PC Codex finished. The complete result is in chat.",
+        task_id="task-1",
+        source="jarvis_voice",
+        diagnostics={
+            "guard_reason": "selected_completed_pc-codex",
+            "task_delivery_pending": False,
+        },
+    )
+
+    assert len(manager.messages["chat-1"]) == 1
+
+
 def test_later_voice_turn_keeps_same_reply_for_same_active_task():
     manager = FakeSessionManager()
     manager.messages["chat-1"] = [

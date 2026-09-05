@@ -902,6 +902,9 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
     assert voice_routes._selected_pc_codex_task_request(
         "Read the repository file.",
     )
+    assert voice_routes._selected_pc_codex_task_request("Friday, fix the tests.")
+    assert voice_routes._selected_pc_codex_task_request("Review these files.")
+    assert voice_routes._selected_pc_codex_task_request("Inspect the containers.")
 
 
 @pytest.mark.asyncio

@@ -3620,11 +3620,16 @@ def _append_chat_message(session_manager, session: dict, role: str, text: str, *
         if role == "assistant" and task_id and hasattr(session_manager, "get_session"):
             try:
                 chat_session = session_manager.get_session(chat_session_id)
+                diagnostics = safe_metadata.get("diagnostics") or {}
+                foreground_result_consumed = (
+                    str(diagnostics.get("guard_reason") or "") == "selected_completed_pc-codex"
+                    and diagnostics.get("task_delivery_pending") is False
+                )
                 if any(
                     message.role == "assistant"
-                    and message.content == text
                     and str((message.metadata or {}).get("task_id") or "") == task_id
                     and str((message.metadata or {}).get("source") or "") == "agent_worker"
+                    and (message.content == text or foreground_result_consumed)
                     for message in (getattr(chat_session, "history", []) or [])[-8:]
                 ):
                     return
