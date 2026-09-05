@@ -67,3 +67,14 @@ def test_selected_friday_routes_contextual_followup_only_with_active_task(monkey
         owner="leo",
         workspace="home-lab",
     )
+    for app_request in (
+        "Update this scheduled task",
+        "Fix that todo",
+        "Change this reminder",
+    ):
+        assert not _selected_worker_request(
+            app_request,
+            session_id="chat-1",
+            owner="leo",
+            workspace="home-lab",
+        )

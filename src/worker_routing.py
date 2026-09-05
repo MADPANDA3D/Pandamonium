@@ -16,7 +16,7 @@ _PROJECT_WORK_SCOPE_RE = re.compile(
 )
 _CONTEXTUAL_WORK_TARGET_RE = re.compile(r"\b(?:it|that|this|them|those|again)\b", re.I)
 _APP_DATA_SCOPE_RE = re.compile(
-    r"\b(?:books?|library|calendar|emails?|mailbox|messages?|notes?)\b",
+    r"\b(?:books?|library|calendar|emails?|mailbox|messages?|notes?|tasks?|to[- ]?dos?|reminders?)\b",
     re.I,
 )
 

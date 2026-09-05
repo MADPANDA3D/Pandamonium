@@ -1577,6 +1577,27 @@ function positionWorkerResult(result, taskId) {
   if (group && result && group.parentElement !== result.parentElement) group.after(result);
 }
 
+function renderWorkerResult(event, task, replaceMessage = null) {
+  const taskId = String(task?.task_id || event?.task_id || '');
+  if (!taskId || !event?.text) return null;
+  let result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
+  if (!result) {
+    result = window.chatModule?.addMessage?.('assistant', event.text, '', {
+      source: 'agent_worker',
+      worker: event.worker || task?.worker,
+      task_id: taskId,
+      character_name: task?.presenter || 'Jarvis',
+    }) || null;
+  }
+  if (result && replaceMessage && replaceMessage !== result) {
+    replaceMessage.remove();
+    if (liveAssistantMessage === replaceMessage) liveAssistantMessage = null;
+  }
+  positionWorkerResult(result, taskId);
+  window.uiModule?.scrollHistory?.();
+  return result;
+}
+
 function setActivityStatus(group, task, status) {
   if (!group || !task) return;
   const previous = group.dataset.status || '';
@@ -1964,17 +1985,7 @@ async function handleWorkerEvent(event) {
       && task?.foreground !== true
       && event.text
       && taskVisible(task)) {
-    let result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
-    if (!result) {
-      result = window.chatModule?.addMessage?.('assistant', event.text, '', {
-        source: 'agent_worker',
-        worker: event.worker,
-        task_id: taskId,
-        character_name: task.presenter || 'Jarvis',
-      });
-    }
-    positionWorkerResult(result, taskId);
-    window.uiModule?.scrollHistory?.();
+    renderWorkerResult(event, task);
   }
   if (isActive
       && SPOKEN_WORKER_EVENTS.has(event.type)
@@ -2250,7 +2261,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
       else if (event.type === 'final') {
         final = event;
         const finalTaskId = (event.task_ids || [])[0];
-        const task = taskSnapshots.get(finalTaskId) || turnTasks.find(item => item.task_id === finalTaskId) || turnTasks[0];
+        let task = taskSnapshots.get(finalTaskId) || turnTasks.find(item => item.task_id === finalTaskId) || turnTasks[0];
         if (task && event.diagnostics?.task_delivery_pending === true) {
           task.foreground = false;
           rememberTask(task);
@@ -2260,6 +2271,18 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
             if (bufferedId) handledWorkerEventIds.delete(bufferedId);
             queueWorkerEvent(buffered);
           }
+        }
+        if (task?.foreground === true && event.diagnostics?.task_delivery_pending === false) {
+          let completed = [...(task.events || [])].reverse().find(item => item.type === 'result');
+          if (!completed) {
+            try {
+              task = rememberTask(await fetchJson(`/api/agent-tasks/${encodeURIComponent(task.task_id)}`)) || task;
+              completed = [...(task.events || [])].reverse().find(item => item.type === 'result');
+            } catch (error) {
+              console.warn('Could not load completed foreground worker result:', error);
+            }
+          }
+          if (completed && taskVisible(task)) renderWorkerResult(completed, task, liveAssistantMessage);
         }
         if (isCurrentVoiceCall(callGeneration)) applyLiveTaskMetadata(liveAssistantMessage, task);
       }

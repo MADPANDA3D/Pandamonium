@@ -164,6 +164,9 @@ assert.doesNotMatch(source, /history\.setAttribute\('role', 'log'\)/);
 assert.doesNotMatch(source, /history\.setAttribute\('aria-live', 'polite'\)/);
 assert.match(source, /window\.chatModule\?\.addMessage\?\.\('assistant', event\.text, '', \{/);
 assert.match(source, /character_name: task\.presenter \|\| 'Jarvis'/);
+assert.match(source, /renderWorkerResult\(completed, task, liveAssistantMessage\)/);
+assert.match(source, /Could not load completed foreground worker result/);
+assert.match(source, /replaceMessage\.remove\(\)/);
 assert.doesNotMatch(source, /setVoiceTarget\(event\.worker \|\| 'pc-codex', false\)/);
 assert.match(source, /task\?\.foreground !== true/);
 assert.match(source, /event\.diagnostics\?\.task_delivery_pending === true/);
@@ -243,7 +246,7 @@ assert.match(index, /src="\/static\/js\/sessions\.js"/);
 assert.match(index, /jarvisVoice\.js\?v=20260905T022733Z/);
 assert.match(index, /app\.js\?v=20260904T235228Z/);
 assert.match(appSource, /from '\.\/js\/sessions\.js'/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v377'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v378'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
@@ -518,9 +521,32 @@ const executableSource = source
   .replace(
     "import { getBrandName } from './brand.js';",
     "const getBrandName = () => 'Pandamonium';",
-  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, prepareExtensionSurface, engageExtensionSurface, showChatFromExtension, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
+  ) + '\n;globalThis.__activityPlacement = { positionActivityGroup, positionWorkerResult, renderWorkerResult, positionWorkerSummary, restoreActivityGroupsToChat, findWorkerSummary, prewarmVoiceStack, mediaVoiceCommand, voiceRequestPayload, workerSpeech, workerApprovalAllowsOnce, rememberTask, requestMicrophone, deferCallPanelClose, startCall, endCall, sendTurn, streamTurn, awaitVoiceTargetReady, setVoiceTarget, setAudioSessionType, voiceTargetForModel, oracleProtocolResultMessage, configureExtensionSurfaces, configureOracleProtocol, prepareExtensionSurface, engageExtensionSurface, showChatFromExtension, disengageExtensionSurface, applyExtensionSurfaceControl, handleExtensionSurfaceMessage, getExtensionSurfaceState: () => ({ extensionSurfaceId, extensionSurfaceReady, pending: extensionSurfacePendingResults.size }), getVoiceTarget: () => voiceTarget, waitForTargetUpdate: () => targetUpdatePromise, getTargetSyncState: () => ({ voiceSessionReady, targetSelectionRevision, confirmedVoiceTargetState, pendingVoiceTargetState, targetUpdateFailure: targetUpdateFailure?.message || null }), enableWorker: worker => { workerCatalog[worker] = { ...(workerCatalog[worker] || {}), enabled: true, connection: { state: "connected" } }; }, getVoiceState: () => ({ sessionId, voiceCallGeneration, isActive, status }), setCameraOpen: value => { testCameraOpen = value; }, setActive: value => { isActive = value; }, setCallPanelMinimized, isCallPanelMinimized, unlockPlaybackAudio, stopPlaybackAudio, closePlaybackAudio, getPlaybackContext: () => playbackAudioContext };';
 vm.runInNewContext(executableSource, sandbox);
 const placement = sandbox.__activityPlacement;
+let foregroundHandoffRemoved = false;
+let foregroundResultRender = null;
+sandbox.chatModule = {
+  addMessage(role, text, model, metadata) {
+    foregroundResultRender = { role, text, model, metadata };
+    return { dataset: { ...metadata }, parentElement: chat };
+  },
+};
+placement.renderWorkerResult(
+  { type: 'result', task_id: 'foreground-task', worker: 'pc-codex', text: 'The complete structured result.' },
+  { task_id: 'foreground-task', worker: 'pc-codex', presenter: 'Jarvis' },
+  { remove() { foregroundHandoffRemoved = true; } },
+);
+assert.equal(foregroundHandoffRemoved, true, 'the short foreground handoff must be replaced in live chat');
+assert.equal(JSON.stringify(foregroundResultRender), JSON.stringify({
+  role: 'assistant',
+  text: 'The complete structured result.',
+  model: '',
+  metadata: {
+    source: 'agent_worker', worker: 'pc-codex', task_id: 'foreground-task', character_name: 'Jarvis',
+  },
+}));
+delete sandbox.chatModule;
 assert.equal(
   placement.oracleProtocolResultMessage(
     { tool: 'set_visual_style', arguments: { style: 'thermal' } },
