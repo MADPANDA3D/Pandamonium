@@ -900,6 +900,12 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
         "Check the server configuration.",
     )
     assert voice_routes._selected_pc_codex_task_request(
+        "Search the repository for this symbol.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Find the configuration file.",
+    )
+    assert voice_routes._selected_pc_codex_task_request(
         "Read the repository file.",
     )
     assert voice_routes._selected_pc_codex_task_request("Friday, fix the tests.")

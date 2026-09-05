@@ -5,7 +5,7 @@ import re
 
 _PROJECT_WORK_ACTION_RE = re.compile(
     r"\b(?:analy[sz]e|audit|build|change|check|compare|create|debug|deploy|diagnose|edit|fix|"
-    r"implement|inspect|investigate|patch|pull|push|read|restart|review|run|start|stop|test|"
+    r"find|implement|inspect|investigate|patch|pull|push|read|restart|review|run|search|start|stop|test|"
     r"update|verify|write)\b",
     re.I,
 )
@@ -13,7 +13,7 @@ _PROJECT_WORK_NEGATOR_RE = re.compile(r"\b(?:do\s+not|don[’']t|dont|never|not\
 _CLAUSE_BOUNDARY_RE = re.compile(r"[.!?;,\n]|\b(?:but|however)\b", re.I)
 _PROJECT_WORK_SCOPE_RE = re.compile(
     r"\b(?:apis?|branches?|bugs?|code|commits?|configurations?|containers?|deployments?|files?|git|hosts?|issues?|"
-    r"projects?|pull requests?|repos?|repositories|scripts?|services?|servers?|sources?|systemd|tests?)\b",
+    r"projects?|pull requests?|repos?|repositor(?:y|ies)|scripts?|services?|servers?|sources?|systemd|tests?)\b",
     re.I,
 )
 _CONTEXTUAL_WORK_TARGET_RE = re.compile(r"\b(?:it|that|this|them|those|again)\b", re.I)

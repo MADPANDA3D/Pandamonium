@@ -17,6 +17,8 @@ def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("Review the Books service source code")
     assert _selected_worker_request("Fix the calendar integration code")
     assert _selected_worker_request("Check the server configuration")
+    assert _selected_worker_request("Search the repository for this symbol")
+    assert _selected_worker_request("Find the configuration file")
     assert _selected_worker_request("Read the repository file")
     assert _selected_worker_request("Fix the tests")
     assert _selected_worker_request("Review these files")
@@ -34,6 +36,7 @@ def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("I don't know why it failed, but fix the API bug")
     assert _selected_worker_request("Don't run tests, but fix the API bug")
     assert not _selected_worker_request("Read the book Clean Code")
+    assert not _selected_worker_request("Find the book in my library that still needs OCR")
     assert not _selected_worker_request("Read the email about the API bug")
 
 
