@@ -3625,6 +3625,7 @@ def _append_chat_message(session_manager, session: dict, role: str, text: str, *
                     message.role == "assistant"
                     and message.content == text
                     and str((message.metadata or {}).get("task_id") or "") == task_id
+                    and str((message.metadata or {}).get("source") or "") == "agent_worker"
                     for message in (getattr(chat_session, "history", []) or [])[-8:]
                 ):
                     return

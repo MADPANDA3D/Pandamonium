@@ -81,6 +81,28 @@ def test_voice_final_does_not_duplicate_a_worker_result_for_the_same_task():
     assert len(manager.messages["chat-1"]) == 1
 
 
+def test_later_voice_turn_keeps_same_reply_for_same_active_task():
+    manager = FakeSessionManager()
+    manager.messages["chat-1"] = [
+        SimpleNamespace(
+            role="assistant",
+            content="The task is still running.",
+            metadata={"task_id": "task-1", "source": "jarvis_voice"},
+        ),
+    ]
+
+    voice_routes._append_chat_message(
+        manager,
+        {"chat_session_id": "chat-1"},
+        "assistant",
+        "The task is still running.",
+        task_id="task-1",
+        source="jarvis_voice",
+    )
+
+    assert len(manager.messages["chat-1"]) == 2
+
+
 def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch, tmp_path):
     async def fake_jarvis_reply(session, text, owner, voice_session=None):
         return "At once, sir.", {

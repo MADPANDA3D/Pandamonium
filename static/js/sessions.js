@@ -2204,6 +2204,7 @@ export function createBlankChat() {
   // Keep a navigation sentinel until discovery or an explicit model choice
   // supplies a usable pending chat. loadSessions() treats any pending object
   // as authoritative, while hasPendingChat() below only reports usable models.
+  clearPendingAgentTarget();
   _prepareNewChat({ source: 'discovering' });
 }
 

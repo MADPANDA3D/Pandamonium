@@ -73,6 +73,7 @@ def test_blank_chat_uses_shared_reset_with_non_materializable_navigation_sentine
     )
 
     assert "_prepareNewChat({ source: 'discovering' })" in blank
+    assert "clearPendingAgentTarget()" in blank
     assert "_pendingChat = pendingChat" in prepare
     assert "currentSessionId = null" in prepare
     assert "history.replaceState(null, '', window.location.pathname)" in prepare
