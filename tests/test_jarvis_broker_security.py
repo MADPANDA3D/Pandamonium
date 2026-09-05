@@ -926,6 +926,8 @@ async def test_model_task_tools_forward_owner_and_reject_missing_identity(monkey
 
     async def start_task(**kwargs):
         captured["start_owner"] = kwargs.get("owner")
+        captured["start_presenter"] = kwargs.get("presenter")
+        captured["start_persist_result"] = kwargs.get("persist_result")
         return {"task_id": "task-1", "status": "queued"}
 
     async def refresh_task(task_id, *, owner=None):
@@ -939,6 +941,7 @@ async def test_model_task_tools_forward_owner_and_reject_missing_identity(monkey
         ToolBlock("start_agent_task", json.dumps({"prompt": "inspect"})),
         session_id="session-1",
         owner="alice",
+        presenter="Jarvis",
     )
     _, read = await tool_execution.execute_tool_block(
         ToolBlock("read_agent_task", json.dumps({"task_id": "task-1"})),
@@ -952,4 +955,9 @@ async def test_model_task_tools_forward_owner_and_reject_missing_identity(monkey
     assert started["exit_code"] == 0
     assert read["exit_code"] == 0
     assert missing == {"error": "owner_required", "exit_code": 1}
-    assert captured == {"start_owner": "alice", "read": ("task-1", "alice")}
+    assert captured == {
+        "start_owner": "alice",
+        "start_presenter": "Jarvis",
+        "start_persist_result": False,
+        "read": ("task-1", "alice"),
+    }

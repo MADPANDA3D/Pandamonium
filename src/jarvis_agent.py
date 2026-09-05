@@ -260,6 +260,7 @@ def _append_event(task_id: str, event: dict) -> None:
         event["seq"] = len(events)
         event["task_id"] = task_id
         event["worker"] = task.get("worker")
+        event["presenter"] = task.get("presenter") or configured_agent_name()
         event["event_id"] = event_id or str(uuid.uuid4())
         if event.get("type") == "artifact":
             event = _persist_artifact(task, event)
@@ -283,9 +284,10 @@ def _append_event(task_id: str, event: dict) -> None:
             _save_worker_binding(task, codex_thread_id=metadata["codex_thread_id"])
         task["updated_at"] = int(time.time())
         if event_type == "result" and not task.get("result_persisted"):
-            _persist_result(task, str(event.get("text") or ""))
+            if task.get("persist_result", True):
+                _persist_result(task, str(event.get("text") or ""))
             task["result_persisted"] = True
-        if event_type in {"progress", "result"}:
+        if event_type == "progress":
             _persist_worker_summary(task, event)
         _save_task(task)
 
@@ -294,9 +296,8 @@ def _persist_worker_summary(task: dict, event: dict) -> bool:
     metadata = event.get("metadata") or {}
     text = str(event.get("spoken_text") or "").strip()
     is_broker_summary = (
-        event.get("type") == "result"
-        or metadata.get("progress_summary") is True
-        or metadata.get("milestone") is True
+        event.get("type") == "progress"
+        and (metadata.get("progress_summary") is True or metadata.get("milestone") is True)
     )
     if not _SESSION_MANAGER or not text or not is_broker_summary or not task.get("session_id"):
         return False
@@ -323,7 +324,7 @@ def _persist_worker_summary(task: dict, event: dict) -> bool:
                 "worker": task.get("worker"),
                 "task_id": task.get("task_id"),
                 "worker_event_id": event_id,
-                "character_name": "Jarvis",
+                "character_name": task.get("presenter") or configured_agent_name(),
             })
             try:
                 _SESSION_MANAGER.add_message(task["session_id"], message)
@@ -349,7 +350,7 @@ def _persist_result(task: dict, text: str) -> None:
                 "source": "agent_worker",
                 "worker": task.get("worker"),
                 "task_id": task.get("task_id"),
-                "character_name": WORKER_LABELS.get(str(task.get("worker")), "Worker"),
+                "character_name": task.get("presenter") or configured_agent_name(),
             }),
         )
     except Exception:
@@ -571,6 +572,8 @@ async def start_task(
     approved: bool = False,
     owner: str | None = None,
     codex_thread_id: str | None = None,
+    presenter: str | None = None,
+    persist_result: bool = True,
 ) -> dict:
     owner = str(owner or "").strip()
     if not owner:
@@ -597,6 +600,8 @@ async def start_task(
             "status": "blocked",
             "reason": "worker_not_connected",
             "owner": owner,
+            "presenter": str(presenter or configured_agent_name())[:80],
+            "persist_result": persist_result is True,
             "events": [],
             "created_at": now,
             "updated_at": now,
@@ -621,6 +626,8 @@ async def start_task(
         "result": None,
         "error": None,
         "owner": owner,
+        "presenter": str(presenter or configured_agent_name())[:80],
+        "persist_result": persist_result is True,
         "events": [],
         "artifacts": [],
         "created_at": now,
@@ -746,7 +753,7 @@ async def stream_task_events(
     while True:
         for event in task_events(task_id, cursor):
             task = get_task(task_id)
-            if task and event.get("type") in {"progress", "result"}:
+            if task and event.get("type") == "progress":
                 _persist_worker_summary(task, event)
             cursor = int(event.get("seq", cursor))
             yield f"id: {cursor}\ndata: {json.dumps(event)}\n\n"

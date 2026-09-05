@@ -5,7 +5,7 @@ import Storage from './storage.js';
 import uiModule, { autoResize, styledPrompt } from './ui.js';
 import chatRenderer from './chatRenderer.js';
 import { providerLogo } from './providers.js';
-import { initModelPicker, updateModelPicker } from './modelPicker.js';
+import { getSelectedAgentTarget, initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
 import { getBrandChatName } from './brand.js';
@@ -3509,6 +3509,10 @@ export function setSessionHasDocs(sessionId, hasDocs) {
   }
 }
 
+export function getChatAgentTarget() {
+  return getSelectedAgentTarget();
+}
+
 // Export all functions to window for use in main app
 const sessionModule = {
   initDependencies,
@@ -3524,6 +3528,7 @@ const sessionModule = {
   getSessions,
   getCurrentModel,
   getCurrentEndpointUrl,
+  getChatAgentTarget,
   setCurrentSessionId,
   initDragSort,
   updateModelPicker,

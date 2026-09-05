@@ -1805,18 +1805,15 @@ function positionWorkerSummary(summary, taskId, afterResult = false) {
 function renderWorkerSummary(event, task) {
   const metadata = event.metadata || {};
   const text = String(event.spoken_text || '').trim();
-  const isResultSummary = event.type === 'result';
-  const isBrokerSummary = isResultSummary || (
-    event.type === 'progress'
-    && (metadata.progress_summary === true || metadata.milestone === true)
-  );
+  const isBrokerSummary = event.type === 'progress'
+    && (metadata.progress_summary === true || metadata.milestone === true);
   if (!isBrokerSummary || !text || !taskVisible(task)) return null;
 
   const eventId = String(event.event_id || '').trim();
   const existing = findWorkerSummary(event.task_id, eventId, text);
   if (existing) {
-    existing.dataset.summaryType = isResultSummary ? 'result' : 'progress';
-    positionWorkerSummary(existing, event.task_id, isResultSummary);
+    existing.dataset.summaryType = 'progress';
+    positionWorkerSummary(existing, event.task_id);
     return existing;
   }
 
@@ -1825,11 +1822,11 @@ function renderWorkerSummary(event, task) {
     worker: event.worker,
     task_id: event.task_id,
     worker_event_id: eventId,
-    character_name: 'Jarvis',
+    character_name: task.presenter || 'Jarvis',
   }) || null;
   if (summary && eventId) summary.dataset.workerEventId = eventId;
-  if (summary) summary.dataset.summaryType = isResultSummary ? 'result' : 'progress';
-  positionWorkerSummary(summary, event.task_id, isResultSummary);
+  if (summary) summary.dataset.summaryType = 'progress';
+  positionWorkerSummary(summary, event.task_id);
   window.uiModule?.scrollHistory?.();
   return summary;
 }
@@ -1946,6 +1943,7 @@ async function handleWorkerEvent(event) {
     ...prior,
     task_id: taskId,
     worker: event.worker || prior.worker,
+    presenter: event.presenter || prior.presenter,
     events,
     updated_at: event.created_at || Date.now() / 1000,
   });
@@ -1963,6 +1961,7 @@ async function handleWorkerEvent(event) {
   }
   if (event.type === 'artifact' && isActive) await openWorkerArtifact(event);
   if (event.type === 'result'
+      && task?.foreground !== true
       && event.text
       && taskVisible(task)) {
     let result = taskMessageElements(taskId).find(item => item.dataset.source === 'agent_worker');
@@ -1971,15 +1970,15 @@ async function handleWorkerEvent(event) {
         source: 'agent_worker',
         worker: event.worker,
         task_id: taskId,
-        character_name: WORKER_LABELS[event.worker] || event.worker || 'Worker',
+        character_name: task.presenter || 'Jarvis',
       });
     }
     positionWorkerResult(result, taskId);
-    renderWorkerSummary(event, task);
     window.uiModule?.scrollHistory?.();
   }
   if (isActive
       && SPOKEN_WORKER_EVENTS.has(event.type)
+      && task?.foreground !== true
       && (event.type !== 'progress' || Boolean(event.spoken_text))) {
     enqueueSpeech(workerSpeech(event), event.type, event.worker || 'worker');
   }
@@ -2226,6 +2225,8 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
           task_id: event.task_id,
           session_id: turnChatSessionId,
           worker: event.worker || 'pc-codex',
+          presenter: event.presenter || existingTask?.presenter,
+          foreground: event.foreground === true,
           workspace: taskWorkspace,
           status: 'running',
           created_at: existingTask?.created_at || Date.now() / 1000,
@@ -2237,8 +2238,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
         if (currentCall) {
           activeWorkerTaskId = event.task_id;
           activeWorkspace = taskWorkspace;
-          if (event.foreground !== false) setVoiceTarget(event.worker || 'pc-codex', false);
-          else setAgentWorkspaceActive(true);
+          setAgentWorkspaceActive(true);
           queueVoiceTargetUpdate(
             { task_id: activeWorkerTaskId },
             { failSafe: event.foreground !== false },

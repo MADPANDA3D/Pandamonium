@@ -112,6 +112,7 @@ JARVIS_TOOLS = {
     "read_agent_task",
     "search_jarvis_knowledge",
     "read_calendar",
+    "manage_books",
     "ui_control",
 }
 EXTENSION_TOOL_TIMEOUT_SECONDS = 45
@@ -2720,6 +2721,7 @@ async def _dispatch_worker_request(
                 permission_mode,
                 False,
                 owner,
+                presenter=_voice_character_name(voice_session),
             )
             action = "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
     except Exception as exc:
@@ -3149,6 +3151,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                     "worker": worker,
                     "workspace": workspace,
                     "foreground": False,
+                    "presenter": task.get("presenter") or _voice_character_name(voice_session),
                 }
 
         if not compound:
@@ -3275,6 +3278,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "worker": worker,
                 "workspace": workspace,
                 "foreground": True,
+                "presenter": task.get("presenter") or _voice_character_name(voice_session),
             }
         foreground_status = ""
         foreground_reply = ""
@@ -3329,6 +3333,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
                 "worker": "pc-codex",
                 "workspace": "business",
                 "foreground": False,
+                "presenter": task.get("presenter") or _voice_character_name(voice_session),
             }
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(
@@ -3460,6 +3465,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
             else None
         ),
         context_extensions=extension_context,
+        presenter=_voice_character_name(voice_session),
     ):
         if not chunk.startswith("data: "):
             continue
@@ -3523,7 +3529,12 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
                     task_id = str(tool_data.get("task_id") or "")
                     if task_id and task_id not in task_ids:
                         task_ids.append(task_id)
-                        yield {"type": "agent_task", "task_id": task_id, "worker": tool_data.get("worker")}
+                        yield {
+                            "type": "agent_task",
+                            "task_id": task_id,
+                            "worker": tool_data.get("worker"),
+                            "presenter": tool_data.get("presenter") or _voice_character_name(voice_session),
+                        }
                 except json.JSONDecodeError:
                     pass
         elif data.get("type") == "metrics":
@@ -3606,6 +3617,19 @@ def _append_chat_message(session_manager, session: dict, role: str, text: str, *
         **{k: v for k, v in metadata.items() if v is not None},
     }
     try:
+        task_id = str(safe_metadata.get("task_id") or "")
+        if role == "assistant" and task_id and hasattr(session_manager, "get_session"):
+            try:
+                chat_session = session_manager.get_session(chat_session_id)
+                if any(
+                    message.role == "assistant"
+                    and message.content == text
+                    and str((message.metadata or {}).get("task_id") or "") == task_id
+                    for message in (getattr(chat_session, "history", []) or [])[-8:]
+                ):
+                    return
+            except Exception:
+                pass
         session_manager.add_message(chat_session_id, ChatMessage(role, text, metadata=safe_metadata))
     except Exception as exc:
         logger.warning("Failed to append Jarvis voice turn to chat session %s: %s", chat_session_id, exc)

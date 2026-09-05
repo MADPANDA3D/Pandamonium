@@ -55,6 +55,31 @@ class FakeSessionManager:
     def add_message(self, session_id, message):
         self.messages.setdefault(session_id, []).append(message)
 
+    def get_session(self, session_id):
+        return SimpleNamespace(history=self.messages.setdefault(session_id, []))
+
+
+def test_voice_final_does_not_duplicate_a_worker_result_for_the_same_task():
+    manager = FakeSessionManager()
+    manager.messages["chat-1"] = [
+        SimpleNamespace(
+            role="assistant",
+            content="The complete library list.",
+            metadata={"task_id": "task-1", "source": "agent_worker"},
+        ),
+    ]
+
+    voice_routes._append_chat_message(
+        manager,
+        {"chat_session_id": "chat-1"},
+        "assistant",
+        "The complete library list.",
+        task_id="task-1",
+        source="jarvis_voice",
+    )
+
+    assert len(manager.messages["chat-1"]) == 1
+
 
 def test_voice_session_creates_chat_session_and_persists_text_turns(monkeypatch, tmp_path):
     async def fake_jarvis_reply(session, text, owner, voice_session=None):

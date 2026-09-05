@@ -302,6 +302,7 @@ def test_books_intent_routes_to_owner_scoped_catalog_not_filesystem():
     assert agent_loop._DOMAIN_TOOL_MAP["books"] == {"manage_books"}
     assert not (agent_loop._DOMAIN_TOOL_MAP["books"] & agent_loop._DOMAIN_TOOL_MAP["files"])
     assert "never use shell, grep" in agent_loop._DOMAIN_RULES["books"]
+    assert not (agent_loop._DOMAIN_TOOL_MAP["books"] & agent_loop._DOMAIN_TOOL_MAP["workers"])
 
 
 def test_runtime_identity_reports_selected_model_without_inventing_provider():

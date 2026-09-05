@@ -63,6 +63,40 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 _HERMES_AGENT_ENDPOINT_NAME = "Hermes API"
 _HERMES_AGENT_MODEL = "hermes-agent"
+_DIRECT_WORKER_ACTION_RE = re.compile(
+    r"\b(?:analy[sz]e|audit|build|change|debug|deploy|diagnose|edit|fix|implement|inspect|"
+    r"investigate|patch|pull|push|restart|review|run|test|update|verify|write)\b",
+    re.I,
+)
+_DIRECT_WORKER_SCOPE_RE = re.compile(
+    r"\b(?:branch|code|commit|configuration|container|deployment|file|git|host|issue|"
+    r"project|pull request|repo(?:sitory)?|script|service|server|source|systemd|test)\b",
+    re.I,
+)
+_APP_DATA_RE = re.compile(
+    r"\b(?:books?|library|calendar|emails?|inbox|notes?|reminders?|tasks?)\b",
+    re.I,
+)
+
+
+def _selected_worker_request(message: str) -> bool:
+    """Delegate explicit project/source work, not small app-data lookups."""
+    text = str(message or "")
+    return bool(
+        not _APP_DATA_RE.search(text)
+        and _DIRECT_WORKER_ACTION_RE.search(text)
+        and _DIRECT_WORKER_SCOPE_RE.search(text)
+    )
+
+
+def _selected_agent_context(label: str) -> str:
+    return (
+        f"The operator explicitly selected {label} for this conversation. Present every response as {label}, "
+        "while using this chat's configured reasoning model. Use native Pandamonium tools directly for small "
+        "application-data requests such as Books, calendar, email, notes, and tasks. Delegate to the pc-codex "
+        "worker only for genuine project, source-code, file, or host work; return one coherent answer and never "
+        "emit polling filler or a second completion notice."
+    )
 
 
 def _resolve_hermes_agent_backend(owner: Optional[str] = None):
@@ -644,6 +678,7 @@ def setup_chat_routes(
         use_research = form_data.get("use_research")
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
+        agent_target = str(form_data.get("agent_target") or "").strip()
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
@@ -654,6 +689,8 @@ def setup_chat_routes(
                 allow_bash = body["allow_bash"]
             if allow_web_search is None and "allow_web_search" in body:
                 allow_web_search = body["allow_web_search"]
+            if not agent_target:
+                agent_target = str(body.get("agent_target") or "").strip()
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -786,6 +823,14 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = effective_user(request)
+            selected_agent_label = ""
+            if agent_target:
+                from src.agent_worker_adapters import worker_catalog
+
+                details = worker_catalog().get(agent_target)
+                if agent_target != "pc-codex" or not details or not details.get("configured"):
+                    raise HTTPException(400, "Selected agent is not configured")
+                selected_agent_label = str(details.get("label") or "Friday")[:80]
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
@@ -885,6 +930,7 @@ def setup_chat_routes(
             agent_mode=(chat_mode == "agent" and not hermes_agent_api),
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
+        active_character_name = selected_agent_label or ctx.preset.character_name
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
         _model_message = message
@@ -1198,7 +1244,7 @@ def setup_chat_routes(
                     session,
                     reply,
                     metrics,
-                    character_name=ctx.preset.character_name,
+                    character_name=active_character_name,
                     incognito=incognito,
                 )
                 if _saved_id:
@@ -1339,6 +1385,12 @@ def setup_chat_routes(
                     len(ctx.messages), raw_history_count, len(messages))
             else:
                 messages = _ensure_current_request_is_latest_user(ctx.messages, _model_message)
+            if selected_agent_label:
+                messages = [
+                    *messages[:-1],
+                    {"role": "system", "content": _selected_agent_context(selected_agent_label)},
+                    messages[-1],
+                ]
             if text_extension_bridge:
                 messages = [
                     *messages[:-1],
@@ -1378,8 +1430,8 @@ def setup_chat_routes(
             _model_info = {"type": "model_info", "model": sess.model}
             if _model_suffix:
                 _model_info["suffix"] = _model_suffix
-            if ctx.preset.character_name:
-                _model_info["character_name"] = ctx.preset.character_name
+            if active_character_name:
+                _model_info["character_name"] = active_character_name
             yield f'data: {json.dumps(_model_info)}\n\n'
 
             if _is_image_generation_session(sess, owner=_user):
@@ -1547,7 +1599,7 @@ def setup_chat_routes(
                                     _metrics_to_save["thinking"] = thinking_response.strip()
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, _metrics_to_save,
-                                    character_name=ctx.preset.character_name,
+                                    character_name=active_character_name,
                                     web_sources=web_sources,
                                     rag_sources=ctx.rag_sources,
                                     research_sources=research_sources,
@@ -1561,7 +1613,7 @@ def setup_chat_routes(
                                     sess, session_manager, session, message, full_response,
                                     _metrics_to_save, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
                                     incognito=incognito, compare_mode=compare_mode,
-                                    character_name=ctx.preset.character_name,
+                                    character_name=active_character_name,
                                     owner=_user,
                                     allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
                                 )
@@ -1654,6 +1706,8 @@ def setup_chat_routes(
                     if _approval_reply and _approval_reply["choice"] == "approve":
                         _forced_tools.add(str((_approval_reply["decision"].get("capability") or {}).get("name") or ""))
                         _forced_tools.discard("")
+                    if agent_target == "pc-codex" and _selected_worker_request(str(message or "")):
+                        _forced_tools.update({"start_agent_task", "read_agent_task"})
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1683,6 +1737,7 @@ def setup_chat_routes(
                         context_extensions=(text_extension_bridge or {}).get("context_extensions"),
                         uploaded_files=ctx.uploaded_files,
                         base_context_manifest=ctx.context_manifest,
+                        presenter=active_character_name or None,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1764,7 +1819,7 @@ def setup_chat_routes(
                                     _metrics_to_save["thinking"] = thinking_response.strip()
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, _response_to_save, _metrics_to_save,
-                                    character_name=ctx.preset.character_name,
+                                    character_name=active_character_name,
                                     web_sources=web_sources,
                                     rag_sources=ctx.rag_sources,
                                     used_memories=ctx.used_memories,
@@ -1776,7 +1831,7 @@ def setup_chat_routes(
                                     sess, session_manager, session, message, _response_to_save,
                                     _metrics_to_save, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
                                     incognito=incognito, compare_mode=compare_mode,
-                                    character_name=ctx.preset.character_name,
+                                    character_name=active_character_name,
                                                             agent_rounds=_agent_rounds,
                                     agent_tool_calls=_agent_tool_calls,
                                     skills_manager=skills_manager,

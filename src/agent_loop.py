@@ -2818,6 +2818,7 @@ async def stream_agent_loop(
     tool_executor=None,
     base_context_manifest: Optional[Dict[str, Any]] = None,
     context_extensions: Optional[Dict[str, Dict[str, Any]]] = None,
+    presenter: Optional[str] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -3139,7 +3140,9 @@ async def stream_agent_loop(
             # and editor-document tools out of explicit Books turns so the
             # model cannot fall back to guessed local paths.
             _relevant_tools.difference_update(
-                _DOMAIN_TOOL_MAP["files"] | _DOMAIN_TOOL_MAP["documents"]
+                _DOMAIN_TOOL_MAP["files"]
+                | _DOMAIN_TOOL_MAP["documents"]
+                | _DOMAIN_TOOL_MAP["workers"]
             )
             _relevant_tools.add("manage_books")
         if "cookbook" in (_intent.get("domains") or set()):
@@ -4715,6 +4718,7 @@ async def stream_agent_loop(
                             owner=owner,
                             progress_cb=_push_progress,
                             workspace=workspace,
+                            presenter=presenter,
                         )
                     finally:
                         # Sentinel so the drainer knows to stop.

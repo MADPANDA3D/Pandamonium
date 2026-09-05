@@ -453,10 +453,12 @@ async def test_business_then_hermes_runs_as_distinct_background_tasks_with_jarvi
     assert business_task == {
         "type": "agent_task", "task_id": "pc-codex-task", "worker": "pc-codex",
         "workspace": "business", "foreground": False,
+        "presenter": voice_routes.configured_agent_name(),
     }
     assert hermes_task == {
         "type": "agent_task", "task_id": "hermes-task", "worker": "hermes",
         "workspace": "home-lab", "foreground": False,
+        "presenter": voice_routes.configured_agent_name(),
     }
     assert "not current enough" in business[-1]["assistant_text"]
     assert all(event["type"] != "target_changed" for event in business + hermes)
@@ -612,6 +614,7 @@ async def test_jarvis_selected_ask_hermes_stays_background_brokered(monkeypatch)
         "worker": "hermes",
         "workspace": "home-lab",
         "foreground": False,
+        "presenter": voice_routes.configured_agent_name(),
     }
     assert events[-1]["diagnostics"]["guard_reason"] == "delegation_started_hermes"
     assert "direct_target" not in events[-1]["diagnostics"]
@@ -1089,7 +1092,17 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
         lambda **values: operational_events.append(values) or {"event_id": f"event-{len(operational_events)}"},
     )
 
-    async def start_task(worker, session_id, workspace, prompt, permission_mode, approved, owner, codex_thread_id=None):
+    async def start_task(
+        worker,
+        session_id,
+        workspace,
+        prompt,
+        permission_mode,
+        approved,
+        owner,
+        codex_thread_id=None,
+        presenter=None,
+    ):
         captured.update(
             worker=worker,
             session_id=session_id,
@@ -1099,6 +1112,7 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
             approved=approved,
             owner=owner,
             codex_thread_id=codex_thread_id,
+            presenter=presenter,
         )
         return {"task_id": "business-task", "status": "queued"}
 
@@ -1117,6 +1131,7 @@ async def test_new_pc_task_ignores_voice_global_thread_id(monkeypatch):
     assert result == "started"
     assert captured["workspace"] == "business"
     assert captured["codex_thread_id"] is None
+    assert captured["presenter"] == voice_routes.configured_agent_name()
     assert captured["action_call"]["target"] == "worker"
     assert captured["action_call"]["agent_id"] == "assistant"
     assert [event["event_type"] for event in operational_events] == [

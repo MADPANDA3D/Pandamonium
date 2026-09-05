@@ -1175,6 +1175,8 @@ import { getBrandName } from './brand.js';
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
+      const selectedAgentTarget = sessionModule?.getChatAgentTarget?.();
+      if (selectedAgentTarget) fd.append('agent_target', selectedAgentTarget);
       if (_textExtensionBridge) {
         fd.append('extension_bridge_session', _textExtensionBridge.sessionId);
         fd.append('extension_bridge_extension', _textExtensionBridge.extensionId);
