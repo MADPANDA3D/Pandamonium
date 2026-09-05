@@ -9,6 +9,13 @@ _PROJECT_WORK_ACTION_RE = re.compile(
     r"update|verify|write)\b",
     re.I,
 )
+_NEGATED_PROJECT_WORK_RE = re.compile(
+    r"\b(?:do\s+not|don[’']t|dont|never|not\s+to)\s+(?:\w+\s+){0,2}"
+    r"(?:analy[sz]e|audit|build|change|check|compare|create|debug|deploy|diagnose|edit|fix|"
+    r"implement|inspect|investigate|patch|pull|push|read|restart|review|run|start|stop|test|"
+    r"update|verify|write)\b",
+    re.I,
+)
 _PROJECT_WORK_SCOPE_RE = re.compile(
     r"\b(?:apis?|branches?|bugs?|code|commits?|configurations?|containers?|deployments?|files?|git|hosts?|issues?|"
     r"projects?|pull requests?|repos?|repositories|scripts?|services?|servers?|sources?|systemd|tests?)\b",
@@ -24,14 +31,19 @@ _APP_DATA_SCOPE_RE = re.compile(
 def is_explicit_project_work_request(message: str) -> bool:
     """Return true only when a turn names both project work and its action."""
     text = str(message or "")
-    return bool(_PROJECT_WORK_ACTION_RE.search(text) and _PROJECT_WORK_SCOPE_RE.search(text))
+    return bool(
+        not _NEGATED_PROJECT_WORK_RE.search(text)
+        and _PROJECT_WORK_ACTION_RE.search(text)
+        and _PROJECT_WORK_SCOPE_RE.search(text)
+    )
 
 
 def is_contextual_project_work_followup(message: str) -> bool:
     """Return true for action-only follow-ups that still need an active task."""
     text = str(message or "")
     return bool(
-        _PROJECT_WORK_ACTION_RE.search(text)
+        not _NEGATED_PROJECT_WORK_RE.search(text)
+        and _PROJECT_WORK_ACTION_RE.search(text)
         and _CONTEXTUAL_WORK_TARGET_RE.search(text)
         and not _APP_DATA_SCOPE_RE.search(text)
     )
