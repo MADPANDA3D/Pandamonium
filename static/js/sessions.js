@@ -5,7 +5,13 @@ import Storage from './storage.js';
 import uiModule, { autoResize, styledPrompt } from './ui.js';
 import chatRenderer from './chatRenderer.js';
 import { providerLogo } from './providers.js';
-import { getSelectedAgentTarget, initModelPicker, updateModelPicker } from './modelPicker.js';
+import {
+  clearPendingAgentTarget,
+  getSelectedAgentTarget,
+  initModelPicker,
+  movePendingAgentTarget,
+  updateModelPicker,
+} from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
 import { getBrandChatName } from './brand.js';
@@ -1793,6 +1799,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
   try {
     // An explicit session navigation supersedes any blank/pending New Chat.
     // Clearing this also makes late default discovery harmless.
+    clearPendingAgentTarget();
     _pendingChat = null;
     const navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
@@ -2254,6 +2261,7 @@ export async function materializePendingSession() {
   if (window.documentModule?.clearSelection) {
     try { window.documentModule.clearSelection(); } catch {}
   }
+  movePendingAgentTarget(payload.id);
   currentSessionId = payload.id;
   Storage.set('lastSessionId', payload.id);
   history.replaceState(null, '', '#' + payload.id);
@@ -2301,6 +2309,7 @@ export function setCurrentSessionId(id) {
   _sessionNavToken++;
   currentSessionId = id;
   if (!id) {
+    clearPendingAgentTarget();
     _suppressNextSessionLoading = true;
     Storage.remove('lastSessionId');
     history.replaceState(null, '', window.location.pathname);

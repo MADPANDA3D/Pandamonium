@@ -79,11 +79,31 @@ let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 let _agentItems = [];
-let _selectedAgentTarget = '';
-let _selectedAgentLabel = '';
+const _PENDING_AGENT_KEY = '__pending__';
+const _selectedAgents = new Map();
+
+function _agentSelectionKey() {
+  return (_deps && _deps.getCurrentSessionId && _deps.getCurrentSessionId()) || _PENDING_AGENT_KEY;
+}
+
+function _selectedAgent() {
+  return _selectedAgents.get(_agentSelectionKey()) || null;
+}
 
 export function getSelectedAgentTarget() {
-  return _selectedAgentTarget;
+  return _selectedAgent()?.target || '';
+}
+
+export function clearPendingAgentTarget() {
+  _selectedAgents.delete(_PENDING_AGENT_KEY);
+}
+
+export function movePendingAgentTarget(sessionId) {
+  const id = String(sessionId || '').trim();
+  const pending = _selectedAgents.get(_PENDING_AGENT_KEY);
+  if (!id || !pending) return;
+  _selectedAgents.set(id, pending);
+  _selectedAgents.delete(_PENDING_AGENT_KEY);
 }
 
 async function _refreshAgentCatalog() {
@@ -106,8 +126,12 @@ async function _refreshAgentCatalog() {
       staleReason: String(friday.connection?.error || friday.connection?.state || 'not connected'),
       offline: friday.ready !== true,
     }] : [];
-    if (_selectedAgentTarget === 'pc-codex' && _agentItems[0]) {
-      _selectedAgentLabel = _agentItems[0].display;
+    if (_agentItems[0]) {
+      for (const [key, selection] of _selectedAgents.entries()) {
+        if (selection.target === 'pc-codex') {
+          _selectedAgents.set(key, { ...selection, label: _agentItems[0].display });
+        }
+      }
     }
   } catch (_) { /* keep the last verified catalog */ }
 }
@@ -635,14 +659,12 @@ function _initModelPickerDropdown() {
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
     if (m.kind === 'agent') {
-      _selectedAgentTarget = m.target;
-      _selectedAgentLabel = m.display;
+      _selectedAgents.set(_agentSelectionKey(), { target: m.target, label: m.display });
       updateModelPicker();
       uiModule.showToast(`Talking to ${m.display}`);
       return;
     }
-    _selectedAgentTarget = '';
-    _selectedAgentLabel = '';
+    _selectedAgents.delete(_agentSelectionKey());
     if (!currentSessionId && _pendingChat) {
       // Already have a deferred session — just update the model
       _deps.setPendingChat({ url: m.url, modelId: m.mid, endpointId: m.endpointId, source: 'manual' });
@@ -815,10 +837,11 @@ export function updateModelPicker() {
   const sessions = _deps.getSessions();
   const _pendingChat = _deps.getPendingChat();
   const s = sessions.find(x => x.id === currentSessionId);
-  if (_selectedAgentTarget) {
+  const selectedAgent = _selectedAgent();
+  if (selectedAgent) {
     if (!currentSessionId && !_deps.getPendingChat()) _ensureDefaultPendingChat();
-    label.title = _selectedAgentLabel;
-    label.textContent = _selectedAgentLabel || 'Friday';
+    label.title = selectedAgent.label;
+    label.textContent = selectedAgent.label || 'Friday';
     return;
   }
   let modelId = null;

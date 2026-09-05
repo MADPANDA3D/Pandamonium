@@ -10,3 +10,5 @@ def test_selected_friday_uses_native_app_tools_for_small_lookups():
 def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("Inspect the active project's source configuration")
     assert _selected_worker_request("Run the repository tests")
+    assert _selected_worker_request("Review the Books service source code")
+    assert _selected_worker_request("Fix the calendar integration code")

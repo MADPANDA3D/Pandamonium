@@ -364,3 +364,31 @@ async def test_books_turn_prunes_worker_delegation_from_voice_sized_catalog(monk
     assert "manage_books" in names
     assert "start_agent_task" not in names
     assert "read_agent_task" not in names
+
+
+@pytest.mark.asyncio
+async def test_books_source_work_retains_worker_delegation(monkeypatch):
+    captured = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"I will inspect the service source."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Review the Books service source code."}],
+        context_length=4096,
+        max_tokens=1024,
+        relevant_tools={"manage_books", "start_agent_task", "read_agent_task", "get_runtime_status"},
+    ):
+        pass
+
+    names = {schema["function"]["name"] for schema in captured["tools"]}
+    assert "start_agent_task" in names
+    assert "read_agent_task" in names

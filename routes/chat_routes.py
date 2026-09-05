@@ -55,6 +55,7 @@ from src.tool_policy import (
 )
 from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
+from src.worker_routing import is_explicit_project_work_request
 
 logger = logging.getLogger(__name__)
 
@@ -63,30 +64,9 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 _HERMES_AGENT_ENDPOINT_NAME = "Hermes API"
 _HERMES_AGENT_MODEL = "hermes-agent"
-_DIRECT_WORKER_ACTION_RE = re.compile(
-    r"\b(?:analy[sz]e|audit|build|change|debug|deploy|diagnose|edit|fix|implement|inspect|"
-    r"investigate|patch|pull|push|restart|review|run|test|update|verify|write)\b",
-    re.I,
-)
-_DIRECT_WORKER_SCOPE_RE = re.compile(
-    r"\b(?:branch|code|commit|configuration|container|deployment|file|git|host|issue|"
-    r"project|pull request|repo(?:sitory)?|script|service|server|source|systemd|test)\b",
-    re.I,
-)
-_APP_DATA_RE = re.compile(
-    r"\b(?:books?|library|calendar|emails?|inbox|notes?|reminders?|tasks?)\b",
-    re.I,
-)
-
-
 def _selected_worker_request(message: str) -> bool:
     """Delegate explicit project/source work, not small app-data lookups."""
-    text = str(message or "")
-    return bool(
-        not _APP_DATA_RE.search(text)
-        and _DIRECT_WORKER_ACTION_RE.search(text)
-        and _DIRECT_WORKER_SCOPE_RE.search(text)
-    )
+    return is_explicit_project_work_request(message)
 
 
 def _selected_agent_context(label: str) -> str:

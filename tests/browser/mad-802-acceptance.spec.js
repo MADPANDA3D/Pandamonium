@@ -48,4 +48,31 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
+
+  await page.evaluate(async () => {
+    const picker = await import('/static/js/modelPicker.js');
+    picker.movePendingAgentTarget('session-friday');
+  });
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('');
+
+  await page.evaluate(async () => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.setCurrentSessionId('session-friday');
+    sessions.updateModelPicker();
+  });
+  await expect(page.locator('#model-picker-label')).toHaveText('Friday');
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('pc-codex');
+
+  await page.evaluate(async () => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.setCurrentSessionId(null);
+    sessions.updateModelPicker();
+  });
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('');
 });

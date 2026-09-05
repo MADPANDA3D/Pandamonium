@@ -46,6 +46,7 @@ from src.authority_protocol import (
     redact_secrets,
 )
 from src.operational_protocol import record_operational_event
+from src.worker_routing import is_explicit_project_work_request
 from src.settings import get_setting
 from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
@@ -3135,10 +3136,14 @@ async def stream_agent_loop(
     if not guide_only and _relevant_tools is not None:
         for _domain in (_intent.get("domains") or set()):
             _relevant_tools.update(_DOMAIN_TOOL_MAP.get(str(_domain), set()))
-        if "books" in (_intent.get("domains") or set()):
+        if (
+            "books" in (_intent.get("domains") or set())
+            and not is_explicit_project_work_request(_last_user)
+        ):
             # Books are application-owned private data. Keep generic filesystem
             # and editor-document tools out of explicit Books turns so the
-            # model cannot fall back to guessed local paths.
+            # model cannot fall back to guessed local paths. Explicit source-
+            # code work about the Books service still retains worker tools.
             _relevant_tools.difference_update(
                 _DOMAIN_TOOL_MAP["files"]
                 | _DOMAIN_TOOL_MAP["documents"]
