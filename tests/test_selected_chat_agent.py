@@ -52,7 +52,7 @@ def test_selected_friday_routes_contextual_followup_only_with_active_task(monkey
         lambda session_id, worker, workspace, owner: {
             "task_id": "active",
         } if (session_id, worker, workspace, owner) == (
-            "chat-1", "pc-codex", "home-lab", "leo",
+            "chat-1", "pc-codex", None, "leo",
         ) else None,
     )
 
@@ -61,13 +61,11 @@ def test_selected_friday_routes_contextual_followup_only_with_active_task(monkey
         "Fix that",
         session_id="chat-1",
         owner="leo",
-        workspace="home-lab",
     )
     assert not _selected_worker_request(
         "Read this book",
         session_id="chat-1",
         owner="leo",
-        workspace="home-lab",
     )
     for app_request in (
         "Update this scheduled task",
@@ -78,5 +76,4 @@ def test_selected_friday_routes_contextual_followup_only_with_active_task(monkey
             app_request,
             session_id="chat-1",
             owner="leo",
-            workspace="home-lab",
         )

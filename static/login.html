@@ -346,13 +346,12 @@
   }
 
   // Load version
-  try {
-    const vr = await fetch('/api/version');
-    if (vr.ok) {
-      const vd = await vr.json();
-      document.getElementById('version-label').textContent = 'v' + vd.version;
-    }
-  } catch(e) {}
+  fetch('/api/version')
+    .then(vr => vr.ok ? vr.json() : null)
+    .then(vd => {
+      if (vd?.version) document.getElementById('version-label').textContent = 'v' + vd.version;
+    })
+    .catch(() => {});
 
   // Prefill last username
   const usernameInput = document.getElementById('username');

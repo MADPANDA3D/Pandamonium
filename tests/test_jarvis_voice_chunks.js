@@ -246,7 +246,7 @@ assert.match(index, /src="\/static\/js\/sessions\.js"/);
 assert.match(index, /jarvisVoice\.js\?v=20260905T022733Z/);
 assert.match(index, /app\.js\?v=20260904T235228Z/);
 assert.match(appSource, /from '\.\/js\/sessions\.js'/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v378'/);
+assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v379'/);
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);

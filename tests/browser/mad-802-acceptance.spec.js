@@ -116,3 +116,41 @@ test('sidebar reports version status and ordinary chat can select configured Fri
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('');
 });
+
+
+test('login submission does not wait for the remote release status', async ({ page }) => {
+  let releaseVersion;
+  const releaseGate = new Promise(resolve => { releaseVersion = resolve; });
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/version') {
+      await releaseGate;
+      return route.fulfill({ json: { version: '1.0.10' } });
+    }
+    if (path === '/api/brand') {
+      return route.fulfill({ json: { name: 'Pandamonium', logo: '', accent: '#e06c75' } });
+    }
+    if (path === '/api/auth/status') {
+      return route.fulfill({ json: { authenticated: false, configured: true, signup_enabled: false } });
+    }
+    if (path === '/api/auth/policy') {
+      return route.fulfill({ json: { password_min_length: 8, reserved_usernames: [] } });
+    }
+    if (path === '/api/auth/login') {
+      return route.fulfill({ status: 401, json: { detail: 'fixture rejection' } });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto('/static/login.html');
+  await page.locator('#username').fill('leo');
+  await page.locator('#password').fill('not-a-real-password');
+  const loginRequest = page.waitForRequest(request => (
+    new URL(request.url()).pathname === '/api/auth/login' && request.method() === 'POST'
+  ));
+  await page.locator('#submitBtn').click();
+  const request = await loginRequest;
+  expect(request.postDataJSON()).toMatchObject({ username: 'leo' });
+  expect(page.url()).not.toContain('password=');
+  releaseVersion();
+});

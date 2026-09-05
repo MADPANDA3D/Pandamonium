@@ -69,7 +69,6 @@ def _selected_worker_request(
     *,
     session_id: str = "",
     owner: str = "",
-    workspace: str | None = None,
 ) -> bool:
     """Delegate explicit project/source work, not small app-data lookups."""
     if is_explicit_project_work_request(message):
@@ -79,7 +78,7 @@ def _selected_worker_request(
     try:
         from src.jarvis_agent import find_active_task
 
-        return find_active_task(session_id, "pc-codex", workspace, owner) is not None
+        return find_active_task(session_id, "pc-codex", None, owner) is not None
     except Exception:
         return False
 
@@ -1723,7 +1722,6 @@ def setup_chat_routes(
                         str(message or ""),
                         session_id=session,
                         owner=_user,
-                        workspace=workspace or None,
                     ):
                         _forced_tools.update({"start_agent_task", "read_agent_task"})
 
