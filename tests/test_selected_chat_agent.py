@@ -25,6 +25,8 @@ def test_selected_friday_delegates_explicit_project_work():
     assert _selected_worker_request("Start the project server")
     assert _selected_worker_request("Stop the project service")
     assert _selected_worker_request("Compare these files")
+    assert _selected_worker_request("Fix the authentication bug")
+    assert _selected_worker_request("Debug the API")
 
 
 def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch):

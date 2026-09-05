@@ -10,7 +10,7 @@ _PROJECT_WORK_ACTION_RE = re.compile(
     re.I,
 )
 _PROJECT_WORK_SCOPE_RE = re.compile(
-    r"\b(?:branches?|code|commits?|configurations?|containers?|deployments?|files?|git|hosts?|issues?|"
+    r"\b(?:apis?|branches?|bugs?|code|commits?|configurations?|containers?|deployments?|files?|git|hosts?|issues?|"
     r"projects?|pull requests?|repos?|repositories|scripts?|services?|servers?|sources?|systemd|tests?)\b",
     re.I,
 )

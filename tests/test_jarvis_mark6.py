@@ -909,6 +909,8 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
     assert voice_routes._selected_pc_codex_task_request("Start the project server.")
     assert voice_routes._selected_pc_codex_task_request("Stop the project service.")
     assert voice_routes._selected_pc_codex_task_request("Compare these files.")
+    assert voice_routes._selected_pc_codex_task_request("Fix the authentication bug.")
+    assert voice_routes._selected_pc_codex_task_request("Debug the API.")
     assert not voice_routes._selected_pc_codex_task_request("Update this scheduled task.")
     assert not voice_routes._selected_pc_codex_task_request("Fix that todo.")
     assert not voice_routes._selected_pc_codex_task_request("Change this reminder.")
