@@ -2250,7 +2250,17 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
       else if (event.type === 'final') {
         final = event;
         const finalTaskId = (event.task_ids || [])[0];
-        const task = turnTasks.find(item => item.task_id === finalTaskId) || taskSnapshots.get(finalTaskId) || turnTasks[0];
+        const task = taskSnapshots.get(finalTaskId) || turnTasks.find(item => item.task_id === finalTaskId) || turnTasks[0];
+        if (task && event.diagnostics?.task_delivery_pending === true) {
+          task.foreground = false;
+          rememberTask(task);
+          const buffered = [...(task.events || [])].reverse().find(item => item.type === 'result');
+          if (buffered) {
+            const bufferedId = String(buffered.event_id || '').trim();
+            if (bufferedId) handledWorkerEventIds.delete(bufferedId);
+            queueWorkerEvent(buffered);
+          }
+        }
         if (isCurrentVoiceCall(callGeneration)) applyLiveTaskMetadata(liveAssistantMessage, task);
       }
       else if (event.type === 'error') throw new Error(event.text || 'Jarvis brain request failed');

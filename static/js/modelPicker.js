@@ -18,6 +18,8 @@ const RECENT_MAX = 5;
 // Catalogs at or below this size are small enough that hiding everything
 // behind search would be a regression — keep listing them in browse mode.
 const BROWSE_ALL_LIMIT = 12;
+const AGENT_SELECTIONS_KEY = 'odysseus-agent-selections';
+const AGENT_SELECTIONS_MAX = 100;
 
 function _loadList(key) {
   try {
@@ -80,7 +82,34 @@ let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 let _agentItems = [];
 const _PENDING_AGENT_KEY = '__pending__';
-const _selectedAgents = new Map();
+
+function _loadAgentSelections() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AGENT_SELECTIONS_KEY) || '{}');
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return new Map();
+    return new Map(Object.entries(saved).slice(-AGENT_SELECTIONS_MAX).flatMap(([key, selection]) => {
+      const sessionId = String(key || '').trim();
+      if (!sessionId || sessionId === _PENDING_AGENT_KEY || selection?.target !== 'pc-codex') return [];
+      return [[sessionId, {
+        target: 'pc-codex',
+        label: String(selection.label || 'Friday').slice(0, 80),
+      }]];
+    }));
+  } catch { return new Map(); }
+}
+
+function _saveAgentSelections() {
+  try {
+    const saved = Object.fromEntries(
+      [..._selectedAgents.entries()]
+        .filter(([key]) => key !== _PENDING_AGENT_KEY)
+        .slice(-AGENT_SELECTIONS_MAX),
+    );
+    localStorage.setItem(AGENT_SELECTIONS_KEY, JSON.stringify(saved));
+  } catch { /* quota / private mode */ }
+}
+
+const _selectedAgents = _loadAgentSelections();
 
 function _agentSelectionKey() {
   return (_deps && _deps.getCurrentSessionId && _deps.getCurrentSessionId()) || _PENDING_AGENT_KEY;
@@ -104,6 +133,7 @@ export function movePendingAgentTarget(sessionId) {
   if (!id || !pending) return;
   _selectedAgents.set(id, pending);
   _selectedAgents.delete(_PENDING_AGENT_KEY);
+  _saveAgentSelections();
 }
 
 async function _refreshAgentCatalog() {
@@ -132,6 +162,7 @@ async function _refreshAgentCatalog() {
           _selectedAgents.set(key, { ...selection, label: _agentItems[0].display });
         }
       }
+      _saveAgentSelections();
     }
   } catch (_) { /* keep the last verified catalog */ }
 }
@@ -668,11 +699,13 @@ function _initModelPickerDropdown() {
     }
     if (m.kind === 'agent') {
       _selectedAgents.set(_agentSelectionKey(), { target: m.target, label: m.display });
+      _saveAgentSelections();
       updateModelPicker();
       uiModule.showToast(`Talking to ${m.display}`);
       return;
     }
     _selectedAgents.delete(_agentSelectionKey());
+    _saveAgentSelections();
     if (!currentSessionId && _pendingChat) {
       // Already have a deferred session — just update the model
       _deps.setPendingChat({ url: m.url, modelId: m.mid, endpointId: m.endpointId, source: 'manual' });

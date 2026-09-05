@@ -845,7 +845,36 @@ async def test_foreground_friday_result_becomes_the_spoken_reply(monkeypatch):
 
     assert events[-1]["assistant_text"] == "Good evening, Leo. I’m ready."
     assert events[-1]["diagnostics"]["guard_reason"] == "selected_completed_pc-codex"
+    assert events[-1]["diagnostics"]["task_delivery_pending"] is False
     assert any(event.get("type") == "agent_task" and event.get("foreground") for event in events)
+
+
+@pytest.mark.asyncio
+async def test_timed_out_friday_task_is_released_for_later_delivery(monkeypatch):
+    async def dispatch(*_args, **_kwargs):
+        return {"task_id": "friday-task"}, "started"
+
+    async def foreground(_task_id, _owner):
+        return "timeout", ""
+
+    monkeypatch.setattr(voice_routes, "_dispatch_worker_request", dispatch)
+    monkeypatch.setattr(voice_routes, "_foreground_worker_result", foreground)
+    monkeypatch.setattr(
+        jarvis_agent,
+        "_SESSION_MANAGER",
+        SimpleNamespace(get_session=lambda _session_id: SimpleNamespace(owner="leo")),
+    )
+    events = [
+        event async for event in _server_routed_events(
+            "chat-1",
+            "Friday, inspect the active project configuration.",
+            "leo",
+            {"target": "pc-codex", "workspace": "home-lab"},
+        )
+    ]
+
+    assert events[-1]["assistant_text"] == "PC Codex is still working. I’ll deliver the result here when it finishes."
+    assert events[-1]["diagnostics"]["task_delivery_pending"] is True
 
 
 def test_selected_friday_only_dispatches_explicit_work_requests():

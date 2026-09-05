@@ -357,6 +357,38 @@ def _persist_result(task: dict, text: str) -> None:
         return
 
 
+def consume_task_result(task_id: str, *, owner: str) -> dict:
+    """Hand a completed worker result to the orchestrator without a raw duplicate."""
+    with _LOCK:
+        task = require_task_owner(task_id, owner)
+        if task.get("status") != "completed":
+            return task
+
+        session_id = str(task.get("session_id") or "")
+        task["persist_result"] = False
+        task["result_consumed"] = True
+        if _SESSION_MANAGER and session_id:
+            try:
+                session = _SESSION_MANAGER.get_session(session_id)
+                matching = [
+                    message for message in session.history
+                    if (message.metadata or {}).get("source") == "agent_worker"
+                    and (message.metadata or {}).get("task_id") == task_id
+                ]
+                for message in matching:
+                    message_id = str((message.metadata or {}).get("_db_id") or "")
+                    if message_id and hasattr(_SESSION_MANAGER, "delete_message"):
+                        _SESSION_MANAGER.delete_message(session_id, message_id)
+                    elif message in session.history:
+                        session.history.remove(message)
+                session._history = session.history
+                session.message_count = len(session.history)
+            except Exception:
+                pass
+        _save_task(task)
+        return get_task(task_id) or task
+
+
 def _jarvis_runtime(task: dict | None = None) -> tuple[str, str, dict]:
     """Resolve the Jarvis brain from the linked chat, then the user's default."""
     owner = str((task or {}).get("owner") or "").strip() or None

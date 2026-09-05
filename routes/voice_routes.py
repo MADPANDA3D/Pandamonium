@@ -3299,7 +3299,13 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         else:
             reply = f"{label} is not connected, so I could not start the request."
         yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(text, reply, f"selected_{action}_{worker}", task_ids)
+        yield _server_final_event(
+            text,
+            reply,
+            f"selected_{action}_{worker}",
+            task_ids,
+            task_delivery_pending=action in {"started", "steered"},
+        )
         return
 
     if _asks_current_business(text):

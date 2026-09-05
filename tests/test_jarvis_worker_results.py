@@ -289,14 +289,26 @@ def test_orchestrated_worker_result_waits_for_one_presenter_response(tmp_path, m
     class SessionManager:
         def __init__(self):
             self.messages = []
+            self.session = type("Session", (), {"history": self.messages, "message_count": 0})()
+
+        def get_session(self, _session_id):
+            return self.session
 
         def add_message(self, _session_id, message):
             self.messages.append(message)
+            message.metadata["_db_id"] = "raw-result"
+
+        def delete_message(self, _session_id, message_id):
+            self.messages[:] = [
+                message for message in self.messages
+                if (message.metadata or {}).get("_db_id") != message_id
+            ]
+            return True
 
     manager = SessionManager()
     monkeypatch.setattr(jarvis_agent, "TASKS_FILE", tmp_path / "agent_tasks.json")
     monkeypatch.setattr(jarvis_agent, "_SESSION_MANAGER", manager)
-    jarvis_agent._save_task(_task(presenter="Jarvis", persist_result=False))
+    jarvis_agent._save_task(_task(presenter="Jarvis", persist_result=True))
 
     jarvis_agent._append_event("task-1", {
         "event_id": "result-orchestrated",
@@ -305,8 +317,14 @@ def test_orchestrated_worker_result_waits_for_one_presenter_response(tmp_path, m
         "metadata": {},
     })
 
-    assert manager.messages == []
+    assert len(manager.messages) == 1
     assert jarvis_agent.get_task("task-1")["result_persisted"] is True
+
+    consumed = jarvis_agent.consume_task_result("task-1", owner="leo")
+
+    assert manager.messages == []
+    assert consumed["result_consumed"] is True
+    assert consumed["persist_result"] is False
 
 
 def test_progress_summary_retries_after_transient_persistence_failure(tmp_path, monkeypatch):

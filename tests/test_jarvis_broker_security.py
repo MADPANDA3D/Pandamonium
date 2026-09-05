@@ -958,6 +958,6 @@ async def test_model_task_tools_forward_owner_and_reject_missing_identity(monkey
     assert captured == {
         "start_owner": "alice",
         "start_presenter": "Jarvis",
-        "start_persist_result": False,
+        "start_persist_result": True,
         "read": ("task-1", "alice"),
     }

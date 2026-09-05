@@ -166,6 +166,8 @@ assert.match(source, /window\.chatModule\?\.addMessage\?\.\('assistant', event\.
 assert.match(source, /character_name: task\.presenter \|\| 'Jarvis'/);
 assert.doesNotMatch(source, /setVoiceTarget\(event\.worker \|\| 'pc-codex', false\)/);
 assert.match(source, /task\?\.foreground !== true/);
+assert.match(source, /event\.diagnostics\?\.task_delivery_pending === true/);
+assert.match(source, /taskSnapshots\.get\(finalTaskId\) \|\| turnTasks\.find/);
 assert.match(source, /full result is in chat/i);
 assert.match(source, /END_VOICE_LABEL = 'End voice — task continues'/);
 assert.match(source, /window\.confirm\('Cancel the active task\?'\)/);

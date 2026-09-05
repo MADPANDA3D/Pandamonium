@@ -82,6 +82,20 @@ test('sidebar reports version status and ordinary chat can select configured Fri
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
 
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    localStorage.getItem('odysseus-agent-selections') || '{}',
+  )['session-friday']?.target)).toBe('pc-codex');
+  await page.reload();
+  await page.evaluate(async () => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.setCurrentSessionId('session-friday');
+    sessions.updateModelPicker();
+  });
+  await expect(page.locator('#model-picker-label')).toHaveText('Friday');
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('pc-codex');
+
   await page.evaluate(async () => {
     const sessions = await import('/static/js/sessions.js');
     sessions.setCurrentSessionId(null);
