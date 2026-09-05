@@ -3671,8 +3671,7 @@ function initializeEventListeners() {
   // Keyboard shortcuts (extracted to js/keyboard-shortcuts.js)
   initKeyboardShortcuts({
     el, Storage, sessionModule, uiModule, chatModule,
-    adminModule, settingsModule, searchChatModule,
-    _closeCompareIfActive, _deactivateIncognito, API_BASE
+    adminModule, settingsModule, searchChatModule, API_BASE
   });
   
 }
@@ -4061,18 +4060,8 @@ function startPandamoniumApp() {
 
       // New chat mode — empty input, no attachments, no STT
       if (!hasText && !hasFiles && sendBtn.dataset.mode === 'newchat') {
-        if (sessionModule) {
-          const sessions = sessionModule.getSessions();
-          const currentId = sessionModule.getCurrentSessionId();
-          const current = sessions.find(s => s.id === currentId);
-          if (current && current.endpoint_url && current.model) {
-            sessionModule.createDirectChat(current.endpoint_url, current.model, current.endpoint_id);
-          } else {
-            // Fallback to rail button
-            const railNew = el('rail-new-session');
-            if (railNew) railNew.click();
-          }
-        }
+        const railNew = el('rail-new-session');
+        if (railNew) railNew.click();
         return;
       }
 

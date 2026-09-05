@@ -24,6 +24,7 @@ import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
 import { getBrandName } from './brand.js';
+import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -3485,6 +3486,14 @@ import { getBrandName } from './brand.js';
         _webLockRelease = null;
       }
 
+      // Relinquish the foreground stream only if this reader still owns it.
+      // A completed reader must not look abortable to later navigation, while
+      // a detached reader must not clear a newer foreground stream's state.
+      if (_streamSessionId === streamSessionId) {
+        currentAbort = null;
+        _streamSessionId = null;
+      }
+
       // Refresh session list after a delay (picks up auto-generated names)
       setTimeout(() => {
         if (sessionModule && sessionModule.loadSessions) {
@@ -3722,8 +3731,8 @@ import { getBrandName } from './brand.js';
    */
   export function detachCurrentStream(sessionId) {
     if (!isStreaming || !currentAbort) {
-      // Not streaming — fall through to abort
-      abortCurrentRequest();
+      // Completed/non-started work has no reader to detach. In particular,
+      // never abort a stale controller left behind by a settled stream.
       return;
     }
     // Store background stream state

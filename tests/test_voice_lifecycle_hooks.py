@@ -31,5 +31,6 @@ def test_core_modules_emit_the_documented_lifecycle_signals():
     assert "'capture-stopped'" in recorder
     assert "'stream-complete'" in chat
     assert "'stream-interrupted'" in chat
+    assert "import { emitVoiceLifecycle } from './voiceLifecycle.js';" in chat
     assert "'tts-started'" in tts
     assert "'tts-idle'" in tts
