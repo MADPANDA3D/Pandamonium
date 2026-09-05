@@ -136,6 +136,12 @@ export function clearPendingAgentTarget() {
   _selectedAgents.delete(_PENDING_AGENT_KEY);
 }
 
+export function preserveSelectedAgentForNewChat() {
+  const selected = _selectedAgents.get(_agentSelectionKey());
+  if (selected) _selectedAgents.set(_PENDING_AGENT_KEY, { ...selected });
+  else clearPendingAgentTarget();
+}
+
 export function movePendingAgentTarget(sessionId) {
   const id = String(sessionId || '').trim();
   const pending = _selectedAgents.get(_PENDING_AGENT_KEY);

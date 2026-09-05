@@ -71,7 +71,7 @@ def test_mobile_new_chat_uses_shared_immediate_handler():
     assert "_startFreshChat();" not in mobile_handler
 
 
-def test_blank_chat_uses_shared_reset_with_non_materializable_navigation_sentinel():
+def test_blank_chat_preserves_the_active_target_and_chat_configuration():
     source = SESSIONS_JS.read_text(encoding="utf-8")
     blank = _slice(
         source,
@@ -84,8 +84,9 @@ def test_blank_chat_uses_shared_reset_with_non_materializable_navigation_sentine
         "export function createBlankChat()",
     )
 
-    assert "_prepareNewChat({ source: 'discovering' })" in blank
-    assert "clearPendingAgentTarget()" in blank
+    assert "preserveSelectedAgentForNewChat()" in blank
+    assert "source: 'new_chat'" in blank
+    assert "clearPendingAgentTarget()" not in blank
     assert "_pendingChat = pendingChat" in prepare
     assert "currentSessionId = null" in prepare
     assert "history.replaceState(null, '', window.location.pathname)" in prepare

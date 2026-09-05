@@ -10,6 +10,7 @@ import {
   getSelectedAgentTarget,
   initModelPicker,
   movePendingAgentTarget,
+  preserveSelectedAgentForNewChat,
   updateModelPicker,
 } from './modelPicker.js';
 import themeModule from './theme.js';
@@ -2184,11 +2185,14 @@ function _prepareNewChat(pendingChat) {
 }
 
 export function createBlankChat() {
-  // Keep a navigation sentinel until discovery or an explicit model choice
-  // supplies a usable pending chat. loadSessions() treats any pending object
-  // as authoritative, while hasPendingChat() below only reports usable models.
-  clearPendingAgentTarget();
-  _prepareNewChat({ source: 'discovering' });
+  const current = sessions.find(session => session.id === currentSessionId);
+  preserveSelectedAgentForNewChat();
+  _prepareNewChat(current?.endpoint_url && current?.model ? {
+    url: current.endpoint_url,
+    modelId: current.model,
+    endpointId: current.endpoint_id || '',
+    source: 'new_chat',
+  } : { source: 'discovering' });
 }
 
 export function createDirectChat(url, modelId, endpointId, source = '') {
