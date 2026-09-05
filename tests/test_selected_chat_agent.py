@@ -32,6 +32,9 @@ def test_selected_friday_delegates_explicit_project_work():
     assert not _selected_worker_request("I don't want you to run the repository tests")
     assert not _selected_worker_request("Don't ever under any circumstances deploy the service")
     assert _selected_worker_request("I don't know why it failed, but fix the API bug")
+    assert _selected_worker_request("Don't run tests, but fix the API bug")
+    assert not _selected_worker_request("Read the book Clean Code")
+    assert not _selected_worker_request("Read the email about the API bug")
 
 
 def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch):

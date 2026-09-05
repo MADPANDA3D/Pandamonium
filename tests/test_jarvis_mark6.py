@@ -922,6 +922,13 @@ def test_selected_friday_only_dispatches_explicit_work_requests():
     assert voice_routes._selected_pc_codex_task_request(
         "I don't know why it failed, but fix the API bug.",
     )
+    assert voice_routes._selected_pc_codex_task_request(
+        "Don't run tests, but fix the API bug.",
+    )
+    assert not voice_routes._selected_pc_codex_task_request("Read the book Clean Code.")
+    assert not voice_routes._selected_pc_codex_task_request(
+        "Read the email about the API bug.",
+    )
     assert not voice_routes._selected_pc_codex_task_request("Update this scheduled task.")
     assert not voice_routes._selected_pc_codex_task_request("Fix that todo.")
     assert not voice_routes._selected_pc_codex_task_request("Change this reminder.")

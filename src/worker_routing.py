@@ -21,33 +21,37 @@ _APP_DATA_SCOPE_RE = re.compile(
     r"\b(?:books?|library|calendar|emails?|mailbox|messages?|notes?|tasks?|to[- ]?dos?|reminders?)\b",
     re.I,
 )
+_APP_DATA_LOOKUP_RE = re.compile(
+    r"\b(?:check|find|inspect|list|open|read|search|show|summari[sz]e)\s+"
+    r"(?:all\s+|every\s+)?(?:(?:my|the|this|that|an?)\s+)?"
+    r"(?:books?|library|calendar|emails?|mailbox|messages?|notes?|tasks?|to[- ]?dos?|reminders?)\b",
+    re.I,
+)
 
 
-def _has_negated_project_action(message: str) -> bool:
-    """Detect a project action rejected anywhere within the same clause."""
+def _project_work_clauses(message: str):
+    """Yield clauses whose project action is positive and not an app lookup."""
     for clause in _CLAUSE_BOUNDARY_RE.split(str(message or "")):
+        action = _PROJECT_WORK_ACTION_RE.search(clause)
+        if not action:
+            continue
         negator = _PROJECT_WORK_NEGATOR_RE.search(clause)
         if negator and _PROJECT_WORK_ACTION_RE.search(clause, negator.end()):
-            return True
-    return False
+            continue
+        if _APP_DATA_LOOKUP_RE.search(clause):
+            continue
+        yield clause
 
 
 def is_explicit_project_work_request(message: str) -> bool:
     """Return true only when a turn names both project work and its action."""
-    text = str(message or "")
-    return bool(
-        not _has_negated_project_action(text)
-        and _PROJECT_WORK_ACTION_RE.search(text)
-        and _PROJECT_WORK_SCOPE_RE.search(text)
-    )
+    return any(_PROJECT_WORK_SCOPE_RE.search(clause) for clause in _project_work_clauses(message))
 
 
 def is_contextual_project_work_followup(message: str) -> bool:
     """Return true for action-only follow-ups that still need an active task."""
-    text = str(message or "")
-    return bool(
-        not _has_negated_project_action(text)
-        and _PROJECT_WORK_ACTION_RE.search(text)
-        and _CONTEXTUAL_WORK_TARGET_RE.search(text)
-        and not _APP_DATA_SCOPE_RE.search(text)
+    return any(
+        _CONTEXTUAL_WORK_TARGET_RE.search(clause)
+        and not _APP_DATA_SCOPE_RE.search(clause)
+        for clause in _project_work_clauses(message)
     )

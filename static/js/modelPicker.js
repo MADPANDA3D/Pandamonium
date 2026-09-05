@@ -81,6 +81,7 @@ let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 let _agentItems = [];
+let _agentCatalogVerified = false;
 const _PENDING_AGENT_KEY = '__pending__';
 
 function _loadAgentSelections() {
@@ -116,6 +117,7 @@ function _agentSelectionKey() {
 }
 
 function _selectedAgent() {
+  if (!_agentCatalogVerified) return null;
   return _selectedAgents.get(_agentSelectionKey()) || null;
 }
 
@@ -145,6 +147,7 @@ async function _refreshAgentCatalog() {
       ? payload.workers
       : payload;
     const friday = catalog && catalog['pc-codex'];
+    _agentCatalogVerified = true;
     _agentItems = friday && friday.configured !== false ? [{
       kind: 'agent',
       target: 'pc-codex',
@@ -285,6 +288,7 @@ async function _ensureDefaultPendingChat() {
 export function initModelPicker(deps) {
   _deps = deps;
   _initModelPickerDropdown();
+  _refreshAgentCatalog().then(() => updateModelPicker()).catch(() => {});
 }
 
 function _initModelPickerDropdown() {

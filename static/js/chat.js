@@ -879,6 +879,7 @@ import { getBrandName } from './brand.js';
 
     // Capture session ID for background stream detection
     const streamSessionId = sessionModule.getCurrentSessionId();
+    const streamAgentTarget = sessionModule?.getChatAgentTarget?.() || '';
     _streamSessionId = streamSessionId;
     const streamQuery = msg;
     _lastReaderActivity = Date.now();
@@ -1175,8 +1176,7 @@ import { getBrandName } from './brand.js';
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
-      const selectedAgentTarget = sessionModule?.getChatAgentTarget?.();
-      if (selectedAgentTarget) fd.append('agent_target', selectedAgentTarget);
+      if (streamAgentTarget) fd.append('agent_target', streamAgentTarget);
       if (_textExtensionBridge) {
         fd.append('extension_bridge_session', _textExtensionBridge.sessionId);
         fd.append('extension_bridge_extension', _textExtensionBridge.extensionId);
