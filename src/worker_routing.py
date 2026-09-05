@@ -2,6 +2,8 @@
 
 import re
 
+from src.agent_worker_adapters import worker_catalog
+
 
 _PROJECT_WORK_ACTION_RE = re.compile(
     r"\b(?:analy[sz]e|audit|build|change|check|compare|create|debug|deploy|diagnose|edit|fix|"
@@ -55,3 +57,21 @@ def is_contextual_project_work_followup(message: str) -> bool:
         and not _APP_DATA_SCOPE_RE.search(clause)
         for clause in _project_work_clauses(message)
     )
+
+
+def selected_worker_workspace(worker: str, message: str) -> str | None:
+    """Resolve a selected worker's workspace from installation-owned aliases.
+
+    An explicitly named allowed alias wins. The selected Friday/PC-Codex lane
+    otherwise belongs to Home Lab; it must not inherit a stale Business alias
+    from an older conversation or let the reasoning model guess one.
+    """
+    details = worker_catalog().get(str(worker or "")) or {}
+    allowed = [str(item) for item in details.get("workspaces") or [] if str(item)]
+    value = str(message or "").lower()
+    for alias in allowed:
+        if re.search(rf"(?<![a-z0-9_-]){re.escape(alias.lower())}(?![a-z0-9_-])", value):
+            return alias
+    if worker == "pc-codex" and "home-lab" in allowed:
+        return "home-lab"
+    return allowed[0] if allowed else None

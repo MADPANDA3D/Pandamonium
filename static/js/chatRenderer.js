@@ -2113,12 +2113,35 @@ export function removeAskUserCards(root) {
   scope.querySelectorAll('.ask-user-card').forEach((node) => node.remove());
 }
 
+function _resumeApprovedAction(attempt = 0) {
+  const input = uiModule.el('message');
+  const sendButton = document.querySelector('.send-btn');
+  const busy = sendButton && (
+    sendButton.disabled
+    || sendButton.dataset.mode === 'streaming'
+    || sendButton.classList.contains('send-pending')
+  );
+  if ((!input || !sendButton || busy) && attempt < 100) {
+    setTimeout(() => _resumeApprovedAction(attempt + 1), 50);
+    return;
+  }
+  if (!input || !sendButton || busy) {
+    uiModule.showError('Approved, but automatic continuation could not start. Send “Approve” once to resume.');
+    return;
+  }
+  input.value = 'Approve';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  sendButton.click();
+}
+
 export function renderAuthorityApprovalCard(payload) {
   const decisionId = String(payload?.decision_id || '');
   const capability = String(payload?.capability?.name || 'requested action');
   const target = String(payload?.capability?.target || 'tool');
   const effect = String(payload?.action_effect || payload?.gate_reason || '');
   const workspace = String(payload?.workspace || 'configured workspace');
+  const executionHost = String(payload?.execution?.host || '');
+  const executionUser = String(payload?.execution?.user || '');
   const chatBox = document.getElementById('chat-history');
   if (!decisionId || !chatBox) return null;
 
@@ -2136,7 +2159,10 @@ export function renderAuthorityApprovalCard(payload) {
 
   const context = document.createElement('div');
   context.className = 'authority-approval-context';
-  context.textContent = [effect, target, workspace].filter(Boolean).join(' · ');
+  const executionIdentity = executionHost
+    ? `${executionHost}${executionUser ? ` as ${executionUser}` : ''}`
+    : '';
+  context.textContent = [effect, target, workspace, executionIdentity, decisionId].filter(Boolean).join(' · ');
   card.appendChild(context);
 
   const preview = document.createElement('pre');
@@ -2157,16 +2183,12 @@ export function renderAuthorityApprovalCard(payload) {
       });
       if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
       question.textContent = choice === 'approve'
-        ? `Approved once: ${capability}. Repeat the command to run it.`
+        ? `Approved once: ${capability}. Running the exact pending action now.`
         : `Denied: ${capability}`;
       preview.remove();
       actions.remove();
       if (choice === 'approve') {
-        const input = uiModule.el('message');
-        if (input) {
-          input.value = `Retry the approved ${capability} command with the same arguments.`;
-          input.focus();
-        }
+        _resumeApprovedAction();
       }
     } catch (error) {
       actions.querySelectorAll('button').forEach(button => { button.disabled = false; });

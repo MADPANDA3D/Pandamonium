@@ -43,6 +43,9 @@ assert.match(chatSource, /if \(streamAgentTarget\) fd\.append\('agent_target', s
 assert.match(chatSource, /json\.extension_call[\s\S]*?applyExtensionSurfaceControl/);
 assert.match(chatSource, /json\.type === 'authority_approval_required'[\s\S]*?renderAuthorityApprovalCard/);
 assert.match(rendererSource, /renderAuthorityApprovalCard[\s\S]*?\/api\/authority\/decisions\/[\s\S]*?Approve once/);
+assert.match(rendererSource, /Running the exact pending action now/);
+assert.match(rendererSource, /function _resumeApprovedAction[\s\S]*?input\.value = 'Approve'[\s\S]*?sendButton\.click\(\)/);
+assert.doesNotMatch(rendererSource, /Retry the approved[\s\S]*?command with the same arguments/);
 assert.match(source, /event\.type === 'authority_approval_required'[\s\S]*?showChatFromExtension[\s\S]*?renderAuthorityApprovalCard/);
 assert.match(rendererSource, /restorePendingAuthorityDecision[\s\S]*?\/api\/authority/);
 assert.doesNotMatch(chatSource, /thinking-toggle live-think-toggle expanded/);

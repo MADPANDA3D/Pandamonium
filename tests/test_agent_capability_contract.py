@@ -61,6 +61,9 @@ def test_platform_architecture_prompt_requires_runtime_and_source_evidence():
     assert "platform" in intent["domains"]
     assert {"get_runtime_status", "manage_mcp", "start_agent_task"} <= selected
     assert any("Do not extrapolate frameworks" in rule for rule in rules)
+    assert any("running `application_version`" in rule for rule in rules)
+    assert any("KV cache" in rule and "MoE expert cache" in rule for rule in rules)
+    assert all("embedding-matrix allocation" in rule for rule in rules if "context-capacity" in rule)
 
 
 def test_worker_runtime_context_is_sanitized_and_uses_configured_labels(monkeypatch):

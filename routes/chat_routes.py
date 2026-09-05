@@ -55,7 +55,11 @@ from src.tool_policy import (
 )
 from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
-from src.worker_routing import is_contextual_project_work_followup, is_explicit_project_work_request
+from src.worker_routing import (
+    is_contextual_project_work_followup,
+    is_explicit_project_work_request,
+    selected_worker_workspace as _selected_worker_workspace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +87,18 @@ def _selected_worker_request(
         return False
 
 
-def _selected_agent_context(label: str) -> str:
+def _selected_agent_context(label: str, workspace: str | None = None) -> str:
+    routing = (
+        f" For pc-codex delegation, use the server-selected `{workspace}` workspace unless the operator "
+        "explicitly names another allowed workspace in this turn."
+        if workspace else ""
+    )
     return (
         f"The operator explicitly selected {label} for this conversation. Present every response as {label}, "
         "while using this chat's configured reasoning model. Use native Pandamonium tools directly for small "
         "application-data requests such as Books, calendar, email, notes, and tasks. Delegate to the pc-codex "
         "worker only for genuine project, source-code, file, or host work; return one coherent answer and never "
-        "emit polling filler or a second completion notice."
+        f"emit polling filler or a second completion notice.{routing}"
     )
 
 
@@ -836,6 +845,7 @@ def setup_chat_routes(
             sess = session_manager.get_session(session)
             owner = effective_user(request)
             selected_agent_label = ""
+            selected_agent_workspace = None
             if agent_target:
                 from src.agent_worker_adapters import worker_catalog
 
@@ -843,6 +853,7 @@ def setup_chat_routes(
                 if agent_target != "pc-codex" or not details or not details.get("configured"):
                     raise HTTPException(400, "Selected agent is not configured")
                 selected_agent_label = str(details.get("label") or "Friday")[:80]
+                selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
@@ -946,14 +957,11 @@ def setup_chat_routes(
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
         _model_message = message
-        if _approval_reply and _approval_reply["choice"] == "approve":
-            _decision = _approval_reply["decision"]
-            _capability = str((_decision.get("capability") or {}).get("name") or "the pending action")
-            _model_message = (
-                f"Proceed with the exact previously requested {_capability} action now. "
-                f"The authenticated operator approved decision {_decision['decision_id']} once. "
-                "Reissue the original call with unchanged target and arguments; do not broaden it."
-            )
+        _approved_action = (
+            _approval_reply.get("pending_action")
+            if _approval_reply and _approval_reply.get("choice") == "approve"
+            else None
+        )
 
         # Query active document — prefer explicit ID from frontend, fall back to session lookup
         active_doc = None
@@ -1235,9 +1243,14 @@ def setup_chat_routes(
             if ctx.used_memories:
                 yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
 
-            if _approval_reply and _approval_reply["choice"] == "deny":
+            if _approval_reply and _approval_reply["choice"] in {"deny", "stale", "repeat"}:
                 _capability = str((_approval_reply["decision"].get("capability") or {}).get("name") or "action")
-                reply = f"Denied: {_capability}. I will not run it."
+                if _approval_reply["choice"] == "deny":
+                    reply = f"Denied: {_capability}. I will not run it."
+                elif _approval_reply["choice"] == "repeat":
+                    reply = f"That approval for {_capability} was already handled. Nothing ran again."
+                else:
+                    reply = f"That approval for {_capability} is stale. Nothing ran; request the action again."
                 metrics = {
                     "model": "pandamonium-authority",
                     "requested_model": sess.model,
@@ -1400,7 +1413,7 @@ def setup_chat_routes(
             if selected_agent_label:
                 messages = [
                     *messages[:-1],
-                    {"role": "system", "content": _selected_agent_context(selected_agent_label)},
+                    {"role": "system", "content": _selected_agent_context(selected_agent_label, selected_agent_workspace)},
                     messages[-1],
                 ]
             if text_extension_bridge:
@@ -1754,6 +1767,9 @@ def setup_chat_routes(
                         uploaded_files=ctx.uploaded_files,
                         base_context_manifest=ctx.context_manifest,
                         presenter=active_character_name or None,
+                        approved_action=_approved_action,
+                        persist_worker_results=not bool(selected_agent_label),
+                        worker_workspace=selected_agent_workspace,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

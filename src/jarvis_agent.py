@@ -835,13 +835,25 @@ async def runtime_status(active_worker: str | None = None, owner: str | None = N
         settings = load_settings()
     except Exception:
         settings = {}
+    from core.constants import APP_VERSION
+
+    memory_evidence = {
+        key: details[key]
+        for key in (
+            "kv_cache", "kv_cache_type", "cache_type_k", "cache_type_v",
+            "swa_cache", "sliding_window", "moe_cache", "n_cpu_moe",
+        )
+        if key in details and isinstance(details[key], (str, int, float, bool))
+    }
     return {
+        "application_version": APP_VERSION,
         "assistant": configured_agent_name(),
         "brain_model": model,
         "architecture": details.get("architecture") or details.get("owned_by"),
         "parameter_size": details.get("parameter_size") or details.get("parameters"),
         "quantization": details.get("quantization") or details.get("quantization_level"),
         "context": context,
+        "model_memory_evidence": memory_evidence or None,
         "tts_provider": settings.get("tts_provider"),
         "tts_model": settings.get("tts_model"),
         "tts_voice": settings.get("tts_voice"),

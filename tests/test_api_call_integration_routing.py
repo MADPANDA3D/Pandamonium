@@ -89,3 +89,22 @@ def test_capability_inventory_selects_live_registry_tool_and_rules():
     rules = agent_loop._domain_rules_for_tools(selected)
     assert any("action=inventory" in rule for rule in rules)
     assert any("core workspace functions" in rule for rule in rules)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Check the health of all my configured integrations",
+        "What is the status of my MCP integrations?",
+        "Summarize whether every plugin is connected and working",
+    ],
+)
+def test_integration_health_routes_through_inventory_before_provider_checks(prompt):
+    intent = agent_loop._classify_agent_request([], prompt)
+    selected = _selected_tools(intent["domains"])
+    rules = agent_loop._domain_rules_for_tools(selected)
+
+    assert "integrations" in intent["domains"]
+    assert "manage_mcp" in selected
+    assert any("inventory every configured surface first" in rule for rule in rules)
+    assert any("overall summary" in rule for rule in rules)

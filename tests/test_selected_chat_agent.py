@@ -3,12 +3,24 @@ from routes.chat_routes import (
     _selected_agent_context,
     _selected_worker_request,
 )
+from src.worker_routing import selected_worker_workspace
 
 
 def test_selected_friday_uses_native_app_tools_for_small_lookups():
     assert not _selected_worker_request("List all books in my library")
     assert not _selected_worker_request("Check my calendar for Friday")
     assert "native Pandamonium tools directly" in _selected_agent_context("Friday")
+
+
+def test_selected_friday_defaults_to_home_lab_without_inheriting_business(monkeypatch):
+    monkeypatch.setattr("src.worker_routing.worker_catalog", lambda: {
+        "pc-codex": {"workspaces": ["business", "home-lab"]},
+    })
+
+    assert selected_worker_workspace("pc-codex", "Inspect the Pandamonium source") == "home-lab"
+    assert selected_worker_workspace("pc-codex", "Inspect the Business workspace") == "business"
+    context = _selected_agent_context("Friday", "home-lab")
+    assert "server-selected `home-lab` workspace" in context
 
 
 def test_selected_friday_delegates_explicit_project_work():
