@@ -54,7 +54,7 @@ try {
   }]);
 
   await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-  await page.locator('#message').waitFor({ state: 'visible', timeout: timeoutMs });
+  await page.locator('#message:visible').waitFor({ state: 'visible', timeout: timeoutMs });
 
   const auth = await page.evaluate(async () => {
     const response = await fetch('/api/auth/status');
@@ -87,7 +87,7 @@ try {
   });
 
   const firstPrompt = `MAD-802 deployed check ${Date.now()}: run the bash command whoami and tell me the result.`;
-  await page.locator('#message').fill(firstPrompt);
+  await page.locator('#message:visible').fill(firstPrompt);
   await page.locator('.send-btn:visible').click();
 
   const firstSessionId = await waitForValue(
@@ -103,7 +103,8 @@ try {
   await waitForValue(
     page,
     () => ({
-      streaming: document.querySelector('.send-btn')?.dataset?.mode === 'streaming',
+      streaming: Array.from(document.querySelectorAll('.send-btn'))
+        .some(button => button.offsetParent !== null && button.dataset.mode === 'streaming'),
       runningTools: document.querySelectorAll('.agent-thread-node.running').length,
     }),
     value => !value?.streaming && value?.runningTools === 0,
@@ -122,7 +123,10 @@ try {
     meta: document.getElementById('current-meta')?.textContent?.trim() || '',
     toolCards: document.querySelectorAll('#chat-history .agent-thread-node').length,
     messages: document.querySelectorAll('#chat-history .msg').length,
-    inputDisabled: Boolean(document.getElementById('message')?.disabled),
+    inputDisabled: Boolean(
+      Array.from(document.querySelectorAll('#message'))
+        .find(input => input.offsetParent !== null)?.disabled,
+    ),
   }));
 
   assert(resetState.sessionId === null, 'New Chat retained the completed tool session id.');
@@ -134,7 +138,7 @@ try {
   }
 
   const secondPrompt = `MAD-802 new-chat continuation ${Date.now()}: reply exactly MAD802_NEW_CHAT_READY without tools.`;
-  await page.locator('#message').fill(secondPrompt);
+  await page.locator('#message:visible').fill(secondPrompt);
   await page.locator('.send-btn:visible').click();
   const secondSessionId = await waitForValue(
     page,
@@ -146,7 +150,8 @@ try {
   await waitForValue(
     page,
     () => ({
-      streaming: document.querySelector('.send-btn')?.dataset?.mode === 'streaming',
+      streaming: Array.from(document.querySelectorAll('.send-btn'))
+        .some(button => button.offsetParent !== null && button.dataset.mode === 'streaming'),
       text: document.getElementById('chat-history')?.textContent || '',
     }),
     value => !value?.streaming && value?.text?.includes('MAD802_NEW_CHAT_READY'),
