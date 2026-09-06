@@ -209,12 +209,13 @@
     @font-face { font-family: 'Inter'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-SemiBold.woff2') format('woff2'); }
   </style>
   <!-- KaTeX CSS is loaded with media="print" so it doesn't block render,
-       then flipped to "all" via JS after load. Mermaid init runs once the
-       library finishes loading. Both hooks are wired via addEventListener
-       below (inline onload= attrs are blocked by CSP script-src-attr). -->
+       then flipped to "all" via JS after load. Mermaid is pinned and served
+       from this release so diagrams work without a CDN. Both hooks are wired
+       via addEventListener below (inline onload= attrs are blocked by CSP
+       script-src-attr). -->
   <link id="katex-css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" media="print">
   <script async src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-  <script id="mermaid-script" async src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script id="mermaid-script" async src="/static/lib/mermaid.min.js?v=11.17.2"></script>
   <script nonce="{{CSP_NONCE}}">
     (function(){
       var k = document.getElementById('katex-css');
@@ -222,11 +223,12 @@
       var m = document.getElementById('mermaid-script');
       if (m) m.addEventListener('load', function(){
         if (window.odysseusInitMermaid) window.odysseusInitMermaid();
+        if (window.odysseusRenderMermaid) window.odysseusRenderMermaid(document);
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=20260905T210749Z">
-  <link rel="modulepreload" href="/static/app.js?v=20260905T210749Z">
+  <link rel="stylesheet" href="/static/style.css?v=20260906T203500Z">
+  <link rel="modulepreload" href="/static/app.js?v=20260906T203500Z">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -1134,7 +1136,7 @@
     <div class="chat-input-bar">
       <div class="chat-input-top">
         <div id="message-ghost" class="ghost-text-overlay" aria-hidden="true"></div>
-        <textarea id="message" placeholder="Message Pandamonium..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
+        <textarea id="message" placeholder="Message Pandamonium..." required autocomplete="off" aria-label="Message input" rows="1"></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Choose who to talk to" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Choose who</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
@@ -2759,10 +2761,10 @@
 <script type="module" src="/static/js/codexWorkspace.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
-<script type="module" src="/static/js/chatRenderer.js?v=20260904T235900Z"></script>
+<script type="module" src="/static/js/chatRenderer.js?v=20260906T203500Z"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260905T210749Z"></script>
+<script type="module" src="/static/js/chat.js?v=20260906T203500Z"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
@@ -2773,7 +2775,7 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260905T210749Z"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260906T203500Z"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

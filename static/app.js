@@ -4391,9 +4391,14 @@ function startPandamoniumApp() {
   if (censorModule) censorModule.init();
   updaterModule.init();
 
-  // Auto-focus message input on load
+  // Auto-focus the composer only while startup still owns focus. A large
+  // optional renderer may finish loading after the user has already focused a
+  // sidebar control; never steal that interaction back to the composer.
   const msgEl = document.getElementById('message');
-  if (msgEl) msgEl.focus();
+  const activeEl = document.activeElement;
+  if (msgEl && (!activeEl || activeEl === document.body || activeEl === document.documentElement)) {
+    msgEl.focus();
+  }
   
   // Initialize mouse-based drag for sidebar sections
   const sidebar = document.getElementById('sidebar');

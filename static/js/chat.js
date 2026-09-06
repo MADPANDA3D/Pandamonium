@@ -678,6 +678,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
             window.hljs.highlightElement(block);
           });
         }
+        if (markdownModule.renderMermaid) markdownModule.renderMermaid(currentHolder);
         
         // Add the stopped indicator with continue button
         const stoppedIndicator = document.createElement('div');
@@ -2497,6 +2498,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
                     _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
                     if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+                    if (markdownModule.renderMermaid) markdownModule.renderMermaid(roundHolder);
                   } else {
                     roundHolder.style.display = 'none';
                   }

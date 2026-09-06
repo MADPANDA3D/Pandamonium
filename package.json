@@ -1,6 +1,6 @@
 {
   "name": "pandamonium",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "private": true,
   "repository": {
     "type": "git",
@@ -14,5 +14,8 @@
   "devDependencies": {
     "@antithesishq/bombadil": "^0.6.1",
     "@playwright/test": "1.61.1"
+  },
+  "dependencies": {
+    "mermaid": "11.17.2"
   }
 }

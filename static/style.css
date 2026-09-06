@@ -8694,6 +8694,47 @@ button.hamburger {
   cursor: progress;
 }
 
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.msg a.rich-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px 2px 4px;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  line-height: 1.35;
+  vertical-align: middle;
+  text-decoration: none;
+}
+.msg a.rich-link:hover,
+.msg a.rich-link:focus-visible {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.msg .rich-link-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 4px;
+}
+.msg .rich-link-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Tables */
 .msg table {
   border-collapse: collapse;
@@ -9438,14 +9479,47 @@ button.hamburger {
 /* Mermaid diagram containers */
 .mermaid-container {
   margin: 12px 0;
-  padding: 16px;
-  background: color-mix(in srgb, var(--bg) 95%, var(--fg));
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--red) 5%, transparent), transparent 45%),
+    color-mix(in srgb, var(--bg) 95%, var(--fg));
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--border));
+  border-radius: 10px;
   overflow-x: auto;
   text-align: center;
+  box-sizing: border-box;
+  max-width: 100%;
 }
-.mermaid-container svg { max-width: 100%; height: auto; }
+.mermaid-container[data-mermaid-state="rendering"] .mermaid-source { opacity: 0.62; }
+.mermaid-container[data-mermaid-state="rendered"] { min-height: 96px; }
+.mermaid-visual { min-width: max-content; }
+.mermaid-visual svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+}
+.mermaid-source {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 90%, #000);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mermaid-source code {
+  color: var(--fg);
+  background: transparent;
+}
+.mermaid-error {
+  margin: 0 0 10px;
+  color: var(--color-error, #ff6b7d);
+  font-size: 0.86em;
+  text-align: left;
+}
 
 /* KaTeX math overrides */
 .katex-display { margin: 0.8em 0; overflow-x: auto; overflow-y: hidden; }

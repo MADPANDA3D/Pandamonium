@@ -143,6 +143,18 @@ The discovered Immich source and its connection controls on desktop and mobile:
 
 ![Immich Gallery settings on mobile](images/gallery-immich-settings-mobile.png)
 
+### Rich chat rendering
+
+Pandamonium renders fenced `mermaid` blocks as responsive diagrams in chat.
+Invalid diagram source stays visible with an error message so an agent response
+never disappears. Markdown tables remain horizontally scrollable on narrow
+screens, and GitHub, Instagram, and Facebook links receive recognizable service
+icons without changing their destinations.
+
+![Mermaid diagram, table, and branded links on desktop](images/chat-mermaid-rich-links-desktop.png)
+
+![Mermaid diagram, table, and branded links on mobile](images/chat-mermaid-rich-links-mobile.png)
+
 ### Atomic native Linux updates
 
 The fixed footer can install a signed Pandamonium release only when Linux is
