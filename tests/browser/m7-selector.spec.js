@@ -86,9 +86,10 @@ test('text and voice render the same typed selector data without rerouting unava
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('#model-picker-btn').click();
-  const mobile = await page.locator('#model-picker-menu').evaluate(node => node.getBoundingClientRect());
-  expect(mobile.left).toBeGreaterThanOrEqual(0);
-  expect(mobile.right).toBeLessThanOrEqual(390);
+  await expect.poll(() => page.locator('#model-picker-menu').evaluate(node => {
+    const bounds = node.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth;
+  })).toBe(true);
 });
 
 test('selector exposes loading, empty, and failure states', async ({ page }) => {

@@ -16,32 +16,33 @@ function sessionFixture(id, name, createdAt, lastMessageAt, extra = {}) {
 }
 
 test('chat dates and latest-message order refresh live without restoring archived state', async ({ page }) => {
-  const now = Date.now();
-  const isoAgo = milliseconds => new Date(now - milliseconds).toISOString();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayAt = minutes => new Date(today.getTime() + minutes * 60_000).toISOString();
   const current = sessionFixture(
     'session-current',
     'Current chat',
-    isoAgo(10 * 86400000),
-    isoAgo(2 * 3600000),
+    new Date(today.getTime() - 10 * 86400000).toISOString(),
+    todayAt(1),
   );
   const recent = sessionFixture(
     'session-recent',
     'Recent chat',
-    isoAgo(4 * 3600000),
-    isoAgo(1 * 3600000),
+    todayAt(1),
+    todayAt(2),
   );
   const favoriteYesterday = sessionFixture(
     'session-favorite',
     'Favorite yesterday',
-    isoAgo(86400000),
-    isoAgo(86400000),
+    new Date(today.getTime() - 60_000).toISOString(),
+    new Date(today.getTime() - 60_000).toISOString(),
     { is_important: true },
   );
   const archived = sessionFixture(
     'session-archived',
     'Archived latest',
-    isoAgo(60000),
-    isoAgo(60000),
+    todayAt(3),
+    todayAt(3),
     { archived: true },
   );
   let responseSessions = [archived, favoriteYesterday, current, recent];
@@ -119,7 +120,7 @@ test('chat dates and latest-message order refresh live without restoring archive
   await expect(dateHeaders.first()).toBeVisible();
 
   await page.evaluate(() => { window.__sessionOrderingPageMarker = true; });
-  current.last_message_at = new Date(now + 60000).toISOString();
+  current.last_message_at = todayAt(4);
   current.updated_at = current.last_message_at;
   responseSessions = [favoriteYesterday, archived, recent, current];
   await page.evaluate(() => window.sessionModule.loadSessions());

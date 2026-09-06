@@ -20,6 +20,13 @@ async function waitForChatSubmitReady(page) {
   ))).toBe(true);
 }
 
+async function waitForSession(page, sessionId) {
+  await expect.poll(
+    () => page.evaluate(() => window.sessionModule?.getCurrentSessionId()),
+    { timeout: 15_000 },
+  ).toBe(sessionId);
+}
+
 test('sidebar New Chat preserves the active configuration and sends immediately', async ({ page }) => {
   let stallDefaultChat = false;
   let releaseDefaultChat;
@@ -88,7 +95,7 @@ test('sidebar New Chat preserves the active configuration and sends immediately'
     const directImport = await import('/static/js/sessions.js');
     return window.sessionModule === directImport.default;
   })).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForSession(page, 'session-one');
   await waitForChatSubmitReady(page);
   await expect(page.locator('#current-meta')).toHaveText('Existing chat');
 
@@ -111,7 +118,7 @@ test('sidebar New Chat preserves the active configuration and sends immediately'
 
   await page.evaluate(() => window.sessionModule.selectSession('session-one'));
   releaseDefaultChat();
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForSession(page, 'session-one');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getPendingChat())).toBe(null);
 });
 
@@ -151,7 +158,7 @@ test('New Chat clears the visible session immediately while Compare teardown is 
   });
 
   await page.goto('/static/index.html#session-one');
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForSession(page, 'session-one');
   await expect(page.locator('#chat-history .msg')).toHaveCount(2);
   await page.locator('#message:visible').fill('unsent draft');
 
@@ -224,7 +231,7 @@ test('New Chat clears a completed tool conversation without a browser refresh', 
   });
 
   await page.goto('/static/index.html#session-one');
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForSession(page, 'session-one');
   await waitForChatSubmitReady(page);
 
   await page.locator('#message:visible').fill('Run whoami and tell me the result');
@@ -300,7 +307,7 @@ test('every New Chat launcher uses the same blank pending lifecycle', async ({ p
   ];
 
   for (const [name, launch] of launchers) {
-    await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId()), name).toBe('session-one');
+    await waitForSession(page, 'session-one');
     await expect(page.locator('#chat-history .msg'), name).toHaveCount(2);
     await launch();
     await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId()), name).toBe(null);
@@ -366,7 +373,7 @@ test('New Chat stays blank while an active tool stream finishes and sessions ref
   });
 
   await page.goto('/static/index.html#session-one');
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForSession(page, 'session-one');
   await waitForChatSubmitReady(page);
   await page.locator('#message:visible').fill('Run whoami');
   await page.locator('.send-btn:visible').click();
@@ -416,7 +423,7 @@ test('mobile sidebar New Chat clears the chat immediately', async ({ page }) => 
   });
 
   await page.goto('/static/index.html#session-one');
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForSession(page, 'session-one');
   if (await page.locator('#sidebar').evaluate(sidebar => sidebar.classList.contains('hidden'))) {
     await page.locator('#hamburger-btn').click();
   }
