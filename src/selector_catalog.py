@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.agent_identity import agent_identity_status
+from src.model_discovery import installation_capabilities
 
 
 def _stable_id(kind: str, *parts: object) -> str:
@@ -18,11 +19,6 @@ def _stable_id(kind: str, *parts: object) -> str:
 def _bounded_text(value: object, fallback: str, limit: int = 200) -> str:
     text = " ".join(str(value or "").split())[:limit]
     return text or fallback
-
-
-def _safe_reason(value: object, fallback: str) -> str:
-    reason = _bounded_text(value, fallback, 120).lower().replace(" ", "_")
-    return re.sub(r"[^a-z0-9_.-]", "", reason) or fallback
 
 
 def _permissions(scopes: list[str], delegation: str = "none") -> dict[str, Any]:
@@ -69,6 +65,7 @@ def build_selector_catalog(
         "entity_id": agent_id,
         "kind": "agent",
         "target": "jarvis",
+        "capabilities": ["model"],
         "selectable": True,
         "reason": None,
     })
@@ -106,22 +103,23 @@ def build_selector_catalog(
                 "kind": "model",
                 "model_id": model_id,
                 "endpoint_id": endpoint_id,
+                "capabilities": ["model"],
                 "selectable": not unavailable,
                 "reason": "endpoint_offline" if unavailable else None,
             })
 
     for worker_id, details in worker_statuses.items():
-        if not isinstance(details, dict) or details.get("configured") is not True:
+        if (
+            not isinstance(details, dict)
+            or details.get("configured") is not True
+            or details.get("ready") is not True
+        ):
             continue
-        is_agent = worker_id == "hermes"
-        kind = "agent" if is_agent else "worker"
+        capabilities = installation_capabilities(details)
+        if not capabilities or capabilities == ["model"]:
+            continue
+        kind = "worker" if "codex" in capabilities else "agent"
         entity_id = _stable_id(kind, worker_id)
-        connection = details.get("connection") if isinstance(details.get("connection"), dict) else {}
-        ready = details.get("ready") is True
-        reason = _safe_reason(
-            connection.get("reason") or connection.get("state"),
-            "worker_unreachable",
-        )
         workspace_scopes = [
             f"workspace:{workspace}"
             for workspace in details.get("workspaces") or []
@@ -131,26 +129,26 @@ def build_selector_catalog(
             "kind": kind,
             "id": entity_id,
             "display_name": _bounded_text(details.get("label"), "Configured peer"),
-            "availability": "available" if ready else "unavailable",
+            "availability": "available",
             "ownership": {"scope": "installation", "id": "installation:current"},
             "health": {
-                "state": "healthy" if ready else "unavailable",
-                **({"reason": reason} if not ready else {}),
+                "state": "healthy",
                 "checked_at": generated_at,
             },
             "permissions": _permissions(workspace_scopes or ["owner:current"], "narrower_only"),
             "source": {"type": "worker", "ref": "src/jarvis_agent.py#worker_statuses"},
             "actions": [
-                _action("converse" if is_agent else "start_task"),
-                *([] if is_agent else [_action("cancel_task")]),
+                _action("start_task" if kind == "worker" else "converse"),
+                *([_action("cancel_task")] if kind == "worker" else []),
             ],
         })
         selections.append({
             "entity_id": entity_id,
             "kind": kind,
             "target": worker_id,
-            "selectable": ready,
-            "reason": None if ready else reason,
+            "capabilities": capabilities,
+            "selectable": True,
+            "reason": None,
         })
 
     return {

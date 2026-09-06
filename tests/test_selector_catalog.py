@@ -28,6 +28,7 @@ def _workers():
             "label": "Friday",
             "configured": True,
             "ready": True,
+            "installation_capabilities": ["codex"],
             "workspaces": ["test-project"],
             "connection": {"state": "connected", "url": "http://private.invalid"},
         },
@@ -35,8 +36,17 @@ def _workers():
             "label": "Gordon",
             "configured": True,
             "ready": False,
+            "installation_capabilities": ["hermes"],
             "workspaces": ["test-project"],
             "connection": {"state": "unreachable", "reason": "connection_failed"},
+        },
+        "desktop-claude": {
+            "label": "Scribe",
+            "configured": True,
+            "ready": True,
+            "installation_capabilities": ["claude"],
+            "workspaces": ["test-project"],
+            "connection": {"state": "connected"},
         },
         "vps-codex": {
             "label": "Private installation label",
@@ -64,20 +74,19 @@ def test_selector_catalog_preserves_taxonomy_and_same_health(monkeypatch):
     assert entities["Alpha"]["kind"] == "model"
     assert entities["Jarvis"]["kind"] == "agent"
     assert entities["Friday"]["kind"] == "worker"
-    assert entities["Gordon"]["kind"] == "agent"
-    assert entities["Gordon"]["health"] == {
-        "state": "unavailable",
-        "reason": "connection_failed",
-        "checked_at": discovery["generated_at"],
-    }
+    assert entities["Scribe"]["kind"] == "agent"
+    assert "Gordon" not in entities
     assert selections[entities["Friday"]["id"]]["selectable"] is True
-    assert selections[entities["Gordon"]["id"]] == {
-        "entity_id": entities["Gordon"]["id"],
+    assert selections[entities["Scribe"]["id"]] == {
+        "entity_id": entities["Scribe"]["id"],
         "kind": "agent",
-        "target": "hermes",
-        "selectable": False,
-        "reason": "connection_failed",
+        "target": "desktop-claude",
+        "capabilities": ["claude"],
+        "selectable": True,
+        "reason": None,
     }
+    assert selections[entities["Friday"]["id"]]["capabilities"] == ["codex"]
+    assert selections[entities["Alpha"]["id"]]["capabilities"] == ["model"]
     assert "Private installation label" not in entities
 
 

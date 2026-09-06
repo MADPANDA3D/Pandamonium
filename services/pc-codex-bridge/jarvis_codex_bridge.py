@@ -30,7 +30,7 @@ STATE_DIR = Path(os.getenv("JARVIS_CODEX_BRIDGE_STATE_DIR", str(Path.home() / ".
 CODEX_BIN = os.getenv("JARVIS_CODEX_BIN", "codex")
 MAX_TASK_RUNTIME = int(os.getenv("JARVIS_CODEX_MAX_TASK_SECONDS", "480"))
 WORKER_ID = os.getenv("JARVIS_CODEX_WORKER_ID", "pc-codex").strip() or "pc-codex"
-WORKER_LABEL = "VPS Codex" if WORKER_ID == "vps-codex" else "PC Codex"
+WORKER_LABEL = " ".join(os.getenv("JARVIS_CODEX_WORKER_LABEL", WORKER_ID).split())[:80] or WORKER_ID
 BRIDGE_PROTOCOL_VERSION = "pandamonium.codex-bridge.v2"
 CODEX_MODEL = os.getenv(
     "JARVIS_CODEX_MODEL",
@@ -910,6 +910,10 @@ class Handler(BaseHTTPRequestHandler):
                 "features": {
                     "project_catalog": True,
                     "task_control": True,
+                },
+                "installation": {
+                    "display_name": WORKER_LABEL,
+                    "capabilities": ["codex"],
                 },
                 "task_execution_enabled": _task_execution_enabled(),
                 "workspaces": sorted(WORKSPACES),

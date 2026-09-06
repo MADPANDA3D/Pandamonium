@@ -1,4 +1,4 @@
-"""Durable, owner-scoped broker for fixed read-only workers."""
+"""Durable, owner-scoped broker for configured read-only workers."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from src.agent_worker_adapters import (
     WORKER_IDS,
     WorkerUnavailable,
     adapters,
+    probe_worker_statuses,
     require_read_only,
     worker_catalog,
 )
@@ -258,20 +259,7 @@ def find_active_task(session_id: str, worker: str, owner: str) -> dict[str, Any]
 async def worker_statuses() -> dict[str, dict[str, Any]]:
     registry = adapters()
     catalog = worker_catalog(registry)
-    health_rows = await asyncio.gather(*(adapter.health() for adapter in registry.values()))
-    for (worker, adapter), health in zip(registry.items(), health_rows):
-        state = str(health.get("state") or "unreachable")
-        connection = {"state": state}
-        if health.get("reason"):
-            connection["reason"] = str(health["reason"])
-        catalog[worker].update(
-            configured=bool(adapter.enabled),
-            ready=bool(adapter.enabled and state == "connected"),
-            capabilities=list(health.get("capabilities") or catalog[worker]["capabilities"]),
-            workspaces=list(health.get("workspaces") or catalog[worker]["workspaces"]),
-            connection=connection,
-        )
-    return catalog
+    return await probe_worker_statuses(registry, catalog)
 
 
 async def start_task(

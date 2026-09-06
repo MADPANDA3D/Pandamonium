@@ -1,6 +1,6 @@
 # Voice Orb workers
 
-Voice Orb workers are optional and disabled by default. The public alpha exposes exactly three adapter IDs: `pc-codex`, `hermes`, and `vps-codex`. Every task is read-only; there is no public write approval mode.
+Voice Orb workers are optional and disabled by default. The private compatibility layer supports the `pc-codex`, `hermes`, and `vps-codex` adapter slots, but public discovery exposes only installations that are explicitly configured and currently reachable. An unconfigured or unreachable VPS Codex slot is absent. Every task is read-only; there is no public write approval mode.
 
 ## Security contract
 

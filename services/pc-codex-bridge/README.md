@@ -18,9 +18,14 @@ optional model overrides in the private service environment:
 
 ```env
 JARVIS_CODEX_WORKSPACES_JSON='{"project":{"path":"/absolute/path/to/project","display_name":"Project"}}'
+JARVIS_CODEX_WORKER_LABEL=Friday
 JARVIS_CODEX_MODEL=your-model-id
 JARVIS_CODEX_REASONING_EFFORT=high
 ```
+
+The health contract reports that installation-assigned label plus its Codex
+capability. Pandamonium uses the label as owner-facing data and exposes the
+installation only while this explicitly configured bridge is reachable.
 
 Pandamonium's project browser defaults every request to read-only. A reversible
 workspace edit requires the authenticated operator to select the explicit edit

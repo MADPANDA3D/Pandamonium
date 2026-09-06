@@ -26,7 +26,6 @@ from core.middleware import require_admin
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_identity import agent_system_prompt, configured_agent_id, configured_agent_name
-from src.agent_worker_adapters import WORKER_IDS
 from src.agent_worker_broker import worker_statuses
 from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
 from src.action_intents import classify_tool_intent
@@ -42,6 +41,7 @@ from src.extension_host import extension_runtime_host
 from src.extension_mcp_adapter import execute_mcp_extension_tool, mcp_extension_tool_specs
 from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
+from src.model_discovery import installation_capabilities
 from src.settings import load_settings
 from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
@@ -1859,17 +1859,6 @@ def _setup_voice_speed(value: Any) -> float:
     return speed if 0.25 <= speed <= 4 else 1.0
 
 
-def _setup_logical_names(value: Any, *, limit: int = 16) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    names = {
-        str(item).strip()
-        for item in value
-        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", str(item).strip())
-    }
-    return sorted(names)[:limit]
-
-
 async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any) -> dict[str, Any]:
     """Build one redacted setup snapshot shared by HTTP status and voice."""
     stt = _safe_service_stats(stt_service, "STT")
@@ -1891,17 +1880,22 @@ async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any)
     if not isinstance(raw_workers, dict):
         raw_workers = {}
     workers: list[dict[str, Any]] = []
-    for worker_id in WORKER_IDS:
-        details = raw_workers.get(worker_id)
-        details = details if isinstance(details, dict) else {}
-        configured = bool(details.get("configured"))
-        ready = bool(configured and details.get("ready"))
+    for worker_id, details in sorted(raw_workers.items()):
+        if (
+            not isinstance(details, dict)
+            or details.get("configured") is not True
+            or details.get("ready") is not True
+        ):
+            continue
+        capabilities = installation_capabilities(details)
+        if not capabilities:
+            continue
         workers.append({
             "id": worker_id,
-            "configured": configured,
-            "ready": ready,
-            "status": "ready" if ready else ("unavailable" if configured else "not_configured"),
-            "capabilities": _setup_logical_names(details.get("capabilities")),
+            "configured": True,
+            "ready": True,
+            "status": "ready",
+            "capabilities": capabilities,
         })
     stt_available = bool(stt.get("available"))
     tts_available = bool(tts.get("available"))
@@ -1916,9 +1910,9 @@ async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any)
             guidance.append("Enable an available text-to-speech provider.")
     ready_workers = sum(1 for worker in workers if worker["ready"])
     if ready_workers:
-        guidance.append(f"{ready_workers} of {len(workers)} optional fixed read-only workers are ready.")
+        guidance.append(f"{ready_workers} configured installation identities are reachable.")
     else:
-        guidance.append("Optional fixed read-only workers are not ready.")
+        guidance.append("No configured installation identities are reachable.")
     setup = {
         "version": 1,
         "command": "Check voice setup.",

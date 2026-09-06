@@ -155,13 +155,15 @@ async def test_worker_status_reports_configuration_and_readiness(monkeypatch):
                 "machine": "test",
                 "protocol": "codex-bridge",
                 "protocol_ready": True,
+                "display_name": "Friday",
+                "installation_capabilities": ["codex"],
             }
 
     monkeypatch.setattr(jarvis_agent, "adapters", lambda: {"pc-codex": Adapter()})
     monkeypatch.setattr(
         jarvis_agent,
         "worker_catalog",
-        lambda: {
+        lambda _registry: {
             "pc-codex": {
                 "enabled": True,
                 "configured": True,
@@ -179,9 +181,48 @@ async def test_worker_status_reports_configuration_and_readiness(monkeypatch):
     assert status["ready"] is True
     assert status["enabled"] is True
     assert status["adapter"] == "codex-bridge"
+    assert status["label"] == "Friday"
+    assert status["installation_capabilities"] == ["codex"]
     assert status["connection"]["state"] == "connected"
     assert "url" not in status["connection"]
     assert "error" not in status["connection"]
+
+
+@pytest.mark.asyncio
+async def test_worker_status_omits_unconfigured_compatibility_slots():
+    class Adapter:
+        def __init__(self, enabled):
+            self.enabled = enabled
+            self.calls = 0
+
+        async def health(self):
+            self.calls += 1
+            return {
+                "state": "connected",
+                "protocol": "codex-bridge",
+                "installation_capabilities": ["codex"],
+            }
+
+    friday = Adapter(True)
+    absent_vps = Adapter(False)
+    registry = {"pc-codex": friday, "vps-codex": absent_vps}
+    catalog = {
+        worker: {
+            "id": worker,
+            "label": worker,
+            "configured": adapter.enabled,
+            "ready": False,
+            "capabilities": [],
+            "workspaces": [],
+        }
+        for worker, adapter in registry.items()
+    }
+
+    statuses = await agent_worker_adapters.probe_worker_statuses(registry, catalog)
+
+    assert list(statuses) == ["pc-codex"]
+    assert friday.calls == 1
+    assert absent_vps.calls == 0
 
 
 @pytest.mark.asyncio

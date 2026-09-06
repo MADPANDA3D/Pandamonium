@@ -18,7 +18,7 @@ from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
 from core.models import ChatMessage
 from src.agent_identity import configured_agent_id, configured_agent_name
-from src.agent_worker_adapters import adapters, require_worker_task_permission, worker_catalog
+from src.agent_worker_adapters import adapters, probe_worker_statuses, require_worker_task_permission, worker_catalog
 from src.authority_protocol import operator_identity
 from src.operational_protocol import record_operational_event
 from src.voice_pcm import asks_read_all, result_speech, speech_text
@@ -976,20 +976,9 @@ async def task_action(
 
 
 async def worker_statuses() -> dict[str, dict[str, Any]]:
-    catalog = worker_catalog()
     registry = adapters()
-    results = await asyncio.gather(*(adapter.health() for adapter in registry.values()))
-    for (worker, adapter), health in zip(registry.items(), results):
-        configured = bool(adapter.enabled)
-        ready = configured and health.get("state") == "connected"
-        catalog[worker] = {
-            **catalog[worker],
-            "connection": health,
-            "configured": configured,
-            "ready": ready,
-            "enabled": ready,
-        }
-    return catalog
+    catalog = worker_catalog(registry)
+    return await probe_worker_statuses(registry, catalog)
 
 
 async def stream_task_events(
@@ -1074,7 +1063,7 @@ async def runtime_status(active_worker: str | None = None, owner: str | None = N
         "tts_model": settings.get("tts_model"),
         "tts_voice": settings.get("tts_voice"),
         "active_worker": active_worker,
-        "workers": WORKERS,
+        "workers": await worker_statuses(),
     }
 
 

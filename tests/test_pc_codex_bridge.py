@@ -256,6 +256,10 @@ def test_catalog_http_endpoint_requires_auth_and_returns_safe_page(tmp_path, mon
         health = json.loads(response.read())
         assert health["protocol_version"] == "pandamonium.codex-bridge.v2"
         assert health["features"] == {"project_catalog": True, "task_control": True}
+        assert health["installation"] == {
+            "display_name": bridge.WORKER_LABEL,
+            "capabilities": ["codex"],
+        }
         connection.close()
 
         connection = http.client.HTTPConnection(*server.server_address, timeout=2)
