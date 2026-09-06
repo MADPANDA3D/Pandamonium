@@ -14,6 +14,12 @@ function sessionFixture() {
   };
 }
 
+async function waitForChatSubmitReady(page) {
+  await expect.poll(() => page.evaluate(() => (
+    typeof document.querySelector('#chat-form')?.onsubmit === 'function'
+  ))).toBe(true);
+}
+
 test('sidebar New Chat preserves the active configuration and sends immediately', async ({ page }) => {
   let stallDefaultChat = false;
   let releaseDefaultChat;
@@ -83,6 +89,7 @@ test('sidebar New Chat preserves the active configuration and sends immediately'
     return window.sessionModule === directImport.default;
   })).toBe(true);
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForChatSubmitReady(page);
   await expect(page.locator('#current-meta')).toHaveText('Existing chat');
 
   stallDefaultChat = true;
@@ -218,9 +225,7 @@ test('New Chat clears a completed tool conversation without a browser refresh', 
 
   await page.goto('/static/index.html#session-one');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
-  await expect.poll(() => page.evaluate(() => (
-    typeof document.querySelector('#chat-form')?.onsubmit === 'function'
-  ))).toBe(true);
+  await waitForChatSubmitReady(page);
 
   await page.locator('#message:visible').fill('Run whoami and tell me the result');
   await page.locator('.send-btn:visible').click();
@@ -362,6 +367,7 @@ test('New Chat stays blank while an active tool stream finishes and sessions ref
 
   await page.goto('/static/index.html#session-one');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-one');
+  await waitForChatSubmitReady(page);
   await page.locator('#message:visible').fill('Run whoami');
   await page.locator('.send-btn:visible').click();
   await expect(page.locator('.send-btn:visible')).toHaveAttribute('data-mode', 'streaming');
