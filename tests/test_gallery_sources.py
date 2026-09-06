@@ -443,8 +443,33 @@ def test_source_route_is_owner_scoped_and_original_is_not_deletable(
     app.state.auth_manager = type(
         "AdminFixture", (), {"is_admin": lambda self, user: user == "alice"}
     )()
+
+    async def tailnet_fixture():
+        return {
+            "available": True,
+            "self_name": "pc-codex",
+            "devices_checked": 1,
+            "candidates": [],
+            "message": "No Immich service found.",
+        }
+
+    monkeypatch.setattr(
+        gallery_routes.immich_gallery,
+        "discover_tailnet_immich",
+        tailnet_fixture,
+    )
+    monkeypatch.setattr(
+        gallery_routes.immich_gallery,
+        "SessionLocal",
+        session_factory,
+    )
     app.include_router(gallery_routes.setup_gallery_routes())
     client = TestClient(app)
+
+    discovery = client.get("/api/gallery/discovery")
+    assert discovery.status_code == 200
+    assert discovery.json()["sources"][0]["kind"] == "device_folder"
+    assert discovery.json()["sources"][0]["device"] == "pc-codex"
 
     response = client.get(f"/api/gallery/source/{image_id}/{image.filename}")
     assert response.status_code == 200

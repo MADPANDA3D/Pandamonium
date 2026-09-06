@@ -60,10 +60,22 @@ downloads and serves. The app itself is lightweight; local model serving is the
 heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
 connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
-On a native install, opening Gallery discovers the current OS user's conventional
+The setup guide includes **Connect your gallery**. Open it to scan for distinct
+Gallery sources on this device and, when Tailscale is available, online tailnet
+devices. Pandamonium currently recognizes two source types: a device folder it
+can read and an Immich service it can reach. Each result keeps its own type,
+device, location, connection state, and controls; an Immich server is never
+collapsed into a PC Pictures folder.
+
+On a native install, Gallery discovers the current OS user's conventional
 Pictures folder: XDG `XDG_PICTURES_DIR` on Linux, `~/Pictures` on macOS, and the
 Windows Known Folder API. Accessible folders are connected read-only and can be
-refreshed, changed, or disabled under **Gallery → Settings → Local Pictures**.
+refreshed, changed, or disabled under **Gallery → Settings → Gallery sources**.
+For example, an install running on `pc-codex` reports its Pictures directory as
+a **Device folder** on `pc-codex`, while an Immich instance found elsewhere is a
+separate **Immich** source on that server. Seeing a remote PC on the tailnet does
+not grant filesystem access; its folder must be visible to the running process
+through a native install or an explicit read-only mount before it can be offered.
 On an authenticated multi-user install, only an administrator can map host
 folders; this prevents ordinary accounts from browsing process-readable paths.
 Pandamonium indexes metadata and content hashes; it does not upload, rewrite, or
@@ -85,11 +97,43 @@ The path must be a real container mount point. An ordinary container directory
 is rejected, and an unmounted host filesystem is never implied. Separate
 multiple Linux container paths with `:`.
 
-Gallery Settings on desktop and mobile:
+Gallery source discovery on desktop and mobile:
 
-![Gallery Local Pictures on desktop](images/gallery-local-pictures-desktop.png)
+![Gallery source discovery on desktop](images/gallery-local-pictures-desktop.png)
 
-![Gallery Local Pictures on mobile](images/gallery-local-pictures-mobile.png)
+![Gallery source discovery on mobile](images/gallery-local-pictures-mobile.png)
+
+### Connect an Immich source
+
+Choose an **Immich found** result under **Gallery → Settings → Gallery sources**.
+Pandamonium checks the standard HTTPS endpoint, port `8443`, and Immich's default
+port `2283` across a bounded set of online tailnet devices. Discovery sends no
+credentials and does not connect anything automatically. If the service is not
+discoverable, use **Connect Immich manually**.
+
+In Immich, open the profile menu, choose **Account Settings → API Keys**, and
+create a key named `Pandamonium`. For browsing, grant `album.read`, `asset.read`,
+`asset.view`, and `asset.download`; add `asset.upload` only if you want to export
+local Gallery images to Immich. Copy the key once, paste it into Pandamonium,
+then save and test the connection. See the
+[official Immich user-settings guide](https://docs.immich.app/features/user-settings/).
+Pandamonium encrypts the key at rest and proxies Immich metadata, thumbnails,
+previews, and downloads server-side, so the browser never receives the
+credential.
+
+Choose **Immich** in the Gallery source filter or open an Immich album to browse
+and search the remote library. Remote assets and albums stay visibly read-only.
+**Import a local copy** stores a bounded copy in Pandamonium; **Export to
+Immich** uses Immich's supported upload API. Removing the connection or clearing
+its owner-scoped cache removes only Pandamonium metadata and thumbnails and
+never deletes an Immich original. If Immich is offline, a matching cached page
+can remain visible with an explicit stale/offline state.
+
+The discovered Immich source and its connection controls on desktop and mobile:
+
+![Immich Gallery settings on desktop](images/gallery-immich-settings-desktop.png)
+
+![Immich Gallery settings on mobile](images/gallery-immich-settings-mobile.png)
 
 ### Atomic native Linux updates
 

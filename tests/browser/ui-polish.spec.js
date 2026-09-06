@@ -29,6 +29,20 @@ async function mockApp(page, { mailboxes = null } = {}) {
     }
     if (url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
     if (url.pathname === '/api/sessions') return route.fulfill({ json: [] });
+    if (url.pathname === '/api/gallery/discovery') {
+      return route.fulfill({ json: {
+        connected: 0,
+        available: 1,
+        sources: [{
+          id: 'immich:found', kind: 'immich', provider: 'Immich', label: 'Immich',
+          device: 'photo-server', location: 'https://photo-server.example',
+          server_url: 'https://photo-server.example', state: 'available',
+          connected: false, connectable: true,
+        }],
+        local: { environment: 'native', message: 'No Pictures folder found.' },
+        tailnet: { available: true, devices_checked: 2, message: 'Found 1 Immich service.' },
+      } });
+    }
     if (url.pathname === '/api/mcp/portal/mailboxes' && mailboxes) {
       return route.fulfill({ json: mailboxes });
     }
@@ -117,7 +131,9 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
   await expect(modal.getByRole('button', { name: 'Restart product tour' })).toBeVisible();
   await expect(modal.getByRole('button', { name: 'Skip for now' })).toBeVisible();
   const stepCards = modal.locator('.first-run-step');
-  await expect(stepCards).toHaveCount(3);
+  await expect(stepCards).toHaveCount(4);
+  await expect(stepCards.nth(2)).toContainText('Connect your gallery');
+  await expect(stepCards.nth(2)).toContainText('Found: Immich on photo-server');
   await modal.locator('.guide-modal-content').evaluate(async node => {
     await Promise.all(node.getAnimations().map(animation => animation.finished));
   });
@@ -143,11 +159,21 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
   expect(guideWidth).toBeLessThanOrEqual(530);
   expect(stepLayout[1].top).toBeGreaterThanOrEqual(stepLayout[0].bottom + 7);
   expect(stepLayout[2].top).toBeGreaterThanOrEqual(stepLayout[1].bottom + 7);
+  expect(stepLayout[3].top).toBeGreaterThanOrEqual(stepLayout[2].bottom + 7);
   expect(Math.max(...stepLayout.map(card => card.width)) - Math.min(...stepLayout.map(card => card.width))).toBeLessThan(2);
   expect(stepLayout.every(card => card.height >= 52)).toBe(true);
   expect(stepLayout.every(card => card.indexTop > card.top && card.indexBottom < card.bottom)).toBe(true);
   expect(stepLayout.every(card => card.labelBottom <= card.stateTop + 1)).toBe(true);
   expect(stepLayout.every(card => card.stateBottom <= card.bottom - 8)).toBe(true);
+
+  await stepCards.nth(2).click();
+  await expect(modal).toBeHidden();
+  await expect(page.locator('#gallery-modal')).toBeVisible();
+  await expect(page.locator('#gallery-settings-container')).toBeVisible();
+  await expect(page.locator('#gallery-source-card h2')).toHaveText('Gallery sources');
+  await page.locator('#gallery-close').click();
+  await expect(page.locator('#gallery-modal')).toHaveCount(0);
+  await guideButton.click();
 
   await modal.getByRole('button', { name: 'Skip for now' }).click();
   await expect(modal).toBeHidden();
