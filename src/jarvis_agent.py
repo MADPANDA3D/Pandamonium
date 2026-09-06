@@ -186,6 +186,38 @@ def find_active_task(
     return matches[0] if matches else None
 
 
+def session_presenter(session: object, worker: str) -> str:
+    """Resolve the presenter from the server-owned conversation target."""
+    target = str(getattr(session, "agent_target", None) or "jarvis").strip()
+    if target == "jarvis":
+        return configured_agent_name()
+    if target != worker:
+        raise ValueError("conversation_target_worker_mismatch")
+    details = worker_catalog().get(worker) or {}
+    if not details.get("configured"):
+        raise RuntimeError("selected_agent_not_configured")
+    return str(details.get("label") or worker)[:80]
+
+
+def _bind_task_presenter(task: dict, presenter: str | None) -> dict:
+    label = " ".join(str(presenter or "").split())[:80]
+    if not label or task.get("presenter") == label:
+        return task
+    task["presenter"] = label
+    for event in task.get("events") or []:
+        event["presenter"] = label
+    _save_task(task)
+    return task
+
+
+def _task_presenter(task: dict) -> str:
+    return str(
+        task.get("presenter")
+        or WORKER_LABELS.get(str(task.get("worker")))
+        or "Worker"
+    )
+
+
 def task_events(task_id: str, after: int = -1) -> list[dict]:
     task = get_task(task_id) or {}
     return [event for event in task.get("events", []) if int(event.get("seq", -1)) > after]
@@ -563,7 +595,7 @@ def _jarvis_runtime(task: dict | None = None) -> tuple[str, str, dict]:
 
 
 async def _spoken_result(task: dict, text: str) -> str:
-    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    label = _task_presenter(task)
     return result_speech(
         text,
         kind="worker",
@@ -576,7 +608,7 @@ async def _spoken_result(task: dict, text: str) -> str:
 
 
 def _worker_result_speech(task: dict, event: dict) -> dict[str, str]:
-    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    label = _task_presenter(task)
     return result_speech(
         str(event.get("text") or ""),
         kind="worker",
@@ -591,7 +623,7 @@ def _worker_result_speech(task: dict, event: dict) -> dict[str, str]:
 
 
 async def _spoken_milestone(task: dict, text: str) -> str:
-    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    label = _task_presenter(task)
     cleaned = speech_text(text)
     if cleaned and len(cleaned.split()) <= 40:
         return cleaned
@@ -599,7 +631,7 @@ async def _spoken_milestone(task: dict, text: str) -> str:
 
 
 async def _spoken_progress(task: dict, updates: list[str]) -> str:
-    label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+    label = _task_presenter(task)
     return f"{label} is still working; the latest details are in the activity history."
 
 
@@ -640,7 +672,7 @@ async def _enrich_worker_event(task: dict, event: dict) -> dict:
         enriched["spoken_text"] = speech_text(str(event.get("text") or ""), preserve_code=True)
         enriched["speech_mode"] = "verbatim"
     elif event.get("type") == "error":
-        label = WORKER_LABELS.get(str(task.get("worker")), "Worker")
+        label = _task_presenter(task)
         enriched.update(result_speech(str(event.get("text") or ""), kind="failure", label=label))
     return enriched
 
@@ -754,6 +786,47 @@ async def direct_hermes_turn(
     )
 
 
+async def direct_codex_turn(
+    session_id: str,
+    prompt: str,
+    *,
+    owner: str,
+    workspace: str,
+    presenter: str,
+) -> tuple[dict, str]:
+    """Start or steer the one Codex task bound to this conversation."""
+    active = find_active_task(session_id, "pc-codex", None, owner)
+    if active:
+        _bind_task_presenter(active, presenter)
+        return await task_action(
+            active["task_id"],
+            "steer",
+            {"prompt": prompt},
+            persist_user_message=False,
+            owner=owner,
+        ), "steered"
+    binding = get_worker_binding(owner, session_id, "pc-codex", workspace)
+    workspace = str(binding.get("workspace") or workspace)
+    task = await start_task(
+        "pc-codex",
+        session_id,
+        workspace,
+        prompt,
+        owner=owner,
+        codex_thread_id=binding.get("codex_thread_id"),
+        presenter=presenter,
+    )
+    if task.get("reused"):
+        return await task_action(
+            task["task_id"],
+            "steer",
+            {"prompt": prompt},
+            persist_user_message=False,
+            owner=owner,
+        ), "steered"
+    return task, "blocked" if task.get("status") == "blocked" else "started"
+
+
 async def start_task(
     worker: str,
     session_id: str,
@@ -818,7 +891,7 @@ async def start_task(
             )
             if incompatible:
                 raise RuntimeError("conversation_task_conflict")
-            return {**active, "reused": True}
+            return {**_bind_task_presenter(active, presenter), "reused": True}
 
         binding = get_worker_binding(owner, session_id, worker, workspace)
         bound_workspace = str(binding.get("workspace") or "")

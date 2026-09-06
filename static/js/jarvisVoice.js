@@ -1590,7 +1590,7 @@ function updateActivitySummary(group, task) {
   const duration = group.querySelector('.jarvis-task-duration');
   const worker = group.querySelector('.jarvis-task-worker');
   if (duration) duration.textContent = activityTitle(task);
-  if (worker) worker.textContent = WORKER_LABELS[task.worker] || task.worker || 'Worker';
+  if (worker) worker.textContent = task.presenter || WORKER_LABELS[task.worker] || task.worker || 'Worker';
 }
 
 function ensureActivityTicker() {
@@ -1970,7 +1970,7 @@ function enqueueSpeech(text, type = 'speech', source = 'jarvis', timings = {}) {
 }
 
 function workerSpeech(event) {
-  const label = WORKER_LABELS[event.worker] || event.worker || 'Worker';
+  const label = event.presenter || WORKER_LABELS[event.worker] || event.worker || 'Worker';
   const fallback = {
     approval_required: `${label} is requesting approval. Approve or deny the exact request in chat.`,
     question: `${label} has a question. The complete question is in chat.`,
@@ -2130,14 +2130,24 @@ async function restoreSessionTasks(targetSessionId) {
   const sessionIdToRestore = String(targetSessionId || '');
   if (!sessionIdToRestore || currentChatSessionId() !== sessionIdToRestore) return;
   const revision = ++activityRestoreRevision;
+  let listedTasks = [];
+  try {
+    const listed = await fetchJson(`/api/agent-tasks?session_id=${encodeURIComponent(sessionIdToRestore)}&limit=100`);
+    listedTasks = Array.isArray(listed.tasks) ? listed.tasks : [];
+  } catch (error) {
+    console.warn('Could not list session worker tasks:', error);
+  }
+  const listedById = new Map(listedTasks.map(task => [String(task.task_id || ''), task]));
   const taskIds = new Set(
     Array.from(document.querySelectorAll('#chat-history .msg[data-task-id]'))
       .map(item => item.dataset.taskId)
       .filter(Boolean),
   );
+  listedById.forEach((_task, taskId) => { if (taskId) taskIds.add(taskId); });
   if (!taskIds.size) return;
 
   const snapshots = await Promise.all(Array.from(taskIds, async taskId => {
+    if (listedById.has(taskId)) return listedById.get(taskId);
     try { return await fetchJson(`/api/agent-tasks/${encodeURIComponent(taskId)}`); }
     catch (error) {
       console.warn(`Could not restore worker task ${taskId}:`, error);

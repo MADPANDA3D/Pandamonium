@@ -117,7 +117,7 @@ class _Manager:
     def get_session(self, session_id):
         if session_id not in {"session-1", "session-2"}:
             raise KeyError(session_id)
-        return SimpleNamespace(id=session_id, owner="leo")
+        return SimpleNamespace(id=session_id, owner="leo", agent_target="pc-codex")
 
 
 class _Adapter:
@@ -157,6 +157,21 @@ class _Adapter:
         return {"ok": True}
 
 
+def test_session_presenter_uses_server_owned_live_worker_identity(monkeypatch):
+    monkeypatch.setenv("ODYSSEUS_PC_CODEX_ENABLED", "true")
+    monkeypatch.setenv("ODYSSEUS_PC_CODEX_LABEL", "Friday")
+
+    assert jarvis_agent.session_presenter(
+        SimpleNamespace(agent_target="pc-codex"),
+        "pc-codex",
+    ) == "Friday"
+    with pytest.raises(ValueError, match="conversation_target_worker_mismatch"):
+        jarvis_agent.session_presenter(
+            SimpleNamespace(agent_target="hermes"),
+            "pc-codex",
+        )
+
+
 @pytest.fixture
 def broker_fixture(tmp_path, monkeypatch):
     adapter = _Adapter()
@@ -185,6 +200,7 @@ async def test_broker_resume_reconnect_steer_and_cancel_one_running_fixture(brok
         owner="leo",
         codex_thread_id=THREAD_ID,
         request_id="request-1",
+        presenter="Friday",
     )
 
     # Reconnect callers receive the same active mapping and cannot duplicate it.
@@ -200,6 +216,7 @@ async def test_broker_resume_reconnect_steer_and_cancel_one_running_fixture(brok
     assert reconnected["task_id"] == task["task_id"]
     assert reconnected["reused"] is True
     assert len(adapter.started) == 1
+    assert reconnected["presenter"] == "Friday"
     assert adapter.started[0]["workspace"] == "disposable"
     assert adapter.started[0]["codex_thread_id"] == THREAD_ID
 
@@ -224,6 +241,34 @@ async def test_broker_resume_reconnect_steer_and_cancel_one_running_fixture(brok
     assert binding["workspace"] == "disposable"
     assert binding["codex_thread_id"] == THREAD_ID
     assert "active_task_id" not in binding
+
+
+@pytest.mark.asyncio
+async def test_direct_codex_turn_reuses_mapping_and_rebinds_every_event_to_friday(broker_fixture):
+    adapter, _tasks_file = broker_fixture
+    task = await jarvis_agent.start_task(
+        "pc-codex",
+        "session-1",
+        "disposable",
+        "Start the fixture.",
+        owner="leo",
+        presenter="Jarvis",
+    )
+
+    steered, action = await jarvis_agent.direct_codex_turn(
+        "session-1",
+        "Use the corrected fixture.",
+        owner="leo",
+        workspace="other-project",
+        presenter="Friday",
+    )
+
+    assert action == "steered"
+    assert steered["task_id"] == task["task_id"]
+    assert steered["workspace"] == "disposable"
+    assert steered["presenter"] == "Friday"
+    assert {event["presenter"] for event in steered["events"]} == {"Friday"}
+    assert adapter.steered == [(task["task_id"], "Use the corrected fixture.")]
 
 
 @pytest.mark.asyncio
@@ -450,6 +495,8 @@ async def test_project_browser_route_uses_m6_authority_and_audits_exact_safe_ide
         }
 
     monkeypatch.setenv("ODYSSEUS_PRIVATE_WORKER_MUTATIONS", "true")
+    monkeypatch.setenv("ODYSSEUS_PC_CODEX_ENABLED", "true")
+    monkeypatch.setenv("ODYSSEUS_PC_CODEX_LABEL", "Friday")
     monkeypatch.setattr(agent_task_routes, "authority_store", Authority())
     monkeypatch.setattr(agent_task_routes, "start_task", start_task)
     monkeypatch.setattr(
@@ -474,6 +521,7 @@ async def test_project_browser_route_uses_m6_authority_and_audits_exact_safe_ide
     assert task["task_id"] == "task-authorized"
     assert started[0]["authority_ref"] == "decision-1"
     assert started[0]["request_id"] == "request-1"
+    assert started[0]["presenter"] == "Friday"
     assert [event["status"] for event in audit] == [
         "requested", "authorized", "executed", "succeeded",
     ]

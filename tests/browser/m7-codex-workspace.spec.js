@@ -29,7 +29,7 @@ const selector = {
   ],
 };
 
-async function mockShell(page, catalogHandler, taskHandler = null, sessionItems = []) {
+async function mockShell(page, catalogHandler, taskHandler = null, sessionItems = [], chatHandler = null) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/selector-catalog') return route.fulfill({ json: selector });
@@ -38,6 +38,7 @@ async function mockShell(page, catalogHandler, taskHandler = null, sessionItems 
     if (url.pathname === '/api/default-chat') return route.fulfill({ json: {} });
     if (url.pathname === '/api/sessions') return route.fulfill({ json: sessionItems });
     if (url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
+    if (url.pathname === '/api/chat_stream' && chatHandler) return chatHandler(route, url);
     if (url.pathname.startsWith('/api/codex/')) return catalogHandler(route, url);
     if (url.pathname.startsWith('/api/agent-tasks') && taskHandler) return taskHandler(route, url);
     return route.fulfill({ json: {} });
@@ -325,4 +326,65 @@ test('Codex browser keeps waiting and failure events visible', async ({ page }) 
   await expect(page.locator('#codex-task-events')).toContainText('Which fixture should I inspect?');
   await expect(page.locator('#codex-task-events')).toContainText('Fixture task failed safely.');
   await expect(page.locator('#codex-task-status')).toContainText('failed');
+});
+
+test('selected Friday chat renders and reconnects the same Friday-owned task', async ({ page }) => {
+  const task = {
+    task_id: 'direct-friday-task', worker: 'pc-codex', presenter: 'Friday',
+    session_id: 'friday-chat', workspace: 'test-project', status: 'running',
+    codex_thread_id: THREAD_ID, created_at: 1, updated_at: 2, events: [],
+  };
+  let listRequests = 0;
+  await mockShell(page, singleProjectCatalog, (route, url) => {
+    if (url.pathname === '/api/agent-tasks') {
+      listRequests += 1;
+      return route.fulfill({ json: { tasks: [task] } });
+    }
+    if (url.pathname.endsWith('/events')) {
+      return route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: [
+          `data: ${JSON.stringify({ event_id: 'progress-direct', seq: 0, ...task, type: 'progress', text: 'Friday is inspecting the project.' })}\n\n`,
+          `data: ${JSON.stringify({ event_id: 'result-direct', seq: 1, ...task, type: 'result', text: 'Friday completed the inspection.' })}\n\n`,
+        ].join(''),
+      });
+    }
+    return route.fulfill({ json: task });
+  }, [{
+    id: 'friday-chat', name: 'Friday task chat', model: 'fixture', endpoint_url: 'http://model.test',
+    archived: false, agent_target: 'pc-codex', created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(), last_message_at: new Date().toISOString(), message_count: 1,
+  }], route => route.fulfill({
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+    body: [
+      `data: ${JSON.stringify({ type: 'model_info', model: 'Friday', character_name: 'Friday' })}\n\n`,
+      `data: ${JSON.stringify({ type: 'agent_task', action: 'started', ...task })}\n\n`,
+      `data: ${JSON.stringify({ type: 'metrics', data: { model: 'Friday', route: 'pc-codex' } })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join(''),
+  }));
+
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule && window.jarvisVoice))).toBe(true);
+  await page.evaluate(async () => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.setCurrentSessionId('friday-chat');
+    sessions.updateModelPicker();
+  });
+  await page.locator('#message:visible').fill('Inspect the selected project.');
+  await page.locator('.send-btn:visible').click();
+
+  const activity = page.locator('.jarvis-task-activity[data-task-id="direct-friday-task"]');
+  await expect(activity).toContainText('Friday');
+  const roles = await page.locator('.msg[data-task-id="direct-friday-task"] .role').allTextContents();
+  expect(roles.length).toBeGreaterThan(0);
+  expect(roles.every(role => role.includes('Friday'))).toBe(true);
+  await expect(page.locator('.msg[data-task-id="direct-friday-task"] .body').filter({ hasText: 'Friday completed the inspection.' })).toHaveCount(1);
+
+  await activity.evaluate(node => node.remove());
+  await page.evaluate(() => window.jarvisVoice.restoreSessionTasks('friday-chat'));
+  await expect(activity).toContainText('Friday');
+  expect(listRequests).toBeGreaterThan(0);
 });

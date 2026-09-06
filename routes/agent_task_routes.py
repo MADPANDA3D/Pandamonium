@@ -22,6 +22,7 @@ from src.jarvis_agent import (
     require_task_owner,
     runtime_status,
     search_knowledge,
+    session_presenter,
     start_task,
     stream_task_events,
     sync_knowledge,
@@ -324,6 +325,7 @@ def setup_agent_task_routes(session_manager):
                 request_id=trace["request_id"],
                 call_id=trace["call_id"],
                 authority_ref=trace["authority_ref"],
+                presenter=session_presenter(session, payload.worker),
             )
             task = await start_task(**values, owner=owner)
             _record_task_control_result(trace, task=task)

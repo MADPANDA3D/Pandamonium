@@ -1808,7 +1808,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                 typewriterInto(roundHolder.querySelector('.body'), errMsg);
                 break;
               }
-              if (json.delta || json.type === 'agent_prep' || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'loop_breaker_triggered' || json.type === 'intent_nudge_exhausted' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
+              if (json.delta || json.type === 'agent_task' || json.type === 'agent_prep' || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'loop_breaker_triggered' || json.type === 'intent_nudge_exhausted' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
                 clearResponseTimeout();
                 clearProcessingProbe();
                 clearFirstTokenWaitTimers();
@@ -2256,6 +2256,13 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                 if (sessionModule && sessionModule.updateModelPicker) {
                   sessionModule.updateModelPicker();
                 }
+                continue;
+              } else if (json.type === 'agent_task') {
+                if (holder && json.task_id) {
+                  holder.dataset.taskId = String(json.task_id);
+                  holder.dataset.worker = String(json.worker || '');
+                }
+                window.jarvisVoice?.trackWorkerTask?.(json);
                 continue;
               } else if (json.type === 'model_info') {
                 // Update role label with model name as soon as we know it

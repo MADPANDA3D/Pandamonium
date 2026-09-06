@@ -56,8 +56,6 @@ from src.tool_policy import (
 from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
 from src.worker_routing import (
-    is_contextual_project_work_followup,
-    is_explicit_project_work_request,
     selected_worker_workspace as _selected_worker_workspace,
 )
 
@@ -77,48 +75,39 @@ def _authoritative_agent_target(session, requested: str = "") -> str:
     return stored or str(requested or "").strip()
 
 
-def _selected_worker_request(
-    message: str,
-    *,
-    session_id: str = "",
-    owner: str = "",
-    worker: str = "pc-codex",
-) -> bool:
-    """Delegate explicit project/source work, not small app-data lookups."""
-    if is_explicit_project_work_request(message):
-        return True
-    if not session_id or not owner or not is_contextual_project_work_followup(message):
-        return False
-    try:
-        from src.jarvis_agent import find_active_task
-
-        return find_active_task(session_id, worker, None, owner) is not None
-    except Exception:
-        return False
-
-
-def _selected_agent_context(
-    label: str,
-    workspace: str | None = None,
-    worker: str = "pc-codex",
-) -> str:
-    if worker == "jarvis":
-        return (
-            f"The operator explicitly selected {label} for this conversation. Present every response as {label}; "
-            "the configured reasoning model remains a replaceable inference engine and does not change identity."
-        )
-    routing = (
-        f" For {worker} delegation, use the server-selected `{workspace}` workspace unless the operator "
-        "explicitly names another allowed workspace in this turn."
-        if workspace else ""
-    )
+def _selected_agent_context(label: str) -> str:
     return (
-        f"The operator explicitly selected {label} for this conversation. Present every response as {label}, "
-        "while using this chat's configured reasoning model. Use native Pandamonium tools directly for small "
-        f"application-data requests such as Books, calendar, email, notes, and tasks. Delegate to the {worker} "
-        "worker only for genuine project, source-code, file, or host work; return one coherent answer and never "
-        f"emit polling filler or a second completion notice.{routing}"
+        f"The operator explicitly selected {label} for this conversation. Present every response as {label}; "
+        "the configured reasoning model remains a replaceable inference engine and does not change identity."
     )
+
+
+async def _direct_selected_identity_turn(
+    worker: str,
+    *,
+    session_id: str,
+    message: str,
+    owner: str,
+    workspace: str,
+    presenter: str,
+) -> tuple[str, Any, str]:
+    """Route non-Jarvis selections without sending them through Jarvis's model."""
+    from src.jarvis_agent import direct_codex_turn, direct_hermes_turn
+
+    if worker == "hermes":
+        return "response", await direct_hermes_turn(
+            session_id, message, owner=owner, workspace=workspace,
+        ), "completed"
+    if worker == "pc-codex":
+        task, action = await direct_codex_turn(
+            session_id,
+            message,
+            owner=owner,
+            workspace=workspace,
+            presenter=presenter,
+        )
+        return "task", task, action
+    raise ValueError("unsupported_conversation_target")
 
 
 def _retire_synthesized_worker_results(metrics: dict, owner: str, session_id: str) -> None:
@@ -1309,6 +1298,95 @@ def setup_chat_routes(
                 _active_streams.pop(session, None)
                 return
 
+            if selected_agent_worker in {"hermes", "pc-codex"}:
+                route_started = time.monotonic()
+                route_model = selected_agent_label or selected_agent_worker
+                metrics = {
+                    "model": route_model,
+                    "requested_model": route_model,
+                    "route": selected_agent_worker,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "response_time": 0,
+                    "agent_rounds": 0,
+                    "tool_calls": 0,
+                }
+                yield f'data: {json.dumps({"type": "model_info", "model": route_model, "character_name": selected_agent_label})}\n\n'
+                try:
+                    session_manager.save_sessions()
+                    kind, payload, action = await _direct_selected_identity_turn(
+                        selected_agent_worker,
+                        session_id=session,
+                        message=str(message or ""),
+                        owner=_user,
+                        workspace=selected_agent_workspace or "home-lab",
+                        presenter=selected_agent_label,
+                    )
+                    if kind == "response":
+                        reply = str(payload or "").strip()
+                        if not reply:
+                            raise RuntimeError("selected_agent_returned_no_response")
+                        yield f'data: {json.dumps({"delta": reply})}\n\n'
+                        saved_id = save_assistant_response(
+                            sess,
+                            session_manager,
+                            session,
+                            reply,
+                            metrics,
+                            character_name=selected_agent_label,
+                            incognito=incognito,
+                        )
+                        if saved_id:
+                            yield f'data: {json.dumps({"type": "message_saved", "id": saved_id})}\n\n'
+                    else:
+                        from src.jarvis_agent import list_session_tasks
+
+                        safe_task = next(
+                            (
+                                row for row in list_session_tasks(session, _user)
+                                if row.get("task_id") == payload.get("task_id")
+                            ),
+                            {},
+                        )
+                        if not safe_task:
+                            raise RuntimeError("selected_task_snapshot_unavailable")
+                        yield f'data: {json.dumps({"type": "agent_task", "action": action, **safe_task})}\n\n'
+                        if action == "blocked":
+                            reply = f"{selected_agent_label} is unavailable. The request was not rerouted."
+                            yield f'data: {json.dumps({"delta": reply})}\n\n'
+                            saved_id = save_assistant_response(
+                                sess,
+                                session_manager,
+                                session,
+                                reply,
+                                metrics,
+                                character_name=selected_agent_label,
+                                incognito=incognito,
+                            )
+                            if saved_id:
+                                yield f'data: {json.dumps({"type": "message_saved", "id": saved_id})}\n\n'
+                except Exception:
+                    logger.exception("Direct selected-identity route failed for %s", selected_agent_worker)
+                    reply = f"{selected_agent_label} is unavailable. The request was not rerouted."
+                    yield f'data: {json.dumps({"delta": reply})}\n\n'
+                    saved_id = save_assistant_response(
+                        sess,
+                        session_manager,
+                        session,
+                        reply,
+                        metrics,
+                        character_name=selected_agent_label,
+                        incognito=incognito,
+                    )
+                    if saved_id:
+                        yield f'data: {json.dumps({"type": "message_saved", "id": saved_id})}\n\n'
+                metrics["response_time"] = round(time.monotonic() - route_started, 3)
+                yield f'data: {json.dumps({"type": "metrics", "data": metrics})}\n\n'
+                yield "data: [DONE]\n\n"
+                _stream_set(session, status="done")
+                _active_streams.pop(session, None)
+                return
+
             # Run research as a background task (survives page refresh)
             if effective_do_research:
                 _r_ep, _r_model, _r_headers = _resolve_research_endpoint(sess)
@@ -1439,14 +1517,10 @@ def setup_chat_routes(
                     len(ctx.messages), raw_history_count, len(messages))
             else:
                 messages = _ensure_current_request_is_latest_user(ctx.messages, _model_message)
-            if selected_agent_label:
+            if selected_agent_worker == "jarvis" and selected_agent_label:
                 messages = [
                     *messages[:-1],
-                    {"role": "system", "content": _selected_agent_context(
-                        selected_agent_label,
-                        selected_agent_workspace,
-                        selected_agent_worker or "jarvis",
-                    )},
+                    {"role": "system", "content": _selected_agent_context(selected_agent_label)},
                     messages[-1],
                 ]
             if text_extension_bridge:
@@ -1764,14 +1838,6 @@ def setup_chat_routes(
                     if _approval_reply and _approval_reply["choice"] == "approve":
                         _forced_tools.add(str((_approval_reply["decision"].get("capability") or {}).get("name") or ""))
                         _forced_tools.discard("")
-                    if selected_agent_worker and selected_agent_worker != "jarvis" and _selected_worker_request(
-                        str(message or ""),
-                        session_id=session,
-                        owner=_user,
-                        worker=selected_agent_worker,
-                    ):
-                        _forced_tools.update({"start_agent_task", "read_agent_task"})
-
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
                         sess.model,
