@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tarfile
@@ -84,6 +85,24 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def assert_immutable_tree(path: Path, label: str) -> None:
+    """Reject application-owned or writable code before a root update uses it."""
+    if os.geteuid() != 0:
+        return
+    try:
+        entries = (path, *path.rglob("*"))
+        for entry in entries:
+            metadata = entry.lstat()
+            writable = (
+                not stat.S_ISLNK(metadata.st_mode)
+                and stat.S_IMODE(metadata.st_mode) & 0o022
+            )
+            if metadata.st_uid != 0 or writable:
+                raise UpdateError(f"{label} is not root-owned and immutable")
+    except OSError as exc:
+        raise UpdateError(f"{label} ownership could not be verified") from exc
 
 
 def canonical_manifest_bytes(manifest: dict[str, Any]) -> bytes:
@@ -470,6 +489,8 @@ class UpdateConfig:
 
     @classmethod
     def from_env(cls) -> UpdateConfig:
+        if os.geteuid() != 0:
+            raise UpdateError("release apply and rollback must run as root")
         install_root = managed_install_root()
         if install_root is None:
             raise UpdateError("PANDAMONIUM_UPDATE_ROOT is required for apply")
@@ -685,11 +706,14 @@ class UpdateExecutor:
         if sha256_file(requirements) != manifest["artifact"]["requirements_sha256"]:
             raise UpdateError("release requirements checksum does not match")
         current = self.current_link.resolve(strict=True)
+        assert_immutable_tree(current, "current release")
+        assert_immutable_tree(candidate, "candidate release")
         current_requirements = current / "requirements.txt"
         if current_requirements.is_file() and sha256_file(
             current_requirements
         ) == sha256_file(requirements):
             current_venv = (current / "venv").resolve(strict=True)
+            assert_immutable_tree(current_venv, "current release runtime")
             candidate_venv = candidate / "venv"
             if candidate_venv.is_symlink():
                 if candidate_venv.resolve(strict=True) != current_venv:
@@ -749,6 +773,7 @@ class UpdateExecutor:
                         expected_runtime,
                         indent=2,
                     )
+                    assert_immutable_tree(staged_venv, "staged release runtime")
                     os.replace(staged_venv, venv)
                 finally:
                     shutil.rmtree(staged_venv, ignore_errors=True)

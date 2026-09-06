@@ -354,6 +354,22 @@ def test_dependency_runtime_is_published_only_after_install_succeeds(
     assert len(commands) == 2
 
 
+def test_root_updater_rejects_application_owned_runtime(tmp_path, monkeypatch):
+    runtime = tmp_path / "venv"
+    runtime.mkdir()
+    monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+
+    with pytest.raises(release_updater.UpdateError, match="root-owned and immutable"):
+        release_updater.assert_immutable_tree(runtime, "release runtime")
+
+
+def test_environment_config_requires_root(monkeypatch):
+    monkeypatch.setattr(release_updater.os, "geteuid", lambda: 1000)
+
+    with pytest.raises(release_updater.UpdateError, match="must run as root"):
+        release_updater.UpdateConfig.from_env()
+
+
 def test_failed_health_check_restores_release_and_backup_data(tmp_path, monkeypatch):
     executor, manifest, archive, old = _layout(tmp_path, monkeypatch)
     _stub_runtime(executor, monkeypatch, healthy=False)
