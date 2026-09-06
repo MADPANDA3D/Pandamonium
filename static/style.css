@@ -2185,7 +2185,7 @@ body.bg-pattern-sparkles {
       width:min(620px, 82vw);
       margin-top:18px;
     }
-    .guide-modal-content { width:min(700px, 92vw); }
+    .modal-content.guide-modal-content { width:min(700px, 92vw); }
     .guide-modal-body { padding:14px; }
     .guide-modal .first-run-guide {
       width:100%;

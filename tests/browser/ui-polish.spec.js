@@ -104,6 +104,7 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
   const savedToggles = JSON.stringify({ web: true, web_chat: true, web_agent: true, mcp: true });
   await page.addInitScript(value => localStorage.setItem('odysseus-toggles', value), savedToggles);
   await mockApp(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/static/index.html');
 
   const guideButton = page.locator('#user-bar-guide');
@@ -115,6 +116,19 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
   await expect(modal.getByRole('button', { name: 'Continue setup' })).toBeVisible();
   await expect(modal.getByRole('button', { name: 'Restart product tour' })).toBeVisible();
   await expect(modal.getByRole('button', { name: 'Skip for now' })).toBeVisible();
+  const stepCards = modal.locator('.first-run-step');
+  await expect(stepCards).toHaveCount(3);
+  await modal.locator('.guide-modal-content').evaluate(async node => {
+    await Promise.all(node.getAnimations().map(animation => animation.finished));
+  });
+  const guideWidth = await modal.locator('.guide-modal-content').evaluate(node => node.getBoundingClientRect().width);
+  const stepLayout = await stepCards.evaluateAll(nodes => nodes.map(node => {
+    const rect = node.getBoundingClientRect();
+    return { top: rect.top, width: rect.width };
+  }));
+  expect(guideWidth).toBeGreaterThanOrEqual(690);
+  expect(Math.max(...stepLayout.map(card => card.top)) - Math.min(...stepLayout.map(card => card.top))).toBeLessThan(2);
+  expect(Math.max(...stepLayout.map(card => card.width)) - Math.min(...stepLayout.map(card => card.width))).toBeLessThan(2);
 
   await modal.getByRole('button', { name: 'Skip for now' }).click();
   await expect(modal).toBeHidden();
