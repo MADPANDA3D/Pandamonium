@@ -28,11 +28,27 @@ let _items = [];
 let _total = 0;
 let _totalTagged = 0;
 let _sourceState = null;
+let _immichState = null;
+let _immichLibraryState = null;
 
 // Update the "X/Y tagged" badge in the AI-tagging settings header.
 function _updateTagCount() {
   const el = document.getElementById('gallery-tag-count');
   if (el) el.textContent = _total ? `${_totalTagged}/${_total} tagged` : '';
+}
+
+function _renderImmichSourceState() {
+  const banner = document.getElementById('gallery-immich-source-state');
+  if (!banner) return;
+  const showingRemote = _activeModel === 'Immich' || _activeAlbum?.startsWith('immich:');
+  if (!showingRemote || !_immichLibraryState || _immichLibraryState.status === 'healthy') {
+    banner.hidden = true;
+    banner.textContent = '';
+    return;
+  }
+  banner.hidden = false;
+  const cached = _immichLibraryState.stale ? ' Showing the last owner-scoped cached page.' : '';
+  banner.textContent = `${_immichLibraryState.message || `Immich ${_immichLibraryState.status}`}.${cached}`;
 }
 let _search = '';
 // Stack of active tag filters. Multiple tags AND together — the user
@@ -104,6 +120,10 @@ async function _fetchLibrary(append) {
   try {
     const res = await fetch(`${API_BASE}/api/gallery/library?${params}`, { credentials: 'same-origin' });
     const data = await res.json();
+    if (!res.ok) {
+      const detail = data.detail;
+      throw new Error(typeof detail === 'object' ? detail.message : (detail || 'Gallery request failed'));
+    }
     if (append) {
       _items = _items.concat(data.items || []);
     } else {
@@ -119,6 +139,8 @@ async function _fetchLibrary(append) {
       }
     } catch (_) {}
     _total = data.total || 0;
+    _immichLibraryState = data.source_state || null;
+    _renderImmichSourceState();
     if (typeof data.total_tagged === 'number') _totalTagged = data.total_tagged;
     _updateTagCount();
     _renderGrid();
@@ -127,6 +149,7 @@ async function _fetchLibrary(append) {
     _renderStats();
   } catch (e) {
     console.error('Gallery fetch error:', e);
+    if (uiModule) uiModule.showError(e.message || 'Gallery request failed');
   }
 }
 
@@ -134,9 +157,86 @@ async function _fetchAlbums() {
   try {
     const res = await fetch(`${API_BASE}/api/gallery/albums`, { credentials: 'same-origin' });
     const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Album request failed');
     _albums = data.albums || [];
     _renderAlbums();
-  } catch (e) { console.error('Albums fetch error:', e); }
+  } catch (e) {
+    console.error('Albums fetch error:', e);
+    if (uiModule) uiModule.showError(e.message || 'Album request failed');
+  }
+}
+
+async function _immichRequest(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.detail;
+    const message = typeof detail === 'object' ? detail.message : detail;
+    throw new Error(message || 'Immich request failed');
+  }
+  return data;
+}
+
+function _renderImmichConnection() {
+  const status = document.getElementById('gallery-immich-status');
+  const url = document.getElementById('gallery-immich-url');
+  const key = document.getElementById('gallery-immich-key');
+  const toggle = document.getElementById('gallery-immich-toggle');
+  const remove = document.getElementById('gallery-immich-remove');
+  const test = document.getElementById('gallery-immich-test');
+  const sync = document.getElementById('gallery-immich-sync');
+  const clear = document.getElementById('gallery-immich-clear');
+  if (!status || !url || !key) return;
+  const state = _immichState || { configured: false, enabled: false, status: 'unconfigured' };
+  if (state.configured) url.value = state.server_url || '';
+  key.value = '';
+  key.placeholder = state.api_key_configured ? 'API key saved — enter a new key to rotate' : 'Immich API key';
+  const labels = {
+    healthy: 'Connected · assets and albums readable',
+    untested: 'Saved · test the connection before browsing',
+    disabled: 'Disabled · cached metadata and thumbnails remain removable',
+    expired_key: 'API key rejected or expired',
+    permission: 'API key is missing asset or album read permission',
+    offline: 'Immich is offline or unreachable',
+    rate_limited: 'Immich rate limit reached',
+    unconfigured: 'Not connected',
+  };
+  status.textContent = state.last_error || labels[state.status] || state.status;
+  status.className = ['healthy', 'untested', 'disabled', 'unconfigured'].includes(state.status)
+    ? 'gallery-source-status' : 'gallery-source-error';
+  if (toggle) {
+    toggle.hidden = !state.configured;
+    toggle.textContent = state.enabled ? 'Disable' : 'Enable';
+  }
+  for (const button of [remove, test, sync, clear]) if (button) button.hidden = !state.configured;
+  if (test) test.disabled = !state.enabled;
+  if (sync) sync.disabled = !state.enabled;
+}
+
+async function _loadImmichConnection() {
+  try {
+    _immichState = await _immichRequest('/api/gallery/immich/connection');
+    _renderImmichConnection();
+  } catch (err) {
+    const status = document.getElementById('gallery-immich-status');
+    if (status) status.textContent = err.message || 'Could not inspect Immich';
+  }
+}
+
+async function _saveImmichConnection() {
+  const serverUrl = document.getElementById('gallery-immich-url')?.value.trim();
+  const apiKey = document.getElementById('gallery-immich-key')?.value.trim();
+  const body = { server_url: serverUrl, enabled: _immichState?.configured ? _immichState.enabled : true };
+  if (apiKey) body.api_key = apiKey;
+  _immichState = await _immichRequest('/api/gallery/immich/connection', {
+    method: 'PUT', body: JSON.stringify(body),
+  });
+  _renderImmichConnection();
+  await Promise.all([_fetchLibrary(false), _fetchAlbums()]);
 }
 
 async function _sourceRequest(url, options = {}) {
@@ -460,7 +560,7 @@ function _renderTags(tags) {
 function _renderModels(models) {
   const sel = document.getElementById('gallery-model-filter');
   if (!sel) return;
-  let html = '<option value="">All sources</option>';
+  let html = `<option value="">${models.includes('Immich') ? 'Local library' : 'All sources'}</option>`;
   models.forEach(m => {
     const selected = _activeModel === m ? ' selected' : '';
     html += `<option value="${_esc(m)}"${selected}>${_esc(m)}</option>`;
@@ -583,7 +683,7 @@ function _ensureAlbumsToolbar(container) {
   });
   container.querySelector('#gallery-albums-bulk-all').addEventListener('change', (e) => {
     const on = e.target.checked;
-    const list = _filteredAlbums();
+    const list = _filteredAlbums().filter(a => !a.read_only);
     if (on) list.forEach(a => _albumSelected.add(a.id));
     else _albumSelected.clear();
     _renderAlbumsGrid();
@@ -612,7 +712,7 @@ function _updateAlbumBulkCount() {
   const cnt = container.querySelector('#gallery-albums-bulk-count');
   if (cnt) cnt.textContent = sel + ' selected';
   const all = container.querySelector('#gallery-albums-bulk-all');
-  const total = _filteredAlbums().length;
+  const total = _filteredAlbums().filter(a => !a.read_only).length;
   if (all) { all.checked = total > 0 && sel === total; all.indeterminate = sel > 0 && sel < total; }
   const del = container.querySelector('#gallery-albums-bulk-delete');
   if (del) del.style.opacity = sel > 0 ? '1' : '0.5';
@@ -675,17 +775,17 @@ function _renderAlbumsGrid() {
            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
          </div>`;
     const isSel = _albumSelected.has(a.id);
-    const dot = _albumSelectMode
+    const dot = _albumSelectMode && !a.read_only
       ? `<span class="gallery-select-dot${isSel ? ' selected' : ''}" style="display:flex;"></span>`
       : '';
-    const cls = 'gallery-album-card' + (_albumSelectMode ? ' gallery-card-selectable' : '') + (isSel ? ' selected' : '');
+    const cls = 'gallery-album-card' + (_albumSelectMode && !a.read_only ? ' gallery-card-selectable' : '') + (isSel ? ' selected' : '');
     html += `
       <div class="${cls}" data-album="${_esc(a.id)}">
         ${dot}
-        <button class="gallery-album-menu-btn" data-album="${_esc(a.id)}" title="Options" aria-label="Album options"${_albumSelectMode ? ' style="display:none"' : ''}>
+        ${a.read_only ? '' : `<button class="gallery-album-menu-btn" data-album="${_esc(a.id)}" title="Options" aria-label="Album options"${_albumSelectMode ? ' style="display:none"' : ''}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="position:relative;top:2px;"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-        </button>
-        <div class="gallery-album-menu-pop dropdown" data-album="${_esc(a.id)}" hidden>
+        </button>`}
+        ${a.read_only ? '' : `<div class="gallery-album-menu-pop dropdown" data-album="${_esc(a.id)}" hidden>
           <div class="dropdown-item-compact" data-action="upload">
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></span>
             <span>Upload here</span>
@@ -698,7 +798,7 @@ function _renderAlbumsGrid() {
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></span>
             <span>Delete</span>
           </div>
-        </div>
+        </div>`}
         <div class="gallery-album-cover">${cover}</div>
         <div class="gallery-album-info">
           <div class="gallery-album-name">${_esc(a.name)}</div>
@@ -728,6 +828,7 @@ function _wireAlbumsEvents(scope) {
       // of opening it. Mirrors the Photos tab's behaviour.
       if (_albumSelectMode) {
         const id = card.dataset.album;
+        if (_albums.find(a => a.id === id)?.read_only) return;
         if (_albumSelected.has(id)) _albumSelected.delete(id);
         else _albumSelected.add(id);
         const dot = card.querySelector('.gallery-select-dot');
@@ -737,7 +838,9 @@ function _wireAlbumsEvents(scope) {
         return;
       }
       _activeAlbum = card.dataset.album || null;
+      _activeModel = _activeAlbum?.startsWith('immich:') ? 'Immich' : null;
       _favoritesOnly = false;
+      if (_activeModel === 'Immich') _activeTags = [];
       // Hide any open photo detail before swapping context — otherwise the
       // previously-viewed photo lingers on top when the user lands back on
       // the Photos tab.
@@ -1279,7 +1382,8 @@ function _renderGrid() {
   // First tile: always-visible "Upload" affordance. Mirrors the Upload album
   // tile in the Albums tab so the upload entry point is consistent across
   // both grids.
-  const uploadTile = `
+  const showingRemote = _activeModel === 'Immich' || _activeAlbum?.startsWith('immich:');
+  const uploadTile = showingRemote ? '' : `
     <div class="gallery-card gallery-card-upload" id="gallery-upload-tile" title="Upload photos or videos">
       <div class="gallery-card-upload-inner">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -1311,11 +1415,12 @@ function _renderGrid() {
     const labelText = (img.caption || '').trim() || (img.prompt || '').trim() || fallbackName || 'Photo';
     const promptPreview = labelText.length > 60 ? labelText.substring(0, 58) + '...' : labelText;
     const favCls = img.favorite ? ' gallery-fav-active' : '';
+    const remote = img.source_type === 'immich';
     html += `
       <div class="gallery-card" data-id="${_esc(img.id)}">
-        <span class="gallery-select-dot" style="display:none;"></span>
-        <button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite">&#9829;</button>
-        <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
+        ${remote ? '' : '<span class="gallery-select-dot" style="display:none;"></span>'}
+        ${remote ? '' : `<button class="gallery-fav-btn${favCls}" data-id="${_esc(img.id)}" title="Favorite">&#9829;</button>`}
+        <button class="gallery-dl-btn" data-id="${_esc(img.id)}" data-url="${_esc(img.download_url || img.url)}" data-filename="${_esc(img.filename || '')}" title="Download">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
         ${_isVideoUrl(img.url)
@@ -1335,6 +1440,25 @@ function _renderGrid() {
   });
   grid.innerHTML = html;
   _wireUploadTile();
+  grid.querySelectorAll('.gallery-card[data-id] img').forEach(image => {
+    image.addEventListener('error', () => {
+      const card = image.closest('.gallery-card');
+      const item = _items.find(candidate => candidate.id === card?.dataset.id);
+      if (item?.source_type !== 'immich') return;
+      image.alt = 'Immich thumbnail unavailable';
+      image.title = item.thumbnail_ready === false
+        ? 'Immich has not generated this thumbnail yet'
+        : 'Immich thumbnail is unavailable';
+      card?.classList.add('gallery-card-source-error');
+      const meta = card?.querySelector('.gallery-card-meta');
+      if (meta && !meta.querySelector('.gallery-source-error')) {
+        const state = document.createElement('span');
+        state.className = 'gallery-source-error';
+        state.textContent = 'Thumbnail unavailable';
+        meta.appendChild(state);
+      }
+    });
+  });
 
   // Domino-in cascade the first render after opening (not on filter/sort/
   // load-more re-renders) — mirrors the document library.
@@ -1411,6 +1535,7 @@ function _renderGrid() {
 function _openDetail(img) {
   const detail = document.getElementById('gallery-detail');
   if (!detail) return;
+  const remote = img.source_type === 'immich';
   // Drop any face-overlay resize listener from the previous photo
   // before the new render attaches its own.
 
@@ -1460,7 +1585,7 @@ function _openDetail(img) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
         ${img.session_id ? 'Open chat' : 'Discuss'}
       </button>
-      <button class="gallery-detail-back gallery-detail-fav-header${img.favorite ? ' active' : ''}" id="gallery-detail-fav-header" title="${img.favorite ? 'Unfavorite' : 'Favorite'}" aria-label="Favorite" aria-pressed="${img.favorite ? 'true' : 'false'}" style="display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;">
+      <button class="gallery-detail-back gallery-detail-fav-header${img.favorite ? ' active' : ''}" id="gallery-detail-fav-header" title="${img.favorite ? 'Unfavorite' : 'Favorite'}" aria-label="Favorite" aria-pressed="${img.favorite ? 'true' : 'false'}" style="display:${remote ? 'none' : 'inline-flex'};align-items:center;justify-content:center;padding:4px 8px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="${img.favorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
       </button>
       <div class="gallery-detail-menu-wrap">
@@ -1468,11 +1593,11 @@ function _openDetail(img) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
         </button>
         <div class="gallery-detail-menu dropdown" id="gallery-detail-menu" hidden>
-          <button class="dropdown-item-compact" id="gallery-fav-detail">
+          <button class="dropdown-item-compact" id="gallery-fav-detail" ${remote ? 'hidden' : ''}>
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="${img.favorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
             ${img.favorite ? 'Favorited' : 'Favorite'}
           </button>
-          <button class="dropdown-item-compact" id="gallery-ai-tag-btn" data-mode="${aiTags ? 'clear' : 'tag'}">
+          <button class="dropdown-item-compact" id="gallery-ai-tag-btn" data-mode="${aiTags ? 'clear' : 'tag'}" ${remote ? 'hidden' : ''}>
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></span>
             ${aiTags ? 'Clear AI tags' : 'AI Tag'}
           </button>
@@ -1480,11 +1605,12 @@ function _openDetail(img) {
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
             Download
           </button>
-          ${img.album_id ? `<button class="dropdown-item-compact" id="gallery-set-cover-btn">
+          ${remote ? `<button class="dropdown-item-compact" id="gallery-immich-import-btn">Import a local copy</button>` : `<button class="dropdown-item-compact" id="gallery-immich-export-btn">Export to Immich</button>`}
+          ${img.album_id && !remote ? `<button class="dropdown-item-compact" id="gallery-set-cover-btn">
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
             Set as album cover
           </button>` : ''}
-          <button class="dropdown-item-compact dropdown-item-danger" id="gallery-delete-btn" ${img.read_only ? 'disabled title="Disconnect its folder to remove this photo"' : ''}>
+          <button class="dropdown-item-compact dropdown-item-danger" id="gallery-delete-btn" ${remote ? 'hidden' : ''} ${img.read_only ? 'disabled title="Disconnect its folder to remove this photo"' : ''}>
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></span>
             Delete
           </button>
@@ -1517,7 +1643,7 @@ function _openDetail(img) {
           <label>Name</label>
           <div class="gallery-name-wrap">
             <input type="text" class="gallery-detail-name-input" id="gallery-detail-name-input"
-              value="${_esc(img.prompt || '')}" placeholder="Untitled photo (press Enter to save)" />
+              value="${_esc(img.prompt || '')}" placeholder="Untitled photo (press Enter to save)" ${remote ? 'disabled title="Immich metadata is read-only"' : ''} />
             <svg class="gallery-name-enter" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>
           </div>
         </div>
@@ -1542,13 +1668,13 @@ function _openDetail(img) {
           <div class="gallery-ai-tags" id="gallery-user-tag-chips">${userTags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<button class="gallery-ai-chip gallery-user-chip" data-tag-filter="${_esc(t)}" title="Filter to photos tagged “${_esc(t)}”">${_esc(t)}<span class="gallery-tag-x" title="Remove tag" aria-label="Remove tag">×</span></button>`).join('')}</div>
           <div class="gallery-tag-input-wrap">
             <input type="text" class="gallery-tag-input" id="gallery-tag-input"
-              value="" placeholder="Add a tag" title="Type a tag and press Enter to add it" />
+              value="" placeholder="${remote ? 'Immich tags are read-only' : 'Add a tag'}" title="Type a tag and press Enter to add it" ${remote ? 'disabled' : ''} />
             <span class="gallery-tag-enter-hint" aria-hidden="true">↵</span>
           </div>
         </div>
         <div class="gallery-detail-section">
           <label>Album</label>
-          <select id="gallery-detail-album" class="gallery-tag-input" style="padding:4px 6px;">
+          <select id="gallery-detail-album" class="gallery-tag-input" style="padding:4px 6px;" ${remote ? 'disabled title="Immich albums are read-only"' : ''}>
             <option value="">None</option>
             ${_albums.map(a => `<option value="${a.id}" ${img.album_id === a.id ? 'selected' : ''}>${_esc(a.name)}</option>`).join('')}
           </select>
@@ -1674,10 +1800,10 @@ function _openDetail(img) {
       if (svg) svg.setAttribute('fill', data.favorite ? 'currentColor' : 'none');
     }
   };
-  document.getElementById('gallery-fav-detail').addEventListener('click', _toggleDetailFavorite);
+  document.getElementById('gallery-fav-detail')?.addEventListener('click', _toggleDetailFavorite);
   document.getElementById('gallery-detail-fav-header')?.addEventListener('click', _toggleDetailFavorite);
 
-  document.getElementById('gallery-ai-tag-btn').addEventListener('click', async (e) => {
+  document.getElementById('gallery-ai-tag-btn')?.addEventListener('click', async (e) => {
     // When the photo already has AI tags this button is "Clear AI tags".
     const clearMode = e.currentTarget.dataset.mode === 'clear';
     // The button lives in the ⋮ menu which closes on click, so its text never
@@ -1721,8 +1847,10 @@ function _openDetail(img) {
   });
 
   document.getElementById('gallery-download-btn').addEventListener('click', async () => {
+    const downloadUrl = img.download_url || img.url;
     try {
-      const res = await fetch(img.url, { credentials: 'same-origin' });
+      const res = await fetch(downloadUrl, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1735,11 +1863,36 @@ function _openDetail(img) {
     } catch (e) {
       // Fallback: direct link
       const a = document.createElement('a');
-      a.href = img.url;
+      a.href = downloadUrl;
       a.download = img.filename || `image-${img.id}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
+    }
+  });
+
+  document.getElementById('gallery-immich-import-btn')?.addEventListener('click', async () => {
+    try {
+      const result = await _immichRequest(
+        `/api/gallery/immich/assets/${encodeURIComponent(img.id)}/import`,
+        { method: 'POST' },
+      );
+      uiModule.showToast(result.duplicate ? 'Local copy already exists' : 'Imported a local copy');
+      await _fetchLibrary(false);
+    } catch (err) {
+      uiModule.showError(err.message || 'Immich import failed');
+    }
+  });
+
+  document.getElementById('gallery-immich-export-btn')?.addEventListener('click', async () => {
+    try {
+      const result = await _immichRequest(
+        `/api/gallery/immich/export/${encodeURIComponent(img.id)}`,
+        { method: 'POST' },
+      );
+      uiModule.showToast(result.status === 'duplicate' ? 'Already present in Immich' : 'Exported to Immich');
+    } catch (err) {
+      uiModule.showError(err.message || 'Immich export failed');
     }
   });
 
@@ -1903,7 +2056,7 @@ function _openDetail(img) {
     }
   });
 
-  document.getElementById('gallery-delete-btn').addEventListener('click', async () => {
+  document.getElementById('gallery-delete-btn')?.addEventListener('click', async () => {
     if (!await uiModule.styledConfirm('Delete this photo? This cannot be undone.', { confirmText: 'Delete', danger: true })) return;
     const ok = await _deleteImage(img.id);
     if (!ok) {
@@ -2010,7 +2163,7 @@ function _openDetail(img) {
     _tagInput.addEventListener('blur', () => { if (_tagInput.value.trim()) _addTags(); });
   }
 
-  document.getElementById('gallery-detail-album').addEventListener('change', async (e) => {
+  document.getElementById('gallery-detail-album')?.addEventListener('change', async (e) => {
     const albumId = e.target.value;
     const ok = await _patchImage(img.id, { album_id: albumId || '' });
     if (!ok) { uiModule.showError('Failed to update album'); return; }
@@ -2117,6 +2270,7 @@ export function openGallery() {
           <button class="gallery-select-btn gallery-toolbar-action" id="gallery-select-btn" title="Select for bulk actions"><span style="position:relative;top:1px;">Select</span></button>
         </div>
         <div class="gallery-album-chips" id="gallery-filter-chips" style="margin-top:0;"></div>
+        <div class="gallery-source-error" id="gallery-immich-source-state" hidden></div>
         <div class="memory-bulk-bar hidden" id="gallery-bulk-bar" style="margin-bottom:4px;">
           <label class="memory-bulk-check-all" style="position:relative;top:-1px;"><input type="checkbox" id="gallery-bulk-select-all"> All</label>
           <span id="gallery-bulk-count" style="position:relative;top:-1px;">0 selected</span>
@@ -2131,6 +2285,23 @@ export function openGallery() {
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-settings-container" id="gallery-settings-container" style="display:none;">
+          <div class="admin-card" id="gallery-immich-card">
+            <h2>Immich</h2>
+            <p class="memory-desc doclib-desc">Browse a scoped Immich library without exposing its API key to this browser. Pandamonium never deletes Immich originals.</p>
+            <label class="settings-label" for="gallery-immich-url">Server URL</label>
+            <input class="settings-input" id="gallery-immich-url" type="url" autocomplete="url" placeholder="https://immich.example.com" />
+            <label class="settings-label" for="gallery-immich-key">API key</label>
+            <input class="settings-input" id="gallery-immich-key" type="password" autocomplete="new-password" placeholder="Immich API key" />
+            <p class="memory-desc doclib-desc" id="gallery-immich-status">Checking Immich connection…</p>
+            <div class="memory-toolbar gallery-source-toolbar" style="display:flex;flex-wrap:wrap;gap:6px;">
+              <button class="memory-toolbar-btn" id="gallery-immich-save">Save / rotate key</button>
+              <button class="memory-toolbar-btn" id="gallery-immich-test" hidden>Test</button>
+              <button class="memory-toolbar-btn" id="gallery-immich-sync" hidden>Refresh cache</button>
+              <button class="memory-toolbar-btn" id="gallery-immich-toggle" hidden>Disable</button>
+              <button class="memory-toolbar-btn" id="gallery-immich-clear" hidden>Clear cached data</button>
+              <button class="memory-toolbar-btn" id="gallery-immich-remove" hidden>Remove</button>
+            </div>
+          </div>
           <div class="admin-card" id="gallery-source-card">
             <h2>Local Pictures</h2>
             <p class="memory-desc doclib-desc" id="gallery-source-message">Checking local photo access…</p>
@@ -2277,7 +2448,7 @@ export function openGallery() {
         // tab does something useful instead of opening an empty grey pane.
         if (!isEditorOpen()) _renderEditorLanding();
       } else if (target === 'settings') {
-        _loadGallerySources(false);
+        Promise.all([_loadGallerySources(false), _loadImmichConnection()]);
       }
     });
   });
@@ -2347,8 +2518,81 @@ export function openGallery() {
     }
   });
 
+  document.getElementById('gallery-immich-save')?.addEventListener('click', async () => {
+    try {
+      await _saveImmichConnection();
+      uiModule.showToast('Immich connection saved');
+    } catch (err) {
+      uiModule.showError(err.message || 'Could not save Immich');
+    }
+  });
+  document.getElementById('gallery-immich-test')?.addEventListener('click', async () => {
+    try {
+      await _immichRequest('/api/gallery/immich/test', { method: 'POST' });
+      await _loadImmichConnection();
+      uiModule.showToast('Immich connection is healthy');
+    } catch (err) {
+      await _loadImmichConnection();
+      uiModule.showError(err.message || 'Immich test failed');
+    }
+  });
+  document.getElementById('gallery-immich-sync')?.addEventListener('click', async () => {
+    try {
+      const result = await _immichRequest('/api/gallery/immich/sync', { method: 'POST' });
+      await Promise.all([_loadImmichConnection(), _fetchLibrary(false), _fetchAlbums()]);
+      uiModule.showToast(`Immich refreshed · ${result.assets_cached} assets · ${result.albums_cached} albums`);
+    } catch (err) {
+      await _loadImmichConnection();
+      uiModule.showError(err.message || 'Immich refresh failed');
+    }
+  });
+  document.getElementById('gallery-immich-toggle')?.addEventListener('click', async () => {
+    try {
+      _immichState = await _immichRequest('/api/gallery/immich/connection', {
+        method: 'PUT', body: JSON.stringify({ enabled: !_immichState.enabled }),
+      });
+      _renderImmichConnection();
+      if (!_immichState.enabled && (_activeModel === 'Immich' || _activeAlbum?.startsWith('immich:'))) {
+        _activeModel = null;
+        _activeAlbum = null;
+      }
+      await Promise.all([_fetchLibrary(false), _fetchAlbums()]);
+    } catch (err) {
+      uiModule.showError(err.message || 'Could not update Immich');
+    }
+  });
+  document.getElementById('gallery-immich-clear')?.addEventListener('click', async () => {
+    try {
+      const result = await _immichRequest('/api/gallery/immich/cache', { method: 'DELETE' });
+      await _loadImmichConnection();
+      uiModule.showToast(`Removed ${result.removed_cached_files} cached Immich file${result.removed_cached_files === 1 ? '' : 's'}`);
+    } catch (err) {
+      uiModule.showError(err.message || 'Could not clear Immich cache');
+    }
+  });
+  document.getElementById('gallery-immich-remove')?.addEventListener('click', async () => {
+    if (!await uiModule.styledConfirm(
+      'Remove the Immich connection and all Pandamonium-cached Immich metadata and thumbnails? Immich originals are untouched.',
+      { confirmText: 'Remove', danger: true },
+    )) return;
+    try {
+      await _immichRequest('/api/gallery/immich/connection', { method: 'DELETE' });
+      _immichState = null;
+      _activeModel = null;
+      if (_activeAlbum?.startsWith('immich:')) _activeAlbum = null;
+      await Promise.all([_loadImmichConnection(), _fetchLibrary(false), _fetchAlbums()]);
+      uiModule.showToast('Immich connection removed');
+    } catch (err) {
+      uiModule.showError(err.message || 'Could not remove Immich');
+    }
+  });
+
   document.getElementById('gallery-model-filter').addEventListener('change', (e) => {
     _activeModel = e.target.value || null;
+    if (_activeModel === 'Immich') {
+      _favoritesOnly = false;
+      _activeTags = [];
+    }
     _fetchLibrary(false);
   });
 

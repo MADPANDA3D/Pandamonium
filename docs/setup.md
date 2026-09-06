@@ -91,6 +91,23 @@ Gallery Settings on desktop and mobile:
 
 ![Gallery Local Pictures on mobile](images/gallery-local-pictures-mobile.png)
 
+### Immich Gallery connection
+
+Open **Gallery → Settings → Immich**, enter the normal Immich server URL and a
+scoped API key, then save and test the connection. The key needs permission to
+read assets and albums; exporting a local Gallery image also needs asset upload
+permission. Pandamonium encrypts the key at rest and proxies Immich metadata,
+thumbnails, previews, and downloads server-side, so the browser never receives
+the credential.
+
+Choose **Immich** in the Gallery source filter or open an Immich album to browse
+and search the remote library. Remote assets and albums stay visibly read-only.
+**Import a local copy** stores a bounded copy in Pandamonium; **Export to
+Immich** uses Immich's supported upload API. Removing the connection or clearing
+its owner-scoped cache removes only Pandamonium metadata and thumbnails and
+never deletes an Immich original. If Immich is offline, a matching cached page
+can remain visible with an explicit stale/offline state.
+
 ### Atomic native Linux updates
 
 The fixed footer can install a signed Pandamonium release only when Linux is
