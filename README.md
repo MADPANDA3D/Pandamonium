@@ -153,6 +153,10 @@ GHCR images embed their exact source revision. Source-built Docker installs can
 preserve the same provenance by passing `PANDAMONIUM_SOURCE_REVISION` during the
 Compose build, as shown in the setup guide.
 
+![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
+
+![Updater release control panel on mobile](docs/images/updater-control-panel-mobile.png)
+
 The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment
 variables; the former `ODYSSEUS_*` names remain accepted during migration.
