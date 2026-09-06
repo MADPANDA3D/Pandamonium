@@ -157,9 +157,18 @@ never disappears. Markdown tables remain horizontally scrollable on narrow
 screens, and GitHub, Instagram, and Facebook links receive recognizable service
 icons without changing their destinations.
 
+The composer reserves the visible model selector's measured width on desktop,
+split-pane, narrow, and touch layouts. Mermaid rendering also performs one
+bounded retry with quoted node labels when generated punctuation, Unicode, or
+HTML line breaks make otherwise valid flowchart source fail to parse.
+
 ![Mermaid diagram, table, and branded links on desktop](images/chat-mermaid-rich-links-desktop.png)
 
 ![Mermaid diagram, table, and branded links on mobile](images/chat-mermaid-rich-links-mobile.png)
+
+![Verified composer and Mermaid follow-ups on desktop](images/chat-composer-mermaid-followups-desktop.png)
+
+![Verified composer and Mermaid follow-ups on mobile](images/chat-composer-mermaid-followups-mobile.png)
 
 ### Atomic native Linux updates
 

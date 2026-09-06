@@ -261,6 +261,7 @@ _AGENT_RULES = """\
 - Only use tools when needed. For casual messages like "test", "yo", "thanks", answer normally.
 - Treat user-owned Pandamonium state as application data: use the owner-scoped app tools and APIs exposed for the turn. Never hunt for it with filesystem tools or guess server paths.
 - Never invent Pandamonium's implementation, runtime, storage, protocols, workers, or available capabilities. Verify those claims with the runtime/catalog tools supplied for the turn; if the required evidence is unavailable, clearly say which details are unverified.
+- Claims about the user's current host or network topology require a read-only inspection tool result in this turn. If inspection is unavailable or fails, state the limitation and do not fill gaps with a typical setup or memory.
 - If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
 - After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
 - After a tool fails, retry with a concrete fix or state what is blocking you.
@@ -275,6 +276,7 @@ _API_AGENT_RULES = """\
 - You MUST use tools to take action; do not claim you did something without a tool result.
 - Treat user-owned Pandamonium state as application data: use the owner-scoped app tools and APIs exposed for the turn. Never hunt for it with filesystem tools or guess server paths.
 - Never invent Pandamonium's implementation, runtime, storage, protocols, workers, or available capabilities. Verify those claims with the runtime/catalog tools supplied for the turn; if the required evidence is unavailable, clearly say which details are unverified.
+- Claims about the user's current host or network topology require a read-only inspection tool result in this turn. If inspection is unavailable or fails, state the limitation and do not fill gaps with a typical setup or memory.
 - If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
 - Keep answers concise unless the user asks for depth.
 - After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
@@ -347,6 +349,7 @@ _DOMAIN_RULES = {
 ## File rules
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
+- For current host or network discovery, inspect with read-only commands before answering; do not change network state unless the user asks.
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
     "settings": """\
 ## Settings/API rules
@@ -1164,7 +1167,8 @@ def _assistant_requested_followup(messages: List[Dict]) -> bool:
         return bool(re.search(
             r"\b(what would you like|what should|what do you want|which one|which model|"
             r"what.+(?:todo|to-do|list|document|email|model|server|item)|"
-            r"any specific|give me|tell me)\b",
+            r"any specific|give me|tell me|"
+            r"(?:could|can) you (?:please )?(?:provide|confirm|specify|share|describe|clarify))\b",
             text,
         ))
     return False
@@ -1233,6 +1237,15 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     if has(r"\b(session|chat history|rename chat|delete chat|archive chat|fork chat|list chats)\b"):
         domains.add("sessions")
     if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b"):
+        domains.add("files")
+    current_network_subject = has(
+        r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi-?fi|wifi|topology|subnet|router|devices?)\b",
+        r"\b(?:network|lan|wi-?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
+        r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
+    )
+    if current_network_subject and has(
+        r"\b(?:make|create|draw|diagram|map|show|what|inspect|check|discover|scan|list|overview|components?)\b"
+    ):
         domains.add("files")
     if re.match(
         r"^\s*(?:(?:please|ok(?:ay)?|alright|right|sure|cool|great|thanks)[\s,.!-]+)*"

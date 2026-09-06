@@ -2495,11 +2495,19 @@ function initializeEventListeners() {
     const _isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
     function checkPickerOverflow() {
-      // Skip responsive collapse on mobile — keyboard open/close causes flicker
-      if (_isMobile) return;
       const w = inputTop.clientWidth;
-      // Hide model picker
-      pickerWrap.classList.toggle('picker-auto-hidden', w < PICKER_HIDE_WIDTH);
+      // Skip responsive collapse on mobile — keyboard open/close causes flicker.
+      // Clearance still tracks the real picker width on every layout so typed
+      // and ghost text cannot flow under the absolutely positioned control.
+      if (!_isMobile) {
+        pickerWrap.classList.toggle('picker-auto-hidden', w < PICKER_HIDE_WIDTH);
+      }
+      const pickerStyle = getComputedStyle(pickerWrap);
+      const pickerWidth = pickerStyle.display === 'none'
+        ? 0
+        : Math.ceil(pickerWrap.getBoundingClientRect().width) + 8;
+      inputTop.style.setProperty('--model-picker-clearance', `${pickerWidth}px`);
+      if (_isMobile) return;
       // Keep a prompt inside the composer even when the picker crowds the row.
       // A blank placeholder makes the mobile/compact empty state feel broken.
       if (textarea) {
@@ -2513,6 +2521,7 @@ function initializeEventListeners() {
 
     const ro = new ResizeObserver(() => requestAnimationFrame(checkPickerOverflow));
     ro.observe(inputTop);
+    ro.observe(pickerWrap);
     checkPickerOverflow();
   })();
 

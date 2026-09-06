@@ -482,6 +482,13 @@ const QWEN_BARE_MARKER_RE = /(?:^|[\t\r\n ])(?:\|?end\|?|\/?\|end\|)(?=[\t\r\n ]
 // Self-narration about tool results (model echoing stdout/exit_code)
 const TOOL_NARRATION_RE = /(?:The (?:result|output) shows?:?\s*)?-?\s*(?:stdout|stderr|exit_code):\s*.+/gi;
 
+function replaceOutsideCodeFences(text, pattern, replacement) {
+  return String(text || '')
+    .split(/(```[\s\S]*?```)/g)
+    .map((part, index) => index % 2 ? part : part.replace(pattern, replacement))
+    .join('');
+}
+
 
 // Model pricing table — per million tokens
 // Model info: pricing (per 1M tokens) + context window length
@@ -922,7 +929,7 @@ export function stripToolBlocks(text) {
   cleaned = cleaned.replace(XML_INVOKE_RE, '');
   cleaned = cleaned.replace(RAW_OPENAI_TOOL_JSON_RE, '');
   cleaned = cleaned.replace(QWEN_ROLE_MARKER_RE, '');
-  cleaned = cleaned.replace(QWEN_BARE_MARKER_RE, ' ');
+  cleaned = replaceOutsideCodeFences(cleaned, QWEN_BARE_MARKER_RE, ' ');
   cleaned = cleaned.replace(TOOL_NARRATION_RE, '');
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
   return cleaned.trim();
