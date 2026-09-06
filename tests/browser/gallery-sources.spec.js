@@ -33,6 +33,22 @@ test('Gallery reports, changes, disables, and protects a connected Pictures fold
     if (path === '/api/gallery/sources/sync') {
       return route.fulfill({ json: state() });
     }
+    if (path === '/api/gallery/discovery') {
+      return route.fulfill({ json: {
+        connected: source.enabled ? 1 : 0,
+        available: 0,
+        sources: [{
+          id: `folder:${source.id}`, source_id: source.id,
+          kind: 'device_folder', provider: 'Device folder', label: source.label,
+          device: 'pc-codex', location: source.path,
+          state: source.enabled ? 'connected' : 'disabled', connected: true,
+          connectable: true, enabled: source.enabled, indexed: source.indexed,
+          last_scan_at: source.last_scan_at, error: source.error,
+        }],
+        local: { environment: 'native', message: state().message },
+        tailnet: { available: true, devices_checked: 1, message: 'No Immich service found.' },
+      } });
+    }
     if (path === '/api/gallery/sources/source-1' && request.method() === 'PATCH') {
       const change = request.postDataJSON();
       source = { ...source, ...change, label: change.path ? 'Photos' : source.label };

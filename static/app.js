@@ -292,6 +292,16 @@ async function _syncWelcomeModelHint() {
 
 const FIRST_RUN_DISMISS_KEY = 'pandamonium-first-run-dismissed';
 
+async function _gallerySetupStatus() {
+  try {
+    const response = await fetch(`${API_BASE}/api/gallery/discovery`, { credentials: 'same-origin' });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (_) {
+    return null;
+  }
+}
+
 async function _renderFirstRunGuide(identityStatus, options = {}) {
   const guide = document.getElementById(options.targetId || 'welcome-setup');
   if (!guide || !window._isAdmin) return;
@@ -305,6 +315,10 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
     guide.replaceChildren();
     return;
   }
+  const galleryDiscovery = await _gallerySetupStatus();
+  const connectedGalleries = Number(galleryDiscovery?.connected || 0);
+  const availableGallery = (galleryDiscovery?.sources || [])
+    .find(source => source.state === 'available');
 
   guide.className = 'first-run-guide';
   guide.style.display = 'grid';
@@ -346,6 +360,16 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
       tab: 'services',
     },
     {
+      label: 'Connect your gallery',
+      state: connectedGalleries
+        ? `Ready: ${connectedGalleries} source${connectedGalleries === 1 ? '' : 's'} connected`
+        : availableGallery
+          ? `Found: ${availableGallery.label} on ${availableGallery.device}`
+          : 'Optional: scan this device and tailnet',
+      done: connectedGalleries > 0,
+      action: () => galleryModule.openGallerySettings(),
+    },
+    {
       label: 'Integrations',
       state: 'Optional: connect services and plugins',
       done: false,
@@ -368,7 +392,8 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
     button.append(indexEl, label, state);
     button.addEventListener('click', () => {
       options.onNavigate?.();
-      settingsModule.open(definition.tab);
+      if (definition.action) definition.action();
+      else settingsModule.open(definition.tab);
       if (definition.target) {
         setTimeout(() => document.getElementById(definition.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
       }

@@ -88,6 +88,108 @@ def test_connection_rejects_unsafe_urls_and_blank_rotation(immich_env):
 
 
 @pytest.mark.asyncio
+async def test_tailnet_discovery_fingerprints_immich_without_credentials():
+    status = {
+        "Self": {"HostName": "pandamonium", "TailscaleIPs": ["100.64.0.1"]},
+        "Peer": {
+            "immich": {
+                "HostName": "photo-server",
+                "Online": True,
+                "TailscaleIPs": ["100.64.0.2"],
+            },
+            "offline": {
+                "HostName": "offline-pc",
+                "Online": False,
+                "TailscaleIPs": ["100.64.0.3"],
+            },
+        },
+    }
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append((str(request.url), request.headers.get("x-api-key")))
+        if request.url.host == "100.64.0.2":
+            return httpx.Response(200, json={"res": "pong"}, request=request)
+        return httpx.Response(404, request=request)
+
+    result = await immich_gallery.discover_tailnet_immich(
+        status=status,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result["available"] is True
+    assert result["self_name"] == "pandamonium"
+    assert result["devices_checked"] == 2
+    assert result["candidates"] == [
+        {
+            "id": result["candidates"][0]["id"],
+            "kind": "immich",
+            "provider": "Immich",
+            "label": "Immich",
+            "device": "photo-server",
+            "location": "http://100.64.0.2:2283",
+            "server_url": "http://100.64.0.2:2283",
+            "state": "available",
+            "connected": False,
+            "connectable": True,
+        }
+    ]
+    assert all(key is None for _url, key in seen)
+    assert all("100.64.0.3" not in url for url, _key in seen)
+
+
+def test_gallery_discovery_keeps_folder_and_immich_as_distinct_sources():
+    result = gallery_routes._compose_gallery_discovery(
+        {
+            "environment": "native",
+            "message": "Local folder found.",
+            "candidates": [],
+            "sources": [
+                {
+                    "id": "folder-one",
+                    "path": "/home/alice/Pictures",
+                    "label": "Pictures",
+                    "enabled": True,
+                    "indexed": 4,
+                }
+            ],
+        },
+        {
+            "configured": False,
+            "enabled": False,
+            "status": "unconfigured",
+        },
+        {
+            "available": True,
+            "self_name": "pc-codex",
+            "devices_checked": 2,
+            "message": "Found Immich.",
+            "candidates": [
+                {
+                    "id": "immich:candidate",
+                    "kind": "immich",
+                    "provider": "Immich",
+                    "label": "Immich",
+                    "device": "photo-server",
+                    "location": "https://photo-server.example",
+                    "server_url": "https://photo-server.example",
+                    "state": "available",
+                    "connected": False,
+                    "connectable": True,
+                }
+            ],
+        },
+    )
+
+    assert [(source["kind"], source["device"]) for source in result["sources"]] == [
+        ("device_folder", "pc-codex"),
+        ("immich", "photo-server"),
+    ]
+    assert result["connected"] == 1
+    assert result["available"] == 1
+
+
+@pytest.mark.asyncio
 async def test_assets_albums_thumbnails_and_offline_cache_are_bounded(immich_env):
     status = _connect()
     connection_id = status["configured"] and immich_gallery.get_connection("alice")["id"]

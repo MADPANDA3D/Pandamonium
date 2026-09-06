@@ -26733,6 +26733,11 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
 .gallery-source-details .gallery-source-error { color: var(--red); opacity: 1; }
 .gallery-source-actions, .gallery-source-toolbar { display: flex; gap: 6px; }
 .gallery-source-toolbar { margin-top: 10px; }
+.gallery-source-steps {
+  margin: 8px 0 10px 18px;
+  padding: 0;
+}
+.gallery-source-steps li { margin: 4px 0; }
 .gallery-albums-container.gallery-dragover {
   border-color: var(--red);
   background: color-mix(in srgb, var(--red) 5%, transparent);

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import shutil
+import socket
+import subprocess
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -41,6 +45,11 @@ SAFE_THUMBNAIL_TYPES = {
 }
 _EXTERNAL_ID = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 _UNSET = object()
+_TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_DISCOVERY_MAX_DEVICES = 16
+_DISCOVERY_MAX_BYTES = 4096
+_DISCOVERY_TIMEOUT = 1.5
+_DISCOVERY_DEADLINE = 5.0
 
 # ponytail: one lock is enough for a small owner-operated cache; use per-owner
 # locks only if concurrent Immich traffic becomes measurable.
@@ -67,6 +76,185 @@ class ImmichError(Exception):
         if self.retry_after:
             result["retry_after"] = self.retry_after
         return result
+
+
+def _tailscale_status() -> dict[str, Any] | None:
+    """Return one bounded Tailscale snapshot, or None when it is unavailable."""
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return None
+    if result.returncode != 0 or len(result.stdout) > 2_000_000:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _tailnet_devices(status: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    """Extract bounded online devices without trusting arbitrary status fields."""
+    self_data = status.get("Self") if isinstance(status.get("Self"), dict) else {}
+    self_name = str(
+        self_data.get("HostName") or socket.gethostname() or "This device"
+    )[:128]
+    records: list[dict[str, Any]] = [self_data]
+    peers = status.get("Peer") if isinstance(status.get("Peer"), dict) else {}
+    records.extend(
+        peer
+        for peer in peers.values()
+        if isinstance(peer, dict) and peer.get("Online") is True
+    )
+    devices: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for record in records:
+        addresses = (
+            record.get("TailscaleIPs")
+            if isinstance(record.get("TailscaleIPs"), list)
+            else []
+        )
+        address = ""
+        for value in addresses:
+            try:
+                candidate = ipaddress.ip_address(str(value))
+            except ValueError:
+                continue
+            if candidate.version == 4 and candidate in _TAILSCALE_CGNAT:
+                address = str(candidate)
+                break
+        dns_name = str(record.get("DNSName") or "").strip().rstrip(".")[:253]
+        host_name = str(record.get("HostName") or dns_name or address).strip()[:128]
+        if not address and not dns_name:
+            continue
+        identity = (address, dns_name)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        devices.append(
+            {
+                "name": host_name or "Tailnet device",
+                "address": address,
+                "dns_name": dns_name,
+            }
+        )
+        if len(devices) >= _DISCOVERY_MAX_DEVICES:
+            break
+    return self_name, devices
+
+
+def _immich_probe_targets(device: dict[str, str]) -> list[str]:
+    targets: list[str] = []
+    dns_name = device.get("dns_name", "")
+    address = device.get("address", "")
+    if dns_name:
+        targets.extend((f"https://{dns_name}", f"https://{dns_name}:8443"))
+    if address:
+        targets.append(f"http://{address}:2283")
+    return targets
+
+
+async def discover_tailnet_immich(
+    *,
+    status: dict[str, Any] | None | object = _UNSET,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """Fingerprint Immich on online tailnet devices without sending credentials."""
+    snapshot = await asyncio.to_thread(_tailscale_status) if status is _UNSET else status
+    fallback_name = socket.gethostname() or "This device"
+    if not isinstance(snapshot, dict):
+        return {
+            "available": False,
+            "self_name": fallback_name,
+            "devices_checked": 0,
+            "candidates": [],
+            "message": "Tailscale is unavailable; device folders and manual server URLs still work.",
+        }
+    self_name, devices = _tailnet_devices(snapshot)
+    probes = [
+        (device, base_url)
+        for device in devices
+        for base_url in _immich_probe_targets(device)
+    ]
+    semaphore = asyncio.Semaphore(16)
+
+    async def probe(client: httpx.AsyncClient, device: dict[str, str], base_url: str):
+        try:
+            async with semaphore:
+                normalized = await asyncio.to_thread(_normalize_server_url, base_url)
+                async with client.stream("GET", f"{normalized}/api/server/ping") as response:
+                    if response.status_code != 200:
+                        return None
+                    declared = int(response.headers.get("content-length", "0") or 0)
+                    if declared > _DISCOVERY_MAX_BYTES:
+                        return None
+                    chunks: list[bytes] = []
+                    received = 0
+                    async for chunk in response.aiter_bytes():
+                        received += len(chunk)
+                        if received > _DISCOVERY_MAX_BYTES:
+                            return None
+                        chunks.append(chunk)
+            payload = json.loads(b"".join(chunks))
+            if not isinstance(payload, dict) or payload.get("res") != "pong":
+                return None
+            return {
+                "id": f"immich:{hashlib.sha256(normalized.encode()).hexdigest()[:16]}",
+                "kind": "immich",
+                "provider": "Immich",
+                "label": "Immich",
+                "device": device["name"],
+                "location": normalized,
+                "server_url": normalized,
+                "state": "available",
+                "connected": False,
+                "connectable": True,
+            }
+        except (ValueError, json.JSONDecodeError, httpx.HTTPError):
+            return None
+
+    candidates: list[dict[str, Any]] = []
+    if probes:
+        async with httpx.AsyncClient(
+            timeout=_DISCOVERY_TIMEOUT,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            tasks = [
+                asyncio.create_task(probe(client, device, url))
+                for device, url in probes
+            ]
+            _done, pending = await asyncio.wait(tasks, timeout=_DISCOVERY_DEADLINE)
+            for task in pending:
+                task.cancel()
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        seen_devices: set[str] = set()
+        for candidate in results:
+            if not isinstance(candidate, dict) or candidate["device"] in seen_devices:
+                continue
+            seen_devices.add(candidate["device"])
+            candidates.append(candidate)
+    count = len(devices)
+    if candidates:
+        noun = "service" if len(candidates) == 1 else "services"
+        message = f"Found {len(candidates)} Immich {noun} across {count} online tailnet devices."
+    elif count:
+        message = f"Scanned {count} online tailnet devices; no supported gallery service answered."
+    else:
+        message = "No online tailnet devices were available to scan."
+    return {
+        "available": True,
+        "self_name": self_name,
+        "devices_checked": count,
+        "candidates": candidates,
+        "message": message,
+    }
 
 
 def _owner_query(db: Any, owner: str | None):

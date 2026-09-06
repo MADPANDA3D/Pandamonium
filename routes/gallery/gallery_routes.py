@@ -124,6 +124,110 @@ def _raise_immich(exc: immich_gallery.ImmichError) -> None:
     raise HTTPException(exc.status_code, exc.public())
 
 
+def _compose_gallery_discovery(
+    local: dict[str, Any],
+    immich: dict[str, Any],
+    tailnet: dict[str, Any],
+) -> dict[str, Any]:
+    """Project provider-specific checks into one list of distinct gallery sources."""
+    sources: list[dict[str, Any]] = []
+    self_name = str(tailnet.get("self_name") or "This device")
+    connected_paths: set[str] = set()
+    for source in local.get("sources", []):
+        path = str(source.get("path") or "")
+        connected_paths.add(path)
+        enabled = bool(source.get("enabled"))
+        sources.append(
+            {
+                "id": f"folder:{source['id']}",
+                "source_id": source["id"],
+                "kind": "device_folder",
+                "provider": "Device folder",
+                "label": source.get("label") or "Pictures",
+                "device": self_name,
+                "location": path,
+                "state": "connected" if enabled else "disabled",
+                "connected": True,
+                "connectable": True,
+                "enabled": enabled,
+                "indexed": int(source.get("indexed") or 0),
+                "last_scan_at": source.get("last_scan_at"),
+                "error": source.get("error"),
+            }
+        )
+    for candidate in local.get("candidates", []):
+        path = str(candidate.get("path") or "")
+        if not path or path in connected_paths:
+            continue
+        sources.append(
+            {
+                "id": f"folder:{hashlib.sha256(path.encode()).hexdigest()[:16]}",
+                "kind": "device_folder",
+                "provider": "Device folder",
+                "label": candidate.get("label") or "Pictures",
+                "device": self_name,
+                "location": path,
+                "state": "available" if candidate.get("available") else "unavailable",
+                "connected": False,
+                "connectable": bool(candidate.get("available")),
+                "reason": candidate.get("reason"),
+            }
+        )
+
+    configured_url = str(immich.get("server_url") or "").rstrip("/")
+    matched = False
+    for candidate in tailnet.get("candidates", []):
+        item = dict(candidate)
+        if configured_url and str(item.get("server_url") or "").rstrip("/") == configured_url:
+            matched = True
+            item.update(
+                {
+                    "id": "immich:primary",
+                    "state": "connected" if immich.get("enabled") else "disabled",
+                    "connected": True,
+                    "enabled": bool(immich.get("enabled")),
+                    "status": immich.get("status"),
+                    "error": immich.get("last_error"),
+                }
+            )
+        sources.append(item)
+    if immich.get("configured") and not matched:
+        sources.append(
+            {
+                "id": "immich:primary",
+                "kind": "immich",
+                "provider": "Immich",
+                "label": "Immich",
+                "device": "Remote service",
+                "location": configured_url,
+                "server_url": configured_url,
+                "state": "connected" if immich.get("enabled") else "disabled",
+                "connected": True,
+                "connectable": True,
+                "enabled": bool(immich.get("enabled")),
+                "status": immich.get("status"),
+                "error": immich.get("last_error"),
+            }
+        )
+
+    connected = sum(1 for source in sources if source.get("state") == "connected")
+    available = sum(1 for source in sources if source.get("state") == "available")
+    return {
+        "sources": sources,
+        "connected": connected,
+        "available": available,
+        "local": {
+            "environment": local.get("environment"),
+            "message": local.get("message"),
+        },
+        "tailnet": {
+            "available": bool(tailnet.get("available")),
+            "devices_checked": int(tailnet.get("devices_checked") or 0),
+            "message": tailnet.get("message"),
+        },
+    }
+
+
 def _store_gallery_bytes(
     content: bytes,
     original_filename: str,
@@ -847,6 +951,24 @@ def setup_gallery_routes() -> APIRouter:
             }
         finally:
             db.close()
+
+    # ---- Distinct Gallery source discovery ----
+
+    @router.get("/api/gallery/discovery")
+    async def gallery_discovery(request: Request):
+        user = _require_gallery_source_operator(request)
+        owner = source_owner(user)
+        db = SessionLocal()
+        try:
+            local = source_status(db, owner)
+        finally:
+            db.close()
+        tailnet = await immich_gallery.discover_tailnet_immich()
+        return _compose_gallery_discovery(
+            local,
+            immich_gallery.connection_status(_immich_owner(request)),
+            tailnet,
+        )
 
     # ---- Owner-scoped Immich Gallery connection ----
 

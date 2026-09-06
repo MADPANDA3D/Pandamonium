@@ -30,6 +30,31 @@ test('Gallery manages Immich safely and keeps remote assets read-only', async ({
     if (path === '/api/gallery/immich/connection' && request.method() === 'GET') {
       return fulfill(connection);
     }
+    if (path === '/api/gallery/discovery') {
+      return fulfill({
+        connected: connection.configured && connection.enabled ? 2 : 1,
+        available: connection.configured ? 0 : 1,
+        sources: [
+          {
+            id: 'folder:source-1', source_id: 'source-1', kind: 'device_folder',
+            provider: 'Device folder', label: 'Pictures', device: 'pc-codex',
+            location: '/home/tester/Pictures', state: 'connected', connected: true,
+            connectable: true, enabled: true, indexed: 3,
+          },
+          {
+            id: connection.configured ? 'immich:primary' : 'immich:found',
+            kind: 'immich', provider: 'Immich', label: 'Immich', device: 'photo-server',
+            location: connection.server_url || 'https://immich.test',
+            server_url: connection.server_url || 'https://immich.test',
+            state: connection.configured ? (connection.enabled ? 'connected' : 'disabled') : 'available',
+            connected: connection.configured, connectable: true, enabled: connection.enabled,
+            status: connection.status,
+          },
+        ],
+        local: { environment: 'native', message: 'Pictures found on this device.' },
+        tailnet: { available: true, devices_checked: 2, message: 'Found 1 Immich service.' },
+      });
+    }
     if (path === '/api/gallery/immich/connection' && request.method() === 'PUT') {
       const body = request.postDataJSON();
       if (body.api_key) savedKey = body.api_key;
@@ -114,8 +139,14 @@ test('Gallery manages Immich safely and keeps remote assets read-only', async ({
   await expect(gallery).toBeVisible();
 
   await gallery.locator('.gallery-tab[data-tab="settings"]').click();
+  await expect(gallery.locator('[data-gallery-source-kind="device_folder"]')).toContainText('Pictures · connected');
+  const discoveredImmich = gallery.locator('[data-gallery-source-kind="immich"]');
+  await expect(discoveredImmich).toContainText('Immich · found');
+  await discoveredImmich.getByRole('button', { name: 'Connect' }).click();
   const card = gallery.locator('#gallery-immich-card');
-  await card.locator('#gallery-immich-url').fill('https://immich.test');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Account Settings → API Keys');
+  await expect(card.locator('#gallery-immich-url')).toHaveValue('https://immich.test');
   await card.locator('#gallery-immich-key').fill('browser-secret');
   await card.getByRole('button', { name: 'Save / rotate key' }).click();
   await expect(card.locator('#gallery-immich-key')).toHaveValue('');

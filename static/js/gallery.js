@@ -28,6 +28,7 @@ let _items = [];
 let _total = 0;
 let _totalTagged = 0;
 let _sourceState = null;
+let _galleryDiscoveryState = null;
 let _immichState = null;
 let _immichLibraryState = null;
 
@@ -182,6 +183,7 @@ async function _immichRequest(path, options = {}) {
 }
 
 function _renderImmichConnection() {
+  const card = document.getElementById('gallery-immich-card');
   const status = document.getElementById('gallery-immich-status');
   const url = document.getElementById('gallery-immich-url');
   const key = document.getElementById('gallery-immich-key');
@@ -192,6 +194,7 @@ function _renderImmichConnection() {
   const clear = document.getElementById('gallery-immich-clear');
   if (!status || !url || !key) return;
   const state = _immichState || { configured: false, enabled: false, status: 'unconfigured' };
+  if (card && state.configured) card.hidden = false;
   if (state.configured) url.value = state.server_url || '';
   key.value = '';
   key.placeholder = state.api_key_configured ? 'API key saved — enter a new key to rotate' : 'Immich API key';
@@ -236,7 +239,7 @@ async function _saveImmichConnection() {
     method: 'PUT', body: JSON.stringify(body),
   });
   _renderImmichConnection();
-  await Promise.all([_fetchLibrary(false), _fetchAlbums()]);
+  await Promise.all([_fetchLibrary(false), _fetchAlbums(), _loadGalleryDiscovery()]);
 }
 
 async function _sourceRequest(url, options = {}) {
@@ -253,39 +256,84 @@ async function _sourceRequest(url, options = {}) {
 function _renderGallerySources() {
   const message = document.getElementById('gallery-source-message');
   const list = document.getElementById('gallery-source-list');
-  const connect = document.getElementById('gallery-source-connect');
-  if (!message || !list || !connect) return;
-  message.textContent = _sourceState?.message || 'Checking local photo access…';
+  if (!message || !list) return;
+  const discovery = _galleryDiscoveryState || { sources: [] };
+  const tailnetMessage = discovery.tailnet?.message || '';
+  const localMessage = discovery.local?.message || '';
+  message.textContent = [localMessage, tailnetMessage].filter(Boolean).join(' ')
+    || 'Scan this device and your tailnet for gallery sources.';
   list.replaceChildren();
-  const sources = _sourceState?.sources || [];
-  connect.style.display = sources.length ? 'none' : '';
+  const sources = discovery.sources || [];
+  if (!sources.length) {
+    const empty = document.createElement('p');
+    empty.className = 'memory-desc doclib-desc';
+    empty.textContent = 'No gallery source found yet. You can still connect a folder or Immich manually.';
+    list.appendChild(empty);
+  }
   for (const source of sources) {
     const row = document.createElement('div');
     row.className = 'gallery-source-row';
+    row.dataset.gallerySourceKind = source.kind;
     const details = document.createElement('div');
     details.className = 'gallery-source-details';
     const label = document.createElement('strong');
-    label.textContent = `${source.label} · ${source.enabled ? `${source.indexed} indexed` : 'disabled'}`;
+    const states = {
+      available: 'found', connected: 'connected', disabled: 'disabled', unavailable: 'unavailable',
+    };
+    label.textContent = `${source.label} · ${states[source.state] || source.state}`;
     const path = document.createElement('span');
-    path.textContent = source.path;
+    path.textContent = `${source.device || 'Unknown device'} · ${source.location || ''}`;
     const status = document.createElement('span');
     status.className = source.error ? 'gallery-source-error' : 'gallery-source-status';
-    status.textContent = source.error || (source.last_scan_at ? `Last refreshed ${new Date(source.last_scan_at).toLocaleString()}` : 'Ready to scan');
+    if (source.error) status.textContent = source.error;
+    else if (source.kind === 'device_folder' && source.state === 'connected') {
+      status.textContent = `${source.indexed || 0} indexed${source.last_scan_at ? ` · refreshed ${new Date(source.last_scan_at).toLocaleString()}` : ''}`;
+    } else if (source.kind === 'immich') {
+      status.textContent = source.state === 'available'
+        ? 'Immich found · connect with an API key'
+        : `Immich · ${source.status || source.state}`;
+    } else {
+      status.textContent = source.reason || `${source.provider || 'Gallery source'} on ${source.device || 'this device'}`;
+    }
     details.append(label, path, status);
     const actions = document.createElement('div');
     actions.className = 'gallery-source-actions';
-    const change = document.createElement('button');
-    change.className = 'memory-toolbar-btn';
-    change.dataset.sourceChange = source.id;
-    change.textContent = 'Change';
-    const toggle = document.createElement('button');
-    toggle.className = 'memory-toolbar-btn';
-    toggle.dataset.sourceToggle = source.id;
-    toggle.dataset.enabled = String(source.enabled);
-    toggle.textContent = source.enabled ? 'Disable' : 'Enable';
-    actions.append(change, toggle);
+    if (source.kind === 'device_folder' && source.connected) {
+      const change = document.createElement('button');
+      change.className = 'memory-toolbar-btn';
+      change.dataset.sourceChange = source.source_id;
+      change.textContent = 'Change';
+      const toggle = document.createElement('button');
+      toggle.className = 'memory-toolbar-btn';
+      toggle.dataset.sourceToggle = source.source_id;
+      toggle.dataset.enabled = String(source.enabled);
+      toggle.textContent = source.enabled ? 'Disable' : 'Enable';
+      actions.append(change, toggle);
+    } else if (source.kind === 'device_folder' && source.connectable) {
+      const connect = document.createElement('button');
+      connect.className = 'memory-toolbar-btn';
+      connect.dataset.sourceConnectPath = source.location;
+      connect.textContent = 'Connect';
+      actions.append(connect);
+    } else if (source.kind === 'immich') {
+      const manage = document.createElement('button');
+      manage.className = 'memory-toolbar-btn';
+      manage.dataset.immichUrl = source.server_url || source.location || '';
+      manage.textContent = source.connected ? 'Manage' : 'Connect';
+      actions.append(manage);
+    }
     row.append(details, actions);
     list.appendChild(row);
+  }
+}
+
+async function _loadGalleryDiscovery() {
+  try {
+    _galleryDiscoveryState = await _sourceRequest('/api/gallery/discovery');
+    _renderGallerySources();
+  } catch (err) {
+    const message = document.getElementById('gallery-source-message');
+    if (message) message.textContent = err.message || 'Could not discover gallery sources';
   }
 }
 
@@ -295,7 +343,7 @@ async function _loadGallerySources(sync = false) {
       sync ? '/api/gallery/sources/sync' : '/api/gallery/sources',
       { method: sync ? 'POST' : 'GET' },
     );
-    _renderGallerySources();
+    await _loadGalleryDiscovery();
     if (sync) {
       await Promise.all([_fetchLibrary(false), _fetchAlbums()]);
     }
@@ -306,7 +354,9 @@ async function _loadGallerySources(sync = false) {
 }
 
 async function _changeGallerySource(sourceId = null) {
-  const current = (_sourceState?.sources || []).find(source => source.id === sourceId);
+  const discovered = (_galleryDiscoveryState?.sources || [])
+    .find(source => source.source_id === sourceId);
+  const current = discovered ? { id: sourceId, path: discovered.location } : null;
   const path = await uiModule.styledPrompt(
     'Enter a folder visible to this Pandamonium process. Docker paths must be explicit read-only mounts.',
     {
@@ -323,7 +373,7 @@ async function _changeGallerySource(sourceId = null) {
       current ? `/api/gallery/sources/${encodeURIComponent(current.id)}` : '/api/gallery/sources',
       { method: current ? 'PATCH' : 'POST', body: JSON.stringify({ path }) },
     );
-    _renderGallerySources();
+    await _loadGalleryDiscovery();
     await _fetchLibrary(false);
   } catch (err) {
     uiModule.showError(err.message || 'Could not connect that folder');
@@ -2285,9 +2335,26 @@ export function openGallery() {
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-settings-container" id="gallery-settings-container" style="display:none;">
-          <div class="admin-card" id="gallery-immich-card">
-            <h2>Immich</h2>
-            <p class="memory-desc doclib-desc">Browse a scoped Immich library without exposing its API key to this browser. Pandamonium never deletes Immich originals.</p>
+          <div class="admin-card" id="gallery-source-card">
+            <h2>Gallery sources</h2>
+            <p class="memory-desc doclib-desc">Each folder or photo service is connected as its own source. Scan this device and your tailnet, then choose what belongs in this Gallery.</p>
+            <p class="memory-desc doclib-desc" id="gallery-source-message">Checking gallery sources…</p>
+            <div id="gallery-source-list"></div>
+            <div class="memory-toolbar gallery-source-toolbar" style="display:flex;flex-wrap:wrap;gap:6px;">
+              <button class="memory-toolbar-btn" id="gallery-source-refresh">Scan this device &amp; tailnet</button>
+              <button class="memory-toolbar-btn" id="gallery-source-connect">Connect folder manually</button>
+              <button class="memory-toolbar-btn" id="gallery-immich-manual">Connect Immich manually</button>
+            </div>
+          </div>
+          <div class="admin-card" id="gallery-immich-card" hidden>
+            <h2>Connect Immich</h2>
+            <p class="memory-desc doclib-desc">Immich is one Gallery source. Its API key stays encrypted on the Pandamonium server, and Pandamonium never deletes Immich originals.</p>
+            <ol class="memory-desc doclib-desc gallery-source-steps">
+              <li>In Immich, open your profile menu, then <strong>Account Settings → API Keys</strong>.</li>
+              <li>Create a key named <strong>Pandamonium</strong>. For browsing, allow <code>album.read</code>, <code>asset.read</code>, <code>asset.view</code>, and <code>asset.download</code>. Add <code>asset.upload</code> only if you want to send local copies to Immich.</li>
+              <li>Copy the key once, paste it below, and connect.</li>
+            </ol>
+            <p class="memory-desc doclib-desc"><a href="https://docs.immich.app/features/user-settings/" target="_blank" rel="noopener noreferrer">Open the official Immich API-key guide</a></p>
             <label class="settings-label" for="gallery-immich-url">Server URL</label>
             <input class="settings-input" id="gallery-immich-url" type="url" autocomplete="url" placeholder="https://immich.example.com" />
             <label class="settings-label" for="gallery-immich-key">API key</label>
@@ -2300,15 +2367,6 @@ export function openGallery() {
               <button class="memory-toolbar-btn" id="gallery-immich-toggle" hidden>Disable</button>
               <button class="memory-toolbar-btn" id="gallery-immich-clear" hidden>Clear cached data</button>
               <button class="memory-toolbar-btn" id="gallery-immich-remove" hidden>Remove</button>
-            </div>
-          </div>
-          <div class="admin-card" id="gallery-source-card">
-            <h2>Local Pictures</h2>
-            <p class="memory-desc doclib-desc" id="gallery-source-message">Checking local photo access…</p>
-            <div id="gallery-source-list"></div>
-            <div class="memory-toolbar gallery-source-toolbar">
-              <button class="memory-toolbar-btn" id="gallery-source-refresh">Refresh index</button>
-              <button class="memory-toolbar-btn" id="gallery-source-connect">Connect folder</button>
             </div>
           </div>
           <div class="admin-card">
@@ -2448,7 +2506,7 @@ export function openGallery() {
         // tab does something useful instead of opening an empty grey pane.
         if (!isEditorOpen()) _renderEditorLanding();
       } else if (target === 'settings') {
-        Promise.all([_loadGallerySources(false), _loadImmichConnection()]);
+        Promise.all([_loadGalleryDiscovery(), _loadImmichConnection()]);
       }
     });
   });
@@ -2498,7 +2556,37 @@ export function openGallery() {
 
   document.getElementById('gallery-source-refresh')?.addEventListener('click', () => _loadGallerySources(true));
   document.getElementById('gallery-source-connect')?.addEventListener('click', () => _changeGallerySource());
+  document.getElementById('gallery-immich-manual')?.addEventListener('click', () => {
+    const card = document.getElementById('gallery-immich-card');
+    if (card) {
+      card.hidden = false;
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    document.getElementById('gallery-immich-url')?.focus();
+  });
   document.getElementById('gallery-source-list')?.addEventListener('click', async (event) => {
+    const immich = event.target.closest('[data-immich-url]');
+    if (immich) {
+      const card = document.getElementById('gallery-immich-card');
+      const url = document.getElementById('gallery-immich-url');
+      if (card) card.hidden = false;
+      if (url && !_immichState?.configured) url.value = immich.dataset.immichUrl || '';
+      card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      url?.focus();
+      return;
+    }
+    const connect = event.target.closest('[data-source-connect-path]');
+    if (connect) {
+      try {
+        _sourceState = await _sourceRequest('/api/gallery/sources', {
+          method: 'POST', body: JSON.stringify({ path: connect.dataset.sourceConnectPath }),
+        });
+        await Promise.all([_loadGalleryDiscovery(), _fetchLibrary(false), _fetchAlbums()]);
+      } catch (err) {
+        uiModule.showError(err.message || 'Could not connect that folder');
+      }
+      return;
+    }
     const change = event.target.closest('[data-source-change]');
     if (change) {
       await _changeGallerySource(change.dataset.sourceChange);
@@ -2511,8 +2599,7 @@ export function openGallery() {
         `/api/gallery/sources/${encodeURIComponent(toggle.dataset.sourceToggle)}`,
         { method: 'PATCH', body: JSON.stringify({ enabled: toggle.dataset.enabled !== 'true' }) },
       );
-      _renderGallerySources();
-      await _fetchLibrary(false);
+      await Promise.all([_loadGalleryDiscovery(), _fetchLibrary(false)]);
     } catch (err) {
       uiModule.showError(err.message || 'Could not update local folder');
     }
@@ -2556,7 +2643,7 @@ export function openGallery() {
         _activeModel = null;
         _activeAlbum = null;
       }
-      await Promise.all([_fetchLibrary(false), _fetchAlbums()]);
+      await Promise.all([_fetchLibrary(false), _fetchAlbums(), _loadGalleryDiscovery()]);
     } catch (err) {
       uiModule.showError(err.message || 'Could not update Immich');
     }
@@ -2580,7 +2667,7 @@ export function openGallery() {
       _immichState = null;
       _activeModel = null;
       if (_activeAlbum?.startsWith('immich:')) _activeAlbum = null;
-      await Promise.all([_loadImmichConnection(), _fetchLibrary(false), _fetchAlbums()]);
+      await Promise.all([_loadImmichConnection(), _fetchLibrary(false), _fetchAlbums(), _loadGalleryDiscovery()]);
       uiModule.showToast('Immich connection removed');
     } catch (err) {
       uiModule.showError(err.message || 'Could not remove Immich');
@@ -3201,6 +3288,11 @@ function _showImagesTab() {
   if (settingsContainer) settingsContainer.style.display = 'none';
 }
 
+export function openGallerySettings() {
+  openGallery();
+  document.querySelector('#gallery-modal .gallery-tab[data-tab="settings"]')?.click();
+}
+
 export async function openGalleryImage(imageId) {
   if (!imageId) {
     openGallery();
@@ -3320,6 +3412,7 @@ function _humanSize(bytes) {
 
 const galleryModule = {
   openGallery,
+  openGallerySettings,
   openGalleryImage,
   closeGallery,
   isGalleryOpen,
