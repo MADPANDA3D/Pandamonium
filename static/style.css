@@ -26730,7 +26730,7 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   overflow-wrap: anywhere;
   opacity: 0.68;
 }
-.gallery-source-details .gallery-source-error { color: var(--color-error, #f44); opacity: 1; }
+.gallery-source-details .gallery-source-error { color: var(--red); opacity: 1; }
 .gallery-source-actions, .gallery-source-toolbar { display: flex; gap: 6px; }
 .gallery-source-toolbar { margin-top: 10px; }
 .gallery-albums-container.gallery-dragover {
