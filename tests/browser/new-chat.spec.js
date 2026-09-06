@@ -14,10 +14,22 @@ function sessionFixture() {
   };
 }
 
-async function waitForChatSubmitReady(page) {
+async function waitForChatSubmitReady(page, sessionId = 'session-one') {
   await expect.poll(() => page.evaluate(() => (
     typeof document.querySelector('#chat-form')?.onsubmit === 'function'
   ))).toBe(true);
+  // Startup publishes the session id before its async render finishes. Await a
+  // same-session selection so a late empty-history render cannot clear text
+  // entered by the test between readiness and submit.
+  await page.evaluate(id => window.sessionModule.selectSession(id, { showLoading: false }), sessionId);
+  await waitForSession(page, sessionId);
+}
+
+async function sendChatMessage(page, message) {
+  await page.locator('#message:visible').fill(message);
+  await page.evaluate(() => window._updateSendBtnIcon?.());
+  await expect(page.locator('.send-btn:visible')).toHaveAttribute('data-mode', 'send');
+  await page.locator('.send-btn:visible').click();
 }
 
 async function waitForSession(page, sessionId) {
@@ -110,8 +122,7 @@ test('sidebar New Chat preserves the active configuration and sends immediately'
     url: 'http://model.test/v1/chat/completions',
   });
 
-  await page.locator('#message:visible').fill('Start another conversation');
-  await page.locator('.send-btn:visible').click();
+  await sendChatMessage(page, 'Start another conversation');
   await expect.poll(() => createdSession).toBe(true);
   await expect.poll(() => streamedSession).toBe('session-new');
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-new');
@@ -234,8 +245,7 @@ test('New Chat clears a completed tool conversation without a browser refresh', 
   await waitForSession(page, 'session-one');
   await waitForChatSubmitReady(page);
 
-  await page.locator('#message:visible').fill('Run whoami and tell me the result');
-  await page.locator('.send-btn:visible').click();
+  await sendChatMessage(page, 'Run whoami and tell me the result');
   await expect(page.locator('.agent-thread-node')).toContainText('bashdone');
   await expect(page.locator('#chat-history')).toContainText('odysseus');
   await expect(page.locator('.send-btn:visible')).not.toHaveAttribute('data-mode', 'streaming');
@@ -375,8 +385,7 @@ test('New Chat stays blank while an active tool stream finishes and sessions ref
   await page.goto('/static/index.html#session-one');
   await waitForSession(page, 'session-one');
   await waitForChatSubmitReady(page);
-  await page.locator('#message:visible').fill('Run whoami');
-  await page.locator('.send-btn:visible').click();
+  await sendChatMessage(page, 'Run whoami');
   await expect(page.locator('.send-btn:visible')).toHaveAttribute('data-mode', 'streaming');
 
   await page.locator('#sidebar-new-chat-btn').click();
