@@ -1563,9 +1563,18 @@ body.bg-pattern-sparkles {
       0%   { opacity: 1; transform: translateY(0)   translateX(0)   scale(1); }
       100% { opacity: 0; transform: translateY(6px) translateX(-3px) scale(0.94); }
     }
+    #sessions-section .session-folder.session-folder-just-expanded > .session-folder-content > :is(.list-item, .date-section-header) {
+      animation: section-domino-in 0.36s cubic-bezier(0.22, 1.61, 0.36, 1) backwards;
+      animation-delay: var(--session-folder-in-delay, 0.04s);
+    }
+    #sessions-section .session-folder.session-folder-just-collapsing > .session-folder-content > :is(.list-item, .date-section-header) {
+      animation: section-domino-out 0.22s ease-in forwards;
+      animation-delay: var(--session-folder-out-delay, 0s);
+    }
     @media (prefers-reduced-motion: reduce) {
       .section:is(.section-just-expanded, .section-just-collapsing) :is(.list-item, .models-row, .date-section-header),
-      #sessions-section:is(.section-just-expanded, .section-just-collapsing) :is(#session-list > *, #codex-project-list > .codex-project-group) {
+      #sessions-section:is(.section-just-expanded, .section-just-collapsing) :is(#session-list > *, #codex-project-list > .codex-project-group),
+      #sessions-section .session-folder:is(.session-folder-just-expanded, .session-folder-just-collapsing) > .session-folder-content > :is(.list-item, .date-section-header) {
         animation: none;
       }
     }

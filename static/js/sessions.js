@@ -341,6 +341,7 @@ export function initDependencies() {}
 // ── Folder state persistence ──
 const FOLDER_STATE_KEY = 'odysseus-folder-state';
 const FOLDER_ORDER_KEY = 'odysseus-folder-order';
+const _folderAnimationGeneration = new Map();
 
 function loadFolderState() {
   return Storage.getJSON(FOLDER_STATE_KEY, {});
@@ -353,6 +354,82 @@ function loadFolderOrder() {
 }
 function saveFolderOrder(order) {
   Storage.setJSON(FOLDER_ORDER_KEY, order);
+}
+
+function _nextFolderAnimation(folderName) {
+  const generation = (_folderAnimationGeneration.get(folderName) || 0) + 1;
+  _folderAnimationGeneration.set(folderName, generation);
+  return generation;
+}
+
+function _findSessionFolder(folderName) {
+  const list = uiModule.el('session-list');
+  return Array.from(list?.querySelectorAll(':scope > .session-folder') || [])
+    .find(folder => folder.dataset.folderKey === folderName);
+}
+
+function _expandSessionFolder(folderName, generation) {
+  const state = loadFolderState();
+  state[folderName] = true;
+  saveFolderState(state);
+  renderSessionList();
+  requestAnimationFrame(() => {
+    if (_folderAnimationGeneration.get(folderName) !== generation) return;
+    const folder = _findSessionFolder(folderName);
+    if (!folder) return;
+    // eslint-disable-next-line no-unused-expressions
+    folder.offsetHeight;
+    folder.classList.add('session-folder-just-expanded');
+    setTimeout(() => {
+      if (_folderAnimationGeneration.get(folderName) !== generation) return;
+      folder.classList.remove('session-folder-just-expanded');
+    }, 700);
+  });
+}
+
+function _toggleSessionFolder(folderName, folder) {
+  const generation = _nextFolderAnimation(folderName);
+  const isCollapsed = loadFolderState()[folderName] === false;
+  const isReversingCollapse = folder.classList.contains('session-folder-just-collapsing');
+  folder.classList.remove('session-folder-just-expanded', 'session-folder-just-collapsing');
+
+  if (isCollapsed || isReversingCollapse) {
+    _expandSessionFolder(folderName, generation);
+    return;
+  }
+
+  // Keep the content mounted until the real outbound cascade finishes.
+  // eslint-disable-next-line no-unused-expressions
+  folder.offsetHeight;
+  folder.classList.add('session-folder-just-collapsing');
+  let collapseLocked = false;
+  const lockCollapsed = () => {
+    if (collapseLocked || _folderAnimationGeneration.get(folderName) !== generation) return;
+    collapseLocked = true;
+    const state = loadFolderState();
+    state[folderName] = false;
+    saveFolderState(state);
+    renderSessionList();
+  };
+  const dominoOut = folder.getAnimations({ subtree: true })
+    .filter(animation => animation.animationName === 'section-domino-out');
+  if (dominoOut.length === 0) {
+    lockCollapsed();
+  } else {
+    Promise.allSettled(dominoOut.map(animation => animation.finished)).then(lockCollapsed);
+    setTimeout(lockCollapsed, 600);
+  }
+}
+
+function _stampSessionFolderRippleRows(fragment) {
+  fragment.querySelectorAll('.session-folder-content').forEach(content => {
+    const rows = Array.from(content.children)
+      .filter(row => row.matches('.date-section-header, .list-item'));
+    rows.forEach((row, index) => {
+      row.style.setProperty('--session-folder-in-delay', `${(index + 1) * 40}ms`);
+      row.style.setProperty('--session-folder-out-delay', `${(rows.length - index - 1) * 25}ms`);
+    });
+  });
 }
 
 /** Get all unique folder names from current sessions. */
@@ -1130,6 +1207,7 @@ function _renderSessionListImpl() {
     const folderDiv = document.createElement('div');
     folderDiv.className = 'session-folder';
     folderDiv.dataset.folderName = folderName;
+    folderDiv.dataset.folderKey = folderName;
 
     const header = document.createElement('div');
     header.className = 'session-folder-header';
@@ -1186,11 +1264,7 @@ function _renderSessionListImpl() {
       e.stopPropagation();
       if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
       if (_folderTouchMoved) { _folderTouchMoved = false; return; }
-      const state = loadFolderState();
-      const isCollapsed = state[folderName] === false;
-      state[folderName] = isCollapsed ? true : false;
-      saveFolderState(state);
-      renderSessionList();
+      _toggleSessionFolder(folderName, folderDiv);
     });
 
     // Allow renaming folder via double-click
@@ -1260,6 +1334,7 @@ function _renderSessionListImpl() {
   if (hasFolders && unfiled.length > 0) {
     const unsortedDiv = document.createElement('div');
     unsortedDiv.className = 'session-folder unsorted-folder';
+    unsortedDiv.dataset.folderKey = '__unsorted__';
     const unsortedHeader = document.createElement('div');
     unsortedHeader.className = 'session-folder-header';
     const unsortedCollapsed = loadFolderState()['__unsorted__'] === false;
@@ -1304,10 +1379,8 @@ function _renderSessionListImpl() {
 
     unsortedHeader.addEventListener('click', (e) => {
       e.stopPropagation();
-      const state = loadFolderState();
-      state['__unsorted__'] = state['__unsorted__'] === false ? true : false;
-      saveFolderState(state);
-      renderSessionList();
+      if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
+      _toggleSessionFolder('__unsorted__', unsortedDiv);
     });
     unsortedDiv.appendChild(unsortedHeader);
     if (!unsortedCollapsed) {
@@ -1339,6 +1412,8 @@ function _renderSessionListImpl() {
     });
     unfiledTarget.appendChild(toggleBtn);
   }
+
+  _stampSessionFolderRippleRows(_frag);
 
   // Flush all built elements into the list in one operation
   list.innerHTML = '';

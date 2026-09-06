@@ -171,6 +171,53 @@ test('Chats reuses the Tools ripple when Friday projects collapse and expand', a
   await expect(section).not.toHaveClass(/collapsed|section-just-collapsing/);
 });
 
+test('chat project folders ripple their direct rows when collapsed and expanded', async ({ page }) => {
+  const now = new Date().toISOString();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const sessions = [
+    { id: 'folder-now', name: 'Current project chat', model: 'fixture', archived: false, folder: 'Home Lab', agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
+    { id: 'folder-old', name: 'Earlier project chat', model: 'fixture', archived: false, folder: 'Home Lab', agent_target: 'jarvis', created_at: yesterday, updated_at: yesterday, last_message_at: yesterday },
+    { id: 'unfiled-now', name: 'Current unfiled chat', model: 'fixture', archived: false, agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now },
+  ];
+  await page.addInitScript(() => localStorage.setItem('lastSessionId', 'folder-now'));
+  await mockShell(page, { sessions });
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(3);
+
+  const assertFolderRipple = async (folderName) => {
+    const folder = page.locator(`.session-folder[data-folder-key="${folderName}"]`);
+    const header = folder.locator(':scope > .session-folder-header');
+    const rows = folder.locator(':scope > .session-folder-content > :is(.date-section-header, .list-item)');
+
+    await header.click();
+    await expect(folder).toHaveClass(/session-folder-just-collapsing/);
+    await expect.poll(() => rows.first().evaluate(row => (
+      row.getAnimations().map(animation => animation.animationName)
+    ))).toContain('section-domino-out');
+    await expect(folder.locator(':scope > .session-folder-content')).toHaveCount(0);
+    await expect(header).toBeVisible();
+
+    await header.click();
+    await expect(folder).toHaveClass(/session-folder-just-expanded/);
+    await expect.poll(() => rows.first().evaluate(row => (
+      row.getAnimations().map(animation => animation.animationName)
+    ))).toContain('section-domino-in');
+  };
+
+  await assertFolderRipple('Home Lab');
+  await assertFolderRipple('__unsorted__');
+
+  const homeLab = page.locator('.session-folder[data-folder-key="Home Lab"]');
+  await homeLab.locator(':scope > .session-folder-header').click();
+  await expect(homeLab).toHaveClass(/session-folder-just-collapsing/);
+  await homeLab.locator(':scope > .session-folder-header').click();
+  await expect(homeLab).toHaveClass(/session-folder-just-expanded/);
+  await expect(homeLab.locator(':scope > .session-folder-content')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem('odysseus-folder-state') || '{}')['Home Lab']
+  ))).toBe(true);
+});
+
 test('Chats stay agent-scoped while pinned chats and project folders keep their hierarchy', async ({ page }) => {
   const now = new Date().toISOString();
   const sessions = [
