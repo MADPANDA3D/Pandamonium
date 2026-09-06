@@ -124,11 +124,30 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
   const guideWidth = await modal.locator('.guide-modal-content').evaluate(node => node.getBoundingClientRect().width);
   const stepLayout = await stepCards.evaluateAll(nodes => nodes.map(node => {
     const rect = node.getBoundingClientRect();
-    return { top: rect.top, width: rect.width };
+    const index = node.querySelector('.first-run-step-index').getBoundingClientRect();
+    const label = node.querySelector('.first-run-step-label').getBoundingClientRect();
+    const state = node.querySelector('.first-run-step-state').getBoundingClientRect();
+    return {
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+      indexTop: index.top,
+      indexBottom: index.bottom,
+      labelBottom: label.bottom,
+      stateTop: state.top,
+      stateBottom: state.bottom,
+    };
   }));
-  expect(guideWidth).toBeGreaterThanOrEqual(690);
-  expect(Math.max(...stepLayout.map(card => card.top)) - Math.min(...stepLayout.map(card => card.top))).toBeLessThan(2);
+  expect(guideWidth).toBeGreaterThanOrEqual(500);
+  expect(guideWidth).toBeLessThanOrEqual(530);
+  expect(stepLayout[1].top).toBeGreaterThanOrEqual(stepLayout[0].bottom + 7);
+  expect(stepLayout[2].top).toBeGreaterThanOrEqual(stepLayout[1].bottom + 7);
   expect(Math.max(...stepLayout.map(card => card.width)) - Math.min(...stepLayout.map(card => card.width))).toBeLessThan(2);
+  expect(stepLayout.every(card => card.height >= 52)).toBe(true);
+  expect(stepLayout.every(card => card.indexTop > card.top && card.indexBottom < card.bottom)).toBe(true);
+  expect(stepLayout.every(card => card.labelBottom <= card.stateTop + 1)).toBe(true);
+  expect(stepLayout.every(card => card.stateBottom <= card.bottom - 8)).toBe(true);
 
   await modal.getByRole('button', { name: 'Skip for now' }).click();
   await expect(modal).toBeHidden();

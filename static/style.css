@@ -2185,7 +2185,6 @@ body.bg-pattern-sparkles {
       width:min(620px, 82vw);
       margin-top:18px;
     }
-    .modal-content.guide-modal-content { width:min(700px, 92vw); }
     .guide-modal-body { padding:14px; }
     .guide-modal .first-run-guide {
       width:100%;
@@ -2271,6 +2270,9 @@ body.bg-pattern-sparkles {
       overflow-wrap:anywhere;
       text-overflow:clip;
     }
+    .guide-modal-content .first-run-steps { grid-template-columns:1fr; }
+    .guide-modal-content .first-run-step { min-height:52px; padding:10px 12px; }
+    .guide-modal-content .first-run-step-state { line-height:1.35; }
     .first-run-actions {
       display:flex;
       justify-content:flex-end;
