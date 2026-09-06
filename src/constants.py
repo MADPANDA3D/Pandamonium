@@ -7,7 +7,7 @@ from src.runtime_paths import get_app_root, get_default_data_dir, get_default_ex
 
 apply_legacy_env_aliases()
 
-APP_VERSION = "1.0.14"
+APP_VERSION = "1.0.15"
 
 # Base paths
 BASE_DIR = os.path.join(get_app_root(), "")
