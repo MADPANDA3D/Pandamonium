@@ -2818,6 +2818,7 @@ export function addMessage(role, content, modelName, metadata) {
         wrap.dataset.raw = sv.raw;
         wrap.dataset.variantIndex = String(newIdx);
         if (window.hljs) wrap.querySelectorAll('pre code').forEach(bl => window.hljs.highlightElement(bl));
+        if (markdownModule.renderMermaid) markdownModule.renderMermaid(wrap);
         tagLabel.textContent = _icons[sv.label] || '';
         tagLabel.className = 'variant-tag' + (sv.label === 'shorter' ? ' variant-tag-scissors' : '');
         numLeft.textContent = String(newIdx + 1);

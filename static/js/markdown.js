@@ -26,6 +26,60 @@ function safeLinkUrl(rawUrl) {
   return '';
 }
 
+const _RICH_LINKS = {
+  github: {
+    className: 'rich-link-github',
+    icon: '/static/icons/brands/github.svg',
+    label: 'GitHub',
+  },
+  instagram: {
+    className: 'rich-link-instagram',
+    icon: '/static/icons/brands/instagram.svg',
+    label: 'Instagram',
+  },
+  facebook: {
+    className: 'rich-link-facebook',
+    icon: '/static/icons/brands/facebook.svg',
+    label: 'Facebook',
+  },
+};
+
+function _richLinkPresentation(text, safeUrl) {
+  let parsed;
+  try {
+    parsed = new URL(safeUrl);
+  } catch (_) {
+    return null;
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  let service = null;
+  if (host === 'github.com') service = 'github';
+  else if (host === 'instagram.com') service = 'instagram';
+  else if (host === 'facebook.com' || host === 'm.facebook.com') service = 'facebook';
+  if (!service) return null;
+
+  const meta = _RICH_LINKS[service];
+  let display = String(text || safeUrl);
+  const looksLikeUrl = /^(?:https?:\/\/|www\.|(?:github|instagram|facebook)\.com\/)/i.test(display.trim());
+
+  // A pasted GitHub repository URL is much easier to scan as owner/repository.
+  // Deeper links (issues, files, commits) retain their full label so path
+  // context is never hidden.
+  if (service === 'github' && looksLikeUrl) {
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    if (segments.length === 2) {
+      try {
+        display = `${decodeURIComponent(segments[0])}/${decodeURIComponent(segments[1]).replace(/\.git$/i, '')}`;
+      } catch (_) {
+        display = `${segments[0]}/${segments[1].replace(/\.git$/i, '')}`;
+      }
+    }
+  }
+
+  return { ...meta, display };
+}
+
 function linkHtml(text, url) {
   const safeUrl = safeLinkUrl(url);
   const safeText = escapeHtml(text);
@@ -33,7 +87,11 @@ function linkHtml(text, url) {
   if (safeUrl.startsWith('#')) {
     return `<a href="${safeUrl}" class="chat-link">${safeText}</a>`;
   }
-  return `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+  const rich = _richLinkPresentation(text, safeUrl);
+  if (!rich) {
+    return `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+  }
+  return `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="rich-link ${rich.className}" title="${escapeHtml(safeUrl)}"><img class="rich-link-icon" src="${rich.icon}" alt="" aria-hidden="true"><span class="rich-link-label">${escapeHtml(rich.display)}</span><span class="sr-only"> on ${rich.label}</span></a>`;
 }
 
 function imageHtml(alt, url, title) {
@@ -509,7 +567,7 @@ export function mdToHtml(src, opts) {
       const mermaidId = 'mermaid-' + Date.now() + '-' + mermaidBlocks.length;
       const raw = cleaned.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
       const placeholder = `___MERMAID_BLOCK_${mermaidBlocks.length}___`;
-      mermaidBlocks.push(`<div class="mermaid-container"><pre class="mermaid" id="${mermaidId}">${escapeHtml(raw)}</pre></div>`);
+      mermaidBlocks.push(`<figure class="mermaid-container" id="${mermaidId}" data-mermaid-state="pending"><div class="mermaid-visual" aria-live="polite"></div><pre class="mermaid-source" aria-label="Mermaid diagram source"><code>${escapeHtml(raw)}</code></pre></figure>`);
       return placeholder;
     }
 
@@ -677,7 +735,10 @@ export function mdToHtml(src, opts) {
 
   // Handle pipe tables
   s = s.replace(/(?:^|\n)([^\n]*\|[^\n]*\|[^\n]*)(?:\n([^\n]*\|[^\n]*\|[^\n]*))*/g, (table) => {
-    if (table.includes('___CODE_BLOCK_') || table.includes('___ALLOWED_HTML_')) return table;
+    // Sanitized link/image placeholders are safe inside cells and are restored
+    // after the table HTML is built. Refusing every ___ALLOWED_HTML_ placeholder
+    // made any table containing a URL fall back to literal pipe-delimited text.
+    if (table.includes('___CODE_BLOCK_')) return table;
 
     const rows = table.trim().split('\n');
     if (rows.length < 2) return table;
@@ -822,17 +883,46 @@ export function renderContent(content) {
 /**
  * Initialize any unprocessed Mermaid diagrams in a container (or whole document)
  */
-export function renderMermaid(container) {
-  if (!window.mermaid) return;
+async function renderMermaid(container) {
+  if (!window.mermaid) return false;
   initMermaid();
   const target = container || document;
-  const pending = target.querySelectorAll('pre.mermaid:not([data-processed])');
-  if (pending.length === 0) return;
-  try {
-    window.mermaid.run({ nodes: pending });
-  } catch (e) {
-    console.warn('Mermaid render error:', e);
+  const pending = target.querySelectorAll('.mermaid-container[data-mermaid-state="pending"]');
+  if (pending.length === 0) return true;
+
+  for (const frame of pending) {
+    const source = frame.querySelector('.mermaid-source');
+    const visual = frame.querySelector('.mermaid-visual');
+    if (!source || !visual) continue;
+    frame.dataset.mermaidState = 'rendering';
+    try {
+      const definition = source.textContent || '';
+      const renderId = `${frame.id || 'mermaid'}-svg`;
+      const result = await window.mermaid.render(renderId, definition);
+      if (!result || !/^\s*<svg[\s>]/i.test(result.svg || '')) {
+        throw new Error('Mermaid returned no SVG');
+      }
+      visual.innerHTML = result.svg;
+      visual.setAttribute('role', 'img');
+      visual.setAttribute('aria-label', 'Rendered Mermaid diagram');
+      visual.hidden = false;
+      source.hidden = true;
+      frame.dataset.mermaidState = 'rendered';
+      if (typeof result.bindFunctions === 'function') result.bindFunctions(visual);
+    } catch (e) {
+      visual.replaceChildren();
+      visual.hidden = true;
+      source.hidden = false;
+      frame.dataset.mermaidState = 'error';
+      const message = document.createElement('p');
+      message.className = 'mermaid-error';
+      message.setAttribute('role', 'status');
+      message.textContent = 'Diagram could not be rendered. Source shown below.';
+      frame.insertBefore(message, source);
+      console.warn('Mermaid render error:', e);
+    }
   }
+  return true;
 }
 
 const markdownModule = {
@@ -855,10 +945,37 @@ export default markdownModule;
 // Mermaid is loaded async so it cannot delay the app shell.
 function initMermaid() {
   if (!window.mermaid || window.__odysseusMermaidReady) return;
-  window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+  window.mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    suppressErrorRendering: true,
+    theme: 'base',
+    themeVariables: {
+      darkMode: true,
+      background: '#0d0d12',
+      primaryColor: '#1a1a22',
+      primaryTextColor: '#f3f4f6',
+      primaryBorderColor: '#ff294d',
+      secondaryColor: '#22222c',
+      secondaryTextColor: '#f3f4f6',
+      secondaryBorderColor: '#9ca3af',
+      tertiaryColor: '#111118',
+      tertiaryTextColor: '#f3f4f6',
+      tertiaryBorderColor: '#6b7280',
+      lineColor: '#ff294d',
+      textColor: '#f3f4f6',
+      mainBkg: '#1a1a22',
+      nodeBorder: '#ff294d',
+      clusterBkg: '#111118',
+      clusterBorder: '#6b7280',
+      edgeLabelBackground: '#0d0d12',
+      fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    },
+  });
   window.__odysseusMermaidReady = true;
 }
 window.odysseusInitMermaid = initMermaid;
+window.odysseusRenderMermaid = renderMermaid;
 initMermaid();
 
 // Persist which thinking sections were expanded across page refreshes.

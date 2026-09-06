@@ -136,6 +136,19 @@ def test_table_separator_row_not_rendered_as_data(node_available):
     assert "---" not in html
 
 
+def test_table_with_url_stays_a_table_and_restores_safe_link(node_available):
+    html = _run_markdown_case(
+        "| Service | Endpoint |\n"
+        "|---|---|\n"
+        "| Pandamonium | https://example.com/a/very/long/path |"
+    )
+
+    assert "<table" in html
+    assert html.count("<tr>") == 2
+    assert 'href="https://example.com/a/very/long/path"' in html
+    assert "___ALLOWED_HTML_" not in html
+
+
 def test_process_with_thinking_handles_gemma4_thought_channel(node_available):
     html = _run_markdown_case(
         "<|channel>thought\ninternal reasoning<channel|>Final answer.",
@@ -203,6 +216,89 @@ def test_url_outside_inline_code_is_still_autolinked(node_available):
 
     assert "<code>irm</code>" in html
     assert 'href="https://example.com/page"' in html
+
+
+def test_bare_github_repository_link_is_branded_and_compact(node_available):
+    html = _run_markdown_case("https://github.com/MADPANDA3D/Pandamonium")
+
+    assert 'class="rich-link rich-link-github"' in html
+    assert 'href="https://github.com/MADPANDA3D/Pandamonium"' in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
+    assert 'src="/static/icons/brands/github.svg"' in html
+    assert '<span class="rich-link-label">MADPANDA3D/Pandamonium</span>' in html
+    assert '>https://github.com/MADPANDA3D/Pandamonium</span>' not in html
+
+
+def test_deep_github_link_keeps_its_path_context(node_available):
+    url = "https://github.com/MADPANDA3D/Pandamonium/issues/833"
+    html = _run_markdown_case(url)
+
+    assert 'class="rich-link rich-link-github"' in html
+    assert f'<span class="rich-link-label">{url}</span>' in html
+
+
+def test_named_github_link_keeps_author_label(node_available):
+    html = _run_markdown_case(
+        "[Pandamonium source](https://github.com/MADPANDA3D/Pandamonium)"
+    )
+
+    assert 'class="rich-link rich-link-github"' in html
+    assert '<span class="rich-link-label">Pandamonium source</span>' in html
+
+
+@pytest.mark.parametrize(
+    ("url", "service", "icon"),
+    [
+        ("https://www.instagram.com/p/abc123/", "instagram", "instagram.svg"),
+        ("https://www.facebook.com/share/r/example", "facebook", "facebook.svg"),
+    ],
+)
+def test_social_links_get_branded_icons_without_changing_destination(
+    node_available, url, service, icon
+):
+    html = _run_markdown_case(url)
+
+    assert f'class="rich-link rich-link-{service}"' in html
+    assert f'href="{url}"' in html
+    assert f'src="/static/icons/brands/{icon}"' in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
+
+
+def test_ordinary_external_link_keeps_existing_markup(node_available):
+    html = _run_markdown_case("https://example.com/page")
+
+    assert html == (
+        '<a href="https://example.com/page" target="_blank" '
+        'rel="noopener noreferrer">https://example.com/page</a>'
+    )
+
+
+def test_mermaid_fence_keeps_source_until_browser_render(node_available):
+    html = _run_markdown_case(
+        "```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```"
+    )
+
+    assert 'class="mermaid-container"' in html
+    assert 'data-mermaid-state="pending"' in html
+    assert 'class="mermaid-visual"' in html
+    assert 'class="mermaid-source"' in html
+    assert "flowchart LR" in html
+    assert "A[Start] --&gt; B[Done]" in html
+    assert '<pre class="mermaid"' not in html
+
+
+def test_mermaid_is_self_hosted_and_strict():
+    index = (_REPO / "static" / "index.html").read_text(encoding="utf-8")
+    markdown = (_REPO / "static" / "js" / "markdown.js").read_text(encoding="utf-8")
+    service_worker = (_REPO / "static" / "sw.js").read_text(encoding="utf-8")
+
+    assert 'src="/static/lib/mermaid.min.js?v=11.17.2"' in index
+    assert "cdn.jsdelivr.net/npm/mermaid" not in index
+    assert "'/static/lib/mermaid.min.js?v=11.17.2'" in service_worker
+    assert "securityLevel: 'strict'" in markdown
+    assert "suppressErrorRendering: true" in markdown
+    assert (_REPO / "static" / "lib" / "mermaid.min.js").is_file()
+    assert (_REPO / "static" / "lib" / "mermaid.LICENSE.txt").is_file()
 
 
 def test_inline_code_content_is_html_escaped(node_available):

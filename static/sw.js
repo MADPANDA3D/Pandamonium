@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v385';
+const CACHE_NAME = 'pandamonium-v386';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -72,6 +72,10 @@ const PRECACHE = [
   '/static/js/sidebar-layout.js',
   '/static/js/section-management.js',
   '/static/lib/highlight.min.js',
+  '/static/lib/mermaid.min.js?v=11.17.2',
+  '/static/icons/brands/github.svg',
+  '/static/icons/brands/instagram.svg',
+  '/static/icons/brands/facebook.svg',
 ];
 
 self.addEventListener('install', (e) => {

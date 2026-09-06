@@ -25,3 +25,7 @@ docker/entrypoint.sh text eol=lf
 *.ico  binary
 *.woff binary
 *.woff2 binary
+
+# Pinned upstream browser bundle: preserve exact bytes and suppress generated
+# diff/whitespace noise while keeping the audited npm source in package-lock.
+static/lib/mermaid.min.js -text -diff -whitespace
