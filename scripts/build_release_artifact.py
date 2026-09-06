@@ -64,6 +64,8 @@ def build(tag: str, out_dir: Path, private_key_path: Path) -> tuple[Path, Path]:
         subprocess.run(
             [
                 "git",
+                "-c",
+                "tar.umask=0022",
                 "archive",
                 "--format=tar",
                 "--prefix=pandamonium/",
