@@ -27,6 +27,7 @@ window.addEventListener('gallery-refresh', (e) => {
 let _items = [];
 let _total = 0;
 let _totalTagged = 0;
+let _sourceState = null;
 
 // Update the "X/Y tagged" badge in the AI-tagging settings header.
 function _updateTagCount() {
@@ -136,6 +137,97 @@ async function _fetchAlbums() {
     _albums = data.albums || [];
     _renderAlbums();
   } catch (e) { console.error('Albums fetch error:', e); }
+}
+
+async function _sourceRequest(url, options = {}) {
+  const res = await fetch(`${API_BASE}${url}`, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || 'Local folder request failed');
+  return data;
+}
+
+function _renderGallerySources() {
+  const message = document.getElementById('gallery-source-message');
+  const list = document.getElementById('gallery-source-list');
+  const connect = document.getElementById('gallery-source-connect');
+  if (!message || !list || !connect) return;
+  message.textContent = _sourceState?.message || 'Checking local photo access…';
+  list.replaceChildren();
+  const sources = _sourceState?.sources || [];
+  connect.style.display = sources.length ? 'none' : '';
+  for (const source of sources) {
+    const row = document.createElement('div');
+    row.className = 'gallery-source-row';
+    const details = document.createElement('div');
+    details.className = 'gallery-source-details';
+    const label = document.createElement('strong');
+    label.textContent = `${source.label} · ${source.enabled ? `${source.indexed} indexed` : 'disabled'}`;
+    const path = document.createElement('span');
+    path.textContent = source.path;
+    const status = document.createElement('span');
+    status.className = source.error ? 'gallery-source-error' : 'gallery-source-status';
+    status.textContent = source.error || (source.last_scan_at ? `Last refreshed ${new Date(source.last_scan_at).toLocaleString()}` : 'Ready to scan');
+    details.append(label, path, status);
+    const actions = document.createElement('div');
+    actions.className = 'gallery-source-actions';
+    const change = document.createElement('button');
+    change.className = 'memory-toolbar-btn';
+    change.dataset.sourceChange = source.id;
+    change.textContent = 'Change';
+    const toggle = document.createElement('button');
+    toggle.className = 'memory-toolbar-btn';
+    toggle.dataset.sourceToggle = source.id;
+    toggle.dataset.enabled = String(source.enabled);
+    toggle.textContent = source.enabled ? 'Disable' : 'Enable';
+    actions.append(change, toggle);
+    row.append(details, actions);
+    list.appendChild(row);
+  }
+}
+
+async function _loadGallerySources(sync = false) {
+  try {
+    _sourceState = await _sourceRequest(
+      sync ? '/api/gallery/sources/sync' : '/api/gallery/sources',
+      { method: sync ? 'POST' : 'GET' },
+    );
+    _renderGallerySources();
+    if (sync) {
+      await Promise.all([_fetchLibrary(false), _fetchAlbums()]);
+    }
+  } catch (err) {
+    const message = document.getElementById('gallery-source-message');
+    if (message) message.textContent = err.message || 'Could not inspect local photo folders';
+  }
+}
+
+async function _changeGallerySource(sourceId = null) {
+  const current = (_sourceState?.sources || []).find(source => source.id === sourceId);
+  const path = await uiModule.styledPrompt(
+    'Enter a folder visible to this Pandamonium process. Docker paths must be explicit read-only mounts.',
+    {
+      title: current ? 'Change local photo folder' : 'Connect local photo folder',
+      defaultValue: current?.path || '',
+      placeholder: '/home/you/Pictures',
+      confirmText: current ? 'Change' : 'Connect',
+      maxLength: 4096,
+    },
+  );
+  if (!path) return;
+  try {
+    _sourceState = await _sourceRequest(
+      current ? `/api/gallery/sources/${encodeURIComponent(current.id)}` : '/api/gallery/sources',
+      { method: current ? 'PATCH' : 'POST', body: JSON.stringify({ path }) },
+    );
+    _renderGallerySources();
+    await _fetchLibrary(false);
+  } catch (err) {
+    uiModule.showError(err.message || 'Could not connect that folder');
+  }
 }
 
 
@@ -1360,7 +1452,7 @@ function _openDetail(img) {
     <div class="gallery-detail-header">
       <button class="gallery-detail-back" id="gallery-detail-back">&larr; Back</button>
       <div style="flex:1"></div>
-      <button class="gallery-detail-back" id="gallery-edit-direct-btn" title="Edit (E)" aria-label="Edit photo" style="display:inline-flex;align-items:center;gap:4px;">
+      <button class="gallery-detail-back" id="gallery-edit-direct-btn" title="${img.read_only ? 'Connected originals are read-only' : 'Edit (E)'}" aria-label="Edit photo" ${img.read_only ? 'disabled' : ''} style="display:inline-flex;align-items:center;gap:4px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         Edit
       </button>
@@ -1392,7 +1484,7 @@ function _openDetail(img) {
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
             Set as album cover
           </button>` : ''}
-          <button class="dropdown-item-compact dropdown-item-danger" id="gallery-delete-btn">
+          <button class="dropdown-item-compact dropdown-item-danger" id="gallery-delete-btn" ${img.read_only ? 'disabled title="Disconnect its folder to remove this photo"' : ''}>
             <span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></span>
             Delete
           </button>
@@ -1401,10 +1493,10 @@ function _openDetail(img) {
     </div>
     <div class="gallery-detail-body">
       <div class="gallery-detail-image" id="gallery-detail-image-wrap" style="position:relative">
-        <button class="gallery-detail-rotate gallery-detail-rotate-ccw" id="gallery-rotate-ccw-btn" title="Rotate 90° counter-clockwise" aria-label="Rotate left">
+        <button class="gallery-detail-rotate gallery-detail-rotate-ccw" id="gallery-rotate-ccw-btn" title="${img.read_only ? 'Connected originals are read-only' : 'Rotate 90° counter-clockwise'}" aria-label="Rotate left" ${img.read_only ? 'disabled' : ''}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
         </button>
-        <button class="gallery-detail-rotate gallery-detail-rotate-cw" id="gallery-rotate-btn" title="Rotate 90° clockwise" aria-label="Rotate right">
+        <button class="gallery-detail-rotate gallery-detail-rotate-cw" id="gallery-rotate-btn" title="${img.read_only ? 'Connected originals are read-only' : 'Rotate 90° clockwise'}" aria-label="Rotate right" ${img.read_only ? 'disabled' : ''}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         </button>
         <button class="gallery-detail-nav gallery-detail-nav-prev" id="gallery-detail-prev" title="Previous (←)" aria-label="Previous">
@@ -2039,6 +2131,15 @@ export function openGallery() {
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-settings-container" id="gallery-settings-container" style="display:none;">
+          <div class="admin-card" id="gallery-source-card">
+            <h2>Local Pictures</h2>
+            <p class="memory-desc doclib-desc" id="gallery-source-message">Checking local photo access…</p>
+            <div id="gallery-source-list"></div>
+            <div class="memory-toolbar gallery-source-toolbar">
+              <button class="memory-toolbar-btn" id="gallery-source-refresh">Refresh index</button>
+              <button class="memory-toolbar-btn" id="gallery-source-connect">Connect folder</button>
+            </div>
+          </div>
           <div class="admin-card">
             <h2>AI Tagging <span id="gallery-tag-count" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal;"></span></h2>
             <p class="memory-desc doclib-desc">Auto-tag photos by content with your <a href="#" id="gallery-vision-link" class="ge-vision-link">vision model</a>. Your own tags are kept.</p>
@@ -2175,6 +2276,8 @@ export function openGallery() {
         // If the editor isn't already holding an image, render a chooser so the
         // tab does something useful instead of opening an empty grey pane.
         if (!isEditorOpen()) _renderEditorLanding();
+      } else if (target === 'settings') {
+        _loadGallerySources(false);
       }
     });
   });
@@ -2220,6 +2323,28 @@ export function openGallery() {
     // re-shuffles, not just re-renders the same seeded order.
     if (_sort === 'shuffle') _shuffleSeed = Math.floor(Math.random() * 2 ** 31);
     _fetchLibrary(false);
+  });
+
+  document.getElementById('gallery-source-refresh')?.addEventListener('click', () => _loadGallerySources(true));
+  document.getElementById('gallery-source-connect')?.addEventListener('click', () => _changeGallerySource());
+  document.getElementById('gallery-source-list')?.addEventListener('click', async (event) => {
+    const change = event.target.closest('[data-source-change]');
+    if (change) {
+      await _changeGallerySource(change.dataset.sourceChange);
+      return;
+    }
+    const toggle = event.target.closest('[data-source-toggle]');
+    if (!toggle) return;
+    try {
+      _sourceState = await _sourceRequest(
+        `/api/gallery/sources/${encodeURIComponent(toggle.dataset.sourceToggle)}`,
+        { method: 'PATCH', body: JSON.stringify({ enabled: toggle.dataset.enabled !== 'true' }) },
+      );
+      _renderGallerySources();
+      await _fetchLibrary(false);
+    } catch (err) {
+      uiModule.showError(err.message || 'Could not update local folder');
+    }
   });
 
   document.getElementById('gallery-model-filter').addEventListener('change', (e) => {
@@ -2813,6 +2938,7 @@ export function openGallery() {
   //    fetch fails or takes a moment, the cached view sticks around.
   _fetchAlbums();
   _fetchLibrary(false);
+  _loadGallerySources(true);
   searchInput.focus();
 }
 

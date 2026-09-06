@@ -60,6 +60,29 @@ downloads and serves. The app itself is lightweight; local model serving is the
 heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
 connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
+On a native install, opening Gallery discovers the current OS user's conventional
+Pictures folder: XDG `XDG_PICTURES_DIR` on Linux, `~/Pictures` on macOS, and the
+Windows Known Folder API. Accessible folders are connected read-only and can be
+refreshed, changed, or disabled under **Gallery → Settings → Local Pictures**.
+Pandamonium indexes metadata and content hashes; it does not upload, rewrite, or
+delete source photos, follow symlinks, or scan outside the selected folder.
+
+Docker cannot see host Pictures folders unless you mount them. Add an explicit
+read-only bind mount and name only the in-container mount path:
+
+```yaml
+services:
+  pandamonium:
+    volumes:
+      - /host/path/to/Pictures:/media/pictures:ro
+    environment:
+      - PANDAMONIUM_GALLERY_MEDIA_ROOTS=/media/pictures
+```
+
+The path must be a real container mount point. An ordinary container directory
+is rejected, and an unmounted host filesystem is never implied. Separate
+multiple Linux container paths with `:`.
+
 ### Atomic native Linux updates
 
 The fixed footer can install a signed Pandamonium release only when Linux is
@@ -519,6 +542,8 @@ Key settings:
 | `PANDAMONIUM_CHAT_UPLOAD_MAX_BYTES` | `10485760` | Chat/agent attachment cap in bytes. Raise for larger local PDFs or text documents. |
 | `PANDAMONIUM_GALLERY_UPLOAD_MAX_BYTES` | `104857600` | Gallery image upload cap in bytes (100 MB). |
 | `PANDAMONIUM_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES` | `26214400` | Gallery transform input cap in bytes (25 MB). |
+| `PANDAMONIUM_GALLERY_MEDIA_ROOTS` | -- | Explicit in-container read-only Gallery mount paths. Native installs discover the OS Pictures folder instead. |
+| `PANDAMONIUM_GALLERY_SCAN_LIMIT` | `10000` | Maximum supported files inspected per Gallery source refresh. |
 | `PANDAMONIUM_MEMORY_IMPORT_MAX_BYTES` | `10485760` | Memory import file cap in bytes (10 MB). |
 | `PANDAMONIUM_PERSONAL_UPLOAD_MAX_BYTES` | `26214400` | Personal document upload cap in bytes (25 MB). |
 | `PANDAMONIUM_EMAIL_COMPOSE_UPLOAD_MAX_BYTES` | `26214400` | Email compose attachment cap in bytes (25 MB). |

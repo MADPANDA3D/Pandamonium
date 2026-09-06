@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
-from sqlalchemy import event, create_engine, Column, String, Text, Boolean, DateTime, Integer, ForeignKey, JSON, Index, func, text
+from sqlalchemy import event, create_engine, Column, String, Text, Boolean, DateTime, Integer, ForeignKey, JSON, Index, UniqueConstraint, func, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
@@ -344,6 +344,50 @@ class GalleryAlbum(TimestampMixin, Base):
     images = relationship("GalleryImage", back_populates="album")
 
 
+class GallerySource(TimestampMixin, Base):
+    """An owner-approved local folder projected into Gallery."""
+    __tablename__ = "gallery_sources"
+
+    id             = Column(String, primary_key=True, index=True)
+    owner          = Column(String, nullable=False, index=True)
+    path           = Column(Text, nullable=False)
+    label          = Column(String, nullable=False, default="Pictures")
+    kind           = Column(String, nullable=False, default="native")
+    enabled        = Column(Boolean, nullable=False, default=True)
+    auto_connected = Column(Boolean, nullable=False, default=False)
+    last_scan_at   = Column(DateTime, nullable=True)
+    last_error     = Column(Text, nullable=True)
+
+    files = relationship(
+        "GallerySourceFile",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("owner", "path", name="uq_gallery_sources_owner_path"),
+    )
+
+
+class GallerySourceFile(TimestampMixin, Base):
+    """Incremental metadata for one read-only file below a Gallery source."""
+    __tablename__ = "gallery_source_files"
+
+    id            = Column(String, primary_key=True, index=True)
+    source_id     = Column(String, ForeignKey("gallery_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    relative_path = Column(Text, nullable=False)
+    file_hash     = Column(String(64), nullable=False, index=True)
+    modified_ns   = Column(Integer, nullable=False)
+    file_size     = Column(Integer, nullable=False)
+    active        = Column(Boolean, nullable=False, default=True, index=True)
+
+    source = relationship("GallerySource", back_populates="files")
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "relative_path", name="uq_gallery_source_files_path"),
+    )
+
+
 class GalleryImage(TimestampMixin, Base):
     """Stores metadata for photos and AI-generated images."""
     __tablename__ = "gallery_images"
@@ -362,6 +406,7 @@ class GalleryImage(TimestampMixin, Base):
     owner      = Column(String, nullable=True, index=True)
     is_active  = Column(Boolean, default=True)
     favorite   = Column(Boolean, default=False)
+    source_file_id = Column(String, ForeignKey("gallery_source_files.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # File integrity
     file_hash  = Column(String(64), nullable=True, index=True)  # SHA-256
@@ -1308,6 +1353,32 @@ def _migrate_add_gallery_caption_column():
             pass
 
 
+def _migrate_add_gallery_source_column():
+    """Link existing Gallery rows to the read-only local-folder index."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(gallery_images)").fetchall()]
+        if columns and "source_file_id" not in columns:
+            conn.execute("ALTER TABLE gallery_images ADD COLUMN source_file_id TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_gallery_images_source_file_id "
+            "ON gallery_images(source_file_id)"
+        )
+        conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Migration gallery source column failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _migrate_add_api_token_scopes_column():
     """Add API token scopes for existing installs.
 
@@ -1975,6 +2046,7 @@ def init_db():
     _migrate_add_mode_column()
     _migrate_add_multiuser_owner_columns()
     _migrate_add_gallery_caption_column()
+    _migrate_add_gallery_source_column()
     _migrate_add_api_token_scopes_column()
     _migrate_backfill_document_owner_from_session()
     _migrate_assign_legacy_owner()

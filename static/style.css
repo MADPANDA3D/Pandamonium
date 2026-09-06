@@ -26712,6 +26712,27 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   max-height: 72vh;
   overflow-y: auto;
 }
+.gallery-source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.gallery-source-details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  font-size: 11px;
+}
+.gallery-source-details span {
+  overflow-wrap: anywhere;
+  opacity: 0.68;
+}
+.gallery-source-details .gallery-source-error { color: var(--color-error, #f44); opacity: 1; }
+.gallery-source-actions, .gallery-source-toolbar { display: flex; gap: 6px; }
+.gallery-source-toolbar { margin-top: 10px; }
 .gallery-albums-container.gallery-dragover {
   border-color: var(--red);
   background: color-mix(in srgb, var(--red) 5%, transparent);

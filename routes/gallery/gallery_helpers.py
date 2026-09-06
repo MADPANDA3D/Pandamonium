@@ -97,7 +97,7 @@ def _image_to_dict(img: GalleryImage, session_name: str = None) -> Dict[str, Any
     return {
         "id": img.id,
         "filename": img.filename,
-        "url": f"/api/generated-image/{img.filename}",
+        "url": _image_url(img),
         "prompt": img.prompt,
         "caption": img.caption or "",
         "model": img.model,
@@ -119,7 +119,14 @@ def _image_to_dict(img: GalleryImage, session_name: str = None) -> Dict[str, Any
         "file_size": img.file_size,
         "created_at": img.created_at.isoformat() if img.created_at else None,
         "updated_at": img.updated_at.isoformat() if img.updated_at else None,
+        "read_only": bool(img.source_file_id),
     }
+
+
+def _image_url(img: GalleryImage) -> str:
+    if img.source_file_id:
+        return f"/api/gallery/source/{img.id}"
+    return f"/api/generated-image/{img.filename}"
 
 
 def _owner_filter(q, user, model_cls=GalleryImage):
