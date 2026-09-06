@@ -354,9 +354,10 @@ def test_dependency_runtime_is_published_only_after_install_succeeds(
     assert len(commands) == 2
 
 
-def test_root_updater_rejects_application_owned_runtime(tmp_path, monkeypatch):
+def test_root_updater_rejects_writable_runtime(tmp_path, monkeypatch):
     runtime = tmp_path / "venv"
     runtime.mkdir()
+    runtime.chmod(0o775)
     monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
 
     with pytest.raises(release_updater.UpdateError, match="root-owned and immutable"):
