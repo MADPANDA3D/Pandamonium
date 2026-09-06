@@ -1486,6 +1486,9 @@ body.bg-pattern-sparkles {
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header) {
       animation: section-domino-in 0.36s cubic-bezier(0.22, 1.61, 0.36, 1) backwards;
     }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group) {
+      animation: section-domino-in 0.36s cubic-bezier(0.22, 1.61, 0.36, 1) backwards;
+    }
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header):nth-child(1)  { animation-delay: 0.04s; }
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header):nth-child(2)  { animation-delay: 0.08s; }
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header):nth-child(3)  { animation-delay: 0.12s; }
@@ -1498,6 +1501,18 @@ body.bg-pattern-sparkles {
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header):nth-child(10) { animation-delay: 0.40s; }
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header):nth-child(11) { animation-delay: 0.44s; }
     .section.section-just-expanded :is(.list-item, .models-row, .date-section-header):nth-child(12) { animation-delay: 0.48s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(1)  { animation-delay: 0.04s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(2)  { animation-delay: 0.08s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(3)  { animation-delay: 0.12s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(4)  { animation-delay: 0.16s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(5)  { animation-delay: 0.20s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(6)  { animation-delay: 0.24s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(7)  { animation-delay: 0.28s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(8)  { animation-delay: 0.32s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(9)  { animation-delay: 0.36s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(10) { animation-delay: 0.40s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(11) { animation-delay: 0.44s; }
+    #sessions-section.section-just-expanded :is(#session-list > *, #codex-project-list > .codex-project-group):nth-child(12) { animation-delay: 0.48s; }
     @keyframes section-domino-in {
       0%   { opacity: 0; transform: translateY(8px) translateX(-4px) scale(0.92); }
       60%  { opacity: 1; }
@@ -1514,6 +1529,9 @@ body.bg-pattern-sparkles {
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header) {
       animation: section-domino-out 0.22s ease-in forwards;
     }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group) {
+      animation: section-domino-out 0.22s ease-in forwards;
+    }
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header):nth-last-child(1)  { animation-delay: 0.00s; }
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header):nth-last-child(2)  { animation-delay: 0.025s; }
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header):nth-last-child(3)  { animation-delay: 0.05s; }
@@ -1526,9 +1544,30 @@ body.bg-pattern-sparkles {
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header):nth-last-child(10) { animation-delay: 0.225s; }
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header):nth-last-child(11) { animation-delay: 0.25s; }
     .section.section-just-collapsing :is(.list-item, .models-row, .date-section-header):nth-last-child(12) { animation-delay: 0.275s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(1)  { animation-delay: 0.00s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(2)  { animation-delay: 0.025s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(3)  { animation-delay: 0.05s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(4)  { animation-delay: 0.075s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(5)  { animation-delay: 0.10s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(6)  { animation-delay: 0.125s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(7)  { animation-delay: 0.15s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(8)  { animation-delay: 0.175s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(9)  { animation-delay: 0.20s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(10) { animation-delay: 0.225s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(11) { animation-delay: 0.25s; }
+    #sessions-section.section-just-collapsing :is(#session-list > *, #codex-project-list > .codex-project-group):nth-last-child(12) { animation-delay: 0.275s; }
+    #sessions-section:is(.section-just-expanded, .section-just-collapsing) .session-folder :is(.list-item, .date-section-header) {
+      animation: none;
+    }
     @keyframes section-domino-out {
       0%   { opacity: 1; transform: translateY(0)   translateX(0)   scale(1); }
       100% { opacity: 0; transform: translateY(6px) translateX(-3px) scale(0.94); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .section:is(.section-just-expanded, .section-just-collapsing) :is(.list-item, .models-row, .date-section-header),
+      #sessions-section:is(.section-just-expanded, .section-just-collapsing) :is(#session-list > *, #codex-project-list > .codex-project-group) {
+        animation: none;
+      }
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .row { display:flex; gap:6px; align-items:center; }

@@ -142,6 +142,35 @@ test('Friday shows readable project folders and nested tasks without a sidebar f
   await expect(page.locator('#codex-workspace-browser textarea')).toHaveCount(0);
 });
 
+test('Chats reuses the Tools ripple when Friday projects collapse and expand', async ({ page }) => {
+  await mockShell(page);
+  await page.goto('/static/index.html');
+  await selectFriday(page);
+
+  const section = page.locator('#sessions-section');
+  const title = page.locator('#chats-section-title');
+  const firstProject = page.locator('#codex-project-list > .codex-project-group').first();
+
+  await title.click();
+  await expect(section).toHaveClass(/section-just-collapsing/);
+  await expect.poll(() => firstProject.evaluate(row => (
+    row.getAnimations().map(animation => animation.animationName)
+  ))).toContain('section-domino-out');
+  await expect(section).toHaveClass(/collapsed/);
+
+  await title.click();
+  await expect(section).toHaveClass(/section-just-expanded/);
+  await expect.poll(() => firstProject.evaluate(row => (
+    row.getAnimations().map(animation => animation.animationName)
+  ))).toContain('section-domino-in');
+
+  // A quick reversal must settle cleanly instead of leaving an animation class behind.
+  await title.click();
+  await expect(section).toHaveClass(/collapsed/);
+  await title.click();
+  await expect(section).not.toHaveClass(/collapsed|section-just-collapsing/);
+});
+
 test('Chats stay agent-scoped while pinned chats and project folders keep their hierarchy', async ({ page }) => {
   const now = new Date().toISOString();
   const sessions = [
