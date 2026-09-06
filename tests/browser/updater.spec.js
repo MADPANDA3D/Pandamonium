@@ -94,6 +94,13 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#updater-apply').click();
   await expect(page.locator('#updater-progress-title')).toContainText('full data backup');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#updater-modal')).toBeHidden();
+  await expect(page.locator('#sidebar-update-check')).toBeEnabled();
+  await expect(page.locator('#sidebar-update-check')).toHaveText('View update progress');
+  await page.locator('#sidebar-update-check').click();
+  await expect(page.locator('#updater-modal')).toBeVisible();
+  expect(checks).toBe(1);
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'reconnecting');
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', { timeout: 7000 });
   await expect(page.locator('#updater-installed-version')).toHaveText('v1.0.11');
@@ -159,6 +166,37 @@ test('host-managed container keeps provenance and separates a GitHub outage from
   );
   await expect(page.locator('#updater-apply')).toBeHidden();
   expect(checks).toBe(2);
+});
+
+test('incompatible managed release shows the compatibility reason instead of host guidance', async ({ page }) => {
+  const response = {
+    version: '0.9.0', commit: OLD_COMMIT, release: '0.9.0-11111111',
+    latest_version: '1.0.19', latest_commit: NEW_COMMIT,
+    update_available: true, update_status: 'incompatible', compatible: false, can_update: false,
+    compatibility_reason: 'Manual upgrade required from versions older than v1.0.11.',
+    update_url: 'https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.19',
+    installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+    release_check: {
+      status: 'incompatible',
+      message: 'Manual upgrade required from versions older than v1.0.11.',
+    },
+  };
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version' || path === '/api/update/check') {
+      return route.fulfill({ json: response });
+    }
+    if (path === '/api/update/status') return route.fulfill({ json: { status: 'idle' } });
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await page.locator('#sidebar-update-check').click();
+  await expect(page.locator('#updater-release-summary')).toContainText('cannot be installed here');
+  await expect(page.locator('#updater-progress-detail')).toHaveText(
+    'Manual upgrade required from versions older than v1.0.11.',
+  );
+  await expect(page.locator('#updater-manual-guidance')).toBeHidden();
+  await expect(page.locator('#updater-apply')).toBeHidden();
 });
 
 test('updater dialog fits a phone viewport and disables scan motion when requested', async ({ page }) => {

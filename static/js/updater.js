@@ -156,6 +156,19 @@ function renderReleaseSummary(data = {}) {
     return;
   }
   if (data.update_available) {
+    if (data.compatible === false) {
+      const reason = data.compatibility_reason || 'This release is not compatible with the installed build.';
+      summary.textContent = `v${data.latest_version} is available, but cannot be installed here. ${reason}`;
+      setPill('warning', 'Manual upgrade required');
+      setProgress({
+        state: 'error',
+        title: 'Signed release is not compatible',
+        detail: reason,
+        progress: 20,
+        phase: 'verify',
+      });
+      return;
+    }
     const mode = data.can_update
       ? 'The signed release is compatible and ready to install.'
       : 'This installation is updated from its host.';
@@ -239,9 +252,13 @@ function renderOperation(operation = {}) {
   const modalCheck = el('updater-check');
   const apply = el('updater-apply');
   const active = ACTIVE_STATUSES.has(operation.status);
-  [action, checkButton, modalCheck, apply].filter(Boolean).forEach(button => {
+  [action, modalCheck, apply].filter(Boolean).forEach(button => {
     button.disabled = active;
   });
+  if (checkButton) {
+    checkButton.disabled = false;
+    checkButton.textContent = active ? 'View update progress' : 'Check for updates';
+  }
   if (active) {
     const progress = Number(operation.progress) || 0;
     if (detail) {
@@ -477,7 +494,10 @@ async function init() {
   if (initialized) return;
   initialized = true;
   el('sidebar-update-check')?.addEventListener('click', event => {
-    openModal({ checkNow: true, opener: event.currentTarget });
+    openModal({
+      checkNow: !ACTIVE_STATUSES.has(lastOperation.status),
+      opener: event.currentTarget,
+    });
   });
   el('sidebar-update-action')?.addEventListener('click', event => {
     openModal({ checkNow: false, opener: event.currentTarget });
