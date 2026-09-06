@@ -45,8 +45,33 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_flags+=(--prerelease)
           fi
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${release_flags[@]}"
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --generate-notes \
+              --draft \
+              "${release_flags[@]}"
+          fi
+
+          is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"
+          if [[ "$is_draft" != "true" ]]; then
+            mapfile -t published_assets < <(
+              gh release view "$GITHUB_REF_NAME" --json assets \
+                --jq '.assets[].name' | sort
+            )
+            expected_assets=(
+              "$(basename dist-release/pandamonium-*.tar.gz)"
+              "pandamonium-release.json"
+            )
+            mapfile -t expected_assets < <(printf '%s\n' "${expected_assets[@]}" | sort)
+            diff -u \
+              <(printf '%s\n' "${expected_assets[@]}") \
+              <(printf '%s\n' "${published_assets[@]}")
+            exit 0
+          fi
+
           gh release upload "$GITHUB_REF_NAME" \
             dist-release/pandamonium-release.json \
-            dist-release/pandamonium-*.tar.gz
+            dist-release/pandamonium-*.tar.gz \
+            --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
