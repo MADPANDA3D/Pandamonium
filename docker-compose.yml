@@ -1,6 +1,9 @@
 services:
   pandamonium:
-    build: .
+    build:
+      context: .
+      args:
+        PANDAMONIUM_SOURCE_REVISION: ${PANDAMONIUM_SOURCE_REVISION:-}
     env_file:
       - path: .env
         required: false

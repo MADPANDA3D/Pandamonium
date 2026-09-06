@@ -188,6 +188,32 @@ def test_prerelease_versions_sort_before_their_stable_release():
     )
 
 
+def test_current_revision_uses_valid_container_build_provenance(tmp_path, monkeypatch):
+    monkeypatch.setenv("PANDAMONIUM_SOURCE_REVISION", NEW_COMMIT)
+    monkeypatch.setattr(
+        release_updater.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("git fallback should not run"),
+    )
+
+    assert release_updater.current_revision(tmp_path) == NEW_COMMIT
+
+
+def test_current_revision_rejects_invalid_container_build_provenance(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PANDAMONIUM_SOURCE_REVISION", "latest")
+    monkeypatch.setattr(
+        release_updater.subprocess,
+        "run",
+        lambda *_args, **_kwargs: type(
+            "Result", (), {"stdout": "", "returncode": 1}
+        )(),
+    )
+
+    assert release_updater.current_revision(tmp_path) is None
+
+
 def test_release_asset_redirects_remain_on_allowlisted_hosts():
     def handler(request):
         if request.url.host == "github.com":

@@ -26,7 +26,7 @@
 git clone https://github.com/MADPANDA3D/Pandamonium.git
 cd Pandamonium
 cp .env.example .env
-docker compose up -d --build
+PANDAMONIUM_SOURCE_REVISION="$(git rev-parse HEAD)" docker compose up -d --build
 ```
 
 Open `http://localhost:7000` after the containers become healthy. The first
@@ -136,14 +136,26 @@ The canonical command is `pandamonium`:
 ```
 
 Managed native Linux installs can enable signed, checksummed updates from the
-fixed footer. Each install stages an immutable release, verifies a full data
-backup, rehearses idempotent migrations, atomically switches `current`, and
-automatically restores the prior release and data if health checks fail. See
+fixed footer. **Check for updates** opens a release-control panel that keeps the
+installed version, exact revision, installation type, and GitHub release check
+as separate facts. During an update it keeps the backup and phase visible,
+reconnects across the expected service restart, and confirms the newly running
+version without requiring a manual page refresh. Each install stages an
+immutable release, verifies a full data backup, rehearses idempotent migrations,
+atomically switches `current`, and automatically restores the prior release and
+data if health checks fail. See
 [Atomic native Linux updates](docs/setup.md#atomic-native-linux-updates).
 
 Docker, ordinary source checkouts, macOS, and Windows still use their platform's
 normal upgrade procedure; the footer reports that host-managed updates are
-required instead of attempting an in-container or in-checkout mutation.
+required instead of attempting an in-container or in-checkout mutation. Official
+GHCR images embed their exact source revision. Source-built Docker installs can
+preserve the same provenance by passing `PANDAMONIUM_SOURCE_REVISION` during the
+Compose build, as shown in the setup guide.
+
+![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
+
+![Updater release control panel on mobile](docs/images/updater-control-panel-mobile.png)
 
 The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment

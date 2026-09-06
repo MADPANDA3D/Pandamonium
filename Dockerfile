@@ -11,6 +11,11 @@ RUN bash /usr/local/bin/build-realesrgan-wheels.sh /wheels
 
 FROM python:3.14-slim
 
+ARG PANDAMONIUM_SOURCE_REVISION=""
+LABEL org.opencontainers.image.source="https://github.com/MADPANDA3D/Pandamonium" \
+      org.opencontainers.image.revision=${PANDAMONIUM_SOURCE_REVISION}
+ENV PANDAMONIUM_SOURCE_REVISION=${PANDAMONIUM_SOURCE_REVISION}
+
 # System deps. tmux is required by Cookbook for background downloads/serves.
 # openssh-client is required for Cookbook remote server tests, setup, probes,
 # downloads, and serves from Docker installs.

@@ -1505,6 +1505,82 @@
     </div>
   </div>
 
+  <!-- Signed application updater -->
+  <div class="modal hidden" id="updater-modal">
+    <div class="modal-content mad-mcp-modal-content updater-modal-content" role="dialog" aria-modal="true" aria-labelledby="updater-title">
+      <div class="modal-header mad-mcp-modal-header">
+        <div class="mad-mcp-title-wrap">
+          <img src="/static/icons/pandamonium.png" alt="" aria-hidden="true" class="mad-mcp-title-logo">
+          <div>
+            <h4 id="updater-title">Pandamonium Updater</h4>
+            <span>Signed releases, protected data, and verified rollback</span>
+          </div>
+        </div>
+        <button type="button" class="close-btn" id="close-updater-modal" aria-label="Close updater">✖</button>
+      </div>
+      <div class="mad-mcp-body updater-body">
+        <section class="mad-mcp-connect-card updater-build-card" aria-labelledby="updater-build-heading">
+          <div class="mad-mcp-card-heading">
+            <div>
+              <h5 id="updater-build-heading">Installed build</h5>
+              <p>Local deployment facts stay visible even when the release channel cannot be reached.</p>
+            </div>
+            <span id="updater-status-pill" class="mad-mcp-status-pill" data-state="idle">Ready</span>
+          </div>
+          <dl class="updater-fact-grid">
+            <div><dt>Version</dt><dd id="updater-installed-version">—</dd></div>
+            <div><dt>Revision</dt><dd id="updater-installed-commit">—</dd></div>
+            <div><dt>Installation</dt><dd id="updater-installation-kind">—</dd></div>
+            <div><dt>Update mode</dt><dd id="updater-update-mode">—</dd></div>
+          </dl>
+        </section>
+
+        <section class="mad-mcp-progress-card updater-progress-card" id="updater-progress-card" data-state="idle" aria-live="polite">
+          <div class="mad-mcp-progress-visual updater-progress-visual" aria-hidden="true">
+            <img src="/static/icons/pandamonium.png" alt="" class="mad-mcp-progress-logo">
+            <span class="mad-mcp-scan-line"></span>
+            <strong id="updater-progress-percent" class="updater-progress-percent">0%</strong>
+          </div>
+          <div class="mad-mcp-progress-copy">
+            <h5 id="updater-progress-title">Ready to scan</h5>
+            <p id="updater-progress-detail">Check the stable release channel when you are ready.</p>
+            <div class="updater-progress-meter" role="progressbar" aria-label="Update progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="updater-progress-fill"></span>
+            </div>
+            <ol class="mad-mcp-phase-list updater-phase-list" id="updater-phase-list">
+              <li data-phase="scan"><span></span>Scan release channel</li>
+              <li data-phase="verify"><span></span>Verify signed release</li>
+              <li data-phase="preserve"><span></span>Protect local data</li>
+              <li data-phase="activate"><span></span>Install and health-check</li>
+              <li data-phase="complete"><span></span>Confirm final version</li>
+            </ol>
+          </div>
+        </section>
+
+        <section class="mad-mcp-catalog-card updater-action-card" aria-labelledby="updater-action-heading">
+          <div class="mad-mcp-catalog-heading">
+            <div>
+              <h5 id="updater-action-heading">Release channel</h5>
+              <p id="updater-release-summary">Stable channel has not been checked yet.</p>
+            </div>
+            <a id="updater-release-link" class="updater-release-link" href="https://github.com/MADPANDA3D/Pandamonium/releases" target="_blank" rel="noopener noreferrer" hidden>Release notes ↗</a>
+          </div>
+          <div id="updater-manual-guidance" class="updater-manual-guidance" hidden>
+            <strong id="updater-manual-title">Host-managed update</strong>
+            <span id="updater-manual-copy"></span>
+            <code id="updater-manual-command"></code>
+          </div>
+          <p id="updater-backup" class="updater-backup" hidden></p>
+          <div class="updater-dialog-actions">
+            <button type="button" id="updater-check" class="mad-mcp-secondary-btn">Check again</button>
+            <button type="button" id="updater-apply" class="mad-mcp-primary-btn" hidden>Install update</button>
+            <button type="button" id="updater-rollback" class="mad-mcp-secondary-btn" hidden>Rollback</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- Replayable first-run guide and product tour launcher -->
   <div id="guide-modal" class="modal hidden">
     <div class="modal-content guide-modal-content" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">

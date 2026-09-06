@@ -18,6 +18,7 @@ from src.release_updater import (
 )
 
 _CACHE_SECONDS = 300
+_ERROR_CACHE_SECONDS = 30
 _CACHE: dict[str, Any] = {"expires_at": 0.0, "payload": None}
 _LOCK = asyncio.Lock()
 
@@ -37,6 +38,7 @@ def _base_payload() -> dict[str, Any]:
         "compatibility_reason": None,
         "can_update": False,
         "installation": installation_status(),
+        "release_check": {"status": "not_checked", "message": None},
     }
 
 
@@ -68,17 +70,24 @@ async def release_status(*, force: bool = False) -> dict[str, Any]:
         if not force and cached and now < float(_CACHE.get("expires_at") or 0):
             return dict(cached)
         payload = _base_payload()
+        cache_seconds = _CACHE_SECONDS
         try:
             candidate = await asyncio.to_thread(discover_release)
             payload["channel"] = candidate["channel"]
             payload["latest_version"] = candidate["version"]
+            payload["update_url"] = candidate.get("release_url") or None
             if candidate.get("current"):
-                payload.update({"update_status": "current", "compatible": True})
+                payload.update(
+                    {
+                        "update_status": "current",
+                        "compatible": True,
+                        "release_check": {"status": "current", "message": None},
+                    }
+                )
             else:
                 compatible, reason = _compatibility(candidate)
                 payload.update(
                     {
-                        "update_url": candidate.get("release_url") or None,
                         "latest_commit": candidate["commit"],
                         "update_available": True,
                         "update_status": "available" if compatible else "incompatible",
@@ -86,9 +95,21 @@ async def release_status(*, force: bool = False) -> dict[str, Any]:
                         "compatibility_reason": reason,
                         "can_update": compatible
                         and payload["installation"]["supported"],
+                        "release_check": {
+                            "status": "available" if compatible else "incompatible",
+                            "message": reason,
+                        },
                     }
                 )
         except (UpdateError, OSError, ValueError) as exc:
-            payload["compatibility_reason"] = str(exc)
-        _CACHE.update(expires_at=now + _CACHE_SECONDS, payload=dict(payload))
+            message = str(exc)
+            payload.update(
+                {
+                    "update_status": "unavailable",
+                    "compatibility_reason": message,
+                    "release_check": {"status": "unavailable", "message": message},
+                }
+            )
+            cache_seconds = _ERROR_CACHE_SECONDS
+        _CACHE.update(expires_at=now + cache_seconds, payload=dict(payload))
         return payload

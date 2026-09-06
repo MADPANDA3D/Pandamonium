@@ -29,8 +29,14 @@ pull request guidelines.
 git clone https://github.com/MADPANDA3D/Pandamonium.git
 cd Pandamonium
 cp .env.example .env       # optional, but recommended for explicit defaults
-docker compose up -d --build
+PANDAMONIUM_SOURCE_REVISION="$(git rev-parse HEAD)" docker compose up -d --build
 ```
+`PANDAMONIUM_SOURCE_REVISION` embeds this checkout's exact revision for the
+updater panel. Official `ghcr.io/madpanda3d/pandamonium` images already carry
+the same revision in both OCI metadata and the application environment. The
+revision is provenance only; Docker and source-checkout upgrades remain
+host-managed.
+
 To include optional extras in the image (PDF viewer, Office extraction; includes AGPL PyMuPDF), build with `docker compose build --build-arg INSTALL_OPTIONAL=true` before `up`.
 
 Open `http://localhost:7000` when the containers are healthy. Docker Compose
@@ -227,10 +233,15 @@ manual app start can make an updater-initiated restart wait on its own recovery
 transaction.
 
 Use `./scripts/pandamonium update check` and `update status` for readback. The
-footer's **Check for updates** action never installs by itself; **Update now**
-requires a separate confirmation and shows phase, percentage, backup path,
-result, and rollback availability. Set `PANDAMONIUM_UPDATE_CHANNEL=prerelease`
-only on hosts that intentionally accept prereleases.
+footer's **Check for updates** action opens the release-control panel and never
+installs by itself. It reports installed provenance, installation type, and
+GitHub release connectivity independently, so a transient release-check failure
+does not erase the known local build. **Install update** requires a separate
+confirmation and shows phase, percentage, backup path, result, and rollback
+availability. The panel treats the application restart as expected, reconnects
+automatically, then reads back the newly running version without a manual page
+refresh. Set `PANDAMONIUM_UPDATE_CHANNEL=prerelease` only on hosts that
+intentionally accept prereleases.
 
 The updater keeps the immediately previous immutable release and exact verified
 backup. A manual rollback restores both when the signed compatibility contract
