@@ -6,6 +6,7 @@ import uiModule from './ui.js';
 import { openEditor, closeEditor, isEditorOpen } from './galleryEditor.js';
 import spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
+import { applyRightDock } from './modalSnap.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { topPortalZ } from './toolWindowZOrder.js';
 import sessionModule from './sessions.js';
@@ -2351,7 +2352,16 @@ export function openGallery() {
             <p class="memory-desc doclib-desc">Immich is one Gallery source. Its API key stays encrypted on the Pandamonium server, and Pandamonium never deletes Immich originals.</p>
             <ol class="memory-desc doclib-desc gallery-source-steps">
               <li>In Immich, open your profile menu, then <strong>Account Settings → API Keys</strong>.</li>
-              <li>Create a key named <strong>Pandamonium</strong>. For browsing, allow <code>album.read</code>, <code>asset.read</code>, <code>asset.view</code>, and <code>asset.download</code>. Add <code>asset.upload</code> only if you want to send local copies to Immich.</li>
+              <li>Create a key named <strong>Pandamonium</strong>. For full Gallery functionality, enable only:
+                <ul class="gallery-permission-list">
+                  <li><code>album.read</code> — list Immich albums</li>
+                  <li><code>asset.read</code> — browse, search, and read photo metadata</li>
+                  <li><code>asset.view</code> — display thumbnails and previews</li>
+                  <li><code>asset.download</code> — open, download, or import originals</li>
+                  <li><code>asset.upload</code> — export local Gallery images to Immich</li>
+                </ul>
+                Leave every other permission disabled. Pandamonium does not update or delete Immich content.
+              </li>
               <li>Copy the key once, paste it below, and connect.</li>
             </ol>
             <p class="memory-desc doclib-desc"><a href="https://docs.immich.app/features/user-settings/" target="_blank" rel="noopener noreferrer">Open the official Immich API-key guide</a></p>
@@ -2400,6 +2410,7 @@ export function openGallery() {
     closeFn: () => _doCloseGallery(),
     restoreFn: () => {},
   });
+  if (window.innerWidth > 768) applyRightDock(modal);
 
   // Allow dragging the modal by its header — same pattern as Email Library,
   // Sessions, etc. The tileManager (corner/edge snap-tiling) listens on

@@ -137,6 +137,8 @@ test('Gallery manages Immich safely and keeps remote assets read-only', async ({
   await page.evaluate(async () => (await import('/static/js/gallery.js')).openGallery());
   const gallery = page.locator('#gallery-modal');
   await expect(gallery).toBeVisible();
+  await expect(gallery).toHaveClass(/modal-right-docked/);
+  await expect(page.locator('body')).toHaveClass(/right-dock-active/);
 
   await gallery.locator('.gallery-tab[data-tab="settings"]').click();
   await expect(gallery.locator('[data-gallery-source-kind="device_folder"]')).toContainText('Pictures · connected');
@@ -146,6 +148,10 @@ test('Gallery manages Immich safely and keeps remote assets read-only', async ({
   const card = gallery.locator('#gallery-immich-card');
   await expect(card).toBeVisible();
   await expect(card).toContainText('Account Settings → API Keys');
+  await expect(card.locator('.gallery-permission-list code')).toHaveText([
+    'album.read', 'asset.read', 'asset.view', 'asset.download', 'asset.upload',
+  ]);
+  await expect(card).toContainText('Leave every other permission disabled');
   await expect(card.locator('#gallery-immich-url')).toHaveValue('https://immich.test');
   await card.locator('#gallery-immich-key').fill('browser-secret');
   await card.getByRole('button', { name: 'Save / rotate key' }).click();
