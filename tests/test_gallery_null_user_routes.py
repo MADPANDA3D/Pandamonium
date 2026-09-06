@@ -7,11 +7,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 import core.database as cdb
-from core.database import GalleryAlbum, GalleryImage
+from core.database import GalleryAlbum, GalleryImage, GallerySource, GallerySourceFile
 import routes.gallery_routes as gallery_routes
 
 
-def _client_with_gallery(monkeypatch, tmp_path):
+def _client_with_gallery(monkeypatch, tmp_path, *, include_source=False):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'gallery.db'}",
         connect_args={"check_same_thread": False},
@@ -23,8 +23,7 @@ def _client_with_gallery(monkeypatch, tmp_path):
 
     db = session_factory()
     try:
-        db.add_all(
-            [
+        rows = [
                 GalleryAlbum(id="album-alice", name="Alice album", owner="alice"),
                 GalleryAlbum(id="album-bob", name="Bob album", owner="bob"),
                 GalleryImage(
@@ -52,7 +51,51 @@ def _client_with_gallery(monkeypatch, tmp_path):
                     file_size=20,
                 ),
             ]
-        )
+        db.add_all(rows)
+        if include_source:
+            pictures = tmp_path / "Pictures"
+            pictures.mkdir()
+            (pictures / "connected.png").write_bytes(b"connected photo")
+            db.add_all(
+                [
+                    GallerySource(
+                        id="source-local",
+                        owner="__single_user__",
+                        path=str(pictures),
+                        label="Pictures",
+                        kind="native",
+                        enabled=True,
+                        auto_connected=True,
+                    ),
+                    GallerySourceFile(
+                        id="source-file-local",
+                        source_id="source-local",
+                        relative_path="connected.png",
+                        file_hash="a" * 64,
+                        modified_ns=1,
+                        change_token="1:1:1",
+                        file_size=15,
+                        active=True,
+                    ),
+                ]
+            )
+            # GalleryImage has no ORM relationship to GallerySourceFile, so
+            # flush the explicit FK target before adding the projected row.
+            db.flush()
+            db.add(
+                GalleryImage(
+                    id="img-source",
+                    filename="source-connected.png",
+                    prompt="connected",
+                    model="local-folder",
+                    tags="",
+                    ai_tags="",
+                    owner=None,
+                    is_active=True,
+                    file_size=15,
+                    source_file_id="source-file-local",
+                )
+            )
         db.commit()
     finally:
         db.close()
@@ -92,6 +135,14 @@ def test_auth_enabled_null_user_gallery_routes_fail_closed(monkeypatch, tmp_path
         "total_untagged": 0,
         "image_ids": [],
     }
+    assert client.get("/api/gallery/img-alice").status_code == 404
+    assert client.patch(
+        "/api/gallery/img-alice", json={"favorite": True}
+    ).status_code == 404
+    assert client.post("/api/gallery/img-alice/favorite").status_code == 404
+    assert client.post(
+        "/api/gallery/download-zip", json={"ids": ["img-alice"]}
+    ).status_code == 404
 
 
 def test_auth_disabled_null_user_gallery_routes_keep_single_user_mode(monkeypatch, tmp_path):
@@ -118,6 +169,39 @@ def test_auth_disabled_null_user_gallery_routes_keep_single_user_mode(monkeypatc
     assert batch["queued"] == 2
     assert batch["total_untagged"] == 2
     assert set(batch["image_ids"]) == {"img-alice", "img-bob"}
+
+
+def test_auth_disabled_null_user_can_act_on_connected_source_photos(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = _client_with_gallery(monkeypatch, tmp_path, include_source=True)
+
+    fetched = client.get("/api/gallery/img-source")
+    assert fetched.status_code == 200
+    assert fetched.json()["read_only"] is True
+
+    patched = client.patch(
+        "/api/gallery/img-source",
+        json={"favorite": True, "tags": "local, family", "album_id": "album-alice"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["favorite"] is True
+    assert patched.json()["tags"] == "local, family"
+    assert patched.json()["album_id"] == "album-alice"
+
+    favorite = client.post("/api/gallery/img-source/favorite")
+    assert favorite.status_code == 200
+    assert favorite.json()["favorite"] is False
+
+    renamed = client.post("/api/gallery/img-source/rename", json={"name": "Family photo"})
+    assert renamed.status_code == 200
+
+    zipped = client.post("/api/gallery/download-zip", json={"ids": ["img-source"]})
+    assert zipped.status_code == 200
+    assert zipped.headers["content-type"] == "application/zip"
+
+    rotate = client.post("/api/gallery/img-source/rotate", json={"angle": 90})
+    assert rotate.status_code == 409
+    assert client.delete("/api/gallery/img-source").status_code == 409
 
 
 def test_authenticated_gallery_routes_remain_owner_scoped(monkeypatch, tmp_path):

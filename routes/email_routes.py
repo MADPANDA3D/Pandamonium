@@ -3353,8 +3353,8 @@ def setup_email_routes():
                 raise HTTPException(status_code=404, detail="Image not found")
             if owner and img.owner and img.owner != owner:
                 raise HTTPException(status_code=404, detail="Image not found")
-            from routes.gallery.gallery_routes import _gallery_image_path
-            src = _gallery_image_path(img.filename)
+            from routes.gallery.gallery_routes import _gallery_row_path
+            src = _gallery_row_path(db, img, owner)
             if not src.exists() or not src.is_file():
                 raise HTTPException(status_code=404, detail="Image file not found")
             return {"filename": _safe_compose_filename(img.filename or "gallery-image.png"), "path": src}

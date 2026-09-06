@@ -28,6 +28,8 @@ from core.database import (
     DocumentVersion,
     GalleryImage,
     GalleryAlbum,
+    GallerySource,
+    GallerySourceFile,
     CalendarEvent,
     CalendarCal,
 )
@@ -146,9 +148,16 @@ def setup_admin_wipe_routes(session_manager):
                 return {"status": "deleted", "kind": kind, "count": count}
 
             if kind == "gallery":
-                count = db.query(GalleryImage).count() + db.query(GalleryAlbum).count()
+                count = (
+                    db.query(GalleryImage).count()
+                    + db.query(GalleryAlbum).count()
+                    + db.query(GallerySourceFile).count()
+                    + db.query(GallerySource).count()
+                )
                 db.query(GalleryImage).delete()
                 db.query(GalleryAlbum).delete()
+                db.query(GallerySourceFile).delete()
+                db.query(GallerySource).delete()
                 db.commit()
                 # Also drop the upload dir so disk doesn't keep orphans.
                 _rmtree_quiet(GALLERY_DIR)

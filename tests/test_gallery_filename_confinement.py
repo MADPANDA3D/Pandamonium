@@ -133,5 +133,6 @@ def test_gallery_file_operations_use_confining_resolver():
     assert 'Path("data/generated_images") / img.filename' not in source
     assert 'os.path.join("data", "generated_images", img.filename)' not in source
     assert 'os.path.join("data", "generated_images", img_filename)' not in source
-    assert source.count("_gallery_image_path(img.filename)") >= 3
+    assert source.count("_gallery_row_path(db, img, user") >= 4
+    assert "return _gallery_image_path(img.filename)" in source
     assert "_gallery_image_path(img_filename)" in source
