@@ -69,6 +69,7 @@ async def test_selected_friday_routes_directly_through_codex(monkeypatch):
         owner="leo",
         workspace="home-lab",
         presenter="Friday",
+        codex_thread_id="thread-selected-in-sidebar",
     )
 
     assert result == (
@@ -82,6 +83,7 @@ async def test_selected_friday_routes_directly_through_codex(monkeypatch):
         "owner": "leo",
         "workspace": "home-lab",
         "presenter": "Friday",
+        "codex_thread_id": "thread-selected-in-sidebar",
     }
 
 

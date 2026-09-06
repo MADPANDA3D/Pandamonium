@@ -75,7 +75,11 @@ def test_selector_catalog_preserves_taxonomy_and_same_health(monkeypatch):
     assert entities["Jarvis"]["kind"] == "agent"
     assert entities["Friday"]["kind"] == "worker"
     assert entities["Scribe"]["kind"] == "agent"
-    assert "Gordon" not in entities
+    assert entities["Gordon"]["kind"] == "agent"
+    assert entities["Gordon"]["availability"] == "unavailable"
+    assert entities["Gordon"]["health"]["reason"] == "connection_failed"
+    assert selections[entities["Gordon"]["id"]]["selectable"] is False
+    assert selections[entities["Gordon"]["id"]]["reason"] == "connection_failed"
     assert selections[entities["Friday"]["id"]]["selectable"] is True
     assert selections[entities["Scribe"]["id"]] == {
         "entity_id": entities["Scribe"]["id"],

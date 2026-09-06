@@ -1019,6 +1019,13 @@ function _createDateSectionHeader(label, kind = 'session') {
   return el;
 }
 
+function _createSidebarNavLabel(label) {
+  const el = document.createElement('div');
+  el.className = 'sidebar-nav-label';
+  el.textContent = label;
+  return el;
+}
+
 function _appendSessionItemsWithDateHeaders(frag, items) {
   let lastLabel = null;
   for (const s of items) {
@@ -1081,43 +1088,18 @@ function _renderSessionListImpl() {
 
   const _frag = document.createDocumentFragment();
 
-  // ── Flat sort modes: ignore folders, show one ordered list. ──
-  // Folders are only shown when _sortMode === 'group' (or null/empty
-  // for manual mode). This keeps the picker simple: a folder-grouped
-  // view is one of the sort choices, alongside Last Active / Newest.
-  if (_sortMode && _sortMode !== 'group') {
-    // Both chronological views use actual message activity. Renames, folder
-    // moves, old favorites, and creation time must not outrank a live chat.
-    orderedSessions.sort(_compareSessionsByActivity);
-    const allFlat = orderedSessions;
-
-    const limit = _showAllSessions ? allFlat.length : SIDEBAR_MAX_VISIBLE;
-    const visible = allFlat.slice(0, limit);
-    const activeIdx = allFlat.findIndex(s => s.id === currentSessionId);
-    if (!_showAllSessions && activeIdx >= limit) visible.push(allFlat[activeIdx]);
-
-    _appendSessionItemsWithDateHeaders(_frag, visible);
-
-    if (allFlat.length > SIDEBAR_MAX_VISIBLE) {
-      const remaining = allFlat.length - SIDEBAR_MAX_VISIBLE;
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'session-show-more-btn';
-      toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
-      toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        _showAllSessions = !_showAllSessions;
-        renderSessionList();
-      });
-      _frag.appendChild(toggleBtn);
-    }
-
-    list.innerHTML = '';
-    list.appendChild(_frag);
-    _postRenderSessionList(list);
-    return;
+  // Favorites are real pinned chats. Keep them in one predictable place
+  // instead of burying them inside date buckets or project folders.
+  const pinnedSessions = orderedSessions.filter(s => s.is_important).sort(_compareSessionsByActivity);
+  orderedSessions = orderedSessions.filter(s => !s.is_important);
+  if (pinnedSessions.length) {
+    _frag.appendChild(_createSidebarNavLabel('Pinned'));
+    pinnedSessions.forEach(session => _frag.appendChild(createSessionItem(session)));
   }
 
-  // ── Group / manual mode: render folders, then unfiled sessions. ──
+  // Project folders stay visible in every sort mode. Sort changes the chats
+  // inside each project; it never destroys the project hierarchy.
+  if (_sortMode && _sortMode !== 'group') orderedSessions.sort(_compareSessionsByActivity);
   const folderState = loadFolderState();
   const folders = {}; // folderName -> [sessions]
   const unfiled = [];
@@ -1131,16 +1113,6 @@ function _renderSessionListImpl() {
     }
   });
 
-  // Move starred sessions to top of each group, preserving relative order
-  const starPartition = (arr) => {
-    const starred = arr.filter(s => s.is_important);
-    const rest = arr.filter(s => !s.is_important);
-    arr.length = 0;
-    arr.push(...starred, ...rest);
-  };
-  starPartition(unfiled);
-  Object.values(folders).forEach(arr => starPartition(arr));
-
   // Render folders first (above unfiled sessions)
   const savedFolderOrder = loadFolderOrder();
   const allFolderNames = Object.keys(folders);
@@ -1151,6 +1123,8 @@ function _renderSessionListImpl() {
   allFolderNames.forEach(name => {
     if (!orderedFolderNames.includes(name)) orderedFolderNames.push(name);
   });
+
+  if (orderedFolderNames.length) _frag.appendChild(_createSidebarNavLabel('Projects'));
 
   orderedFolderNames.forEach(folderName => {
     const folderDiv = document.createElement('div');
@@ -1165,7 +1139,7 @@ function _renderSessionListImpl() {
     // Drag handle for folder reordering
     const dragHandle = document.createElement('span');
     dragHandle.className = 'folder-drag-handle';
-    dragHandle.textContent = '\u2630';
+    dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
     dragHandle.title = 'Drag to reorder folder';
     header.appendChild(dragHandle);
 
@@ -1292,7 +1266,7 @@ function _renderSessionListImpl() {
 
     const dragHandle = document.createElement('span');
     dragHandle.className = 'folder-drag-handle';
-    dragHandle.textContent = '\u2630';
+    dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
     dragHandle.title = 'Drag to reorder folder';
     unsortedHeader.appendChild(dragHandle);
 
@@ -1302,7 +1276,7 @@ function _renderSessionListImpl() {
     unsortedHeader.appendChild(toggle);
     const nameSpan = document.createElement('span');
     nameSpan.className = 'folder-name';
-    nameSpan.textContent = 'Unsorted';
+    nameSpan.textContent = 'Chats';
     unsortedHeader.appendChild(nameSpan);
     const countSpan = document.createElement('span');
     countSpan.className = 'folder-count';

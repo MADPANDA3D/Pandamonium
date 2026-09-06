@@ -1176,6 +1176,11 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
       if (streamAgentTarget) fd.append('agent_target', streamAgentTarget);
+      if (streamAgentTarget === 'pc-codex') {
+        const codexContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
+        if (codexContext?.workspace) fd.append('worker_workspace', codexContext.workspace);
+        if (codexContext?.codexThreadId) fd.append('worker_thread_id', codexContext.codexThreadId);
+      }
       if (_textExtensionBridge) {
         fd.append('extension_bridge_session', _textExtensionBridge.sessionId);
         fd.append('extension_bridge_extension', _textExtensionBridge.extensionId);

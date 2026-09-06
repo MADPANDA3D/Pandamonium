@@ -90,6 +90,7 @@ async def _direct_selected_identity_turn(
     owner: str,
     workspace: str,
     presenter: str,
+    codex_thread_id: str | None = None,
 ) -> tuple[str, Any, str]:
     """Route non-Jarvis selections without sending them through Jarvis's model."""
     from src.jarvis_agent import direct_codex_turn, direct_hermes_turn
@@ -105,6 +106,7 @@ async def _direct_selected_identity_turn(
             owner=owner,
             workspace=workspace,
             presenter=presenter,
+            codex_thread_id=codex_thread_id,
         )
         return "task", task, action
     raise ValueError("unsupported_conversation_target")
@@ -708,6 +710,8 @@ def setup_chat_routes(
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
         agent_target = str(form_data.get("agent_target") or "").strip()
+        worker_workspace = str(form_data.get("worker_workspace") or "").strip()
+        worker_thread_id = str(form_data.get("worker_thread_id") or "").strip()
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
@@ -720,6 +724,10 @@ def setup_chat_routes(
                 allow_web_search = body["allow_web_search"]
             if not agent_target:
                 agent_target = str(body.get("agent_target") or "").strip()
+            if not worker_workspace:
+                worker_workspace = str(body.get("worker_workspace") or "").strip()
+            if not worker_thread_id:
+                worker_thread_id = str(body.get("worker_thread_id") or "").strip()
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -872,6 +880,10 @@ def setup_chat_routes(
                     selected_agent_label = str(details.get("label") or agent_target)[:80]
                     selected_agent_worker = agent_target
                     selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
+                    if agent_target == "pc-codex" and worker_workspace:
+                        if worker_workspace not in set(details.get("workspaces") or []):
+                            raise HTTPException(400, "Selected project is not allowlisted")
+                        selected_agent_workspace = worker_workspace
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
@@ -1321,6 +1333,7 @@ def setup_chat_routes(
                         owner=_user,
                         workspace=selected_agent_workspace or "home-lab",
                         presenter=selected_agent_label,
+                        codex_thread_id=worker_thread_id or None,
                     )
                     if kind == "response":
                         reply = str(payload or "").strip()

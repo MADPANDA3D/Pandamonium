@@ -272,6 +272,26 @@ async def test_direct_codex_turn_reuses_mapping_and_rebinds_every_event_to_frida
 
 
 @pytest.mark.asyncio
+async def test_direct_codex_turn_resumes_the_thread_selected_in_the_sidebar(broker_fixture):
+    adapter, _tasks_file = broker_fixture
+    selected_thread = "019f5022-a520-7de0-9208-018cd2d4d999"
+
+    task, action = await jarvis_agent.direct_codex_turn(
+        "session-2",
+        "Continue this exact task.",
+        owner="leo",
+        workspace="other-project",
+        presenter="Friday",
+        codex_thread_id=selected_thread,
+    )
+
+    assert action == "started"
+    assert task["workspace"] == "other-project"
+    assert task["codex_thread_id"] == selected_thread
+    assert adapter.started[0]["codex_thread_id"] == selected_thread
+
+
+@pytest.mark.asyncio
 async def test_completed_friday_turn_stays_friday_in_the_next_round(broker_fixture):
     adapter, _tasks_file = broker_fixture
     first, first_action = await jarvis_agent.direct_codex_turn(

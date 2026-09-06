@@ -727,16 +727,17 @@
         <img class="sidebar-brand-logo" src="/static/icons/pandamonium.png" alt="" aria-hidden="true">
         <span class="sidebar-brand-title">Pandamonium</span>
       </div>
+      <button type="button" class="sidebar-header-search" id="sidebar-search-btn" title="Search conversations (Ctrl+K)" aria-label="Search conversations">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
     </div>
-    <div class="sidebar-inner">
+    <div class="sidebar-primary-actions">
       <div class="list-item" id="sidebar-new-chat-btn" title="New chat">
         <svg class="sidebar-action-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="grow" style="position:relative;left:-3px;">New Chat</span>
+        <span class="grow" style="position:relative;left:-3px;">New task</span>
       </div>
-      <div class="list-item" id="sidebar-search-btn" title="Search conversations (Ctrl+K)">
-        <svg class="sidebar-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-        <span class="grow" style="position:relative;left:-1px;">Search</span>
-      </div>
+    </div>
+    <div class="sidebar-inner">
       <!-- Assistant sidebar entry removed — its log + settings live inside
            the Tasks modal (Activity + Settings tabs). The backend
            assistant session is still maintained for log_to_assistant()
@@ -791,39 +792,14 @@
         <div id="session-list" role="listbox"></div>
         <section id="codex-workspace-browser" class="codex-workspace-browser" aria-label="Codex projects and tasks" hidden>
           <div class="codex-browser-head">
-            <strong id="codex-browser-title">Codex projects</strong>
+            <strong id="codex-browser-title">Projects</strong>
           </div>
           <div id="codex-project-view">
-            <input type="search" id="codex-project-search" placeholder="Search projects" autocomplete="off" aria-label="Search allowlisted Codex projects">
             <div id="codex-project-list" class="codex-browser-list" role="list"></div>
             <button type="button" id="codex-project-more" class="codex-browser-more" hidden>Load more projects</button>
             <div id="codex-task-view" hidden>
-              <button type="button" id="codex-project-return" class="codex-project-return">Close project</button>
-              <input type="search" id="codex-task-search" placeholder="Search tasks" autocomplete="off" aria-label="Search tasks in selected Codex project">
-              <button type="button" id="codex-new-task" class="codex-browser-primary">New task in this project</button>
               <div id="codex-task-list" class="codex-browser-list" role="list"></div>
               <button type="button" id="codex-task-more" class="codex-browser-more" hidden>Load more tasks</button>
-            </div>
-          </div>
-          <div id="codex-action-view" hidden>
-            <button type="button" id="codex-task-return" class="codex-project-return">← Tasks</button>
-            <p id="codex-task-identity" class="codex-task-identity"></p>
-            <label class="codex-task-label" for="codex-task-prompt">Request</label>
-            <textarea id="codex-task-prompt" rows="4" maxlength="50000" placeholder="Describe the bounded work for the selected worker"></textarea>
-            <label class="codex-write-consent">
-              <input type="checkbox" id="codex-task-write-consent">
-              <span>Allow the explicitly requested reversible edit inside this project</span>
-            </label>
-            <button type="button" id="codex-task-run" class="codex-browser-primary">Start read-only task</button>
-            <div id="codex-task-live" class="codex-task-live" hidden>
-              <p id="codex-task-status" role="status" aria-live="polite"></p>
-              <div id="codex-task-events" class="codex-task-events" aria-label="Codex task progress"></div>
-              <label class="codex-task-label" for="codex-task-steer-prompt">Steer running task</label>
-              <textarea id="codex-task-steer-prompt" rows="2" maxlength="50000" placeholder="Add a bounded correction or follow-up"></textarea>
-              <div class="codex-task-actions">
-                <button type="button" id="codex-task-steer">Steer</button>
-                <button type="button" id="codex-task-cancel">Cancel</button>
-              </div>
             </div>
           </div>
         </section>

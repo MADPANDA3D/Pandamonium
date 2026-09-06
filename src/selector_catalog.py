@@ -21,6 +21,11 @@ def _bounded_text(value: object, fallback: str, limit: int = 200) -> str:
     return text or fallback
 
 
+def _bounded_reason(value: object, fallback: str = "worker_unavailable") -> str:
+    reason = re.sub(r"[^a-z0-9_-]+", "_", str(value or "").strip().lower()).strip("_")[:80]
+    return reason or fallback
+
+
 def _permissions(scopes: list[str], delegation: str = "none") -> dict[str, Any]:
     return {
         "requires_authenticated_request": True,
@@ -112,12 +117,16 @@ def build_selector_catalog(
         if (
             not isinstance(details, dict)
             or details.get("configured") is not True
-            or details.get("ready") is not True
         ):
             continue
         capabilities = installation_capabilities(details)
         if not capabilities or capabilities == ["model"]:
             continue
+        ready = details.get("ready") is True
+        connection = details.get("connection") if isinstance(details.get("connection"), dict) else {}
+        unavailable_reason = _bounded_reason(
+            connection.get("reason") or connection.get("state"),
+        )
         kind = "worker" if "codex" in capabilities else "agent"
         entity_id = _stable_id(kind, worker_id)
         workspace_scopes = [
@@ -129,11 +138,12 @@ def build_selector_catalog(
             "kind": kind,
             "id": entity_id,
             "display_name": _bounded_text(details.get("label"), "Configured peer"),
-            "availability": "available",
+            "availability": "available" if ready else "unavailable",
             "ownership": {"scope": "installation", "id": "installation:current"},
             "health": {
-                "state": "healthy",
+                "state": "healthy" if ready else "unavailable",
                 "checked_at": generated_at,
+                **({"reason": unavailable_reason} if not ready else {}),
             },
             "permissions": _permissions(workspace_scopes or ["owner:current"], "narrower_only"),
             "source": {"type": "worker", "ref": "src/jarvis_agent.py#worker_statuses"},
@@ -147,8 +157,8 @@ def build_selector_catalog(
             "kind": kind,
             "target": worker_id,
             "capabilities": capabilities,
-            "selectable": True,
-            "reason": None,
+            "selectable": ready,
+            "reason": None if ready else unavailable_reason,
         })
 
     return {

@@ -108,11 +108,10 @@ test('chat dates and latest-message order refresh live without restoring archive
   const sessionIds = () => page.locator('#session-list .list-item[data-session-id]').evaluateAll(
     items => items.map(item => item.dataset.sessionId),
   );
-  await expect.poll(sessionIds).toEqual(['session-recent', 'session-current', 'session-favorite']);
+  await expect.poll(sessionIds).toEqual(['session-favorite', 'session-recent', 'session-current']);
   const dateHeaders = page.locator('#session-list .date-section-header');
-  await expect(dateHeaders).toHaveText(['Today', 'Yesterday']);
+  await expect(dateHeaders).toHaveText(['Today']);
   await expect(dateHeaders.first()).toBeVisible();
-  await expect(dateHeaders.last()).toBeVisible();
 
   for (let click = 0; click < 2; click += 1) {
     await page.locator('#session-sort-btn').click();
@@ -127,12 +126,12 @@ test('chat dates and latest-message order refresh live without restoring archive
   responseSessions = [favoriteYesterday, archived, recent, current];
   await page.evaluate(() => window.sessionModule.loadSessions());
 
-  await expect.poll(sessionIds).toEqual(['session-current', 'session-recent', 'session-favorite']);
-  await expect(dateHeaders).toHaveText(['Today', 'Yesterday']);
+  await expect.poll(sessionIds).toEqual(['session-favorite', 'session-current', 'session-recent']);
+  await expect(dateHeaders).toHaveText(['Today']);
   await expect.poll(() => page.evaluate(() => window.__sessionOrderingPageMarker)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-current');
 
   await page.evaluate(() => window.sessionModule.setSortMode('group'));
-  await expect(page.locator('#session-list .session-folder-content .date-section-header')).toHaveText(['Today', 'Yesterday']);
+  await expect(page.locator('#session-list .session-folder-content .date-section-header')).toHaveText(['Today']);
   await expect(page.locator('#session-list .session-folder-content').first()).toContainText('Current chat');
 });

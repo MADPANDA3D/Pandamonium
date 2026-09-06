@@ -793,10 +793,13 @@ async def direct_codex_turn(
     owner: str,
     workspace: str,
     presenter: str,
+    codex_thread_id: str | None = None,
 ) -> tuple[dict, str]:
     """Start or steer the one Codex task bound to this conversation."""
     active = find_active_task(session_id, "pc-codex", None, owner)
     if active:
+        if codex_thread_id and active.get("codex_thread_id") not in {None, codex_thread_id}:
+            raise RuntimeError("conversation_task_conflict")
         _bind_task_presenter(active, presenter)
         return await task_action(
             active["task_id"],
@@ -813,7 +816,7 @@ async def direct_codex_turn(
         workspace,
         prompt,
         owner=owner,
-        codex_thread_id=binding.get("codex_thread_id"),
+        codex_thread_id=codex_thread_id or binding.get("codex_thread_id"),
         presenter=presenter,
     )
     if task.get("reused"):
