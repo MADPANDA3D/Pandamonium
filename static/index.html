@@ -225,8 +225,8 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=20260905T022733Z">
-  <link rel="modulepreload" href="/static/app.js?v=20260904T235228Z">
+  <link rel="stylesheet" href="/static/style.css?v=20260905T210749Z">
+  <link rel="modulepreload" href="/static/app.js?v=20260905T210749Z">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -727,16 +727,17 @@
         <img class="sidebar-brand-logo" src="/static/icons/pandamonium.png" alt="" aria-hidden="true">
         <span class="sidebar-brand-title">Pandamonium</span>
       </div>
+      <button type="button" class="sidebar-header-search" id="sidebar-search-btn" title="Search conversations (Ctrl+K)" aria-label="Search conversations">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
     </div>
-    <div class="sidebar-inner">
+    <div class="sidebar-primary-actions">
       <div class="list-item" id="sidebar-new-chat-btn" title="New chat">
         <svg class="sidebar-action-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="grow" style="position:relative;left:-3px;">New Chat</span>
+        <span class="grow" style="position:relative;left:-3px;">New task</span>
       </div>
-      <div class="list-item" id="sidebar-search-btn" title="Search conversations (Ctrl+K)">
-        <svg class="sidebar-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-        <span class="grow" style="position:relative;left:-1px;">Search</span>
-      </div>
+    </div>
+    <div class="sidebar-inner">
       <!-- Assistant sidebar entry removed — its log + settings live inside
            the Tasks modal (Activity + Settings tabs). The backend
            assistant session is still maintained for log_to_assistant()
@@ -789,6 +790,19 @@
           </div>
         </div>
         <div id="session-list" role="listbox"></div>
+        <section id="codex-workspace-browser" class="codex-workspace-browser" aria-label="Codex projects and tasks" hidden>
+          <div class="codex-browser-head">
+            <strong id="codex-browser-title">Projects</strong>
+          </div>
+          <div id="codex-project-view">
+            <div id="codex-project-list" class="codex-browser-list" role="list"></div>
+            <button type="button" id="codex-project-more" class="codex-browser-more" hidden>Load more projects</button>
+            <div id="codex-task-view" hidden>
+              <div id="codex-task-list" class="codex-browser-list" role="list"></div>
+              <button type="button" id="codex-task-more" class="codex-browser-more" hidden>Load more tasks</button>
+            </div>
+          </div>
+        </section>
       </div>
       <!-- Hidden dropdown for session actions -->
       <div id="session-actions-dropdown" class="dropdown hidden">
@@ -963,16 +977,28 @@
           <span class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/></svg>Plugins</span>
         </div>
         <div id="plugins-list" aria-live="polite">
+          <button type="button" class="list-item marketplace-launcher" id="add-plugins-btn" aria-haspopup="dialog" aria-controls="marketplace-modal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></svg>
+            <span class="grow">Add Plugins</span>
+            <span class="marketplace-launcher-meta">Browse</span>
+          </button>
           <div class="list-item" aria-disabled="true"><span class="grow">Loading plugins…</span></div>
         </div>
       </div>
     </div>
-    <section class="sidebar-update-status" id="sidebar-update-status" aria-live="polite" aria-label="Checking application version">
+    <section class="sidebar-update-status" id="sidebar-update-status" aria-live="polite" aria-label="Application update status">
       <div class="sidebar-update-copy">
         <span class="sidebar-update-version" id="sidebar-update-version">Version —</span>
-        <span class="sidebar-update-state is-checking" id="sidebar-update-state">Checking for updates…</span>
+        <span class="sidebar-update-commit" id="sidebar-update-commit"></span>
+        <span class="sidebar-update-state is-unknown" id="sidebar-update-state">Not checked</span>
+        <span class="sidebar-update-detail" id="sidebar-update-detail" hidden></span>
+        <span class="sidebar-update-backup" id="sidebar-update-backup" hidden></span>
       </div>
-      <a class="sidebar-update-action" id="sidebar-update-action" href="#" target="_blank" rel="noopener noreferrer" hidden>Update</a>
+      <div class="sidebar-update-actions">
+        <button type="button" class="sidebar-update-action" id="sidebar-update-check">Check for updates</button>
+        <button type="button" class="sidebar-update-action is-primary" id="sidebar-update-action" hidden>Update now</button>
+        <button type="button" class="sidebar-update-action" id="sidebar-update-rollback" hidden>Rollback</button>
+      </div>
     </section>
     <div class="sidebar-user-bar" id="sidebar-user-bar">
       <div class="user-bar-left" id="user-bar-profile">
@@ -980,6 +1006,10 @@
         <span class="user-bar-name" id="user-bar-name">User</span>
       </div>
       <div class="user-bar-actions">
+        <button type="button" class="user-bar-btn user-bar-guide" id="user-bar-guide" title="Setup guide and product tour" aria-label="Open setup guide and product tour" hidden>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></svg>
+          <span>Guide</span>
+        </button>
         <button type="button" class="user-bar-btn" id="user-bar-settings" title="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
@@ -1033,37 +1063,6 @@
       if (el) {
         el.textContent = 'Type /setup, then choose Local models or API.';
       }
-      fetch('/api/version').then(function(r){return r.json()}).then(function(d){
-        if (d.version) window._appVersion = d.version;
-        var widget = document.getElementById('sidebar-update-status');
-        var version = document.getElementById('sidebar-update-version');
-        var state = document.getElementById('sidebar-update-state');
-        var action = document.getElementById('sidebar-update-action');
-        if (!widget || !version || !state || !action) return;
-        version.textContent = 'Version ' + (d.version ? 'v' + d.version : 'unknown');
-        state.classList.remove('is-checking', 'is-current', 'is-available', 'is-unknown');
-        if (d.update_available && d.latest_version && d.update_url) {
-          state.textContent = 'v' + d.latest_version + ' available';
-          state.classList.add('is-available');
-          action.href = d.update_url;
-          action.hidden = false;
-          widget.setAttribute('aria-label', 'Version ' + d.version + '; update ' + d.latest_version + ' available');
-        } else {
-          var known = d.update_status === 'current';
-          state.textContent = known ? 'Up to date' : 'Update check unavailable';
-          state.classList.add(known ? 'is-current' : 'is-unknown');
-          action.hidden = true;
-          action.removeAttribute('href');
-          widget.setAttribute('aria-label', 'Version ' + (d.version || 'unknown') + '; ' + state.textContent);
-        }
-      }).catch(function(){
-        var state = document.getElementById('sidebar-update-state');
-        if (state) {
-          state.textContent = 'Update check unavailable';
-          state.classList.remove('is-checking');
-          state.classList.add('is-unknown');
-        }
-      });
     })();
     </script>
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
@@ -1091,18 +1090,7 @@
             <svg class="jarvis-agent-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div id="jarvis-agent-menu" class="jarvis-agent-menu" role="menu" hidden>
-            <button type="button" class="jarvis-target is-active" data-worker="jarvis" role="menuitemradio" aria-checked="true">
-              <span>Jarvis</span><small>Self-hosted · conversational brain</small>
-            </button>
-            <button type="button" class="jarvis-target" data-worker="pc-codex" role="menuitemradio" aria-checked="false" disabled>
-              <span>PC Codex</span><small>Local workstation · gated</small>
-            </button>
-            <button type="button" class="jarvis-target" data-worker="hermes" role="menuitemradio" aria-checked="false" disabled>
-              <span>Hermes</span><small>Remote agent · gated</small>
-            </button>
-            <button type="button" class="jarvis-target" data-worker="vps-codex" role="menuitemradio" aria-checked="false" disabled>
-              <span>VPS Codex</span><small>Remote server · gated</small>
-            </button>
+            <div class="jarvis-selector-status" role="status">Discovering who you can talk to…</div>
             <button type="button" id="jarvis-agent-cancel" class="jarvis-agent-cancel" role="menuitem" hidden disabled>Cancel active task</button>
           </div>
         </div>
@@ -1149,11 +1137,11 @@
         <textarea id="message" placeholder="Message Pandamonium..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
-          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model or agent"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Choose who to talk to" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Choose who</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <div class="model-picker-search-row">
               <div class="model-picker-search-wrap">
-                <input type="text" id="model-picker-search" placeholder="Search models and agents..." autocomplete="off" aria-label="Search models and agents">
+                <input type="text" id="model-picker-search" placeholder="Search who you can talk to..." autocomplete="off" aria-label="Search who you can talk to">
                 <button type="button" class="model-picker-refresh-btn" id="model-picker-refresh-btn" title="Refresh model picker" aria-label="Refresh model picker">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 </button>
@@ -1162,7 +1150,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
               </button>
             </div>
-            <div class="model-picker-list" id="model-picker-list"></div>
+            <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured conversation identities"></div>
           </div>
         </div>
       </div>
@@ -1511,6 +1499,56 @@
           </div>
           <div id="mad-mcp-service-list" class="mad-mcp-service-list"></div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Replayable first-run guide and product tour launcher -->
+  <div id="guide-modal" class="modal hidden">
+    <div class="modal-content guide-modal-content" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
+      <div class="modal-header">
+        <h4 id="guide-modal-title">Setup guide</h4>
+        <button type="button" class="close-btn" id="close-guide-modal" aria-label="Close setup guide">✖</button>
+      </div>
+      <div class="modal-body guide-modal-body">
+        <div id="guide-panel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="marketplace-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content marketplace-modal-content" role="dialog" aria-modal="true" aria-labelledby="marketplace-title">
+      <div class="modal-header marketplace-modal-header">
+        <div>
+          <h4 id="marketplace-title">Add Plugins</h4>
+          <p>Signed marketplace · lifecycle changes require an explicit M6 approval</p>
+        </div>
+        <button type="button" class="close-btn" id="close-marketplace-modal" aria-label="Close Add Plugins">✖</button>
+      </div>
+      <div class="modal-body marketplace-modal-body">
+        <div class="marketplace-toolbar">
+          <label class="marketplace-search-wrap">
+            <span class="sr-only">Search plugins</span>
+            <input id="marketplace-search" type="search" placeholder="Search plugins, publishers, or categories" autocomplete="off">
+          </label>
+          <label>
+            <span class="sr-only">Filter by category</span>
+            <select id="marketplace-category" aria-label="Filter plugins by category"><option value="">All categories</option></select>
+          </label>
+          <button type="button" id="marketplace-retry">Refresh</button>
+        </div>
+        <div id="marketplace-summary" class="marketplace-summary" role="status" aria-live="polite"></div>
+        <div id="marketplace-workspace" class="marketplace-workspace">
+          <section class="marketplace-results-pane" aria-label="Marketplace plugins">
+            <div id="marketplace-results" class="marketplace-results"></div>
+          </section>
+          <article id="marketplace-detail" class="marketplace-detail" tabindex="-1" aria-live="polite">
+            <button type="button" id="marketplace-back" class="marketplace-back">← Back to plugins</button>
+            <div id="marketplace-detail-content" class="marketplace-detail-content">
+              <div class="marketplace-state"><strong>Select a plugin</strong><span>Review compatibility, provenance, permissions, and dependencies.</span></div>
+            </div>
+          </article>
+        </div>
       </div>
     </div>
   </div>
@@ -2717,13 +2755,14 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/jarvisVoice.js?v=20260905T022733Z"></script>
+<script type="module" src="/static/js/jarvisVoice.js?v=20260905T210749Z"></script>
+<script type="module" src="/static/js/codexWorkspace.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260904T235900Z"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260905T022733Z"></script>
+<script type="module" src="/static/js/chat.js?v=20260905T210749Z"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
@@ -2734,7 +2773,7 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260904T235228Z"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260905T210749Z"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

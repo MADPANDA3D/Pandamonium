@@ -187,6 +187,9 @@ class Session(TimestampMixin, Base):
     endpoint_url = Column(String, nullable=False)
     model = Column(String, nullable=False)
     owner = Column(String, nullable=True, index=True)  # username; null = legacy/shared
+    # Server-owned conversation identity. Legacy rows are migrated to Jarvis;
+    # clients may display this value but cannot use local storage to override it.
+    agent_target = Column(String, nullable=False, default="jarvis", server_default="jarvis")
     
     # Configuration flags
     rag = Column(Boolean, default=False)
@@ -822,6 +825,33 @@ def _migrate_add_last_message_at_column():
             conn.close()
         except Exception:
             pass
+
+
+def _migrate_add_agent_target_column():
+    """Add the server-owned conversation identity and preserve legacy chats."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "agent_target" not in columns:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN agent_target TEXT NOT NULL DEFAULT 'jarvis'"
+            )
+        conn.execute(
+            "UPDATE sessions SET agent_target = 'jarvis' "
+            "WHERE agent_target IS NULL OR trim(agent_target) = ''"
+        )
+        conn.commit()
+        logging.getLogger(__name__).info("Migrated: added 'agent_target' on sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"agent_target migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 def _migrate_add_document_archived_column():
     """Add `archived` to documents (soft-archive flag). Guarded + idempotent."""
@@ -1939,6 +1969,7 @@ def init_db():
     _migrate_add_owner_column()
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
+    _migrate_add_agent_target_column()
     _migrate_add_folder_column()
     _migrate_add_token_columns()
     _migrate_add_mode_column()

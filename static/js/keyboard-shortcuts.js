@@ -43,15 +43,12 @@ export function _matchesCombo(e, combo, isMac = IS_MAC) {
  * @param {Object} modules.adminModule
  * @param {Object} modules.settingsModule
  * @param {Object} modules.searchChatModule
- * @param {Function} modules._closeCompareIfActive
- * @param {Function} modules._deactivateIncognito
  * @param {string} modules.API_BASE
  */
 export function initKeyboardShortcuts(modules) {
   const {
     el, Storage, sessionModule, uiModule, chatModule,
-    adminModule, settingsModule, searchChatModule,
-    _closeCompareIfActive, _deactivateIncognito, API_BASE
+    adminModule, settingsModule, searchChatModule, API_BASE
   } = modules;
 
   window._odysseusKeybinds = { ..._defaultKeybinds };
@@ -222,26 +219,8 @@ export function initKeyboardShortcuts(modules) {
     }
     if (_matchesCombo(e, kb.new_session)) {
       e.preventDefault();
-      if (_closeCompareIfActive()) return;
-      _deactivateIncognito();
-      const sid = sessionModule && sessionModule.getCurrentSessionId();
-      const sessions = sessionModule ? sessionModule.getSessions() : [];
-      const cur = sessions.find(s => s.id === sid);
-      const name = new Date().toLocaleTimeString();
-      const fd = new FormData();
-      fd.append('name', name);
-      fd.append('endpoint_url', cur ? cur.endpoint_url || '' : '');
-      fd.append('model', cur ? cur.model || '' : '');
-      if (cur && cur.endpoint_id) fd.append('endpoint_id', cur.endpoint_id);
-      fd.append('skip_validation', 'true');
-      fetch(`${API_BASE}/api/session`, { method: 'POST', body: fd, credentials: 'same-origin' })
-        .then(r => r.ok ? r.json() : null)
-        .then(async data => {
-          if (data) {
-            await sessionModule.loadSessions();
-            await sessionModule.selectSession(data.id);
-          }
-        });
+      const railNew = el('rail-new-session');
+      if (railNew) railNew.click();
       return;
     }
     if (_matchesCombo(e, kb.cancel)) {

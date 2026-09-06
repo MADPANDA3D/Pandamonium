@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Check, apply, inspect, recover, or roll back signed Pandamonium releases."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.release_updater import (
+    UpdateConfig,
+    UpdateError,
+    UpdateExecutor,
+    discover_release,
+    execute_request,
+    public_update_state,
+    queue_update,
+    recover_interrupted,
+)
+
+
+def emit(value: object) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="pandamonium-update")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("check", help="check the configured signed release channel")
+    sub.add_parser("status", help="show persisted update progress and history")
+    apply_parser = sub.add_parser("apply", help="apply the newest verified release")
+    apply_parser.add_argument(
+        "--request", type=Path, help="execute an owner-approved request file"
+    )
+    sub.add_parser("rollback", help="queue rollback to the retained prior release")
+    sub.add_parser("recover", help="recover an interrupted activation")
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "check":
+            emit(discover_release())
+        elif args.command == "status":
+            emit(public_update_state())
+        elif args.command == "apply" and args.request:
+            emit(execute_request(args.request))
+        elif args.command == "apply":
+            candidate = discover_release()
+            emit(UpdateExecutor(UpdateConfig.from_env()).apply(candidate))
+        elif args.command == "rollback":
+            emit(queue_update({}, action="rollback"))
+        else:
+            emit(recover_interrupted())
+        return 0
+    except UpdateError as exc:
+        emit({"ok": False, "error": str(exc)})
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -31,5 +31,8 @@ def test_header_indicator_uses_server_display_name():
     assert "const displayName = _modelDisplayName(modelId);" in body
 
 
-def test_agent_alias_rows_hide_backend_endpoint_label():
-    assert "const _isAgentAlias = ['jarvis', 'gordon', 'friday'].includes" in SRC
+def test_conversation_identity_rows_show_owner_type_instead_of_backend_endpoint():
+    assert "? 'Workstation Codex'" in SRC
+    assert "? 'Hermes'" in SRC
+    assert "? 'Self-hosted model'" in SRC
+    assert "const _epDisplay = m.epName || '';" in SRC

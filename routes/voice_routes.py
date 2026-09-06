@@ -20,13 +20,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.constants import DATA_DIR
+from core.constants import APP_VERSION, DATA_DIR
 from core.atomic_io import atomic_write_json
 from core.middleware import require_admin
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
 from src.agent_identity import agent_system_prompt, configured_agent_id, configured_agent_name
-from src.agent_worker_adapters import WORKER_IDS
 from src.agent_worker_broker import worker_statuses
 from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
 from src.action_intents import classify_tool_intent
@@ -42,6 +41,7 @@ from src.extension_host import extension_runtime_host
 from src.extension_mcp_adapter import execute_mcp_extension_tool, mcp_extension_tool_specs
 from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
+from src.model_discovery import installation_capabilities
 from src.settings import load_settings
 from src.tools.calendar import do_read_calendar
 from src.user_time import clear_user_time_context, now_user_local, set_user_tz_name, set_user_tz_offset
@@ -1362,7 +1362,22 @@ def _num_predict_for_text(text: str) -> int:
 
 
 def _asks_runtime_status(text: str) -> bool:
-    return bool(re.search(r"\b(what|which|identify|runtime|model|architecture|quantization)\b.*\b(model|running|runtime|architecture|quantization)\b", text, re.IGNORECASE))
+    return bool(re.search(r"\b(what|which|identify|runtime|model|architecture|quantization|version)\b.*\b(model|running|runtime|architecture|quantization|version)\b", text, re.IGNORECASE))
+
+
+def _voice_runtime_status_reply(voice_session: dict[str, Any], chat_session: Any) -> str:
+    model = str(getattr(chat_session, "model", "") or "unknown model")
+    character = _voice_character_name(voice_session)
+    settings = load_settings()
+    provider = str(settings.get("tts_provider") or "disabled")
+    voice = (
+        _tts_voice_for_final({"diagnostics": {"character_name": character}})
+        or str(settings.get("tts_voice") or "default")
+    )
+    return (
+        f"Pandamonium is running version {APP_VERSION}. I am {character}, using {model} for this voice call. "
+        f"Speech is rendered through {provider}, using {voice}."
+    )
 
 
 def _asks_current_business(text: str) -> bool:
@@ -1844,17 +1859,6 @@ def _setup_voice_speed(value: Any) -> float:
     return speed if 0.25 <= speed <= 4 else 1.0
 
 
-def _setup_logical_names(value: Any, *, limit: int = 16) -> list[str]:
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    names = {
-        str(item).strip()
-        for item in value
-        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", str(item).strip())
-    }
-    return sorted(names)[:limit]
-
-
 async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any) -> dict[str, Any]:
     """Build one redacted setup snapshot shared by HTTP status and voice."""
     stt = _safe_service_stats(stt_service, "STT")
@@ -1876,17 +1880,22 @@ async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any)
     if not isinstance(raw_workers, dict):
         raw_workers = {}
     workers: list[dict[str, Any]] = []
-    for worker_id in WORKER_IDS:
-        details = raw_workers.get(worker_id)
-        details = details if isinstance(details, dict) else {}
-        configured = bool(details.get("configured"))
-        ready = bool(configured and details.get("ready"))
+    for worker_id, details in sorted(raw_workers.items()):
+        if (
+            not isinstance(details, dict)
+            or details.get("configured") is not True
+            or details.get("ready") is not True
+        ):
+            continue
+        capabilities = installation_capabilities(details)
+        if not capabilities:
+            continue
         workers.append({
             "id": worker_id,
-            "configured": configured,
-            "ready": ready,
-            "status": "ready" if ready else ("unavailable" if configured else "not_configured"),
-            "capabilities": _setup_logical_names(details.get("capabilities")),
+            "configured": True,
+            "ready": True,
+            "status": "ready",
+            "capabilities": capabilities,
         })
     stt_available = bool(stt.get("available"))
     tts_available = bool(tts.get("available"))
@@ -1901,9 +1910,9 @@ async def _voice_status_snapshot(owner: str, stt_service: Any, tts_service: Any)
             guidance.append("Enable an available text-to-speech provider.")
     ready_workers = sum(1 for worker in workers if worker["ready"])
     if ready_workers:
-        guidance.append(f"{ready_workers} of {len(workers)} optional fixed read-only workers are ready.")
+        guidance.append(f"{ready_workers} configured installation identities are reachable.")
     else:
-        guidance.append("Optional fixed read-only workers are not ready.")
+        guidance.append("No configured installation identities are reachable.")
     setup = {
         "version": 1,
         "command": "Check voice setup.",
@@ -2715,6 +2724,9 @@ async def _dispatch_worker_request(
                 False,
                 owner,
                 presenter=_voice_character_name(voice_session),
+                request_id=request_id,
+                call_id=call["call_id"],
+                authority_ref=call["authority_ref"],
             )
             action = "blocked" if task.get("status") == "blocked" or not task.get("task_id") else "started"
     except Exception as exc:
@@ -3226,13 +3238,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         chat_session = _voice_chat_session(chat_session_id)
         model = str(getattr(chat_session, "model", "") or "unknown model")
         character = _voice_character_name(voice_session)
-        settings = load_settings()
-        provider = str(settings.get("tts_provider") or "disabled")
-        voice = _tts_voice_for_final({"diagnostics": {"character_name": character}}) or str(settings.get("tts_voice") or "default")
-        reply = (
-            f"I am {character}, using {model} for this voice call. "
-            f"Speech is rendered through {provider}, using {voice}."
-        )
+        reply = _voice_runtime_status_reply(voice_session, chat_session)
         yield {"type": "assistant_delta", "text": reply}
         yield {
             "type": "final",
@@ -3356,20 +3362,21 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         operator_id=str(operator_identity(owner) or ""),
         session_id=chat_session_id,
     )
-    if approval_reply and approval_reply["choice"] == "deny":
+    if approval_reply and approval_reply["choice"] in {"deny", "stale", "repeat"}:
         capability = str((approval_reply["decision"].get("capability") or {}).get("name") or "action")
-        reply = f"Denied: {capability}. I will not run it."
+        if approval_reply["choice"] == "deny":
+            reply = f"Denied: {capability}. I will not run it."
+        elif approval_reply["choice"] == "repeat":
+            reply = f"That approval for {capability} was already handled. Nothing ran again."
+        else:
+            reply = f"That approval for {capability} is stale. Nothing ran; request the action again."
         yield {"type": "assistant_delta", "text": reply}
-        yield _server_final_event(operator_text, reply, "authority_denied")
+        yield _server_final_event(operator_text, reply, f"authority_{approval_reply['choice']}")
         return
+    approved_action = approval_reply.get("pending_action") if approval_reply else None
     if approval_reply:
         decision = approval_reply["decision"]
         capability = str((decision.get("capability") or {}).get("name") or "the pending action")
-        text = (
-            f"Proceed with the exact previously requested {capability} action now. "
-            f"The authenticated operator approved decision {decision['decision_id']} once. "
-            "Reissue the original call with unchanged target and arguments; do not broaden it."
-        )
     voice_session["_protocol_request_id"] = str(uuid.uuid4())
     selected_target = str(voice_session.get("target") or "jarvis")
     origin_target = _voice_origin_target(voice_session, chat_session)
@@ -3481,6 +3488,12 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         ),
         context_extensions=extension_context,
         presenter=_voice_character_name(voice_session),
+        approved_action=approved_action,
+        persist_worker_results=selected_target != "pc-codex",
+        worker_workspace=(
+            str(voice_session.get("workspace") or "home-lab")
+            if selected_target == "pc-codex" else None
+        ),
     ):
         if not chunk.startswith("data: "):
             continue

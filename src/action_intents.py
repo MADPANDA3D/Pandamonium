@@ -114,6 +114,9 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
          r"\b(?:what|which)\s+(?:tools?|integrations?|plugins?|capabilities)\b.{0,100}\b(?:see|visible|available|access|have|connected|installed)\b|"
          r"\b(?:do|can)\s+you\s+(?:see|access|have)\b.{0,100}\b(?:tools?|integrations?|plugins?|capabilities)\b|"
          r"\b(?:list|show|tell\s+me)\b.{0,80}\b(?:tools?|integrations?|plugins?|capabilities)\b"),
+        ("integrations", "live integration health request",
+         r"\b(?:check|show|report|summari[sz]e|what(?:'s| is))\b.{0,100}\b(?:integration|plugin|mcp|portal)s?\b.{0,100}\b(?:health|status|working|connected|available)\b|"
+         r"\b(?:health|status)\b.{0,100}\b(?:all\s+|my\s+|configured\s+)?(?:integration|plugin|mcp|portal)s?\b"),
 
         # Deep research jobs, not quick conceptual mentions of research.
         ("web", "explicit web search request", rf"{_PLEASE}(?:do|run|use|perform|make)\s+(?:a\s+)?(?:web\s+search|search\s+the\s+web)\b.+"),

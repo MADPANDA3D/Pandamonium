@@ -10,6 +10,8 @@ import {
   getSelectedAgentTarget,
   initModelPicker,
   movePendingAgentTarget,
+  preserveSelectedAgentForNewChat,
+  syncSessionAgentTargets,
   updateModelPicker,
 } from './modelPicker.js';
 import themeModule from './theme.js';
@@ -330,7 +332,7 @@ function _normalizeSessionsList(fetched) {
     seen.add(id);
     unique.push(session);
   }
-  return unique;
+  return unique.sort(_compareSessionsByActivity);
 }
 
 // Initialize dependencies from app.js (no-op: dependencies now imported directly)
@@ -339,6 +341,7 @@ export function initDependencies() {}
 // ── Folder state persistence ──
 const FOLDER_STATE_KEY = 'odysseus-folder-state';
 const FOLDER_ORDER_KEY = 'odysseus-folder-order';
+const _folderAnimationGeneration = new Map();
 
 function loadFolderState() {
   return Storage.getJSON(FOLDER_STATE_KEY, {});
@@ -351,6 +354,82 @@ function loadFolderOrder() {
 }
 function saveFolderOrder(order) {
   Storage.setJSON(FOLDER_ORDER_KEY, order);
+}
+
+function _nextFolderAnimation(folderName) {
+  const generation = (_folderAnimationGeneration.get(folderName) || 0) + 1;
+  _folderAnimationGeneration.set(folderName, generation);
+  return generation;
+}
+
+function _findSessionFolder(folderName) {
+  const list = uiModule.el('session-list');
+  return Array.from(list?.querySelectorAll(':scope > .session-folder') || [])
+    .find(folder => folder.dataset.folderKey === folderName);
+}
+
+function _expandSessionFolder(folderName, generation) {
+  const state = loadFolderState();
+  state[folderName] = true;
+  saveFolderState(state);
+  renderSessionList();
+  requestAnimationFrame(() => {
+    if (_folderAnimationGeneration.get(folderName) !== generation) return;
+    const folder = _findSessionFolder(folderName);
+    if (!folder) return;
+    // eslint-disable-next-line no-unused-expressions
+    folder.offsetHeight;
+    folder.classList.add('session-folder-just-expanded');
+    setTimeout(() => {
+      if (_folderAnimationGeneration.get(folderName) !== generation) return;
+      folder.classList.remove('session-folder-just-expanded');
+    }, 700);
+  });
+}
+
+function _toggleSessionFolder(folderName, folder) {
+  const generation = _nextFolderAnimation(folderName);
+  const isCollapsed = loadFolderState()[folderName] === false;
+  const isReversingCollapse = folder.classList.contains('session-folder-just-collapsing');
+  folder.classList.remove('session-folder-just-expanded', 'session-folder-just-collapsing');
+
+  if (isCollapsed || isReversingCollapse) {
+    _expandSessionFolder(folderName, generation);
+    return;
+  }
+
+  // Keep the content mounted until the real outbound cascade finishes.
+  // eslint-disable-next-line no-unused-expressions
+  folder.offsetHeight;
+  folder.classList.add('session-folder-just-collapsing');
+  let collapseLocked = false;
+  const lockCollapsed = () => {
+    if (collapseLocked || _folderAnimationGeneration.get(folderName) !== generation) return;
+    collapseLocked = true;
+    const state = loadFolderState();
+    state[folderName] = false;
+    saveFolderState(state);
+    renderSessionList();
+  };
+  const dominoOut = folder.getAnimations({ subtree: true })
+    .filter(animation => animation.animationName === 'section-domino-out');
+  if (dominoOut.length === 0) {
+    lockCollapsed();
+  } else {
+    Promise.allSettled(dominoOut.map(animation => animation.finished)).then(lockCollapsed);
+    setTimeout(lockCollapsed, 600);
+  }
+}
+
+function _stampSessionFolderRippleRows(fragment) {
+  fragment.querySelectorAll('.session-folder-content').forEach(content => {
+    const rows = Array.from(content.children)
+      .filter(row => row.matches('.date-section-header, .list-item'));
+    rows.forEach((row, index) => {
+      row.style.setProperty('--session-folder-in-delay', `${(index + 1) * 40}ms`);
+      row.style.setProperty('--session-folder-out-delay', `${(rows.length - index - 1) * 25}ms`);
+    });
+  });
 }
 
 /** Get all unique folder names from current sessions. */
@@ -1001,9 +1080,25 @@ function _sessionBucketDate(s) {
   return s.last_message_at || s.updated_at || s.created_at || '';
 }
 
+function _compareSessionsByActivity(a, b) {
+  const activityDelta = (Date.parse(_sessionBucketDate(b)) || 0)
+    - (Date.parse(_sessionBucketDate(a)) || 0);
+  if (activityDelta) return activityDelta;
+  const createdDelta = (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+  if (createdDelta) return createdDelta;
+  return String(a.id).localeCompare(String(b.id));
+}
+
 function _createDateSectionHeader(label, kind = 'session') {
   const el = document.createElement('div');
   el.className = `date-section-header ${kind}-date-section-header`;
+  el.textContent = label;
+  return el;
+}
+
+function _createSidebarNavLabel(label) {
+  const el = document.createElement('div');
+  el.className = 'sidebar-nav-label';
   el.textContent = label;
   return el;
 }
@@ -1016,14 +1111,6 @@ function _appendSessionItemsWithDateHeaders(frag, items) {
       frag.appendChild(_createDateSectionHeader(label, 'session'));
       lastLabel = label;
     }
-    frag.appendChild(createSessionItem(s));
-  }
-}
-
-function _appendFavoriteSessionItems(frag, items) {
-  if (!items.length) return;
-  frag.appendChild(_createDateSectionHeader('Favorites', 'session'));
-  for (const s of items) {
     frag.appendChild(createSessionItem(s));
   }
 }
@@ -1042,7 +1129,17 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
-  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+  const currentTarget = getSelectedAgentTarget()
+    || sessions.find(session => session.id === currentSessionId)?.agent_target
+    || 'jarvis';
+  let orderedSessions = sessions.filter(s => (
+    !s.archived
+    && s.folder !== 'Assistant'
+    && !_isIncognitoSession(s.id)
+    && (s.name || '').trim() !== 'Nobody'
+    && (s.name || '').trim() !== 'Incognito'
+    && String(s.agent_target || 'jarvis') === currentTarget
+  ));
 
   if (savedOrder) {
     try {
@@ -1068,61 +1165,18 @@ function _renderSessionListImpl() {
 
   const _frag = document.createDocumentFragment();
 
-  // ── Flat sort modes: ignore folders, show one ordered list. ──
-  // Folders are only shown when _sortMode === 'group' (or null/empty
-  // for manual mode). This keeps the picker simple: a folder-grouped
-  // view is one of the sort choices, alongside Last Active / Newest.
-  if (_sortMode && _sortMode !== 'group') {
-    orderedSessions.sort((a, b) => {
-      if (_sortMode === 'newest') return (b.created_at || '').localeCompare(a.created_at || '');
-      // "Last active" sorts by the last actual MESSAGE, not updated_at —
-      // updated_at is bumped by renames / model swaps / folder moves, which
-      // made the order feel random. Fall back to updated_at/created_at for
-      // older rows that predate the last_message_at backfill.
-      if (_sortMode === 'active') {
-        const av = a.last_message_at || a.updated_at || a.created_at || '';
-        const bv = b.last_message_at || b.updated_at || b.created_at || '';
-        return bv.localeCompare(av);
-      }
-      return 0;
-    });
-    // Favorites are a global pinned block above date buckets, not just
-    // promoted within the day they belong to.
-    const allFlat = [
-      ...orderedSessions.filter(s => s.is_important),
-      ...orderedSessions.filter(s => !s.is_important),
-    ];
-
-    const limit = _showAllSessions ? allFlat.length : SIDEBAR_MAX_VISIBLE;
-    const visible = allFlat.slice(0, limit);
-    const activeIdx = allFlat.findIndex(s => s.id === currentSessionId);
-    if (!_showAllSessions && activeIdx >= limit) visible.push(allFlat[activeIdx]);
-
-    const visibleFavorites = visible.filter(s => s.is_important);
-    const visibleRegular = visible.filter(s => !s.is_important);
-    _appendFavoriteSessionItems(_frag, visibleFavorites);
-    _appendSessionItemsWithDateHeaders(_frag, visibleRegular);
-
-    if (allFlat.length > SIDEBAR_MAX_VISIBLE) {
-      const remaining = allFlat.length - SIDEBAR_MAX_VISIBLE;
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'session-show-more-btn';
-      toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
-      toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        _showAllSessions = !_showAllSessions;
-        renderSessionList();
-      });
-      _frag.appendChild(toggleBtn);
-    }
-
-    list.innerHTML = '';
-    list.appendChild(_frag);
-    _postRenderSessionList(list);
-    return;
+  // Favorites are real pinned chats. Keep them in one predictable place
+  // instead of burying them inside date buckets or project folders.
+  const pinnedSessions = orderedSessions.filter(s => s.is_important).sort(_compareSessionsByActivity);
+  orderedSessions = orderedSessions.filter(s => !s.is_important);
+  if (pinnedSessions.length) {
+    _frag.appendChild(_createSidebarNavLabel('Pinned'));
+    pinnedSessions.forEach(session => _frag.appendChild(createSessionItem(session)));
   }
 
-  // ── Group / manual mode: render folders, then unfiled sessions. ──
+  // Project folders stay visible in every sort mode. Sort changes the chats
+  // inside each project; it never destroys the project hierarchy.
+  if (_sortMode && _sortMode !== 'group') orderedSessions.sort(_compareSessionsByActivity);
   const folderState = loadFolderState();
   const folders = {}; // folderName -> [sessions]
   const unfiled = [];
@@ -1136,16 +1190,6 @@ function _renderSessionListImpl() {
     }
   });
 
-  // Move starred sessions to top of each group, preserving relative order
-  const starPartition = (arr) => {
-    const starred = arr.filter(s => s.is_important);
-    const rest = arr.filter(s => !s.is_important);
-    arr.length = 0;
-    arr.push(...starred, ...rest);
-  };
-  starPartition(unfiled);
-  Object.values(folders).forEach(arr => starPartition(arr));
-
   // Render folders first (above unfiled sessions)
   const savedFolderOrder = loadFolderOrder();
   const allFolderNames = Object.keys(folders);
@@ -1157,10 +1201,13 @@ function _renderSessionListImpl() {
     if (!orderedFolderNames.includes(name)) orderedFolderNames.push(name);
   });
 
+  if (orderedFolderNames.length) _frag.appendChild(_createSidebarNavLabel('Projects'));
+
   orderedFolderNames.forEach(folderName => {
     const folderDiv = document.createElement('div');
     folderDiv.className = 'session-folder';
     folderDiv.dataset.folderName = folderName;
+    folderDiv.dataset.folderKey = folderName;
 
     const header = document.createElement('div');
     header.className = 'session-folder-header';
@@ -1170,7 +1217,7 @@ function _renderSessionListImpl() {
     // Drag handle for folder reordering
     const dragHandle = document.createElement('span');
     dragHandle.className = 'folder-drag-handle';
-    dragHandle.textContent = '\u2630';
+    dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
     dragHandle.title = 'Drag to reorder folder';
     header.appendChild(dragHandle);
 
@@ -1217,11 +1264,7 @@ function _renderSessionListImpl() {
       e.stopPropagation();
       if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
       if (_folderTouchMoved) { _folderTouchMoved = false; return; }
-      const state = loadFolderState();
-      const isCollapsed = state[folderName] === false;
-      state[folderName] = isCollapsed ? true : false;
-      saveFolderState(state);
-      renderSessionList();
+      _toggleSessionFolder(folderName, folderDiv);
     });
 
     // Allow renaming folder via double-click
@@ -1254,9 +1297,7 @@ function _renderSessionListImpl() {
         visibleFolder.push(folderSessions[activeInFolder]);
       }
 
-      visibleFolder.forEach(s => {
-        content.appendChild(createSessionItem(s));
-      });
+      _appendSessionItemsWithDateHeaders(content, visibleFolder);
 
       if (folderSessions.length > FOLDER_MAX_VISIBLE) {
         const rem = folderSessions.length - FOLDER_MAX_VISIBLE;
@@ -1293,13 +1334,14 @@ function _renderSessionListImpl() {
   if (hasFolders && unfiled.length > 0) {
     const unsortedDiv = document.createElement('div');
     unsortedDiv.className = 'session-folder unsorted-folder';
+    unsortedDiv.dataset.folderKey = '__unsorted__';
     const unsortedHeader = document.createElement('div');
     unsortedHeader.className = 'session-folder-header';
     const unsortedCollapsed = loadFolderState()['__unsorted__'] === false;
 
     const dragHandle = document.createElement('span');
     dragHandle.className = 'folder-drag-handle';
-    dragHandle.textContent = '\u2630';
+    dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
     dragHandle.title = 'Drag to reorder folder';
     unsortedHeader.appendChild(dragHandle);
 
@@ -1309,7 +1351,7 @@ function _renderSessionListImpl() {
     unsortedHeader.appendChild(toggle);
     const nameSpan = document.createElement('span');
     nameSpan.className = 'folder-name';
-    nameSpan.textContent = 'Unsorted';
+    nameSpan.textContent = 'Chats';
     unsortedHeader.appendChild(nameSpan);
     const countSpan = document.createElement('span');
     countSpan.className = 'folder-count';
@@ -1337,10 +1379,8 @@ function _renderSessionListImpl() {
 
     unsortedHeader.addEventListener('click', (e) => {
       e.stopPropagation();
-      const state = loadFolderState();
-      state['__unsorted__'] = state['__unsorted__'] === false ? true : false;
-      saveFolderState(state);
-      renderSessionList();
+      if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
+      _toggleSessionFolder('__unsorted__', unsortedDiv);
     });
     unsortedDiv.appendChild(unsortedHeader);
     if (!unsortedCollapsed) {
@@ -1356,9 +1396,7 @@ function _renderSessionListImpl() {
   }
 
   if (unfiledTarget) {
-    visibleUnfiled.forEach(s => {
-      unfiledTarget.appendChild(createSessionItem(s));
-    });
+    _appendSessionItemsWithDateHeaders(unfiledTarget, visibleUnfiled);
   }
 
   // "Show more" / "Show less" toggle
@@ -1374,6 +1412,8 @@ function _renderSessionListImpl() {
     });
     unfiledTarget.appendChild(toggleBtn);
   }
+
+  _stampSessionFolderRippleRows(_frag);
 
   // Flush all built elements into the list in one operation
   list.innerHTML = '';
@@ -1648,10 +1688,11 @@ export async function loadSessions() {
       fetched = await res.json();
     }
     sessions = _normalizeSessionsList(fetched);
+    syncSessionAgentTargets(sessions);
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');
-    if (sessions.length === 0) {
+    if (sessions.length === 0 && getSelectedAgentTarget() !== 'pc-codex') {
       sessionsSection.classList.add('hidden');
     } else {
       sessionsSection.classList.remove('hidden');
@@ -1690,7 +1731,7 @@ export async function loadSessions() {
       // completions call loadSessions() later; without this guard that reload
       // sees no current session and auto-selects the previous chat.
       targetId = null;
-    } else if (hashId) {
+    } else if (hashId && activeSessions.some(s => String(s.id) === hashId)) {
       targetId = hashId;
     } else if (currentSessionId && activeSessions.some(s => s.id === currentSessionId)) {
       targetId = currentSessionId;
@@ -2201,11 +2242,14 @@ function _prepareNewChat(pendingChat) {
 }
 
 export function createBlankChat() {
-  // Keep a navigation sentinel until discovery or an explicit model choice
-  // supplies a usable pending chat. loadSessions() treats any pending object
-  // as authoritative, while hasPendingChat() below only reports usable models.
-  clearPendingAgentTarget();
-  _prepareNewChat({ source: 'discovering' });
+  const current = sessions.find(session => session.id === currentSessionId);
+  preserveSelectedAgentForNewChat();
+  _prepareNewChat(current?.endpoint_url && current?.model ? {
+    url: current.endpoint_url,
+    modelId: current.model,
+    endpointId: current.endpoint_id || '',
+    source: 'new_chat',
+  } : { source: 'discovering' });
 }
 
 export function createDirectChat(url, modelId, endpointId, source = '') {
@@ -2228,6 +2272,7 @@ export async function materializePendingSession() {
   fd.append('name', name);
   fd.append('endpoint_url', pending.url || '');
   fd.append('model', pending.modelId || '');
+  fd.append('agent_target', getSelectedAgentTarget() || 'jarvis');
   if (pending.url && pending.modelId) {
     fd.append('skip_validation', 'true');
   }
@@ -2411,8 +2456,11 @@ export function initDragSort() {
 window.addEventListener('hashchange', () => {
   const hashId = window.location.hash.replace('#', '');
   if (/^(document|note|image|email|event|task|skill|research)-/.test(hashId) || /^open=notes&note=/.test(hashId)) return;
-  if (hashId && hashId !== currentSessionId) {
+  const isActiveSession = sessions.some(s => String(s.id) === hashId && !s.archived);
+  if (hashId && isActiveSession && hashId !== currentSessionId) {
     selectSession(hashId);
+  } else if (hashId && !isActiveSession) {
+    history.replaceState(null, '', currentSessionId ? `#${currentSessionId}` : window.location.pathname);
   }
 });
 

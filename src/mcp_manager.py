@@ -828,6 +828,23 @@ class McpManager:
 
         return schemas
 
+    def get_readonly_action_policies(self) -> Dict[str, Dict[str, str]]:
+        """Return authority metadata only for MCP calls proven read-only.
+
+        Unknown or mutating MCP tools deliberately receive no declaration and
+        continue to fail closed at the authority gate.
+        """
+        policies: Dict[str, Dict[str, str]] = {}
+        for server_id, tools in self._tools.items():
+            if self.is_extension_server(server_id):
+                continue
+            if self.is_builtin(server_id) and server_id != "builtin_browser":
+                continue
+            for tool in tools:
+                if mcp_tool_is_readonly(tool):
+                    policies[f"mcp__{server_id}__{tool['name']}"] = {"action_effect": "read"}
+        return policies
+
     def get_all_tools(self, disabled_map: Optional[Dict[str, set]] = None) -> List[Dict]:
         """Return a flat list of all discovered tools with server info."""
         result = []

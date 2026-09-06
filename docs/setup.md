@@ -60,6 +60,83 @@ downloads and serves. The app itself is lightweight; local model serving is the
 heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
 connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
+### Atomic native Linux updates
+
+The fixed footer can install a signed Pandamonium release only when Linux is
+using the managed immutable layout below. A normal Git checkout is never
+rewritten in place, and a Docker container must be updated from its host.
+
+```text
+/opt/pandamonium/
+  current -> releases/1.0.11-<commit8>
+  releases/<version>-<commit8>/
+  venvs/<version>-<commit8>/
+/var/lib/pandamonium/data/
+/var/backups/pandamonium/
+```
+
+Every release artifact has a SHA-256 digest, exact Git commit, requirements
+digest, compatibility/migration contract, and Ed25519 signature. The embedded
+public key verifies that manifest before any archive is extracted. An update
+then performs these steps in order:
+
+1. download and verify the signed manifest and checksummed artifact;
+2. stage a new immutable release and reuse or build its virtual environment;
+3. create and verify a full data backup, including uploads and documents;
+4. restore that backup into a rehearsal directory and run migrations twice;
+5. stop the app, run the same idempotent migrations twice on live data, and
+   atomically switch the `current` symlink;
+6. start the app and verify both `/api/health` and the exact target version;
+7. automatically restore the prior symlink and backup if any live step fails.
+
+The authenticated admin UI writes only a request under the external data
+directory. Install the root-owned units so systemd performs the privileged
+work. Review and adjust every path before enabling them:
+
+```bash
+sudo install -m 0644 pandamonium-updater.service /etc/systemd/system/
+sudo install -m 0644 pandamonium-updater.path /etc/systemd/system/
+sudo install -m 0644 pandamonium-update-recover.service /etc/systemd/system/
+sudo install -d -m 0755 /etc/pandamonium
+sudoedit /etc/pandamonium/update.env
+sudo systemctl daemon-reload
+sudo systemctl enable --now pandamonium-updater.path
+sudo systemctl enable pandamonium-update-recover.service
+```
+
+`/etc/pandamonium/update.env` must be readable only by root and define the same
+data path and app port used by the web service:
+
+```ini
+PANDAMONIUM_DATA_DIR=/var/lib/pandamonium/data
+PANDAMONIUM_UPDATE_ROOT=/opt/pandamonium
+PANDAMONIUM_UPDATE_TRIGGER=systemd-path
+PANDAMONIUM_UPDATE_SERVICE=pandamonium.service
+PANDAMONIUM_UPDATE_BACKUP_DIR=/var/backups/pandamonium
+PANDAMONIUM_UPDATE_CONFIG_FILES=/etc/pandamonium/update.env
+PANDAMONIUM_UPDATE_CHANNEL=stable
+APP_PORT=7000
+```
+
+Copy those non-secret values into the app service environment too, then add an
+app-service ordering drop-in so boot recovery completes first:
+
+```ini
+[Unit]
+After=pandamonium-update-recover.service
+```
+
+Use `./scripts/pandamonium update check` and `update status` for readback. The
+footer's **Check for updates** action never installs by itself; **Update now**
+requires a separate confirmation and shows phase, percentage, backup path,
+result, and rollback availability. Set `PANDAMONIUM_UPDATE_CHANNEL=prerelease`
+only on hosts that intentionally accept prereleases.
+
+The updater keeps the immediately previous immutable release and exact verified
+backup. A manual rollback restores both when the signed compatibility contract
+requires data restoration. Interrupted live activation is recovered from the
+persisted state by `pandamonium-update-recover.service` at boot.
+
 ### Apple Silicon
 Docker on macOS cannot use the Metal GPU. For GPU-accelerated Cookbook on an
 M-series Mac, run Pandamonium natively:

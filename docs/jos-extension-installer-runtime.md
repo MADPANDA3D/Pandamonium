@@ -26,6 +26,14 @@ Enable, disable, rollback, and recoverable uninstall use
 steps. `GET /api/extensions` returns bounded package/plan state without internal
 staging paths.
 
+The signed marketplace uses `POST /api/extensions/marketplace/plans` as the
+only distribution bridge into that same manager. It verifies the trusted
+catalog, compatibility, declared dependencies, artifact signature/size/digest,
+immutable Git revision, and checked-out manifest before creating the existing
+approval decision. Required missing plugins fail closed; optional host packages
+are reported but never installed implicitly. The owner UI previews restart and
+removal/preservation scope before approval.
+
 ## Git and filesystem boundary
 
 - Production source forms are canonical HTTPS repositories on GitHub, GitLab,

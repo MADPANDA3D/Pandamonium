@@ -35,3 +35,15 @@ def test_discovery_ignores_invalid_tailscale_ip_shapes(monkeypatch):
     model_discovery._hosts_cache_time = 0
 
     assert model_discovery.discover_tailscale_hosts() == ["100.1.1.3"]
+
+
+def test_installation_capabilities_accept_only_supported_health_claims():
+    assert model_discovery.installation_capabilities({
+        "installation_capabilities": ["claude", "model", "shell", "claude"],
+    }) == ["claude", "model"]
+    assert model_discovery.installation_capabilities({
+        "connection": {"protocol": "codex-bridge"},
+    }) == ["codex"]
+    assert model_discovery.installation_capabilities({
+        "connection": {"protocol": "hermes-runs"},
+    }) == ["hermes"]

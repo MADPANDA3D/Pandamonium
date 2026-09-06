@@ -32,6 +32,7 @@ _TAILNET_TARGETS = (
 _OPAQUE_PEER_ID = re.compile(r"^[0-9a-f]{32}$")
 _SAFE_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$")
 _KNOWN_PEER_OS = {"android", "darwin", "freebsd", "ios", "linux", "windows"}
+_INSTALLATION_CAPABILITIES = ("codex", "claude", "hermes", "model")
 
 # Preserve the legacy explicit helper contract for callers that still invoke
 # ``discover_tailscale_hosts`` directly. Normal model discovery no longer uses
@@ -40,6 +41,29 @@ _KNOWN_PEER_OS = {"android", "darwin", "freebsd", "ios", "linux", "windows"}
 _hosts_cache: List[str] = []
 _hosts_cache_time: float = 0
 _HOSTS_CACHE_TTL = 60
+
+
+def installation_capabilities(details: Any) -> List[str]:
+    """Return only owner-selector capabilities proven by installation health."""
+    if not isinstance(details, dict):
+        return []
+    raw = details.get("installation_capabilities")
+    connection = details.get("connection") if isinstance(details.get("connection"), dict) else {}
+    if not isinstance(raw, (list, tuple, set)):
+        raw = connection.get("capabilities")
+    values = [
+        str(value).strip().lower()
+        for value in (raw if isinstance(raw, (list, tuple, set)) else [])
+    ]
+    capabilities = [name for name in _INSTALLATION_CAPABILITIES if name in values]
+    if capabilities:
+        return capabilities
+    protocol = str(connection.get("protocol") or details.get("adapter") or "").lower()
+    if "codex" in protocol:
+        return ["codex"]
+    if "hermes" in protocol:
+        return ["hermes"]
+    return []
 
 
 def _parse_tailscale_status(raw: str) -> Dict[str, Any]:

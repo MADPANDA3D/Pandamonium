@@ -1,6 +1,6 @@
 {
   "name": "pandamonium",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "private": true,
   "repository": {
     "type": "git",
@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test:browser": "playwright test",
+    "test:deployed-new-chat": "node tests/deployed/new-chat-after-tool.mjs",
     "test:voice-orb": "node tests/test_foreground_control.js && node tests/test_voice_orb.js && node tests/test_voice_orb_setup.js && node tests/voice_lifecycle.test.mjs && playwright test tests/browser/voice-orb.spec.js"
   },
   "devDependencies": {

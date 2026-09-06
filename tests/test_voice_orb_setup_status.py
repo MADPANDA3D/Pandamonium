@@ -6,7 +6,6 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from routes import voice_routes
-from src.agent_worker_adapters import WORKER_IDS
 
 
 @pytest.fixture(autouse=True)
@@ -126,6 +125,7 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
                 "configured": True,
                 "ready": True,
                 "capabilities": ["read_only", "task_status", "http://192.0.2.99"],
+                "installation_capabilities": ["codex"],
                 "workspaces": ["client-workspace"],
                 "connection": {"state": "connected", "reason": "http://192.0.2.11"},
             },
@@ -167,8 +167,8 @@ async def test_authenticated_status_and_voice_command_share_one_redacted_snapsho
         "voice": "Safe Voice",
     }
     assert setup["workers"]["ready_count"] == 1
-    assert [item["id"] for item in setup["workers"]["items"]] == list(WORKER_IDS)
-    assert setup["workers"]["items"][0]["capabilities"] == ["read_only", "task_status"]
+    assert [item["id"] for item in setup["workers"]["items"]] == ["pc-codex"]
+    assert setup["workers"]["items"][0]["capabilities"] == ["codex"]
 
     response = await _endpoint(router, "stream_voice_response")(
         "voice-1",
@@ -226,10 +226,7 @@ async def test_setup_status_fails_closed_without_returning_source_errors(monkeyp
     assert status["setup"]["core_ready"] is False
     assert status["setup"]["model"]["configured"] is False
     assert status["setup"]["workers"]["ready_count"] == 0
-    assert all(
-        item["status"] == "not_configured"
-        for item in status["setup"]["workers"]["items"]
-    )
+    assert status["setup"]["workers"]["items"] == []
     assert status["stt"] == {"available": False, "provider": "disabled"}
     assert status["tts"] == {
         "available": False,

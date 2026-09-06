@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 
-test('sidebar reports version status and ordinary chat can select configured Friday', async ({ page }) => {
+test('New Chat preserves configured Friday as the conversation target', async ({ page }) => {
   let fridayConfigured = true;
   let agentCatalogGate = null;
   await page.route('**/api/**', route => {
@@ -9,22 +9,35 @@ test('sidebar reports version status and ordinary chat can select configured Fri
     if (path === '/api/version') {
       return route.fulfill({ json: {
         version: '1.0.9',
+        commit: '1111111111111111111111111111111111111111',
+        release: '1.0.9-11111111',
         latest_version: '1.0.10',
+        latest_commit: '2222222222222222222222222222222222222222',
         update_available: true,
         update_url: 'https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.10',
         update_status: 'available',
+        compatible: true,
+        can_update: true,
+        installation: { supported: true, trigger: 'systemd-path' },
+        operation: { status: 'idle' },
       } });
     }
-    if (path === '/api/agent-workers') {
+    if (path === '/api/selector-catalog') {
       if (agentCatalogGate) {
-        return agentCatalogGate.then(() => route.fulfill({ json: {} }));
+        return agentCatalogGate.then(() => route.fulfill({ json: {
+          discovery: { schema_version: 'pandamonium.discovery.v1', entities: [] },
+          selections: [],
+        } }));
       }
-      if (!fridayConfigured) return route.fulfill({ json: {} });
+      const entities = fridayConfigured ? [{
+        kind: 'worker', id: 'worker:friday', display_name: 'Friday',
+        health: { state: 'healthy' },
+      }] : [];
+      const selections = fridayConfigured ? [{
+        entity_id: 'worker:friday', kind: 'worker', target: 'pc-codex', selectable: true,
+      }] : [];
       return route.fulfill({ json: {
-        'pc-codex': {
-          id: 'pc-codex', label: 'Friday', configured: true, ready: true,
-          machine: 'Local workstation', connection: { state: 'connected' },
-        },
+        discovery: { schema_version: 'pandamonium.discovery.v1', entities }, selections,
       } });
     }
     if (path === '/api/auth/status') {
@@ -39,19 +52,18 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   await page.goto('/static/index.html');
 
   await expect(page.locator('#sidebar-update-version')).toHaveText('Version v1.0.9');
-  await expect(page.locator('#sidebar-update-state')).toHaveText('v1.0.10 available');
+  await expect(page.locator('#sidebar-update-commit')).toHaveText('Deployed 1.0.9-11111111 · 11111111');
+  await expect(page.locator('#sidebar-update-state')).toHaveText('v1.0.10 available · 22222222');
+  await expect(page.locator('#sidebar-update-check')).toHaveText('Check for updates');
   await expect(page.locator('#sidebar-update-action')).toBeVisible();
-  await expect(page.locator('#sidebar-update-action')).toHaveAttribute(
-    'href',
-    'https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.10',
-  );
+  await expect(page.locator('#sidebar-update-action')).toHaveText('Update to v1.0.10');
 
   await page.locator('#model-picker-btn').click();
   const friday = page.locator('.model-switch-item').filter({ hasText: 'Friday' });
   await expect(friday).toBeVisible();
   await friday.click();
-  await expect(page.locator('#model-picker-menu')).toHaveClass(/hidden/);
   await expect(page.locator('#model-picker-label')).toHaveText('Friday');
+  await page.evaluate(() => window.codexWorkspaceBrowser?.close?.());
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
@@ -62,12 +74,6 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   });
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
-  ).getSelectedAgentTarget())).toBe('');
-
-  await page.locator('#model-picker-btn').click();
-  await page.locator('.model-switch-item').filter({ hasText: 'Friday' }).click();
-  await expect.poll(() => page.evaluate(async () => (
-    await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
 
   await page.evaluate(async () => {
@@ -76,7 +82,7 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   });
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
-  ).getSelectedAgentTarget())).toBe('');
+  ).getSelectedAgentTarget())).toBe('pc-codex');
 
   await page.evaluate(async () => {
     const sessions = await import('/static/js/sessions.js');
@@ -88,9 +94,19 @@ test('sidebar reports version status and ordinary chat can select configured Fri
     await import('/static/js/modelPicker.js')
   ).getSelectedAgentTarget())).toBe('pc-codex');
 
+  await page.evaluate(async () => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.createBlankChat();
+  });
+  await expect.poll(() => page.evaluate(async () => (
+    await import('/static/js/modelPicker.js')
+  ).getSelectedAgentTarget())).toBe('pc-codex');
+  await expect(page.locator('#model-picker-label')).toHaveText('Friday');
+
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('odysseus-agent-selections') || '{}',
   )['session-friday']?.target)).toBe('pc-codex');
+
   fridayConfigured = false;
   let releaseAgentCatalog;
   agentCatalogGate = new Promise(resolve => { releaseAgentCatalog = resolve; });
@@ -108,10 +124,10 @@ test('sidebar reports version status and ordinary chat can select configured Fri
   agentCatalogGate = null;
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
-  ).getSelectedAgentTarget())).toBe('');
+  ).getSelectedAgentTarget())).toBe('pc-codex');
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('odysseus-agent-selections') || '{}',
-  )['session-friday'])).toBeUndefined();
+  )['session-friday']?.available)).toBe(false);
 
   await page.evaluate(async () => {
     const sessions = await import('/static/js/sessions.js');

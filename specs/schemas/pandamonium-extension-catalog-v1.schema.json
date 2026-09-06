@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pandamonium:schema:extension-catalog:v1",
+  "title": "Pandamonium published extension catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "catalog_id", "generated_at", "expires_at", "entries", "signature"],
+  "properties": {
+    "schema_version": {"const": "pandamonium.extension-catalog.v1"},
+    "catalog_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "entries": {
+      "type": "array",
+      "maxItems": 2048,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["package_type", "manifest", "summary", "categories", "license", "publisher", "artifact", "compatibility", "dependencies", "configuration", "restart_required", "review"],
+        "properties": {
+          "package_type": {"const": "plugin"},
+          "manifest": {"$ref": "jos-extension-v1.schema.json"},
+          "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+          "categories": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"}},
+          "license": {"type": "string", "minLength": 1, "maxLength": 100},
+          "publisher": {"$ref": "#/$defs/publisher"},
+          "artifact": {"$ref": "#/$defs/artifact"},
+          "compatibility": {"$ref": "#/$defs/compatibility"},
+          "dependencies": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/dependency"}},
+          "configuration": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/configuration"}},
+          "restart_required": {"enum": ["none", "plugin", "pandamonium"]},
+          "review": {"$ref": "#/$defs/review"}
+        }
+      }
+    },
+    "signature": {"$ref": "#/$defs/signature"}
+  },
+  "$defs": {
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "value"],
+      "properties": {
+        "algorithm": {"const": "ed25519"},
+        "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "value": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "url", "key_id"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+        "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "size_bytes", "signature"],
+      "properties": {
+        "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912},
+        "signature": {"$ref": "#/$defs/signature"}
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pandamonium_min", "pandamonium_max", "platforms", "architectures"],
+      "properties": {
+        "pandamonium_min": {"$ref": "#/$defs/semver"},
+        "pandamonium_max": {"$ref": "#/$defs/semver"},
+        "platforms": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["linux", "macos", "windows"]}},
+        "architectures": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["amd64", "arm64"]}}
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dependency_type", "id", "minimum_version", "maximum_version", "optional"],
+      "properties": {
+        "dependency_type": {"enum": ["plugin", "optional_package"]},
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "minimum_version": {"$ref": "#/$defs/semver"},
+        "maximum_version": {"$ref": "#/$defs/semver"},
+        "optional": {"type": "boolean"}
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "description", "required", "secret"],
+      "properties": {
+        "key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"},
+        "description": {"type": "string", "minLength": 1, "maxLength": 500},
+        "required": {"type": "boolean"},
+        "secret": {"type": "boolean"}
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reviewed_at", "reviewer", "security_advisories"],
+      "properties": {
+        "status": {"enum": ["active", "deprecated", "revoked"]},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "reviewer": {"type": "string", "minLength": 1, "maxLength": 200},
+        "security_advisories": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/advisory"}}
+      }
+    },
+    "advisory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "url", "severity", "summary"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "url": {"type": "string", "format": "uri", "pattern": "^https://"},
+        "severity": {"enum": ["low", "medium", "high", "critical"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 500}
+      }
+    }
+  }
+}

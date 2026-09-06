@@ -1,8 +1,10 @@
+from core.constants import APP_VERSION
 from routes.voice_routes import (
     JARVIS_TOOLS,
     _asks_current_business,
     _asks_runtime_status,
     _delegation_route,
+    _voice_runtime_status_reply,
     _workspace_for_text,
     VOICE_LONG_NUM_PREDICT,
     VOICE_NORMAL_NUM_PREDICT,
@@ -15,8 +17,24 @@ from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
 def test_voice_runtime_and_business_intents_are_server_routed():
     assert _asks_runtime_status("What model are you running?")
     assert _asks_runtime_status("Give me the runtime architecture and quantization")
+    assert _asks_runtime_status("What Pandamonium version is running?")
     assert _asks_current_business("What are our current business updates?")
     assert not _asks_current_business("Explain how a business works")
+
+
+def test_voice_runtime_reply_uses_the_running_application_version(monkeypatch):
+    monkeypatch.setattr("routes.voice_routes.load_settings", lambda: {
+        "tts_provider": "chatterbox",
+        "tts_voice": "jarvis",
+    })
+    reply = _voice_runtime_status_reply(
+        {"character_name": "Jarvis"},
+        type("Session", (), {"model": "brain-model"})(),
+    )
+
+    assert f"version {APP_VERSION}" in reply
+    assert "brain-model" in reply
+    assert "chatterbox" in reply
 
 
 def test_leos_worker_names_route_without_confusing_nimbus_and_vps():

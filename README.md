@@ -55,6 +55,12 @@ following maintained platform capabilities.
   brings in tools only when the request needs them.
 - Local and API model support through configurable endpoints, with model
   switching that does not replace the agent's identity, memory, or sessions.
+- One owner-visible selector classifies inference models, conversational agents,
+  and execution workers from the same live discovery and health data in chat
+  and voice, including explicit unavailable states without silent rerouting.
+- The server persists each conversation target. The left sidebar follows that
+  target: conversational identities show only their dated chats, while a Codex
+  worker shows its allowlisted projects with tasks loaded beneath each project.
 
 ### Governed agents, tools, and extensions
 
@@ -66,6 +72,8 @@ following maintained platform capabilities.
 - Generic extension manifests, installed-plugin visibility, pinned Git source
   installation, capability registration, enable/disable lifecycle, and
   rollback without giving extensions authority over the host.
+- Signed plugin marketplace discovery and approval-gated install, update,
+  enable/disable, rollback, and recoverable removal through the native lifecycle.
 - Scoped client-state and foreground-action bridges for extensions that need
   to interact with the active browser surface.
 - ORACLE remains an optional reference extension; clean installations start
@@ -95,6 +103,9 @@ following maintained platform capabilities.
 - Optional concurrent read-only worker adapters with attributed progress,
   cancellation, session reconstruction, health gates, and disabled-by-default
   configuration.
+- The optional PC Codex bridge exposes only installation-allowlisted projects
+  and owner-safe task metadata through supported Codex App Server APIs, with
+  exact resume, create, steer, cancel, progress, and cited artifact handoff.
   See the [Voice Orb documentation](docs/voice-orb/README.md).
 
 ### Reliability, deployment, and security
@@ -119,8 +130,20 @@ The canonical command is `pandamonium`:
 ```bash
 ./scripts/pandamonium help
 ./scripts/pandamonium backup snapshot
+./scripts/pandamonium update check
+./scripts/pandamonium update status
 ./scripts/pandamonium mcp list
 ```
+
+Managed native Linux installs can enable signed, checksummed updates from the
+fixed footer. Each install stages an immutable release, verifies a full data
+backup, rehearses idempotent migrations, atomically switches `current`, and
+automatically restores the prior release and data if health checks fail. See
+[Atomic native Linux updates](docs/setup.md#atomic-native-linux-updates).
+
+Docker, ordinary source checkouts, macOS, and Windows still use their platform's
+normal upgrade procedure; the footer reports that host-managed updates are
+required instead of attempting an in-container or in-checkout mutation.
 
 The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment

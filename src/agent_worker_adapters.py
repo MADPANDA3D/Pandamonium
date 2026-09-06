@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -11,10 +12,12 @@ from typing import Any, Protocol
 import httpx
 
 from src.agent_identity import configured_agent_name
+from src.model_discovery import installation_capabilities
 
 MILESTONE_MARKER = "[[ODYSSEUS_MILESTONE]]"
 WORKER_IDS = ("pc-codex", "hermes", "vps-codex")
 _WORKSPACE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+CODEX_BRIDGE_PROTOCOL = "pandamonium.codex-bridge.v2"
 
 
 class WorkerUnavailable(RuntimeError):
@@ -33,6 +36,10 @@ def _worker_label(name: str, default: str) -> str:
     value = str(os.getenv(name) or default).strip()
     value = " ".join(value.split())
     return value[:80] or default
+
+
+def _display_name(value: object, fallback: str) -> str:
+    return " ".join(str(value or fallback).split())[:80] or fallback
 
 
 def configured_worker_workspaces() -> dict[str, list[str]]:
@@ -208,6 +215,8 @@ class CodexBridgeAdapter:
             "permission_mode": task["permission_mode"],
             "approved": task.get("approved", False),
             "codex_thread_id": task.get("codex_thread_id"),
+            "thread_title": task.get("thread_title"),
+            "request_id": task.get("request_id"),
         }
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(f"{self.url}/v1/tasks", json=payload, headers=self._headers())
@@ -223,6 +232,45 @@ class CodexBridgeAdapter:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
                 f"{self.url}/v1/tasks/{task['remote_task_id']}",
+                headers=self._headers(),
+            )
+        response.raise_for_status()
+        return response.json()
+
+    async def catalog_projects(
+        self,
+        *,
+        query: str = "",
+        cursor: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        if not self.enabled:
+            raise WorkerUnavailable("codex_bridge_not_configured")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.url}/v1/catalog/projects",
+                params={"query": query, "cursor": cursor, "limit": limit},
+                headers=self._headers(),
+            )
+        response.raise_for_status()
+        return response.json()
+
+    async def catalog_tasks(
+        self,
+        project_id: str,
+        *,
+        query: str = "",
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if not self.enabled:
+            raise WorkerUnavailable("codex_bridge_not_configured")
+        if not _WORKSPACE_NAME.fullmatch(project_id):
+            raise ValueError("invalid_project_id")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{self.url}/v1/catalog/projects/{project_id}/tasks",
+                params={"query": query, "cursor": cursor, "limit": limit},
                 headers=self._headers(),
             )
         response.raise_for_status()
@@ -288,11 +336,35 @@ class CodexBridgeAdapter:
             response.raise_for_status()
             payload = response.json()
             payload = payload if isinstance(payload, dict) else {}
+            features = payload.get("features") if isinstance(payload.get("features"), dict) else {}
+            protocol_ready = (
+                payload.get("protocol_version") == CODEX_BRIDGE_PROTOCOL
+                and features.get("project_catalog") is True
+                and features.get("task_control") is True
+            )
+            if not protocol_ready:
+                return {
+                    "state": "incompatible",
+                    "reason": "bridge_update_required",
+                    "machine": self.machine,
+                    "protocol": "codex-bridge",
+                    "protocol_ready": False,
+                }
+            installation = (
+                payload.get("installation")
+                if isinstance(payload.get("installation"), dict)
+                else {}
+            )
+            display_name = _display_name(installation.get("display_name"), self.label)
+            if display_name == self.worker:
+                display_name = self.label
             return {
                 "state": "connected",
                 "machine": self.machine,
                 "protocol": "codex-bridge",
-                "protocol_ready": bool(payload.get("app_server")),
+                "protocol_ready": True,
+                "display_name": display_name,
+                "installation_capabilities": ["codex"],
             }
         except Exception as exc:
             return {"machine": self.machine, **_health_failure(exc)}
@@ -508,6 +580,8 @@ class HermesRunsAdapter:
                 "state": "connected",
                 "machine": self.machine,
                 "protocol": "hermes-runs",
+                "display_name": self.label,
+                "installation_capabilities": ["hermes"],
                 **_hermes_run_features(features),
             }
             version = str(public_payload.get("version") or "").strip()
@@ -579,5 +653,43 @@ def worker_catalog(
                 getattr(adapter, "configured_workspaces", None)
                 or workspaces.get(worker, [])
             ),
+        }
+    return result
+
+
+async def probe_worker_statuses(
+    registry: dict[str, WorkerAdapter],
+    catalog: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Probe configured adapters and expose one redacted status contract."""
+    configured = [
+        (worker, adapter)
+        for worker, adapter in registry.items()
+        if bool(adapter.enabled) and worker in catalog
+    ]
+    health_rows = await asyncio.gather(*(adapter.health() for _, adapter in configured))
+    result: dict[str, dict[str, Any]] = {}
+    for (worker, adapter), health in zip(configured, health_rows):
+        health = health if isinstance(health, dict) else {}
+        state = str(health.get("state") or "unreachable")
+        connection = {"state": state}
+        for key in ("reason", "protocol"):
+            value = str(health.get(key) or "").strip()
+            if value:
+                connection[key] = value[:120]
+        if "protocol_ready" in health:
+            connection["protocol_ready"] = health.get("protocol_ready") is True
+        ready = state == "connected"
+        result[worker] = {
+            **catalog[worker],
+            "label": _display_name(
+                health.get("display_name"),
+                catalog[worker].get("label") or worker,
+            ),
+            "configured": True,
+            "ready": ready,
+            "enabled": ready,
+            "installation_capabilities": installation_capabilities(health),
+            "connection": connection,
         }
     return result

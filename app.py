@@ -991,6 +991,66 @@ async def get_version():
 
     return await release_status()
 
+
+@app.post("/api/update/check")
+async def check_for_updates(request: Request):
+    from core.middleware import require_admin
+    from src.update_status import release_status
+
+    require_admin(request)
+    return await release_status(force=True)
+
+
+@app.get("/api/update/status")
+async def get_update_progress(request: Request):
+    from core.middleware import require_admin
+    from src.release_updater import public_update_state
+
+    require_admin(request)
+    return public_update_state()
+
+
+@app.post("/api/update/apply")
+async def apply_available_update(request: Request):
+    from core.middleware import require_admin
+    from src.release_updater import UpdateError, discover_release, queue_update
+
+    require_admin(request)
+    try:
+        try:
+            approval = await request.json()
+        except (ValueError, TypeError):
+            approval = {}
+        expected_version = (
+            str(approval.get("version") or "") if isinstance(approval, dict) else ""
+        )
+        expected_commit = (
+            str(approval.get("commit") or "") if isinstance(approval, dict) else ""
+        )
+        if not expected_version or not expected_commit:
+            raise UpdateError("check for updates before approving an install")
+        candidate = await asyncio.to_thread(discover_release)
+        if (
+            candidate.get("version") != expected_version
+            or candidate.get("commit") != expected_commit
+        ):
+            raise UpdateError("available release changed; check again before approving")
+        return queue_update(candidate)
+    except UpdateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/update/rollback")
+async def rollback_application_update(request: Request):
+    from core.middleware import require_admin
+    from src.release_updater import UpdateError, queue_update
+
+    require_admin(request)
+    try:
+        return queue_update({}, action="rollback")
+    except UpdateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}

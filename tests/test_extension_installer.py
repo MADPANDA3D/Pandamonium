@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -7,6 +8,11 @@ import pytest
 import src.extension_installer as installer
 from routes.extension_routes import setup_extension_routes
 from src.authority_protocol import AuthorityStore
+from src.extension_host import (
+    ExtensionRuntimeHost,
+    LiveCatalogWebAdapter,
+    configured_extension_urls,
+)
 from src.extension_installer import (
     ExtensionLifecycleError,
     ExtensionLifecycleManager,
@@ -15,9 +21,7 @@ from src.extension_installer import (
     normalize_git_source_url,
     validate_git_ref,
 )
-from src.extension_host import ExtensionRuntimeHost, LiveCatalogWebAdapter, configured_extension_urls
 from src.extension_registry import ExtensionRegistry
-
 
 SOURCE_URL = "https://github.com/example/jos-extension-fixture.git"
 ORACLE_SOURCE_URL = "https://github.com/MADPANDA3D/ORACLE.git"
@@ -34,7 +38,9 @@ def _run(argv, *, cwd=None):
     ).stdout.strip()
 
 
-def _manifest(version: str, tool: str, *, runtime: str = "web", commands=None, revision="self"):
+def _manifest(
+    version: str, tool: str, *, runtime: str = "web", commands=None, revision="self"
+):
     return {
         "protocol_version": "jos-extension.v1",
         "extension_id": "fixture",
@@ -44,16 +50,18 @@ def _manifest(version: str, tool: str, *, runtime: str = "web", commands=None, r
         "runtime": {"type": runtime, "entrypoint": "index.html"},
         "capabilities": {
             "descriptor": {"type": "inline"},
-            "schemas": [{
-                "name": tool,
-                "description": f"Run {tool}",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"target": {"type": "string"}},
-                    "required": ["target"],
-                    "additionalProperties": False,
-                },
-            }],
+            "schemas": [
+                {
+                    "name": tool,
+                    "description": f"Run {tool}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"target": {"type": "string"}},
+                        "required": ["target"],
+                        "additionalProperties": False,
+                    },
+                }
+            ],
         },
         "permissions": {"default": "read_only", "capabilities": {}},
         "health": {"type": "catalog", "timeout_seconds": 3},
@@ -66,7 +74,9 @@ def _manifest(version: str, tool: str, *, runtime: str = "web", commands=None, r
 
 def _commit(repo: Path, manifest: dict, tag: str) -> str:
     (repo / "jarvis-extension.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (repo / "index.html").write_text(f"<h1>{manifest['version']}</h1>", encoding="utf-8")
+    (repo / "index.html").write_text(
+        f"<h1>{manifest['version']}</h1>", encoding="utf-8"
+    )
     _run(["git", "add", "jarvis-extension.json", "index.html"], cwd=repo)
     _run(["git", "commit", "-m", f"fixture {manifest['version']}"], cwd=repo)
     revision = _run(["git", "rev-parse", "HEAD"], cwd=repo)
@@ -104,7 +114,9 @@ def _mapped_git(repo: Path, source_url: str = SOURCE_URL) -> GitSourceClient:
     return GitSourceClient(runner=runner, check_public_urls=False)
 
 
-def _manager(tmp_path: Path, repo: Path, *, adapters=None, source_url: str = SOURCE_URL):
+def _manager(
+    tmp_path: Path, repo: Path, *, adapters=None, source_url: str = SOURCE_URL
+):
     authority = AuthorityStore(tmp_path / "authority.json")
     registry = ExtensionRegistry(tmp_path / "registry.json")
     manager = ExtensionLifecycleManager(
@@ -117,7 +129,9 @@ def _manager(tmp_path: Path, repo: Path, *, adapters=None, source_url: str = SOU
     return manager, authority, registry
 
 
-def test_extension_root_accepts_nested_mount_but_rejects_source_directory(monkeypatch, tmp_path):
+def test_extension_root_accepts_nested_mount_but_rejects_source_directory(
+    monkeypatch, tmp_path
+):
     app_root = tmp_path / "app"
     data_root = app_root / "data"
     extensions_root = data_root / "extensions"
@@ -134,7 +148,9 @@ def test_extension_root_accepts_nested_mount_but_rejects_source_directory(monkey
         root=extensions_root,
         registry=ExtensionRegistry(tmp_path / "mounted-registry.json"),
     )
-    with pytest.raises(ExtensionLifecycleError, match="extension_root_must_be_outside_source"):
+    with pytest.raises(
+        ExtensionLifecycleError, match="extension_root_must_be_outside_source"
+    ):
         ExtensionLifecycleManager(
             root=app_root / "extensions",
             registry=ExtensionRegistry(tmp_path / "source-registry.json"),
@@ -144,7 +160,9 @@ def test_extension_root_accepts_nested_mount_but_rejects_source_directory(monkey
 def _approve_and_execute(manager, authority, plan, *, operator="operator"):
     decision = plan["authority_decision"]
     assert decision["decision"] == "approval_required"
-    authority.resolve(decision["decision_id"], operator_id=operator, choice="approve", scope="once")
+    authority.resolve(
+        decision["decision_id"], operator_id=operator, choice="approve", scope="once"
+    )
     return manager.execute_plan(plan["plan_id"], operator_id=operator)
 
 
@@ -156,9 +174,10 @@ def _lifecycle(manager, authority, operation, *, target=None, extension_id="fixt
 
 
 def test_supported_git_urls_and_refs_are_strict():
-    assert normalize_git_source_url(
-        "https://github.com/example/repo", check_public=False
-    ) == "https://github.com/example/repo.git"
+    assert (
+        normalize_git_source_url("https://github.com/example/repo", check_public=False)
+        == "https://github.com/example/repo.git"
+    )
     assert validate_git_ref("release/v1.2.3") == "release/v1.2.3"
     for value in (
         "git@github.com:example/repo.git",
@@ -175,7 +194,9 @@ def test_supported_git_urls_and_refs_are_strict():
             validate_git_ref(ref)
 
 
-def test_install_preview_pins_revision_and_requires_explicit_approval(tmp_path, git_fixture):
+def test_install_preview_pins_revision_and_requires_explicit_approval(
+    tmp_path, git_fixture
+):
     repo, v1, _v2 = git_fixture
     manager, authority, registry = _manager(tmp_path, repo)
 
@@ -187,7 +208,12 @@ def test_install_preview_pins_revision_and_requires_explicit_approval(tmp_path, 
     assert plan["source_revision"] == v1
     assert plan["manifest"]["source"]["revision"] == "self"
     assert plan["requested_permissions"] == {"default": "read_only", "capabilities": {}}
-    assert plan["lifecycle_commands"] == {"install": [], "start": [], "stop": [], "remove": []}
+    assert plan["lifecycle_commands"] == {
+        "install": [],
+        "start": [],
+        "stop": [],
+        "remove": [],
+    }
     with pytest.raises(ExtensionLifecycleError, match="extension_approval_required"):
         manager.execute_plan(plan["plan_id"], operator_id="operator")
     with pytest.raises(ExtensionLifecycleError, match="extension_plan_owner_mismatch"):
@@ -198,11 +224,68 @@ def test_install_preview_pins_revision_and_requires_explicit_approval(tmp_path, 
 
     assert result["result"]["status"] == "succeeded"
     assert manager.snapshot()["extensions"]["fixture"]["active_revision"] == v1
-    assert registry.effective_capabilities()["inspect_fixture"]["extension_id"] == "fixture"
+    assert (
+        registry.effective_capabilities()["inspect_fixture"]["extension_id"]
+        == "fixture"
+    )
     install_path = manager.root / "installed" / "fixture" / "revisions" / v1
     assert install_path.is_dir()
     assert not install_path.is_relative_to(Path(installer.get_app_root()).resolve())
     assert manager.execute_plan(plan["plan_id"], operator_id="operator") == result
+
+
+def test_signed_marketplace_manifest_is_reconciled_before_approval(
+    tmp_path, git_fixture
+):
+    repo, v1, _v2 = git_fixture
+    manager, _authority, _registry = _manager(tmp_path, repo)
+    expected = _manifest("1.0.0", "inspect_fixture", revision=v1)
+
+    plan = manager.preview_source(
+        "install",
+        SOURCE_URL,
+        v1,
+        operator_id="operator",
+        expected_manifest=expected,
+        distribution={
+            "artifact": {"sha256": "a" * 64, "size_bytes": 7},
+            "dependencies": [],
+            "configuration": [],
+            "restart_required": "none",
+        },
+    )
+    assert plan["marketplace"]["artifact"]["sha256"] == "a" * 64
+
+    authority = manager.authority
+    authority.resolve(
+        plan["authority_decision"]["decision_id"],
+        operator_id="operator",
+        choice="approve",
+        scope="once",
+    )
+    private_plan = manager._read_state()["plans"][plan["plan_id"]]
+    staged_manifest = Path(private_plan["staging_path"]) / "jarvis-extension.json"
+    tampered = json.loads(staged_manifest.read_text(encoding="utf-8"))
+    tampered["name"] = "Tampered after approval"
+    staged_manifest.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        ExtensionLifecycleError, match="extension_signed_manifest_mismatch"
+    ):
+        manager.execute_plan(plan["plan_id"], operator_id="operator")
+    assert manager.registry.snapshot()["extensions"] == {}
+
+    expected["name"] = "Tampered"
+    with pytest.raises(
+        ExtensionLifecycleError, match="extension_signed_manifest_mismatch"
+    ):
+        manager.preview_source(
+            "install",
+            SOURCE_URL,
+            v1,
+            operator_id="operator",
+            expected_manifest=expected,
+        )
+    assert len(manager.snapshot()["plans"]) == 1
 
 
 def test_upgrade_failure_keeps_previous_revision_and_catalog(tmp_path, git_fixture):
@@ -216,10 +299,13 @@ def test_upgrade_failure_keeps_previous_revision_and_catalog(tmp_path, git_fixtu
 
     manager, authority, registry = _manager(tmp_path, repo, adapters=[FailV2()])
     _approve_and_execute(
-        manager, authority,
+        manager,
+        authority,
         manager.preview_source("install", SOURCE_URL, "v1", operator_id="operator"),
     )
-    upgrade = manager.preview_source("upgrade", SOURCE_URL, "v2", operator_id="operator")
+    upgrade = manager.preview_source(
+        "upgrade", SOURCE_URL, "v2", operator_id="operator"
+    )
     authority.resolve(
         upgrade["authority_decision"]["decision_id"],
         operator_id="operator",
@@ -260,7 +346,9 @@ def test_failed_first_install_exposes_no_catalog(tmp_path, git_fixture):
     assert registry.snapshot()["extensions"] == {}
 
 
-def test_enable_disable_upgrade_rollback_and_uninstall_are_reversible(tmp_path, git_fixture, monkeypatch):
+def test_enable_disable_upgrade_rollback_and_uninstall_are_reversible(
+    tmp_path, git_fixture, monkeypatch
+):
     repo, v1, v2 = git_fixture
     manager, authority, registry = _manager(tmp_path, repo)
     events = []
@@ -270,7 +358,8 @@ def test_enable_disable_upgrade_rollback_and_uninstall_are_reversible(tmp_path, 
         lambda **values: events.append(values) or {"event_id": str(len(events))},
     )
     _approve_and_execute(
-        manager, authority,
+        manager,
+        authority,
         manager.preview_source("install", SOURCE_URL, "v1", operator_id="operator"),
     )
 
@@ -284,7 +373,8 @@ def test_enable_disable_upgrade_rollback_and_uninstall_are_reversible(tmp_path, 
     assert set(registry.effective_capabilities()) == {"inspect_fixture"}
 
     _approve_and_execute(
-        manager, authority,
+        manager,
+        authority,
         manager.preview_source("upgrade", SOURCE_URL, "v2", operator_id="operator"),
     )
     assert manager.snapshot()["extensions"]["fixture"]["active_revision"] == v2
@@ -296,7 +386,18 @@ def test_enable_disable_upgrade_rollback_and_uninstall_are_reversible(tmp_path, 
     rollback_again = _lifecycle(manager, authority, "rollback", target=v1)
     assert rollback_again["result"]["structured"]["idempotent"] is True
 
-    uninstalled = _lifecycle(manager, authority, "uninstall")
+    uninstall_plan = manager.preview_lifecycle(
+        "uninstall", "fixture", operator_id="operator"
+    )
+    assert uninstall_plan["removal"] == {
+        "remove_paths": [],
+        "preserve_paths": [],
+        "deleted_paths": [],
+        "retained_paths": [],
+        "user_data_default": "preserve",
+        "package_recoverable": True,
+    }
+    uninstalled = _approve_and_execute(manager, authority, uninstall_plan)
     assert uninstalled["result"]["structured"]["recoverable"] is True
     assert manager.snapshot()["extensions"] == {}
     assert registry.snapshot()["extensions"] == {}
@@ -311,13 +412,26 @@ def test_enable_disable_upgrade_rollback_and_uninstall_are_reversible(tmp_path, 
     assert all(event.get("request_id") for event in approvals + results)
 
 
-def test_unsupported_runtime_requires_adapter_and_never_creates_plan(tmp_path, git_fixture):
+def test_unsupported_runtime_requires_adapter_and_never_creates_plan(
+    tmp_path, git_fixture
+):
     repo, _v1, _v2 = git_fixture
-    commands = {"install": ["npm", "ci"], "start": ["npm", "start"], "stop": [], "remove": []}
-    _commit(repo, _manifest("3.0.0", "service_tool", runtime="service", commands=commands), "v3")
+    commands = {
+        "install": ["npm", "ci"],
+        "start": ["npm", "start"],
+        "stop": [],
+        "remove": [],
+    }
+    _commit(
+        repo,
+        _manifest("3.0.0", "service_tool", runtime="service", commands=commands),
+        "v3",
+    )
     manager, _authority, registry = _manager(tmp_path, repo)
 
-    with pytest.raises(ExtensionLifecycleError, match="extension_adapter_required:service:inline"):
+    with pytest.raises(
+        ExtensionLifecycleError, match="extension_adapter_required:service:inline"
+    ):
         manager.preview_source("install", SOURCE_URL, "v3", operator_id="operator")
 
     assert manager.snapshot()["plans"] == {}
@@ -336,7 +450,10 @@ def test_oracle_reference_contract_installs_from_its_live_catalog_without_a_copi
         "descriptor": {"type": "live_catalog", "endpoint": "/api/oracle/capabilities"}
     }
     query_tools = (
-        "analyst_query", "get_current_view_state", "get_entity_context", "next_iss_pass"
+        "analyst_query",
+        "get_current_view_state",
+        "get_entity_context",
+        "next_iss_pass",
     )
     manifest["permissions"] = {
         "default": "external_side_effect",
@@ -351,15 +468,18 @@ def test_oracle_reference_contract_installs_from_its_live_catalog_without_a_copi
         return {
             "protocol": "oracle",
             "version": "native-3",
-            "tools": [{
-                "name": name,
-                "description": f"Native {name}",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-            } for name in query_tools],
+            "tools": [
+                {
+                    "name": name,
+                    "description": f"Native {name}",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                }
+                for name in query_tools
+            ],
         }
 
     adapter = LiveCatalogWebAdapter(host, catalog_fetcher=fetch_catalog)
@@ -369,7 +489,9 @@ def test_oracle_reference_contract_installs_from_its_live_catalog_without_a_copi
     result = _approve_and_execute(
         manager,
         authority,
-        manager.preview_source("install", ORACLE_SOURCE_URL, "live-v3", operator_id="operator"),
+        manager.preview_source(
+            "install", ORACLE_SOURCE_URL, "live-v3", operator_id="operator"
+        ),
     )
 
     assert result["result"]["status"] == "succeeded"
@@ -405,7 +527,9 @@ def test_live_catalog_timeout_fails_install_closed(tmp_path, git_fixture):
         repo,
         adapters=[LiveCatalogWebAdapter(host, catalog_fetcher=timeout)],
     )
-    plan = manager.preview_source("install", SOURCE_URL, "timeout-v3", operator_id="operator")
+    plan = manager.preview_source(
+        "install", SOURCE_URL, "timeout-v3", operator_id="operator"
+    )
     authority.resolve(
         plan["authority_decision"]["decision_id"],
         operator_id="operator",
@@ -438,10 +562,15 @@ def test_extension_runtime_url_map_is_strict_and_reference_neutral():
     manifest = _manifest("1.0.0", "inspect_fixture")
     manifest["runtime"]["entrypoint"] = "ui/index.html"
     host = ExtensionRuntimeHost({"fixture": "https://fixture.example.test/runtime/"})
-    assert host.surface_url(manifest) == "https://fixture.example.test/runtime/ui/index.html"
+    assert (
+        host.surface_url(manifest)
+        == "https://fixture.example.test/runtime/ui/index.html"
+    )
 
 
-def test_manifest_source_and_revision_mismatch_fail_before_approval(tmp_path, git_fixture):
+def test_manifest_source_and_revision_mismatch_fail_before_approval(
+    tmp_path, git_fixture
+):
     repo, _v1, _v2 = git_fixture
     wrong_source = _manifest("3.0.0", "wrong_source")
     wrong_source["source"]["url"] = "https://github.com/example/another-repo.git"
@@ -450,21 +579,36 @@ def test_manifest_source_and_revision_mismatch_fail_before_approval(tmp_path, gi
     _commit(repo, wrong_revision, "wrong-revision")
     manager, _authority, _registry = _manager(tmp_path, repo)
 
-    with pytest.raises(ExtensionLifecycleError, match="extension_manifest_source_mismatch"):
-        manager.preview_source("install", SOURCE_URL, "wrong-source", operator_id="operator")
-    with pytest.raises(ExtensionLifecycleError, match="extension_manifest_revision_mismatch"):
-        manager.preview_source("install", SOURCE_URL, "wrong-revision", operator_id="operator")
+    with pytest.raises(
+        ExtensionLifecycleError, match="extension_manifest_source_mismatch"
+    ):
+        manager.preview_source(
+            "install", SOURCE_URL, "wrong-source", operator_id="operator"
+        )
+    with pytest.raises(
+        ExtensionLifecycleError, match="extension_manifest_revision_mismatch"
+    ):
+        manager.preview_source(
+            "install", SOURCE_URL, "wrong-revision", operator_id="operator"
+        )
     assert manager.snapshot()["plans"] == {}
 
 
 def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixture):
     repo, _v1, _v2 = git_fixture
     manager, _authority, _registry = _manager(tmp_path, repo)
-    routes = {route.path: route for route in setup_extension_routes(manager).routes}
+    routes = {
+        route.path: route
+        for route in setup_extension_routes(
+            manager, marketplace_loader=lambda: None
+        ).routes
+    }
 
     assert set(routes) == {
         "/api/extensions",
         "/api/extensions/catalog",
+        "/api/extensions/marketplace",
+        "/api/extensions/marketplace/plans",
         "/api/extensions/plans/source",
         "/api/extensions/plans/lifecycle",
         "/api/extensions/plans/{plan_id}/execute",
@@ -474,8 +618,17 @@ def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixt
         for path, route in routes.items()
     }
     assert dependencies["/api/extensions/catalog"] == {"require_user"}
+    assert dependencies["/api/extensions/marketplace"] == {"require_user"}
+    assert asyncio.run(
+        routes["/api/extensions/marketplace"].endpoint(_owner="operator")
+    ) == {
+        "schema_version": "pandamonium.marketplace-view.v1",
+        "status": "offline",
+        "failure": "marketplace_catalog_offline",
+        "plugins": [],
+    }
     assert all(
         "require_admin" in route_dependencies
         for path, route_dependencies in dependencies.items()
-        if path != "/api/extensions/catalog"
+        if path not in {"/api/extensions/catalog", "/api/extensions/marketplace"}
     )

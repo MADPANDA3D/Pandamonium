@@ -133,6 +133,7 @@ class SessionManager:
             headers=headers,
             history=[],
             owner=getattr(db_session, "owner", None),
+            agent_target=getattr(db_session, "agent_target", None) or "jarvis",
             is_important=getattr(db_session, "is_important", False) or False,
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
@@ -191,6 +192,7 @@ class SessionManager:
             headers=headers,
             history=history,
             owner=getattr(db_session, 'owner', None),
+            agent_target=getattr(db_session, 'agent_target', None) or 'jarvis',
             is_important=getattr(db_session, 'is_important', False) or False,
         )
 
@@ -481,6 +483,7 @@ class SessionManager:
             session.rag = db_session.rag
             session.archived = db_session.archived
             session.owner = getattr(db_session, "owner", None)
+            session.agent_target = getattr(db_session, "agent_target", None) or "jarvis"
             session.is_important = getattr(db_session, "is_important", False) or False
             session.message_count = getattr(db_session, "message_count", session.message_count) or 0
             return True
@@ -551,6 +554,7 @@ class SessionManager:
                 rag=rag,
                 headers={},
                 owner=owner,
+                agent_target="jarvis",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -565,6 +569,7 @@ class SessionManager:
                 rag=rag,
                 headers={},
                 owner=owner,
+                agent_target="jarvis",
             )
 
             self.sessions[session_id] = session

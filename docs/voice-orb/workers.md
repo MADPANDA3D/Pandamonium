@@ -2,7 +2,7 @@
 
 Workers are optional and disabled by default. A clean installation with no workers retains normal Voice Orb conversation.
 
-## Fixed adapters
+## Compatibility adapters
 
 | ID | Purpose | Beta default |
 |---|---|---|
@@ -10,7 +10,7 @@ Workers are optional and disabled by default. A clean installation with no worke
 | `hermes` | Hermes task service that advertises enforced read-only capability | Disabled, fail-closed |
 | `vps-codex` | Codex bridge on an explicitly configured server | Disabled, read-only |
 
-The beta does not load arbitrary Python modules or accept caller-selected adapters. Labels, workspace allowlists, and capabilities come from neutral configuration and the worker's bounded health response.
+The beta does not load arbitrary Python modules or accept caller-selected adapters. These IDs are private compatibility slots, not a public topology: owner-facing discovery includes only explicitly enabled, currently reachable installations. Labels, workspace allowlists, and Codex/Hermes capabilities come from neutral configuration and the worker's bounded health response. An unconfigured or unreachable VPS Codex slot is absent.
 
 ## Configuration
 
@@ -54,9 +54,9 @@ Only an interactive Pandamonium user session may invoke voice orchestration. Bea
 
 Normal status may expose only `configured`, `ready`, adapter ID, bounded capabilities, neutral workspace identifiers, and connection state. Endpoint URLs, IP addresses, token paths, token contents, and raw upstream errors must not be returned.
 
-The Voice Orb setup summary is narrower: it includes only each fixed worker ID,
-`configured`, `ready`, a normalized status, and at most 16 logical capability
-names. It omits workspace names and connection reasons entirely.
+The Voice Orb setup summary is narrower: it includes only configured and
+reachable installation IDs plus normalized Codex, Claude, Hermes, or model
+capabilities. It omits absent slots, workspace names, and connection reasons.
 
 ## Voice commands
 

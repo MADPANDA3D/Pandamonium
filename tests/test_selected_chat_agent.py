@@ -1,43 +1,90 @@
+import pytest
+
 from routes.chat_routes import (
+    _direct_selected_identity_turn,
     _retire_synthesized_worker_results,
     _selected_agent_context,
-    _selected_worker_request,
 )
+from src.worker_routing import selected_worker_workspace
 
 
-def test_selected_friday_uses_native_app_tools_for_small_lookups():
-    assert not _selected_worker_request("List all books in my library")
-    assert not _selected_worker_request("Check my calendar for Friday")
-    assert "native Pandamonium tools directly" in _selected_agent_context("Friday")
+def test_only_jarvis_uses_the_configured_reasoning_model_context():
+    context = _selected_agent_context("Jarvis")
+
+    assert "configured reasoning model" in context
+    assert "Present every response as Friday" not in context
 
 
-def test_selected_friday_delegates_explicit_project_work():
-    assert _selected_worker_request("Inspect the active project's source configuration")
-    assert _selected_worker_request("Run the repository tests")
-    assert _selected_worker_request("Review the Books service source code")
-    assert _selected_worker_request("Fix the calendar integration code")
-    assert _selected_worker_request("Check the server configuration")
-    assert _selected_worker_request("Search the repository for this symbol")
-    assert _selected_worker_request("Find the configuration file")
-    assert _selected_worker_request("Read the repository file")
-    assert _selected_worker_request("Fix the tests")
-    assert _selected_worker_request("Review these files")
-    assert _selected_worker_request("Inspect the containers")
-    assert _selected_worker_request("Create a repository script")
-    assert _selected_worker_request("Start the project server")
-    assert _selected_worker_request("Stop the project service")
-    assert _selected_worker_request("Compare these files")
-    assert _selected_worker_request("Fix the authentication bug")
-    assert _selected_worker_request("Debug the API")
-    assert not _selected_worker_request("Do not run the repository tests")
-    assert not _selected_worker_request("Don't deploy the service")
-    assert not _selected_worker_request("I don't want you to run the repository tests")
-    assert not _selected_worker_request("Don't ever under any circumstances deploy the service")
-    assert _selected_worker_request("I don't know why it failed, but fix the API bug")
-    assert _selected_worker_request("Don't run tests, but fix the API bug")
-    assert not _selected_worker_request("Read the book Clean Code")
-    assert not _selected_worker_request("Find the book in my library that still needs OCR")
-    assert not _selected_worker_request("Read the email about the API bug")
+def test_selected_friday_defaults_to_home_lab_without_inheriting_business(monkeypatch):
+    monkeypatch.setattr("src.worker_routing.worker_catalog", lambda: {
+        "pc-codex": {"workspaces": ["business", "home-lab"]},
+    })
+
+    assert selected_worker_workspace("pc-codex", "Inspect the Pandamonium source") == "home-lab"
+    assert selected_worker_workspace("pc-codex", "Inspect the Business workspace") == "business"
+
+
+@pytest.mark.asyncio
+async def test_selected_gordon_routes_directly_through_hermes(monkeypatch):
+    captured = {}
+
+    async def direct(session_id, message, **kwargs):
+        captured.update(session_id=session_id, message=message, **kwargs)
+        return "Gordon response."
+
+    monkeypatch.setattr("src.jarvis_agent.direct_hermes_turn", direct)
+
+    result = await _direct_selected_identity_turn(
+        "hermes",
+        session_id="chat-1",
+        message="Inspect this.",
+        owner="leo",
+        workspace="home-lab",
+        presenter="Gordon",
+    )
+
+    assert result == ("response", "Gordon response.", "completed")
+    assert captured == {
+        "session_id": "chat-1",
+        "message": "Inspect this.",
+        "owner": "leo",
+        "workspace": "home-lab",
+    }
+
+
+@pytest.mark.asyncio
+async def test_selected_friday_routes_directly_through_codex(monkeypatch):
+    captured = {}
+
+    async def direct(session_id, message, **kwargs):
+        captured.update(session_id=session_id, message=message, **kwargs)
+        return {"task_id": "task-1", "presenter": "Friday"}, "steered"
+
+    monkeypatch.setattr("src.jarvis_agent.direct_codex_turn", direct)
+
+    result = await _direct_selected_identity_turn(
+        "pc-codex",
+        session_id="chat-1",
+        message="Continue the task.",
+        owner="leo",
+        workspace="home-lab",
+        presenter="Friday",
+        codex_thread_id="thread-selected-in-sidebar",
+    )
+
+    assert result == (
+        "task",
+        {"task_id": "task-1", "presenter": "Friday"},
+        "steered",
+    )
+    assert captured == {
+        "session_id": "chat-1",
+        "message": "Continue the task.",
+        "owner": "leo",
+        "workspace": "home-lab",
+        "presenter": "Friday",
+        "codex_thread_id": "thread-selected-in-sidebar",
+    }
 
 
 def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch):
@@ -55,41 +102,3 @@ def test_worker_result_is_retired_only_from_saved_response_metadata(monkeypatch)
     }, "leo", "chat-1")
 
     assert consumed == [("complete", "leo", "chat-1")]
-
-
-def test_selected_friday_routes_contextual_followup_only_with_active_task(monkeypatch):
-    monkeypatch.setattr(
-        "src.jarvis_agent.find_active_task",
-        lambda session_id, worker, workspace, owner: {
-            "task_id": "active",
-        } if (session_id, worker, workspace, owner) == (
-            "chat-1", "pc-codex", None, "leo",
-        ) else None,
-    )
-
-    assert not _selected_worker_request("Fix that")
-    assert not _selected_worker_request(
-        "Do not fix that",
-        session_id="chat-1",
-        owner="leo",
-    )
-    assert _selected_worker_request(
-        "Fix that",
-        session_id="chat-1",
-        owner="leo",
-    )
-    assert not _selected_worker_request(
-        "Read this book",
-        session_id="chat-1",
-        owner="leo",
-    )
-    for app_request in (
-        "Update this scheduled task",
-        "Fix that todo",
-        "Change this reminder",
-    ):
-        assert not _selected_worker_request(
-            app_request,
-            session_id="chat-1",
-            owner="leo",
-        )

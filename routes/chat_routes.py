@@ -55,7 +55,9 @@ from src.tool_policy import (
 )
 from src.authority_protocol import authority_store, operator_identity
 from src.operational_protocol import record_operational_event
-from src.worker_routing import is_contextual_project_work_followup, is_explicit_project_work_request
+from src.worker_routing import (
+    selected_worker_workspace as _selected_worker_workspace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +66,50 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 _HERMES_AGENT_ENDPOINT_NAME = "Hermes API"
 _HERMES_AGENT_MODEL = "hermes-agent"
-def _selected_worker_request(
-    message: str,
-    *,
-    session_id: str = "",
-    owner: str = "",
-) -> bool:
-    """Delegate explicit project/source work, not small app-data lookups."""
-    if is_explicit_project_work_request(message):
-        return True
-    if not session_id or not owner or not is_contextual_project_work_followup(message):
-        return False
-    try:
-        from src.jarvis_agent import find_active_task
 
-        return find_active_task(session_id, "pc-codex", None, owner) is not None
-    except Exception:
-        return False
+
+def _authoritative_agent_target(session, requested: str = "") -> str:
+    """Prefer the persisted session target over caller-supplied routing state."""
+    stored_value = getattr(session, "agent_target", "")
+    stored = stored_value.strip() if isinstance(stored_value, str) else ""
+    return stored or str(requested or "").strip()
 
 
 def _selected_agent_context(label: str) -> str:
     return (
-        f"The operator explicitly selected {label} for this conversation. Present every response as {label}, "
-        "while using this chat's configured reasoning model. Use native Pandamonium tools directly for small "
-        "application-data requests such as Books, calendar, email, notes, and tasks. Delegate to the pc-codex "
-        "worker only for genuine project, source-code, file, or host work; return one coherent answer and never "
-        "emit polling filler or a second completion notice."
+        f"The operator explicitly selected {label} for this conversation. Present every response as {label}; "
+        "the configured reasoning model remains a replaceable inference engine and does not change identity."
     )
+
+
+async def _direct_selected_identity_turn(
+    worker: str,
+    *,
+    session_id: str,
+    message: str,
+    owner: str,
+    workspace: str,
+    presenter: str,
+    codex_thread_id: str | None = None,
+) -> tuple[str, Any, str]:
+    """Route non-Jarvis selections without sending them through Jarvis's model."""
+    from src.jarvis_agent import direct_codex_turn, direct_hermes_turn
+
+    if worker == "hermes":
+        return "response", await direct_hermes_turn(
+            session_id, message, owner=owner, workspace=workspace,
+        ), "completed"
+    if worker == "pc-codex":
+        task, action = await direct_codex_turn(
+            session_id,
+            message,
+            owner=owner,
+            workspace=workspace,
+            presenter=presenter,
+            codex_thread_id=codex_thread_id,
+        )
+        return "task", task, action
+    raise ValueError("unsupported_conversation_target")
 
 
 def _retire_synthesized_worker_results(metrics: dict, owner: str, session_id: str) -> None:
@@ -691,6 +710,8 @@ def setup_chat_routes(
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
         agent_target = str(form_data.get("agent_target") or "").strip()
+        worker_workspace = str(form_data.get("worker_workspace") or "").strip()
+        worker_thread_id = str(form_data.get("worker_thread_id") or "").strip()
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
@@ -703,6 +724,10 @@ def setup_chat_routes(
                 allow_web_search = body["allow_web_search"]
             if not agent_target:
                 agent_target = str(body.get("agent_target") or "").strip()
+            if not worker_workspace:
+                worker_workspace = str(body.get("worker_workspace") or "").strip()
+            if not worker_thread_id:
+                worker_thread_id = str(body.get("worker_thread_id") or "").strip()
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -835,14 +860,30 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = effective_user(request)
+            # The session row owns conversational routing. A stale or forged
+            # browser value cannot silently move an established conversation.
+            agent_target = _authoritative_agent_target(sess, agent_target)
             selected_agent_label = ""
+            selected_agent_workspace = None
+            selected_agent_worker = ""
             if agent_target:
                 from src.agent_worker_adapters import worker_catalog
+                from src.agent_identity import configured_agent_name
 
                 details = worker_catalog().get(agent_target)
-                if agent_target != "pc-codex" or not details or not details.get("configured"):
+                if agent_target == "jarvis":
+                    selected_agent_label = configured_agent_name()
+                    selected_agent_worker = "jarvis"
+                elif not details or not details.get("configured"):
                     raise HTTPException(400, "Selected agent is not configured")
-                selected_agent_label = str(details.get("label") or "Friday")[:80]
+                else:
+                    selected_agent_label = str(details.get("label") or agent_target)[:80]
+                    selected_agent_worker = agent_target
+                    selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
+                    if agent_target == "pc-codex" and worker_workspace:
+                        if worker_workspace not in set(details.get("workspaces") or []):
+                            raise HTTPException(400, "Selected project is not allowlisted")
+                        selected_agent_workspace = worker_workspace
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
@@ -946,14 +987,11 @@ def setup_chat_routes(
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
         _model_message = message
-        if _approval_reply and _approval_reply["choice"] == "approve":
-            _decision = _approval_reply["decision"]
-            _capability = str((_decision.get("capability") or {}).get("name") or "the pending action")
-            _model_message = (
-                f"Proceed with the exact previously requested {_capability} action now. "
-                f"The authenticated operator approved decision {_decision['decision_id']} once. "
-                "Reissue the original call with unchanged target and arguments; do not broaden it."
-            )
+        _approved_action = (
+            _approval_reply.get("pending_action")
+            if _approval_reply and _approval_reply.get("choice") == "approve"
+            else None
+        )
 
         # Query active document — prefer explicit ID from frontend, fall back to session lookup
         active_doc = None
@@ -1235,9 +1273,14 @@ def setup_chat_routes(
             if ctx.used_memories:
                 yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
 
-            if _approval_reply and _approval_reply["choice"] == "deny":
+            if _approval_reply and _approval_reply["choice"] in {"deny", "stale", "repeat"}:
                 _capability = str((_approval_reply["decision"].get("capability") or {}).get("name") or "action")
-                reply = f"Denied: {_capability}. I will not run it."
+                if _approval_reply["choice"] == "deny":
+                    reply = f"Denied: {_capability}. I will not run it."
+                elif _approval_reply["choice"] == "repeat":
+                    reply = f"That approval for {_capability} was already handled. Nothing ran again."
+                else:
+                    reply = f"That approval for {_capability} is stale. Nothing ran; request the action again."
                 metrics = {
                     "model": "pandamonium-authority",
                     "requested_model": sess.model,
@@ -1261,6 +1304,96 @@ def setup_chat_routes(
                 )
                 if _saved_id:
                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
+                yield f'data: {json.dumps({"type": "metrics", "data": metrics})}\n\n'
+                yield "data: [DONE]\n\n"
+                _stream_set(session, status="done")
+                _active_streams.pop(session, None)
+                return
+
+            if selected_agent_worker in {"hermes", "pc-codex"}:
+                route_started = time.monotonic()
+                route_model = selected_agent_label or selected_agent_worker
+                metrics = {
+                    "model": route_model,
+                    "requested_model": route_model,
+                    "route": selected_agent_worker,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "response_time": 0,
+                    "agent_rounds": 0,
+                    "tool_calls": 0,
+                }
+                yield f'data: {json.dumps({"type": "model_info", "model": route_model, "character_name": selected_agent_label})}\n\n'
+                try:
+                    session_manager.save_sessions()
+                    kind, payload, action = await _direct_selected_identity_turn(
+                        selected_agent_worker,
+                        session_id=session,
+                        message=str(message or ""),
+                        owner=_user,
+                        workspace=selected_agent_workspace or "home-lab",
+                        presenter=selected_agent_label,
+                        codex_thread_id=worker_thread_id or None,
+                    )
+                    if kind == "response":
+                        reply = str(payload or "").strip()
+                        if not reply:
+                            raise RuntimeError("selected_agent_returned_no_response")
+                        yield f'data: {json.dumps({"delta": reply})}\n\n'
+                        saved_id = save_assistant_response(
+                            sess,
+                            session_manager,
+                            session,
+                            reply,
+                            metrics,
+                            character_name=selected_agent_label,
+                            incognito=incognito,
+                        )
+                        if saved_id:
+                            yield f'data: {json.dumps({"type": "message_saved", "id": saved_id})}\n\n'
+                    else:
+                        from src.jarvis_agent import list_session_tasks
+
+                        safe_task = next(
+                            (
+                                row for row in list_session_tasks(session, _user)
+                                if row.get("task_id") == payload.get("task_id")
+                            ),
+                            {},
+                        )
+                        if not safe_task:
+                            raise RuntimeError("selected_task_snapshot_unavailable")
+                        yield f'data: {json.dumps({"type": "agent_task", "action": action, **safe_task})}\n\n'
+                        if action == "blocked":
+                            reply = f"{selected_agent_label} is unavailable. The request was not rerouted."
+                            yield f'data: {json.dumps({"delta": reply})}\n\n'
+                            saved_id = save_assistant_response(
+                                sess,
+                                session_manager,
+                                session,
+                                reply,
+                                metrics,
+                                character_name=selected_agent_label,
+                                incognito=incognito,
+                            )
+                            if saved_id:
+                                yield f'data: {json.dumps({"type": "message_saved", "id": saved_id})}\n\n'
+                except Exception:
+                    logger.exception("Direct selected-identity route failed for %s", selected_agent_worker)
+                    reply = f"{selected_agent_label} is unavailable. The request was not rerouted."
+                    yield f'data: {json.dumps({"delta": reply})}\n\n'
+                    saved_id = save_assistant_response(
+                        sess,
+                        session_manager,
+                        session,
+                        reply,
+                        metrics,
+                        character_name=selected_agent_label,
+                        incognito=incognito,
+                    )
+                    if saved_id:
+                        yield f'data: {json.dumps({"type": "message_saved", "id": saved_id})}\n\n'
+                metrics["response_time"] = round(time.monotonic() - route_started, 3)
                 yield f'data: {json.dumps({"type": "metrics", "data": metrics})}\n\n'
                 yield "data: [DONE]\n\n"
                 _stream_set(session, status="done")
@@ -1397,7 +1530,7 @@ def setup_chat_routes(
                     len(ctx.messages), raw_history_count, len(messages))
             else:
                 messages = _ensure_current_request_is_latest_user(ctx.messages, _model_message)
-            if selected_agent_label:
+            if selected_agent_worker == "jarvis" and selected_agent_label:
                 messages = [
                     *messages[:-1],
                     {"role": "system", "content": _selected_agent_context(selected_agent_label)},
@@ -1718,13 +1851,6 @@ def setup_chat_routes(
                     if _approval_reply and _approval_reply["choice"] == "approve":
                         _forced_tools.add(str((_approval_reply["decision"].get("capability") or {}).get("name") or ""))
                         _forced_tools.discard("")
-                    if agent_target == "pc-codex" and _selected_worker_request(
-                        str(message or ""),
-                        session_id=session,
-                        owner=_user,
-                    ):
-                        _forced_tools.update({"start_agent_task", "read_agent_task"})
-
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
                         sess.model,
@@ -1754,6 +1880,14 @@ def setup_chat_routes(
                         uploaded_files=ctx.uploaded_files,
                         base_context_manifest=ctx.context_manifest,
                         presenter=active_character_name or None,
+                        approved_action=_approved_action,
+                        persist_worker_results=not bool(selected_agent_label),
+                        worker_workspace=selected_agent_workspace,
+                        worker_target=(
+                            selected_agent_worker
+                            if selected_agent_worker and selected_agent_worker != "jarvis"
+                            else None
+                        ),
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

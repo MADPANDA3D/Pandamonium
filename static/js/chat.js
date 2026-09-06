@@ -24,6 +24,7 @@ import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
 import { getBrandName } from './brand.js';
+import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -757,7 +758,6 @@ import { getBrandName } from './brand.js';
         const mode = currentSetupMode;
         slashCommands.clearSetupMode(mode === 'endpoint-provider' || mode === 'endpoint-key-for-provider');
         el('message').value = '';
-        if (window._syncModelPickerAutohide) window._syncModelPickerAutohide();
         if (uiModule.autoResize) uiModule.autoResize(el('message'));
         if (mode === true || mode === 'endpoint') {
           handleSetupInput(rawMsg);
@@ -783,7 +783,6 @@ import { getBrandName } from './brand.js';
       const handled = await handleSlashCommand(msg.trim());
       if (handled) {
         el('message').value = '';
-        if (window._syncModelPickerAutohide) window._syncModelPickerAutohide();
         if (uiModule.autoResize) uiModule.autoResize(el('message'));
         _releaseSendFlag();
         return;
@@ -1177,6 +1176,11 @@ import { getBrandName } from './brand.js';
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
       if (streamAgentTarget) fd.append('agent_target', streamAgentTarget);
+      if (streamAgentTarget === 'pc-codex') {
+        const codexContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
+        if (codexContext?.workspace) fd.append('worker_workspace', codexContext.workspace);
+        if (codexContext?.codexThreadId) fd.append('worker_thread_id', codexContext.codexThreadId);
+      }
       if (_textExtensionBridge) {
         fd.append('extension_bridge_session', _textExtensionBridge.sessionId);
         fd.append('extension_bridge_extension', _textExtensionBridge.extensionId);
@@ -1809,7 +1813,7 @@ import { getBrandName } from './brand.js';
                 typewriterInto(roundHolder.querySelector('.body'), errMsg);
                 break;
               }
-              if (json.delta || json.type === 'agent_prep' || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'loop_breaker_triggered' || json.type === 'intent_nudge_exhausted' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
+              if (json.delta || json.type === 'agent_task' || json.type === 'agent_prep' || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'loop_breaker_triggered' || json.type === 'intent_nudge_exhausted' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
                 clearResponseTimeout();
                 clearProcessingProbe();
                 clearFirstTokenWaitTimers();
@@ -2257,6 +2261,13 @@ import { getBrandName } from './brand.js';
                 if (sessionModule && sessionModule.updateModelPicker) {
                   sessionModule.updateModelPicker();
                 }
+                continue;
+              } else if (json.type === 'agent_task') {
+                if (holder && json.task_id) {
+                  holder.dataset.taskId = String(json.task_id);
+                  holder.dataset.worker = String(json.worker || '');
+                }
+                window.jarvisVoice?.trackWorkerTask?.(json);
                 continue;
               } else if (json.type === 'model_info') {
                 // Update role label with model name as soon as we know it
@@ -3485,6 +3496,14 @@ import { getBrandName } from './brand.js';
         _webLockRelease = null;
       }
 
+      // Relinquish the foreground stream only if this reader still owns it.
+      // A completed reader must not look abortable to later navigation, while
+      // a detached reader must not clear a newer foreground stream's state.
+      if (_streamSessionId === streamSessionId) {
+        currentAbort = null;
+        _streamSessionId = null;
+      }
+
       // Refresh session list after a delay (picks up auto-generated names)
       setTimeout(() => {
         if (sessionModule && sessionModule.loadSessions) {
@@ -3722,8 +3741,8 @@ import { getBrandName } from './brand.js';
    */
   export function detachCurrentStream(sessionId) {
     if (!isStreaming || !currentAbort) {
-      // Not streaming — fall through to abort
-      abortCurrentRequest();
+      // Completed/non-started work has no reader to detach. In particular,
+      // never abort a stale controller left behind by a settled stream.
       return;
     }
     // Store background stream state
