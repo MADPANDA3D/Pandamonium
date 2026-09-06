@@ -166,6 +166,11 @@ def test_native_sync_is_incremental_deduplicated_bounded_and_read_only(
             return original_hash(path)
 
         monkeypatch.setattr(gallery_sources, "_hash_file", counted_hash)
+        monkeypatch.setattr(
+            gallery_sources,
+            "_image_dimensions",
+            lambda path: pytest.fail("unchanged images must not be decoded"),
+        )
         again = gallery_sources.scan_gallery_source(db, source, limit=100)
         db.commit()
         assert again["unchanged"] == 2
@@ -174,6 +179,61 @@ def test_native_sync_is_incremental_deduplicated_bounded_and_read_only(
         for path, expected in before.items():
             assert path.read_bytes() == expected[0]
             assert path.stat().st_mtime_ns == expected[1]
+    finally:
+        db.close()
+
+
+def test_same_size_same_mtime_replacement_is_rehashed(
+    tmp_path, session_factory, monkeypatch
+):
+    root = tmp_path / "Pictures"
+    root.mkdir()
+    photo = root / "photo.jpg"
+    photo.write_bytes(b"first-photo")
+    db = session_factory()
+    source = GallerySource(
+        id="source-1",
+        owner="alice",
+        path=str(root),
+        label="Pictures",
+        kind="native",
+        enabled=True,
+    )
+    db.add(source)
+    db.commit()
+    try:
+        gallery_sources.scan_gallery_source(db, source, limit=100)
+        db.commit()
+        indexed = db.query(GallerySourceFile).one()
+        old_hash = indexed.file_hash
+        old_stat = photo.stat()
+
+        replacement = root / "replacement.jpg"
+        replacement.write_bytes(b"other-photo")
+        os.utime(
+            replacement,
+            ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns),
+        )
+        replacement.replace(photo)
+        assert photo.stat().st_size == old_stat.st_size
+        assert photo.stat().st_mtime_ns == old_stat.st_mtime_ns
+
+        hash_calls = 0
+        original_hash = gallery_sources._hash_file
+
+        def counted_hash(path):
+            nonlocal hash_calls
+            hash_calls += 1
+            return original_hash(path)
+
+        monkeypatch.setattr(gallery_sources, "_hash_file", counted_hash)
+        result = gallery_sources.scan_gallery_source(db, source, limit=100)
+        db.commit()
+        db.refresh(indexed)
+
+        assert result["indexed"] == 1
+        assert hash_calls == 1
+        assert indexed.file_hash != old_hash
     finally:
         db.close()
 

@@ -252,6 +252,11 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _change_token(stat_result: os.stat_result) -> str:
+    """Detect replacements even when syncing software preserves size/mtime."""
+    return f"{stat_result.st_dev}:{stat_result.st_ino}:{stat_result.st_ctime_ns}"
+
+
 def _image_dimensions(path: Path) -> tuple[int | None, int | None]:
     if path.suffix.lower() not in {".gif", ".jpeg", ".jpg", ".png", ".webp"}:
         return None, None
@@ -308,6 +313,7 @@ def _reconcile_owner_images(db, owner: str) -> None:
             continue
         row = rows[0] if rows else None
         selected = files[0]
+        selected_changed = row is None or row.source_file_id != selected.id
         if row is None:
             suffix = Path(selected.relative_path).suffix.lower()
             row = GalleryImage(
@@ -320,18 +326,19 @@ def _reconcile_owner_images(db, owner: str) -> None:
                 source_file_id=selected.id,
             )
             db.add(row)
-        elif row.source_file_id != selected.id:
+        elif selected_changed:
             row.source_file_id = selected.id
             row.prompt = Path(selected.relative_path).stem
         row.is_active = True
         row.file_size = selected.file_size
-        try:
-            width, height = _image_dimensions(resolve_source_file(db, row, owner))
-            row.width, row.height = width, height
-        except FileNotFoundError:
-            # A bounded/incomplete scan retains unseen metadata. The next full
-            # scan resolves whether an unavailable entry was removed.
-            pass
+        if selected_changed:
+            try:
+                width, height = _image_dimensions(resolve_source_file(db, row, owner))
+                row.width, row.height = width, height
+            except FileNotFoundError:
+                # A bounded/incomplete scan retains unseen metadata. The next
+                # complete scan resolves whether an unavailable entry was removed.
+                pass
         for duplicate in rows[1:]:
             duplicate.is_active = False
 
@@ -371,6 +378,7 @@ def scan_gallery_source(db, source: GallerySource, *, limit: int | None = None) 
                     current is not None
                     and current.active
                     and current.modified_ns == stat_result.st_mtime_ns
+                    and current.change_token == _change_token(stat_result)
                     and current.file_size == stat_result.st_size
                 ):
                     unchanged += 1
@@ -383,12 +391,14 @@ def scan_gallery_source(db, source: GallerySource, *, limit: int | None = None) 
                             relative_path=relative,
                             file_hash=file_hash,
                             modified_ns=stat_result.st_mtime_ns,
+                            change_token=_change_token(stat_result),
                             file_size=stat_result.st_size,
                         )
                         db.add(current)
                     else:
                         current.file_hash = file_hash
                         current.modified_ns = stat_result.st_mtime_ns
+                        current.change_token = _change_token(stat_result)
                         current.file_size = stat_result.st_size
                         current.active = True
                     indexed += 1

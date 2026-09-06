@@ -378,6 +378,7 @@ class GallerySourceFile(TimestampMixin, Base):
     relative_path = Column(Text, nullable=False)
     file_hash     = Column(String(64), nullable=False, index=True)
     modified_ns   = Column(Integer, nullable=False)
+    change_token  = Column(String, nullable=False)
     file_size     = Column(Integer, nullable=False)
     active        = Column(Boolean, nullable=False, default=True, index=True)
 
