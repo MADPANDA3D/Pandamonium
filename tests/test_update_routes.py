@@ -72,6 +72,9 @@ def test_update_status_is_admin_gated_and_units_preserve_privilege_boundary(
     path_unit = (root / "pandamonium-updater.path").read_text(encoding="utf-8")
     recovery = (root / "pandamonium-update-recover.service").read_text(encoding="utf-8")
     assert "User=root" in service
+    assert "NoNewPrivileges=true" in service
+    assert "ProtectSystem=full" in service
     assert "pandamonium-update apply --request" in service
     assert "PathExists=/var/lib/pandamonium/data/updates/request.json" in path_unit
+    assert "Before=pandamonium.service" in recovery
     assert "pandamonium-update recover" in recovery
