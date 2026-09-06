@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import sqlite3
 import sys
 import tarfile
@@ -524,7 +525,12 @@ def test_release_archive_strips_group_and_other_write_bits(tmp_path):
         )
     )
 
-    extracted = executor._extract_release(archive, tmp_path / "extract")
+    previous_umask = os.umask(0o077)
+    try:
+        extracted = executor._extract_release(archive, tmp_path / "extract")
+    finally:
+        os.umask(previous_umask)
 
+    assert extracted.stat().st_mode & 0o777 == 0o755
     assert extracted.joinpath("config.py").stat().st_mode & 0o777 == 0o644
     assert extracted.joinpath("run").stat().st_mode & 0o777 == 0o755
