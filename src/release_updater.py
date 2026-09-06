@@ -333,6 +333,9 @@ def current_revision(root: Path = ROOT) -> str | None:
             return value
     except OSError:
         pass
+    build_revision = (os.getenv("PANDAMONIUM_SOURCE_REVISION") or "").strip()
+    if _COMMIT_RE.fullmatch(build_revision):
+        return build_revision
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -360,15 +363,16 @@ def managed_install_root(root: Path = ROOT) -> Path | None:
 def installation_status(root: Path = ROOT) -> dict[str, Any]:
     install_root = managed_install_root(root)
     trigger = (os.getenv("PANDAMONIUM_UPDATE_TRIGGER") or "disabled").strip().lower()
+    is_container = Path("/.dockerenv").exists()
     supported = bool(
         install_root
         and (install_root / "current").is_symlink()
         and trigger == "systemd-path"
         and sys.platform.startswith("linux")
-        and not Path("/.dockerenv").exists()
+        and not is_container
     )
     reason = None
-    if Path("/.dockerenv").exists():
+    if is_container:
         reason = "Container updates must be run from the host."
     elif not install_root or not (install_root / "current").is_symlink():
         reason = "Atomic updates require a managed immutable-release install."
@@ -379,7 +383,13 @@ def installation_status(root: Path = ROOT) -> dict[str, Any]:
     return {
         "supported": supported,
         "reason": reason,
-        "kind": "managed-native" if install_root else "source-checkout",
+        "kind": (
+            "container"
+            if is_container
+            else "managed-native"
+            if install_root
+            else "source-checkout"
+        ),
         "root": str(install_root) if install_root else None,
         "trigger": trigger,
     }

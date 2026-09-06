@@ -189,3 +189,19 @@ def test_docker_publish_keeps_release_version_tags_immutable():
         "enable=${{ github.ref_type == 'tag' }}"
     ) in workflow
     assert "type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}" in workflow
+
+
+def test_published_container_embeds_exact_source_revision():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+        encoding="utf-8"
+    )
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+
+    assert "ARG PANDAMONIUM_SOURCE_REVISION" in dockerfile
+    assert "ENV PANDAMONIUM_SOURCE_REVISION=${PANDAMONIUM_SOURCE_REVISION}" in dockerfile
+    assert "org.opencontainers.image.revision=${PANDAMONIUM_SOURCE_REVISION}" in dockerfile
+    assert "PANDAMONIUM_SOURCE_REVISION=${{ github.sha }}" in workflow
+    assert compose["services"]["pandamonium"]["build"]["args"] == {
+        "PANDAMONIUM_SOURCE_REVISION": "${PANDAMONIUM_SOURCE_REVISION:-}"
+    }

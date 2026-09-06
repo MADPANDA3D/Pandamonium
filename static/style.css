@@ -11334,6 +11334,154 @@ details a:hover {
   .mad-mcp-sidebar-status,
   .mad-mcp-phase-list li > span { animation: none !important; }
 }
+
+/* Signed updater dialog — intentionally reuses the MAD MCP control-panel
+   frame and scan visual so operational tools share one visual language. */
+.updater-modal-content {
+  width: min(780px, 94vw);
+  max-height: min(780px, 92vh);
+}
+.updater-body {
+  max-height: calc(min(780px, 92vh) - 76px);
+  overflow-x: hidden;
+}
+.updater-fact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+}
+.updater-fact-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--fg) 13%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+.updater-fact-grid dt {
+  color: var(--fg);
+  opacity: 0.48;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.updater-fact-grid dd {
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.updater-progress-visual { min-height: 158px; }
+.updater-progress-percent {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  color: #fff8e7;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.updater-progress-meter {
+  height: 5px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.updater-progress-meter > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--red), #fff8e7);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--red) 48%, transparent);
+  transition: width 0.35s ease;
+}
+.updater-progress-card[data-state="reconnecting"] .mad-mcp-progress-logo {
+  animation: mad-mcp-breathe 1.4s ease-in-out infinite;
+}
+.updater-progress-card[data-state="reconnecting"] .mad-mcp-scan-line {
+  opacity: 1;
+  animation: mad-mcp-scan 1.8s linear infinite;
+}
+.updater-progress-card[data-state="ready"] .updater-progress-visual,
+.updater-progress-card[data-state="reconnecting"] .updater-progress-visual {
+  border-color: color-mix(in srgb, var(--red) 68%, transparent);
+}
+#updater-status-pill[data-state="available"] {
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--red) 22%, transparent);
+}
+.updater-release-link {
+  flex-shrink: 0;
+  align-self: center;
+  color: #fff8e7;
+  font-size: 10px;
+  text-decoration: none;
+}
+.updater-release-link:hover,
+.updater-release-link:focus-visible { color: var(--red); text-decoration: underline; }
+.updater-manual-guidance {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border-left: 2px solid var(--red);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.updater-manual-guidance[hidden] { display: none; }
+.updater-manual-guidance strong { color: var(--red); font-size: 11px; }
+.updater-manual-guidance code {
+  overflow-x: auto;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, var(--border));
+  border-radius: 6px;
+  background: #07080c;
+  color: #fff8e7;
+  white-space: nowrap;
+}
+.updater-backup {
+  overflow-wrap: anywhere;
+  margin: 12px 0 0;
+  color: var(--fg);
+  opacity: 0.68;
+  font-size: 9px;
+}
+.updater-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.updater-dialog-actions button { margin-top: 0; }
+
+@media (max-width: 680px) {
+  .updater-modal-content {
+    width: 96vw;
+    max-height: 94vh;
+  }
+  .updater-body { max-height: calc(94vh - 70px); }
+  .updater-fact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .updater-progress-visual { min-height: 112px; }
+  .updater-dialog-actions { display: grid; grid-template-columns: 1fr; }
+  .updater-dialog-actions button { width: 100%; }
+}
+
+@media (max-width: 390px) {
+  .updater-fact-grid { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .updater-progress-meter > span,
+  .updater-progress-card .mad-mcp-progress-logo,
+  .updater-progress-card .mad-mcp-scan-line { animation: none !important; transition: none !important; }
+}
 .memory-modal-content .modal-header h4 {
   font-size: 1rem;
 }
