@@ -3,7 +3,7 @@ import os
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -57,6 +57,17 @@ def test_native_conventional_picture_folder_resolution(tmp_path):
     assert linux["candidates"][0]["available"] is True
     assert mac["candidates"][0]["path"] == str(tmp_path / "Pictures")
     assert windows["candidates"][0]["path"] == str(pictures)
+
+    (config / "user-dirs.dirs").write_text(
+        'XDG_PICTURES_DIR="$HOME/"\n', encoding="utf-8"
+    )
+    disabled = gallery_sources.discover_gallery_roots(
+        platform_name="linux",
+        home=home,
+        environ={},
+        containerized=False,
+    )
+    assert disabled["candidates"] == []
 
 
 def test_docker_exposes_only_configured_mounted_roots(tmp_path):
@@ -234,6 +245,46 @@ def test_same_size_same_mtime_replacement_is_rehashed(
         assert result["indexed"] == 1
         assert hash_calls == 1
         assert indexed.file_hash != old_hash
+    finally:
+        db.close()
+
+
+def test_unchanged_reconciliation_uses_bounded_gallery_queries(
+    tmp_path, session_factory
+):
+    root = tmp_path / "Pictures"
+    root.mkdir()
+    for index in range(25):
+        (root / f"{index}.jpg").write_bytes(f"photo-{index}".encode())
+    db = session_factory()
+    source = GallerySource(
+        id="source-1",
+        owner="alice",
+        path=str(root),
+        label="Pictures",
+        kind="native",
+        enabled=True,
+    )
+    db.add(source)
+    db.commit()
+    try:
+        gallery_sources.scan_gallery_source(db, source, limit=100)
+        db.commit()
+        gallery_selects = []
+
+        def capture_gallery_selects(conn, cursor, statement, parameters, context, many):
+            if statement.lstrip().upper().startswith("SELECT") and "gallery_images" in statement:
+                gallery_selects.append(statement)
+
+        event.listen(db.bind, "before_cursor_execute", capture_gallery_selects)
+        try:
+            result = gallery_sources.scan_gallery_source(db, source, limit=100)
+            db.commit()
+        finally:
+            event.remove(db.bind, "before_cursor_execute", capture_gallery_selects)
+
+        assert result["unchanged"] == 25
+        assert len(gallery_selects) == 2
     finally:
         db.close()
 

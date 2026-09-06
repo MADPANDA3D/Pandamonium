@@ -95,7 +95,13 @@ def _linux_pictures_dir(home: Path, environ: Mapping[str, str]) -> Path | None:
     if "$" in value or not value:
         return None
     path = Path(value)
-    return path if path.is_absolute() else home / path
+    path = path if path.is_absolute() else home / path
+    try:
+        if path.resolve() == home.resolve():
+            return None
+    except OSError:
+        return None
+    return path
 
 
 def _parse_media_roots(environ: Mapping[str, str]) -> list[Path]:
@@ -300,14 +306,22 @@ def _reconcile_owner_images(db, owner: str) -> None:
     for image in source_images:
         source_by_hash[image.file_hash or ""].append(image)
 
-    for file_hash, files in by_hash.items():
-        ordinary = _owner_images(db, owner).filter(
-            GalleryImage.file_hash == file_hash,
+    ordinary_hashes = {
+        file_hash
+        for (file_hash,) in _owner_images(db, owner)
+        .filter(
             GalleryImage.source_file_id == None,  # noqa: E711
             GalleryImage.is_active == True,  # noqa: E712
-        ).first()
+            GalleryImage.file_hash != None,  # noqa: E711
+        )
+        .with_entities(GalleryImage.file_hash)
+        .distinct()
+        .all()
+    }
+
+    for file_hash, files in by_hash.items():
         rows = source_by_hash.get(file_hash, [])
-        if ordinary:
+        if file_hash in ordinary_hashes:
             for row in rows:
                 row.is_active = False
             continue
