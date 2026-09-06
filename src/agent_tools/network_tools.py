@@ -4,39 +4,105 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ntpath
 import os
 import socket
+import sys
 from typing import Final
 
 from src.tool_utils import _truncate
 
 
-NETWORK_PROBES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
-    ("interfaces", ("ip", "-brief", "address", "show")),
-    ("ipv4_routes", ("ip", "-4", "route", "show")),
-    ("ipv6_routes", ("ip", "-6", "route", "show")),
-    ("neighbors", ("ip", "neighbor", "show")),
-    ("tailscale", ("tailscale", "status")),
-)
+NETWORK_PROBES_BY_PLATFORM: Final[
+    dict[str, tuple[tuple[str, tuple[str, ...]], ...]]
+] = {
+    "linux": (
+        ("interfaces", ("ip", "-brief", "address", "show")),
+        ("ipv4_routes", ("ip", "-4", "route", "show")),
+        ("ipv6_routes", ("ip", "-6", "route", "show")),
+        ("neighbors", ("ip", "neighbor", "show")),
+        ("tailscale", ("tailscale", "status")),
+    ),
+    "macos": (
+        ("interfaces", ("ifconfig", "-a")),
+        ("default_route", ("route", "-n", "get", "default")),
+        ("neighbors", ("arp", "-an")),
+        ("tailscale", ("tailscale", "status")),
+    ),
+    "windows": (
+        ("interfaces", ("ipconfig", "/all")),
+        ("routes", ("route", "print")),
+        ("neighbors", ("arp", "-a")),
+        ("tailscale", ("tailscale", "status")),
+    ),
+}
 
-_TRUSTED_EXECUTABLES: Final[dict[str, tuple[str, ...]]] = {
-    "ip": ("/usr/sbin/ip", "/usr/bin/ip", "/sbin/ip", "/bin/ip"),
-    "tailscale": ("/usr/bin/tailscale", "/usr/local/bin/tailscale"),
+_POSIX_TRUSTED_EXECUTABLES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
+    "linux": {
+        "ip": ("/usr/sbin/ip", "/usr/bin/ip", "/sbin/ip", "/bin/ip"),
+        "tailscale": ("/usr/bin/tailscale", "/usr/local/bin/tailscale"),
+    },
+    "macos": {
+        "ifconfig": ("/sbin/ifconfig",),
+        "route": ("/sbin/route",),
+        "arp": ("/usr/sbin/arp",),
+        "tailscale": (
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/usr/local/bin/tailscale",
+            "/usr/bin/tailscale",
+        ),
+    },
 }
 _PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
 _PROBE_OUTPUT_CHARS: Final[int] = 8_000
 
 
-def _resolve_executable(name: str) -> str | None:
+def _platform_family(platform: str | None = None) -> str:
+    platform_id = (platform or sys.platform).lower()
+    if platform_id == "windows" or platform_id.startswith("win"):
+        return "windows"
+    if platform_id in {"darwin", "macos"}:
+        return "macos"
+    return "linux"
+
+
+def _trusted_executables(platform: str | None = None) -> dict[str, tuple[str, ...]]:
+    family = _platform_family(platform)
+    if family != "windows":
+        return _POSIX_TRUSTED_EXECUTABLES[family]
+
+    windows_roots = tuple(dict.fromkeys(filter(None, (
+        os.environ.get("SystemRoot"),
+        os.environ.get("WINDIR"),
+        r"C:\Windows",
+    ))))
+    system32 = tuple(ntpath.join(root, "System32") for root in windows_roots)
+    return {
+        "ipconfig": tuple(ntpath.join(root, "ipconfig.exe") for root in system32),
+        "route": tuple(ntpath.join(root, "route.exe") for root in system32),
+        "arp": tuple(ntpath.join(root, "arp.exe") for root in system32),
+        "tailscale": (
+            r"C:\Program Files\Tailscale\tailscale.exe",
+            r"C:\Program Files (x86)\Tailscale\tailscale.exe",
+        ),
+    }
+
+
+def _platform_probes(platform: str | None = None) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    return NETWORK_PROBES_BY_PLATFORM[_platform_family(platform)]
+
+
+def _resolve_executable(name: str, platform: str | None = None) -> str | None:
     """Resolve only an allowlisted binary from fixed system paths."""
-    for candidate in _TRUSTED_EXECUTABLES.get(name, ()):
+    for candidate in _trusted_executables(platform).get(name, ()):
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
 
 
-async def _run_probe(argv: tuple[str, ...]) -> dict:
-    executable = _resolve_executable(argv[0])
+async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
+    executable = _resolve_executable(argv[0], platform)
     if executable is None:
         return {
             "available": False,
@@ -94,9 +160,10 @@ class NetworkInspectionTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         del content, ctx  # Calls are intentionally parameterless and owner-scoped upstream.
 
+        platform = _platform_family()
         probes = {
-            name: await _run_probe(argv)
-            for name, argv in NETWORK_PROBES
+            name: await _run_probe(argv, platform)
+            for name, argv in _platform_probes(platform)
         }
         successful = [
             name
@@ -106,6 +173,7 @@ class NetworkInspectionTool:
         snapshot = {
             "capability": "read_only_network_snapshot",
             "scope": "network view visible to the running Pandamonium service",
+            "platform": platform,
             "hostname": socket.gethostname(),
             "inspection_available": bool(successful),
             "successful_probes": successful,

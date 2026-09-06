@@ -1262,7 +1262,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "inspect_network",
-            "description": "Collect a bounded, read-only snapshot of the current host network view using fixed interface, route, neighbor, and optional Tailscale probes. Takes no commands, paths, or arguments.",
+            "description": "Collect a bounded, read-only snapshot of the current host network view using fixed platform-specific interface, route, neighbor, and optional Tailscale probes on Linux, macOS, or Windows. Takes no commands, paths, or arguments.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },

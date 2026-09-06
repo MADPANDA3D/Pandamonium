@@ -128,7 +128,11 @@ def test_inspection_ignores_supplied_commands_and_executes_only_fixed_probes(mon
         calls.append((argv, kwargs))
         return FakeProcess()
 
-    monkeypatch.setattr(network_tools, "_resolve_executable", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        network_tools,
+        "_resolve_executable",
+        lambda name, platform: f"/usr/bin/{name}",
+    )
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
     result = asyncio.run(
@@ -140,13 +144,40 @@ def test_inspection_ignores_supplied_commands_and_executes_only_fixed_probes(mon
 
     expected = [
         (f"/usr/bin/{argv[0]}", *argv[1:])
-        for _name, argv in network_tools.NETWORK_PROBES
+        for _name, argv in network_tools._platform_probes("linux")
     ]
     assert [argv for argv, _kwargs in calls] == expected
     assert all(kwargs["stdout"] == asyncio.subprocess.PIPE for _argv, kwargs in calls)
     assert result["inspection_available"] is True
     assert result["exit_code"] == 0
     assert "touch" not in result["output"]
+
+
+def test_supported_native_platforms_have_fixed_read_only_probes():
+    assert network_tools._platform_family("linux") == "linux"
+    assert network_tools._platform_family("darwin") == "macos"
+    assert network_tools._platform_family("win32") == "windows"
+
+    expected_commands = {
+        "linux": {"ip", "tailscale"},
+        "macos": {"ifconfig", "route", "arp", "tailscale"},
+        "windows": {"ipconfig", "route", "arp", "tailscale"},
+    }
+    for platform, commands in expected_commands.items():
+        probes = network_tools._platform_probes(platform)
+        trusted = network_tools._trusted_executables(platform)
+        assert {argv[0] for _name, argv in probes} == commands
+        assert commands <= trusted.keys()
+        assert all("shell" not in argv for _name, argv in probes)
+
+    mac_paths = network_tools._trusted_executables("darwin")["tailscale"]
+    assert "/opt/homebrew/bin/tailscale" in mac_paths
+    windows_paths = network_tools._trusted_executables("win32")
+    assert all(
+        any(path.lower().endswith(f"\\system32\\{command}.exe") for path in paths)
+        for command, paths in windows_paths.items()
+        if command != "tailscale"
+    )
 
 
 def test_unavailable_inspection_requires_an_honest_limitation():
