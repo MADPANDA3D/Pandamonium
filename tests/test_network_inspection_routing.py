@@ -81,6 +81,8 @@ def test_first_person_current_network_phrasing_mounts_only_inspection_tool():
         "Map the network I'm on",
         "Show the Wi-Fi I am connected to",
         "Draw the LAN I’m using",
+        "What network am I connected to?",
+        "Map my Wi‑Fi",
     )
 
     for prompt in prompts:

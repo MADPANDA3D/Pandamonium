@@ -1244,10 +1244,10 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b"):
         domains.add("files")
     current_network_subject = has(
-        r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi-?fi|wifi|topology|subnet|router|devices?)\b",
-        r"\b(?:network|lan|wi-?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
+        r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b",
+        r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
         r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
-        r"\b(?:network|lan|wi[-‑]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\bi(?:['’]?m| am)\b.{0,16}\b(?:on|using|connected to)\b",
+        r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
     )
     if current_network_subject and has(
         r"\b(?:make|create|draw|diagram|map|show|what|inspect|check|discover|scan|list|overview|components?)\b"
