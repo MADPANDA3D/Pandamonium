@@ -688,6 +688,12 @@ class UpdateExecutor:
             for destination, link in symlinks:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.symlink_to(link)
+            for directory in (
+                target,
+                *(path for path in target.rglob("*") if path.is_dir()),
+            ):
+                if not directory.is_symlink():
+                    directory.chmod(0o755)
             root = target / "pandamonium"
             if not root.is_dir():
                 raise UpdateError("release archive has no Pandamonium root")

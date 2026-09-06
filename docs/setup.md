@@ -126,6 +126,11 @@ app-service ordering drop-in so boot recovery completes first:
 After=pandamonium-update-recover.service
 ```
 
+Do not add `Wants=pandamonium-update-recover.service` to the app service. The
+enabled recovery unit is ordered before the app at boot; pulling it into every
+manual app start can make an updater-initiated restart wait on its own recovery
+transaction.
+
 Use `./scripts/pandamonium update check` and `update status` for readback. The
 footer's **Check for updates** action never installs by itself; **Update now**
 requires a separate confirmation and shows phase, percentage, backup path,
