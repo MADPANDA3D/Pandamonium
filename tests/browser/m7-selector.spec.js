@@ -12,14 +12,14 @@ const modelEndpoint = {
   offline: false,
 };
 
-function selectorCatalog() {
+function selectorCatalog({ includeGordon = true, gordonState = 'unavailable' } = {}) {
   const entities = [
     ['agent', 'agent:jarvis', 'Configured Jarvis', 'healthy'],
-    ['agent', 'agent:gordon', 'Configured Gordon', 'unavailable'],
+    ['agent', 'agent:gordon', 'Configured Gordon', gordonState],
     ['worker', 'worker:friday', 'Configured Friday', 'healthy'],
     ['worker', 'worker:vps', 'Configured VPS Codex', 'unavailable'],
-    ['model', 'model:alpha', 'Alpha', 'healthy'],
-  ].map(([kind, id, display_name, state]) => ({
+    ['model', 'model:alpha', 'Configured Jarvis', 'healthy'],
+  ].filter(([, id]) => includeGordon || id !== 'agent:gordon').map(([kind, id, display_name, state]) => ({
     kind, id, display_name,
     availability: state === 'healthy' ? 'available' : 'unavailable',
     ownership: { scope: 'installation', id: 'installation:current' },
@@ -31,12 +31,12 @@ function selectorCatalog() {
   return {
     discovery: { schema_version: 'pandamonium.discovery.v1', generated_at: '2026-09-05T12:00:00Z', entities },
     selections: [
-      { entity_id: 'agent:jarvis', kind: 'agent', target: 'jarvis', selectable: true, reason: null },
-      { entity_id: 'agent:gordon', kind: 'agent', target: 'hermes', selectable: false, reason: 'connection_failed' },
-      { entity_id: 'worker:friday', kind: 'worker', target: 'pc-codex', selectable: true, reason: null },
-      { entity_id: 'worker:vps', kind: 'worker', target: 'vps-codex', selectable: false, reason: 'connection_failed' },
-      { entity_id: 'model:alpha', kind: 'model', model_id: 'vendor/alpha', endpoint_id: 'endpoint-one', selectable: true, reason: null },
-    ],
+      { entity_id: 'agent:jarvis', kind: 'agent', target: 'jarvis', capabilities: ['model'], selectable: true, reason: null },
+      { entity_id: 'agent:gordon', kind: 'agent', target: 'hermes', capabilities: ['hermes'], selectable: gordonState === 'healthy', reason: gordonState === 'healthy' ? null : 'connection_failed' },
+      { entity_id: 'worker:friday', kind: 'worker', target: 'pc-codex', capabilities: ['codex'], selectable: true, reason: null },
+      { entity_id: 'worker:vps', kind: 'worker', target: 'vps-codex', capabilities: ['codex'], selectable: false, reason: 'connection_failed' },
+      { entity_id: 'model:alpha', kind: 'model', model_id: 'vendor/alpha', endpoint_id: 'endpoint-one', capabilities: ['model'], selectable: true, reason: null },
+    ].filter(selection => entities.some(entity => entity.id === selection.entity_id)),
   };
 }
 
@@ -56,27 +56,33 @@ async function mockApp(page, selectorHandler) {
   });
 }
 
-test('text and voice render the same typed selector data without rerouting unavailable peers', async ({ page }) => {
+test('text and voice render one compact identity list without duplicate models or rerouting', async ({ page }) => {
   await mockApp(page, route => route.fulfill({ json: selectorCatalog() }));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/static/index.html');
   await page.locator('#model-picker-btn').click();
 
   const textList = page.locator('#model-picker-list');
-  await expect(textList.locator('.mp-section-label')).toHaveText(['Agents', 'Workers', 'All models']);
+  await expect(textList.locator('.mp-section-label')).toHaveCount(0);
+  await expect(textList.locator('.model-switch-item')).toHaveCount(4);
   await expect(textList).toContainText('Configured Jarvis');
   await expect(textList).toContainText('Configured Gordon');
   await expect(textList).toContainText('Configured Friday');
   await expect(textList).toContainText('Configured VPS Codex');
-  await expect(textList).toContainText('Alpha');
+  await expect(textList.getByText('Configured Jarvis', { exact: true })).toHaveCount(1);
+  await expect(textList).toContainText('Self-hosted model');
+  await expect(textList).toContainText('Hermes');
+  await expect(textList).toContainText('Workstation Codex');
   await expect(textList.getByText('Configured Gordon').locator('..')).toHaveAttribute('aria-disabled', 'true');
 
   const voiceList = page.locator('#jarvis-agent-menu');
+  await expect(voiceList.locator('.jarvis-selector-section')).toHaveCount(0);
+  await expect(voiceList.locator('.jarvis-target')).toHaveCount(4);
   await expect(voiceList).toContainText('Configured Jarvis');
   await expect(voiceList).toContainText('Configured Gordon');
   await expect(voiceList).toContainText('Configured Friday');
   await expect(voiceList).toContainText('Configured VPS Codex');
-  await expect(voiceList).toContainText('Alpha');
+  await expect(voiceList.getByText('Configured Jarvis', { exact: true })).toHaveCount(1);
   await expect(voiceList.getByText('Configured Gordon').locator('..')).toBeDisabled();
 
   await page.locator('#model-picker-search').focus();
@@ -84,7 +90,13 @@ test('text and voice render the same typed selector data without rerouting unava
   await page.keyboard.press('Enter');
   await expect(page.locator('#model-picker-label')).toHaveText('Configured Jarvis');
 
+  await page.locator('#message').first().fill('This stays visible while I keep typing.');
+  await expect(page.locator('#model-picker-wrap')).toBeVisible();
+  await expect(page.locator('#model-picker-wrap')).not.toHaveClass(/model-picker-autohide/);
+
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.locator('#model-picker-label')).toHaveText('Configured Jarvis');
   await page.locator('#model-picker-btn').click();
   await expect.poll(() => page.locator('#model-picker-menu').evaluate(node => {
     const bounds = node.getBoundingClientRect();
@@ -108,13 +120,32 @@ test('selector exposes loading, empty, and failure states', async ({ page }) => 
   });
   await page.goto('/static/index.html');
   await page.locator('#model-picker-btn').click();
-  await expect(page.locator('#model-picker-list')).toContainText('Discovering configured models, agents, and workers');
+  await expect(page.locator('#model-picker-list')).toContainText('Discovering who you can talk to');
 
   mode = 'empty';
   release();
-  await expect(page.locator('#model-picker-list')).toContainText('No configured choices are available');
+  await expect(page.locator('#model-picker-list')).toContainText('No configured identities are available');
 
   mode = 'failure';
   await page.locator('#model-picker-refresh-btn').click();
   await expect(page.locator('#model-picker-list [role="alert"]')).toContainText('Existing choices were not rerouted');
+});
+
+test('a selected identity that disappears stays explicit and is never rerouted', async ({ page }) => {
+  let includeGordon = true;
+  await mockApp(page, route => route.fulfill({
+    json: selectorCatalog({ includeGordon, gordonState: 'healthy' }),
+  }));
+  await page.goto('/static/index.html');
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#model-picker-list').getByText('Configured Gordon', { exact: true }).click();
+  await expect(page.locator('#model-picker-label')).toHaveText('Configured Gordon');
+
+  includeGordon = false;
+  await page.locator('#model-picker-btn').click();
+  const unavailable = page.locator('#model-picker-list').getByText('Configured Gordon', { exact: true }).locator('..');
+  await expect(unavailable).toHaveAttribute('aria-disabled', 'true');
+  await expect(unavailable).toContainText('Unavailable · no longer configured');
+  await expect(page.locator('#model-picker-label')).toHaveText('Configured Gordon');
+  await expect(page.locator('#model-picker-label')).toHaveAttribute('title', 'Configured Gordon: no longer configured');
 });

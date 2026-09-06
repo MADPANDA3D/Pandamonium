@@ -2629,11 +2629,6 @@ body.bg-pattern-sparkles {
       transition: opacity 0.22s ease, transform 0.22s ease;
       will-change: opacity, transform;
     }
-    .chat-input-top > .model-picker-wrap.model-picker-autohide {
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(-4px) scale(0.96);
-    }
     .ghost-text-overlay {
       position: absolute;
       top: 0;
@@ -3155,8 +3150,8 @@ body.bg-pattern-sparkles {
       bottom: calc(100% + 16px);
       right: 0;
       z-index: 250;
-      min-width: 260px;
-      max-width: 360px;
+      min-width: min(260px, calc(100vw - 16px));
+      max-width: min(360px, calc(100vw - 16px));
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -41834,8 +41829,7 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 .jarvis-agent-menu[hidden] {
   display: none;
 }
-.jarvis-target,
-.jarvis-model-target {
+.jarvis-target {
   width: 100%;
   min-height: 48px;
   display: flex;
@@ -41854,27 +41848,17 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   cursor: pointer;
   text-align: left;
 }
-.jarvis-target small,
-.jarvis-model-target small {
+.jarvis-target small {
   color: rgba(232, 241, 247, 0.42);
   font-size: 10px;
 }
-.jarvis-target.is-active,
-.jarvis-model-target.is-active {
+.jarvis-target.is-active {
   background: rgba(0, 214, 230, 0.14);
   color: #70edf5;
 }
-.jarvis-target:disabled,
-.jarvis-model-target:disabled {
+.jarvis-target:disabled {
   color: rgba(232, 241, 247, 0.25);
   cursor: not-allowed;
-}
-.jarvis-selector-section {
-  padding: 7px 10px 3px;
-  color: rgba(232, 241, 247, 0.38);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 .jarvis-selector-status {
   padding: 12px 10px;

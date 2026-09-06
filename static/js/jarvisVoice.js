@@ -128,13 +128,6 @@ let workerCatalog = {
 let selectorEntries = [];
 let selectorCatalogState = 'loading';
 
-function voiceTargetForModel(modelId, endpointUrl = '') {
-  const model = String(modelId || '').trim().toLowerCase().split('/').pop();
-  if (model === 'hermes-agent') return 'hermes';
-  if (String(endpointUrl || '').toLowerCase().includes('chatgpt.com/backend-api/codex')) return 'friday';
-  return 'jarvis';
-}
-
 function $(id) {
   return document.getElementById(id);
 }
@@ -1288,47 +1281,31 @@ function renderSelectorMenu() {
     statusNode.className = `jarvis-selector-status${selectorCatalogState === 'error' ? ' is-error' : ''}`;
     statusNode.setAttribute('role', selectorCatalogState === 'error' ? 'alert' : 'status');
     statusNode.textContent = selectorCatalogState === 'loading'
-      ? 'Discovering configured choices…'
+      ? 'Discovering who you can talk to…'
       : (selectorCatalogState === 'error'
         ? 'Selector discovery failed. The active target was not rerouted.'
-        : 'No configured choices are available.');
+        : 'No configured identities are available.');
     menu.insertBefore(statusNode, cancel);
     if (!selectorEntries.length) return;
   }
-  const kinds = [
-    ['agent', 'Agents'],
-    ['worker', 'Workers'],
-    ['model', 'Models'],
-  ];
-  kinds.forEach(([kind, label]) => {
-    const entries = selectorEntries.filter(entry => entry.kind === kind);
-    if (!entries.length) return;
-    const heading = document.createElement('div');
-    heading.className = 'jarvis-selector-section jarvis-selector-generated';
-    heading.textContent = label;
-    menu.insertBefore(heading, cancel);
-    entries.forEach(entry => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `${kind === 'model' ? 'jarvis-model-target' : 'jarvis-target'} jarvis-selector-generated`;
-      button.setAttribute('role', kind === 'model' ? 'menuitem' : 'menuitemradio');
-      if (kind !== 'model') {
-        button.dataset.worker = entry.target;
-        button.setAttribute('aria-checked', entry.target === voiceTarget ? 'true' : 'false');
-        button.classList.toggle('is-active', entry.target === voiceTarget);
-      } else {
-        button.dataset.modelId = entry.modelId;
-        button.dataset.endpointId = entry.endpointId;
-      }
-      button.disabled = !entry.selectable;
-      button.title = entry.selectable ? entry.display : `${entry.display} is unavailable: ${entry.reason}`;
-      const name = document.createElement('span');
-      name.textContent = entry.display;
-      const detail = document.createElement('small');
-      detail.textContent = entry.selectable ? kind : `${kind} · ${entry.reason.replace(/_/g, ' ')}`;
-      button.append(name, detail);
-      menu.insertBefore(button, cancel);
-    });
+  selectorEntries.forEach(entry => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'jarvis-target jarvis-selector-generated';
+    button.setAttribute('role', 'menuitemradio');
+    button.dataset.worker = entry.target;
+    button.setAttribute('aria-checked', entry.target === voiceTarget ? 'true' : 'false');
+    button.classList.toggle('is-active', entry.target === voiceTarget);
+    button.disabled = !entry.selectable;
+    button.title = entry.selectable ? entry.display : `${entry.display} is unavailable: ${entry.reason}`;
+    const name = document.createElement('span');
+    name.textContent = entry.display;
+    const detail = document.createElement('small');
+    detail.textContent = entry.selectable
+      ? entry.detail
+      : `${entry.detail} · unavailable: ${entry.reason.replace(/_/g, ' ')}`;
+    button.append(name, detail);
+    menu.insertBefore(button, cancel);
   });
 }
 
@@ -1371,13 +1348,19 @@ async function loadWorkerCatalog() {
     const entityById = new Map(entities.map(entity => [entity.id, entity]));
     selectorEntries = (Array.isArray(payload?.selections) ? payload.selections : []).flatMap(selection => {
       const entity = entityById.get(selection.entity_id);
-      if (!entity || !['model', 'agent', 'worker'].includes(entity.kind)) return [];
+      if (!entity || !['agent', 'worker'].includes(entity.kind) || !selection.target) return [];
+      const capabilities = Array.isArray(selection.capabilities) ? selection.capabilities : [];
       return [{
         kind: entity.kind,
         target: String(selection.target || ''),
-        modelId: String(selection.model_id || ''),
-        endpointId: String(selection.endpoint_id || ''),
         display: String(entity.display_name || 'Configured choice'),
+        detail: capabilities.includes('codex')
+          ? 'Workstation Codex'
+          : (capabilities.includes('hermes')
+            ? 'Hermes'
+            : (capabilities.includes('claude')
+              ? 'Claude'
+              : (capabilities.includes('model') ? 'Self-hosted model' : 'Configured identity'))),
         selectable: selection.selectable === true,
         reason: String(selection.reason || entity.health?.reason || 'unavailable'),
         health: String(entity.health?.state || 'unknown'),
@@ -1389,7 +1372,7 @@ async function loadWorkerCatalog() {
         label: entry.display,
         enabled: entry.selectable,
         configured: true,
-        machine: entry.kind === 'agent' ? 'Conversational agent' : 'Execution worker',
+        machine: entry.detail,
         connection: { state: entry.selectable ? 'connected' : entry.reason },
       };
       WORKER_LABELS[entry.target] = entry.display;
@@ -3044,17 +3027,7 @@ async function startCall() {
   }
 
   unlockPlaybackAudio();
-  if (!pendingVoiceTargetState) {
-    const selectedTarget = voiceTargetForModel(
-      window.sessionModule?.getCurrentModel?.(),
-      window.sessionModule?.getCurrentEndpointUrl?.(),
-    );
-    if (selectedTarget !== 'jarvis') {
-      if (!setVoiceTarget(selectedTarget)) return;
-    } else {
-      setVoiceTarget('jarvis', false);
-    }
-  }
+  if (!pendingVoiceTargetState) setVoiceTarget('jarvis', false);
   const callGeneration = ++voiceCallGeneration;
   voiceOrbMedia.stopMedia();
   isActive = true;
@@ -3268,18 +3241,8 @@ function bind() {
   $('extension-surface-chat')?.addEventListener('click', () => showChatFromExtension());
   $('extension-surface-close')?.addEventListener('click', () => disengageExtensionSurface());
   agentMenu?.addEventListener('click', event => {
-    const button = event.target.closest('.jarvis-target, .jarvis-model-target');
+    const button = event.target.closest('.jarvis-target');
     if (!button || button.disabled) return;
-    if (button.classList.contains('jarvis-model-target')) {
-      document.dispatchEvent(new CustomEvent('odysseus:auto-select-model', { detail: {
-        modelId: button.dataset.modelId || '',
-        endpointId: button.dataset.endpointId || '',
-        force: true,
-      } }));
-      setAgentMenuOpen(false);
-      showToast('The selected model will be used by chat and the next voice session.');
-      return;
-    }
     activeWorkspace = button.dataset.workspace || activeWorkspace;
     setVoiceTarget(button.dataset.worker || 'jarvis');
   });

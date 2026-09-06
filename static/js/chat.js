@@ -758,7 +758,6 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
         const mode = currentSetupMode;
         slashCommands.clearSetupMode(mode === 'endpoint-provider' || mode === 'endpoint-key-for-provider');
         el('message').value = '';
-        if (window._syncModelPickerAutohide) window._syncModelPickerAutohide();
         if (uiModule.autoResize) uiModule.autoResize(el('message'));
         if (mode === true || mode === 'endpoint') {
           handleSetupInput(rawMsg);
@@ -784,7 +783,6 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       const handled = await handleSlashCommand(msg.trim());
       if (handled) {
         el('message').value = '';
-        if (window._syncModelPickerAutohide) window._syncModelPickerAutohide();
         if (uiModule.autoResize) uiModule.autoResize(el('message'));
         _releaseSendFlag();
         return;

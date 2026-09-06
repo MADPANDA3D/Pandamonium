@@ -4,20 +4,12 @@
 import { providerLogo } from './providers.js';
 import uiModule from './ui.js';
 import settingsModule from './settings.js';
-import { sortModelObjects } from './modelSort.js';
 
 const API_BASE = window.location.origin;
 
-// ── Recent + Favorites persistence ──
-// Recent is auto-tracked (last 5 picks, most-recent-first) and lives in its
-// own key. Favorites is the SAME key the sidebar Models section uses, so a
-// favorite toggled here shows up there and vice-versa.
+// Preserve recent programmatic model switches for legacy compatibility.
 const RECENT_KEY = 'odysseus-model-recent';
-const FAVORITES_KEY = 'odysseus-model-favorites';
 const RECENT_MAX = 5;
-// Catalogs at or below this size are small enough that hiding everything
-// behind search would be a regression — keep listing them in browse mode.
-const BROWSE_ALL_LIMIT = 12;
 const AGENT_SELECTIONS_KEY = 'odysseus-agent-selections';
 const AGENT_SELECTIONS_MAX = 100;
 
@@ -37,22 +29,6 @@ function _pushRecent(mid) {
   next.unshift(mid);
   _saveList(RECENT_KEY, next.slice(0, RECENT_MAX));
 }
-function _loadFavorites() { return _loadList(FAVORITES_KEY); }
-function _toggleFavorite(mid) {
-  const favs = _loadFavorites();
-  const i = favs.indexOf(mid);
-  if (i >= 0) favs.splice(i, 1);
-  else favs.push(mid);
-  _saveList(FAVORITES_KEY, favs);
-  // Keep the sidebar Models section (same key) in sync if it's mounted.
-  try {
-    if (window.modelsModule && typeof window.modelsModule.refreshModels === 'function') {
-      window.modelsModule.refreshModels();
-    }
-  } catch { /* sidebar not present */ }
-  return i < 0; // true when now favorited
-}
-
 // ── Shared keyboard nav for model pickers ──
 function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
   if (e.key === 'Escape') { closeFn(); return; }
@@ -81,7 +57,6 @@ let _deps = null;
 let _autoSelectingDefault = false;
 let _defaultChatPickInFlight = false;
 let _selectorItems = [];
-let _selectorModels = new Map();
 let _selectorCatalogState = 'loading';
 let _selectorCatalogError = '';
 let _agentCatalogVerified = false;
@@ -125,7 +100,17 @@ function _agentSelectionKey() {
 
 function _selectedAgent() {
   if (!_agentCatalogVerified) return null;
-  return _selectedAgents.get(_agentSelectionKey()) || null;
+  const selected = _selectedAgents.get(_agentSelectionKey()) || _selectedAgents.get(_PENDING_AGENT_KEY);
+  if (selected) return selected;
+  const defaultIdentity = _selectorItems.find(item => item.target === 'jarvis' && !item.disabled)
+    || _selectorItems.find(item => !item.disabled);
+  return defaultIdentity ? {
+    target: defaultIdentity.target,
+    label: defaultIdentity.display,
+    kind: defaultIdentity.kind,
+    available: true,
+    reason: '',
+  } : null;
 }
 
 export function getSelectedAgentTarget() {
@@ -163,7 +148,6 @@ async function _refreshSelectorCatalog() {
     const entities = Array.isArray(payload?.discovery?.entities) ? payload.discovery.entities : [];
     const selections = Array.isArray(payload?.selections) ? payload.selections : [];
     const entityById = new Map(entities.map(entity => [entity.id, entity]));
-    _selectorModels = new Map();
     _selectorItems = [];
     selections.forEach(selection => {
       const entity = entityById.get(selection.entity_id);
@@ -175,16 +159,20 @@ async function _refreshSelectorCatalog() {
         modelId: String(selection.model_id || ''),
         endpointId: String(selection.endpoint_id || ''),
         display: String(entity.display_name || 'Configured choice'),
-        epName: entity.kind === 'model' ? '' : (entity.kind === 'agent' ? 'Agent' : 'Worker'),
+        epName: (selection.capabilities || []).includes('codex')
+          ? 'Workstation Codex'
+          : ((selection.capabilities || []).includes('hermes')
+            ? 'Hermes'
+            : ((selection.capabilities || []).includes('claude')
+              ? 'Claude'
+              : ((selection.capabilities || []).includes('model') ? 'Self-hosted model' : 'Configured identity'))),
         providerText: `${entity.kind} ${entity.health?.state || ''} ${selection.reason || ''}`,
         stale: selection.selectable !== true,
         disabled: selection.selectable !== true,
         staleReason: String(selection.reason || entity.health?.reason || 'unavailable').replace(/_/g, ' '),
         offline: entity.health?.state === 'unavailable',
       };
-      if (entity.kind === 'model') {
-        _selectorModels.set(`${item.endpointId}\0${item.modelId}`, item);
-      } else if (item.target) {
+      if (entity.kind !== 'model' && item.target) {
         _selectorItems.push(item);
       }
     });
@@ -378,6 +366,19 @@ function _initModelPickerDropdown() {
     _closeFallbackTimer = setTimeout(_finishClose, 200);
   }
 
+  function _fitMenuToViewport() {
+    menu.style.right = '';
+    const width = menu.offsetWidth;
+    if (!width) return;
+    const inset = 8;
+    const anchorRight = wrap.getBoundingClientRect().right;
+    const desiredRight = Math.min(
+      Math.max(anchorRight, inset + width),
+      Math.max(inset + width, window.innerWidth - inset),
+    );
+    menu.style.right = `${anchorRight - desiredRight}px`;
+  }
+
   function _openPickerShortcut(kind) {
     _close();
     try {
@@ -419,114 +420,41 @@ function _initModelPickerDropdown() {
     } catch (_) { /* leave stale data; picker still works */ }
   }
 
-  function _getAllModels() {
-    const items = (window.modelsModule && window.modelsModule.getCachedItems) ? window.modelsModule.getCachedItems() : [];
-    const result = [];
-    const seen = new Set();
-    items.filter(_isChatEndpoint).forEach(item => {
-      // Previously: offline endpoints were skipped entirely, so a server
-      // that briefly went down disappeared from the picker — confusing
-      // when the user can still see it (offline-tagged) in Settings.
-      // Now: include offline-endpoint models too but flag them
-      // `stale: true` so the row renderer dims them + shows the offline
-      // pill. The user can still click and try anyway (matches the
-      // existing "local server appears offline" path on line 301).
-      const epOffline = !!item.offline;
-      const allModels = (item.models || []).concat(item.models_extra || []);
-      const allDisplay = (item.models_display || []).concat(item.models_extra_display || []);
-      // Mark local endpoints whose live probe failed.
-      const probeResult = item.endpoint_id ? _localProbe[item.endpoint_id] : null;
-      const isLocalDead = !!(probeResult && probeResult.alive === false);
-      allModels.forEach((mid, i) => {
-        // Deduplicate by model ID — prefer ONLINE endpoint entries over
-        // offline duplicates so the user gets a working endpoint first
-        // when the same model is exposed by both.
-        if (seen.has(mid)) return;
-        seen.add(mid);
-        const discovered = _selectorModels.get(`${item.endpoint_id || ''}\0${mid}`);
-        if (_selectorCatalogState === 'ready' && !discovered) return;
-        result.push({
-          kind: 'model',
-          mid,
-          display: (allDisplay[i] || mid).split('/').pop(),
-          url: item.url,
-          endpointId: item.endpoint_id,
-          epName: item.endpoint_name || '',
-          providerText: [
-            item.endpoint_name || '',
-            item.category || '',
-            item.host || '',
-            item.url || '',
-          ].filter(Boolean).join(' '),
-          stale: discovered ? discovered.stale : (isLocalDead || epOffline),
-          disabled: discovered ? discovered.disabled : false,
-          staleReason: discovered?.staleReason || (epOffline
-            ? (item.ping_error || 'endpoint offline')
-            : (isLocalDead ? (probeResult.error || 'not responding') : 'discovery unavailable')),
-          offline: discovered ? discovered.offline : epOffline,
-        });
+  function _getConversationTargets() {
+    const choices = [..._selectorItems];
+    const selected = _selectedAgent();
+    if (selected?.available === false && !choices.some(item => item.target === selected.target)) {
+      choices.push({
+        kind: selected.kind,
+        target: selected.target,
+        mid: `${selected.kind}:${selected.target}`,
+        display: selected.label,
+        epName: `Unavailable · ${selected.reason || 'no longer configured'}`,
+        providerText: selected.reason || 'no longer configured',
+        stale: true,
+        disabled: true,
+        staleReason: selected.reason || 'no longer configured',
+        offline: true,
       });
+    }
+    const seen = new Set();
+    return choices.filter(item => {
+      const keys = [`target:${item.target}`, `name:${item.display.trim().toLowerCase()}`];
+      if (keys.some(key => seen.has(key))) return false;
+      keys.forEach(key => seen.add(key));
+      return true;
     });
-    return [..._selectorItems, ...sortModelObjects(result)];
   }
-
-  // ── Provider display names and grouping ──
-  const _PROVIDER_NAMES = {
-    '01-ai': 'Yi', 'abacusai': 'Abacus AI', 'adept': 'Adept',
-    'ai21': 'AI21 Labs', 'ai21labs': 'AI21 Labs', 'aion-labs': 'Aion Labs',
-    'aisingapore': 'AI Singapore', 'allenai': 'Allen AI', 'amazon': 'Amazon',
-    'anthracite-org': 'Anthracite', 'anthropic': 'Anthropic', 'arcee-ai': 'Arcee AI',
-    'baai': 'BAAI', 'baidu': 'Baidu', 'bigcode': 'BigCode',
-    'black-forest-labs': 'Black Forest Labs', 'bytedance': 'ByteDance',
-    'bytedance-seed': 'ByteDance', 'cognitivecomputations': 'Cognitive Computations',
-    'cohere': 'Cohere', 'databricks': 'Databricks', 'deepcogito': 'DeepCogito',
-    'deepseek': 'DeepSeek', 'deepseek-ai': 'DeepSeek', 'essentialai': 'Essential AI',
-    'google': 'Google', 'gryphe': 'Gryphe', 'ibm': 'IBM',
-    'ibm-granite': 'IBM Granite', 'inception': 'Inception',
-    'inclusionai': 'Inclusion AI', 'inflection': 'Inflection',
-    'kwaipilot': 'KwaiPilot', 'liquid': 'Liquid AI', 'mancer': 'Mancer',
-    'meta': 'Llama', 'meta-llama': 'Llama', 'microsoft': 'Microsoft',
-    'minimax': 'MiniMax', 'minimaxai': 'MiniMax', 'mistralai': 'Mistral',
-    'moonshotai': 'Moonshot', 'morph': 'Morph', 'nex-agi': 'Nex AGI',
-    'nousresearch': 'Nous Research', 'nv-mistralai': 'NVIDIA x Mistral',
-    'nvidia': 'NVIDIA', 'openai': 'OpenAI', 'openrouter': 'OpenRouter',
-    'perceptron': 'Perceptron', 'perplexity': 'Perplexity', 'poolside': 'Poolside',
-    'prime-intellect': 'Prime Intellect', 'qwen': 'Qwen', 'rekaai': 'Reka',
-    'relace': 'Relace', 'sao10k': 'Sao10k', 'sarvamai': 'Sarvam AI',
-    'snowflake': 'Snowflake', 'stepfun': 'StepFun', 'stepfun-ai': 'StepFun',
-    'stockmark': 'Stockmark', 'switchpoint': 'SwitchPoint', 'tencent': 'Tencent',
-    'thedrummer': 'TheDrummer', 'undi95': 'Undi95', 'upstage': 'Upstage',
-    'writer': 'Writer', 'x-ai': 'xAI', 'xiaomi': 'Xiaomi',
-    'z-ai': 'Zhipu', 'zyphra': 'Zyphra',
-    '~anthropic': 'Anthropic', '~google': 'Google',
-    '~moonshotai': 'Moonshot', '~openai': 'OpenAI',
-  };
-  const _PROVIDER_ALIAS = {
-    'meta-llama': 'meta', 'deepseek': 'deepseek-ai', 'minimaxai': 'minimax',
-    'stepfun-ai': 'stepfun', 'ai21labs': 'ai21', 'ibm-granite': 'ibm',
-    'bytedance-seed': 'bytedance', '~anthropic': 'anthropic',
-    '~google': 'google', '~moonshotai': 'moonshotai', '~openai': 'openai',
-  };
-  function _providerDisplayName(slug) {
-    return _PROVIDER_NAMES[slug] || slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ');
-  }
-  function _providerSlug(mid) {
-    const slash = mid.indexOf('/');
-    let slug = slash > 0 ? mid.substring(0, slash) : 'other';
-    return _PROVIDER_ALIAS[slug] || slug;
-  }
-  const _collapsedProviders = new Set(_loadList('odysseus-model-collapsed'));
-  let _justExpandedProvider = null;
 
   function _populate(filter) {
     listEl.innerHTML = '';
-    const all = _getAllModels();
+    const all = _getConversationTargets();
     const q = (filter || '').trim().toLowerCase();
     const hasAnyChoice = all.length > 0;
     listEl.classList.toggle('is-empty', !hasAnyChoice);
     menu.classList.toggle('no-models', !hasAnyChoice);
     if (search) {
-      search.placeholder = hasAnyChoice ? 'Search models, agents, and workers…' : 'No choices discovered';
+      search.placeholder = hasAnyChoice ? 'Search who you can talk to…' : 'No identities discovered';
     }
     if (searchRow) {
       searchRow.classList.toggle('searching', !!q);
@@ -538,7 +466,7 @@ function _initModelPickerDropdown() {
       const loading = document.createElement('div');
       loading.className = 'model-switch-status';
       loading.setAttribute('role', 'status');
-      loading.textContent = 'Discovering configured models, agents, and workers…';
+      loading.textContent = 'Discovering who you can talk to…';
       listEl.appendChild(loading);
       return;
     }
@@ -558,24 +486,11 @@ function _initModelPickerDropdown() {
       const empty = document.createElement('div');
       empty.className = 'model-switch-status';
       empty.setAttribute('role', 'status');
-      empty.textContent = 'No configured choices are available.';
+      empty.textContent = 'No configured identities are available.';
       listEl.appendChild(empty);
       return;
     }
 
-    // Unique lookup so Recent/Favorites (stored as bare model IDs) can be
-    // resolved back to full model objects; drops anything no longer offered.
-    const byId = new Map();
-    all.forEach(m => { if (!byId.has(m.mid)) byId.set(m.mid, m); });
-
-    const favs = _loadFavorites();
-
-    function _addSection(label) {
-      const el = document.createElement('div');
-      el.className = 'mp-section-label';
-      el.textContent = label;
-      listEl.appendChild(el);
-    }
     function _addEmpty(text) {
       const empty = document.createElement('div');
       empty.className = 'model-switch-empty';
@@ -593,14 +508,6 @@ function _initModelPickerDropdown() {
         row.classList.add('model-switch-stale');
         row.title = `${m.display} is unavailable: ${m.staleReason}. Pandamonium will not reroute this choice.`;
       }
-      const _mlogo = providerLogo(m.mid);
-      if (_mlogo) {
-        const logoSpan = document.createElement('span');
-        logoSpan.className = 'provider-logo';
-        logoSpan.style.opacity = '0.6';
-        logoSpan.innerHTML = _mlogo;
-        row.appendChild(logoSpan);
-      }
       const nameSpan = document.createElement('span');
       nameSpan.className = 'mp-model-name';
       nameSpan.textContent = m.display;
@@ -614,48 +521,10 @@ function _initModelPickerDropdown() {
       // badge is gone.)
       const epSpan = document.createElement('span');
       epSpan.className = 'model-switch-ep';
-      // Don't show endpoint name if it matches the model name (local self-hosted)
-      const _isAgentAlias = ['jarvis', 'gordon', 'friday'].includes(m.display.toLowerCase());
-      const _epDisplay = !_isAgentAlias && m.epName && !m.display.toLowerCase().includes(m.epName.toLowerCase().split('/').pop()) ? m.epName : '';
+      // Describe the owner behind the conversational identity, not its endpoint.
+      const _epDisplay = m.epName || '';
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
-
-      if (m.kind === 'model') {
-        // Inline favorite dot — toggles favorite, never picks the model.
-        const favDot = document.createElement('button');
-        favDot.type = 'button';
-        favDot.className = 'mp-fav-dot' + (favs.includes(m.mid) ? ' active' : '');
-        favDot.textContent = '●';
-        const _setFavState = (on) => {
-          favDot.classList.toggle('active', on);
-          favDot.title = on ? 'Remove from favorites' : 'Add to favorites';
-          favDot.setAttribute('aria-label', on ? 'Remove from favorites' : 'Add to favorites');
-          favDot.setAttribute('aria-pressed', on ? 'true' : 'false');
-        };
-        _setFavState(favs.includes(m.mid));
-        favDot.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const nowFav = _toggleFavorite(m.mid);
-          _setFavState(nowFav);
-          favDot.classList.remove('pulse');
-          void favDot.offsetWidth;
-          favDot.classList.add('pulse');
-          // Keep our in-memory copy aligned so a follow-up re-render is correct.
-          const idx = favs.indexOf(m.mid);
-          if (nowFav && idx < 0) favs.push(m.mid);
-          else if (!nowFav && idx >= 0) favs.splice(idx, 1);
-          if (uiModule && uiModule.showToast) uiModule.showToast(nowFav ? 'Favorited' : 'Unfavorited');
-          // In browse mode the Favorites section membership changed — rebuild
-          // (cheap: Recent + Favorites). In search mode the row stays put, so
-          // the in-place favorite update above is enough.
-          if (!q) {
-            const st = listEl.scrollTop;
-            _populate('');
-            listEl.scrollTop = st;
-          }
-        });
-        row.appendChild(favDot);
-      }
 
       row.addEventListener('click', () => _pick(m));
       row.addEventListener('keydown', event => {
@@ -670,8 +539,7 @@ function _initModelPickerDropdown() {
     // ── Search mode: flat, filtered results across the whole catalog ──
     if (q) {
       const matches = all.filter(m => {
-        const provName = _providerDisplayName(_providerSlug(m.mid)).toLowerCase();
-        return [m.mid, m.display, m.epName, m.providerText, provName]
+        return [m.mid, m.display, m.epName, m.providerText]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
       if (matches.length === 0) _addEmpty('No matching choices');
@@ -679,102 +547,7 @@ function _initModelPickerDropdown() {
       return;
     }
 
-    // ── Browse mode: Favorites (manual) + Recent (auto), with dedupe. ──
-    // Rules:
-    //   1. Never list the same model twice in the dropdown. Favorites
-    //      win over Recent (if you favorited it, that's where it
-    //      belongs — Recent shouldn't show it again as duplicate).
-    //   2. Small catalogs (≤ BROWSE_ALL_LIMIT total) skip the Recent
-    //      section entirely — when there's only ~10 models, the whole
-    //      list fits below as "All models" and a separate Recent
-    //      section just duplicates rows.
-    const shown = new Set();
-    const agentRows = all.filter(m => m.kind === 'agent');
-    if (agentRows.length) {
-      _addSection('Agents');
-      agentRows.forEach(m => { shown.add(m.mid); _addRow(m); });
-    }
-    const workerRows = all.filter(m => m.kind === 'worker');
-    if (workerRows.length) {
-      _addSection('Workers');
-      workerRows.forEach(m => { shown.add(m.mid); _addRow(m); });
-    }
-    const favModels = favs.map(id => byId.get(id)).filter(Boolean);
-    if (favModels.length) {
-      _addSection('Favorites');
-      favModels.forEach(m => { shown.add(m.mid); _addRow(m); });
-    }
-    // Recent: only render when the catalog is big enough that surfacing
-    // a recency shortlist is actually useful, AND only models that
-    // aren't already in Favorites (dedupe).
-    if (all.length > BROWSE_ALL_LIMIT) {
-      const recentModels = _loadRecent()
-        .map(id => byId.get(id))
-        .filter(Boolean)
-        .filter(m => !shown.has(m.mid))
-        .slice(0, RECENT_MAX);
-      if (recentModels.length) {
-        _addSection('Recent');
-        recentModels.forEach(m => { shown.add(m.mid); _addRow(m); });
-      }
-    }
-
-    // Small catalogs: still list everything so users aren't forced to search.
-    if (all.length <= BROWSE_ALL_LIMIT) {
-      const rest = all.filter(m => !shown.has(m.mid));
-      if (rest.length) {
-        if (shown.size) _addSection('All models');
-        rest.forEach(_addRow);
-      }
-    } else {
-      // Large catalog: show provider groups with collapsible sections.
-      const rest = all.filter(m => !shown.has(m.mid));
-      const groups = new Map();
-      rest.forEach(m => {
-        const slug = _providerSlug(m.mid);
-        if (!groups.has(slug)) groups.set(slug, []);
-        groups.get(slug).push(m);
-      });
-      const sorted = [...groups.keys()].sort((a, b) =>
-        _providerDisplayName(a).localeCompare(_providerDisplayName(b)));
-
-      sorted.forEach(provider => {
-        const models = groups.get(provider);
-        const isCollapsed = _collapsedProviders.has(provider);
-        const header = document.createElement('div');
-        header.className = 'mp-provider-header';
-        header.innerHTML =
-          `<svg class="mp-provider-chevron${isCollapsed ? ' collapsed' : ''}" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`
-          + `<span class="mp-provider-name">${_providerDisplayName(provider)}</span>`
-          + `<span class="mp-provider-count">${models.length}</span>`;
-        header.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (_collapsedProviders.has(provider)) {
-            _collapsedProviders.delete(provider);
-            _justExpandedProvider = provider;
-          } else {
-            _collapsedProviders.add(provider);
-            _justExpandedProvider = null;
-          }
-          _saveList('odysseus-model-collapsed', [..._collapsedProviders]);
-          const st = listEl.scrollTop;
-          _populate('');
-          listEl.scrollTop = st;
-        });
-        listEl.appendChild(header);
-        if (!isCollapsed) {
-          const group = document.createElement('div');
-          group.className = 'mp-provider-group' + (_justExpandedProvider === provider ? ' mp-just-expanded' : '');
-          models.forEach(m => {
-            _addRow(m);
-            // Move the just-appended row into the group container
-            group.appendChild(listEl.lastElementChild);
-          });
-          listEl.appendChild(group);
-          if (_justExpandedProvider === provider) _justExpandedProvider = null;
-        }
-      });
-    }
+    all.forEach(_addRow);
   }
 
   async function _pick(m) {
@@ -917,14 +690,21 @@ function _initModelPickerDropdown() {
       _cancelPendingClose();
       menu.classList.remove('closing', 'hidden');
       _populate('');
+      _fitMenuToViewport();
       if (window.modelsModule && window.modelsModule.refreshModels) {
         window.modelsModule.refreshModels().then(() => {
-          if (!menu.classList.contains('hidden')) _populate(search.value || '');
+          if (!menu.classList.contains('hidden')) {
+            _populate(search.value || '');
+            _fitMenuToViewport();
+          }
           updateModelPicker();
         }).catch(() => {});
       }
       _refreshSelectorCatalog().then(() => {
-        if (!menu.classList.contains('hidden')) _populate(search.value || '');
+        if (!menu.classList.contains('hidden')) {
+          _populate(search.value || '');
+          _fitMenuToViewport();
+        }
         updateModelPicker();
       }).catch(() => {});
       if (window.innerWidth >= 768) search.focus();
@@ -937,6 +717,9 @@ function _initModelPickerDropdown() {
   });
 
   search.addEventListener('input', () => _populate(search.value));
+  window.addEventListener('resize', () => {
+    if (!menu.classList.contains('hidden')) _fitMenuToViewport();
+  });
   search.addEventListener('click', (e) => e.stopPropagation());
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async (e) => {

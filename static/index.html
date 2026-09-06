@@ -225,8 +225,8 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=20260905T022733Z">
-  <link rel="modulepreload" href="/static/app.js?v=20260904T235228Z">
+  <link rel="stylesheet" href="/static/style.css?v=20260905T210749Z">
+  <link rel="modulepreload" href="/static/app.js?v=20260905T210749Z">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -1095,7 +1095,7 @@
             <svg class="jarvis-agent-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div id="jarvis-agent-menu" class="jarvis-agent-menu" role="menu" hidden>
-            <div class="jarvis-selector-status" role="status">Discovering configured choices…</div>
+            <div class="jarvis-selector-status" role="status">Discovering who you can talk to…</div>
             <button type="button" id="jarvis-agent-cancel" class="jarvis-agent-cancel" role="menuitem" hidden disabled>Cancel active task</button>
           </div>
         </div>
@@ -1142,11 +1142,11 @@
         <textarea id="message" placeholder="Message Pandamonium..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
-          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model, agent, or worker" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Choose who to talk to" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Choose who</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <div class="model-picker-search-row">
               <div class="model-picker-search-wrap">
-                <input type="text" id="model-picker-search" placeholder="Search models, agents, and workers..." autocomplete="off" aria-label="Search models, agents, and workers">
+                <input type="text" id="model-picker-search" placeholder="Search who you can talk to..." autocomplete="off" aria-label="Search who you can talk to">
                 <button type="button" class="model-picker-refresh-btn" id="model-picker-refresh-btn" title="Refresh model picker" aria-label="Refresh model picker">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 </button>
@@ -1155,7 +1155,7 @@
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
               </button>
             </div>
-            <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured models, agents, and workers"></div>
+            <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured conversation identities"></div>
             <button type="button" id="codex-browser-toggle" class="codex-browser-toggle" aria-expanded="false" aria-controls="codex-workspace-browser" hidden>Browse Codex projects and tasks</button>
             <section id="codex-workspace-browser" class="codex-workspace-browser" aria-label="Codex projects and tasks" hidden>
               <div class="codex-browser-head">
@@ -2763,14 +2763,14 @@
 <script type="module" src="/static/js/search.js"></script>
 <script type="module" src="/static/js/spinner.js"></script>
 <script type="module" src="/static/js/tts-ai.js"></script>
-<script type="module" src="/static/js/jarvisVoice.js?v=20260905T022733Z"></script>
+<script type="module" src="/static/js/jarvisVoice.js?v=20260905T210749Z"></script>
 <script type="module" src="/static/js/codexWorkspace.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260904T235900Z"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260905T022733Z"></script>
+<script type="module" src="/static/js/chat.js?v=20260905T210749Z"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
@@ -2781,7 +2781,7 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260904T235228Z"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260905T210749Z"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

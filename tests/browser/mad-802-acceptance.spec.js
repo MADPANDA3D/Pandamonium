@@ -76,7 +76,7 @@ test('New Chat preserves configured Friday as the conversation target', async ({
   });
   await expect.poll(() => page.evaluate(async () => (
     await import('/static/js/modelPicker.js')
-  ).getSelectedAgentTarget())).toBe('');
+  ).getSelectedAgentTarget())).toBe('pc-codex');
 
   await page.evaluate(async () => {
     const sessions = await import('/static/js/sessions.js');
