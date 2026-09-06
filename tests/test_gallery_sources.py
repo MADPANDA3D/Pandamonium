@@ -329,10 +329,13 @@ def test_source_route_is_owner_scoped_and_original_is_not_deletable(
     monkeypatch.setattr(gallery_routes, "get_current_user", lambda request: "alice")
     monkeypatch.setattr(gallery_routes, "require_user", lambda request: "alice")
     app = FastAPI()
+    app.state.auth_manager = type(
+        "AdminFixture", (), {"is_admin": lambda self, user: user == "alice"}
+    )()
     app.include_router(gallery_routes.setup_gallery_routes())
     client = TestClient(app)
 
-    response = client.get(f"/api/gallery/source/{image_id}")
+    response = client.get(f"/api/gallery/source/{image_id}/{image.filename}")
     assert response.status_code == 200
     assert response.content == b"owner-photo"
     assert response.headers["cache-control"] == "private, no-cache"
@@ -342,4 +345,15 @@ def test_source_route_is_owner_scoped_and_original_is_not_deletable(
     assert photo.read_bytes() == b"owner-photo"
 
     monkeypatch.setattr(gallery_routes, "require_user", lambda request: "bob")
-    assert client.get(f"/api/gallery/source/{image_id}").status_code == 404
+    assert client.get(f"/api/gallery/source/{image_id}/{image.filename}").status_code == 404
+    assert client.get("/api/gallery/sources").status_code == 403
+
+
+def test_source_video_url_preserves_media_extension():
+    image = GalleryImage(
+        id="video-1",
+        filename="source-video.mp4",
+        source_file_id="file-1",
+    )
+
+    assert gallery_routes._image_url(image).endswith("/source-video.mp4")

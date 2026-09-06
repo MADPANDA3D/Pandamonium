@@ -54,6 +54,14 @@ def _current_user_is_admin(request: Request, user: str | None) -> bool:
         return False
 
 
+def _require_gallery_source_operator(request: Request) -> str:
+    """Allow host-folder mapping only to an admin or a single-user install."""
+    user = require_user(request)
+    if user and not _current_user_is_admin(request, user):
+        raise HTTPException(403, "Only an administrator can connect local folders")
+    return user
+
+
 def _sanitize_gallery_filename(filename: str) -> str:
     """Return a local filename safe to join under generated_images."""
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(str(filename or "")).name)[:128]
@@ -750,7 +758,7 @@ def setup_gallery_routes() -> APIRouter:
 
     @router.get("/api/gallery/sources")
     def gallery_sources(request: Request):
-        owner = source_owner(require_user(request))
+        owner = source_owner(_require_gallery_source_operator(request))
         db = SessionLocal()
         try:
             return source_status(db, owner)
@@ -759,7 +767,7 @@ def setup_gallery_routes() -> APIRouter:
 
     @router.post("/api/gallery/sources/sync")
     def sync_sources(request: Request):
-        owner = source_owner(require_user(request))
+        owner = source_owner(_require_gallery_source_operator(request))
         db = SessionLocal()
         try:
             return sync_gallery_sources(db, owner)
@@ -772,7 +780,7 @@ def setup_gallery_routes() -> APIRouter:
 
     @router.post("/api/gallery/sources")
     def connect_source(request: Request, change: GallerySourceChange):
-        owner = source_owner(require_user(request))
+        owner = source_owner(_require_gallery_source_operator(request))
         if not change.path:
             raise HTTPException(400, "Folder path is required")
         try:
@@ -813,7 +821,7 @@ def setup_gallery_routes() -> APIRouter:
 
     @router.patch("/api/gallery/sources/{source_id}")
     def update_source(request: Request, source_id: str, change: GallerySourceChange):
-        owner = source_owner(require_user(request))
+        owner = source_owner(_require_gallery_source_operator(request))
         db = SessionLocal()
         try:
             source = db.query(GallerySource).filter(
@@ -862,8 +870,8 @@ def setup_gallery_routes() -> APIRouter:
         finally:
             db.close()
 
-    @router.get("/api/gallery/source/{image_id}")
-    def serve_source_image(request: Request, image_id: str):
+    @router.get("/api/gallery/source/{image_id}/{display_name}")
+    def serve_source_image(request: Request, image_id: str, display_name: str):
         user = require_user(request)
         owner = source_owner(user)
         db = SessionLocal()
@@ -873,6 +881,8 @@ def setup_gallery_routes() -> APIRouter:
                 GalleryImage.is_active == True,  # noqa: E712
             ).first()
             if img is None or (user and img.owner != user) or not img.source_file_id:
+                raise HTTPException(404, "Image not found")
+            if display_name != img.filename:
                 raise HTTPException(404, "Image not found")
             try:
                 path = resolve_source_file(db, img, owner)

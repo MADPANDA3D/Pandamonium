@@ -64,6 +64,8 @@ On a native install, opening Gallery discovers the current OS user's conventiona
 Pictures folder: XDG `XDG_PICTURES_DIR` on Linux, `~/Pictures` on macOS, and the
 Windows Known Folder API. Accessible folders are connected read-only and can be
 refreshed, changed, or disabled under **Gallery → Settings → Local Pictures**.
+On an authenticated multi-user install, only an administrator can map host
+folders; this prevents ordinary accounts from browsing process-readable paths.
 Pandamonium indexes metadata and content hashes; it does not upload, rewrite, or
 delete source photos, follow symlinks, or scan outside the selected folder.
 
@@ -82,6 +84,12 @@ services:
 The path must be a real container mount point. An ordinary container directory
 is rejected, and an unmounted host filesystem is never implied. Separate
 multiple Linux container paths with `:`.
+
+Gallery Settings on desktop and mobile:
+
+![Gallery Local Pictures on desktop](images/gallery-local-pictures-desktop.png)
+
+![Gallery Local Pictures on mobile](images/gallery-local-pictures-mobile.png)
 
 ### Atomic native Linux updates
 

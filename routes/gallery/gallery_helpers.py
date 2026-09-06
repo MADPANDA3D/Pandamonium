@@ -125,7 +125,7 @@ def _image_to_dict(img: GalleryImage, session_name: str = None) -> Dict[str, Any
 
 def _image_url(img: GalleryImage) -> str:
     if img.source_file_id:
-        return f"/api/gallery/source/{img.id}"
+        return f"/api/gallery/source/{img.id}/{img.filename}"
     return f"/api/generated-image/{img.filename}"
 
 

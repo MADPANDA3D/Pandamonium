@@ -41,7 +41,7 @@ test('Gallery reports, changes, disables, and protects a connected Pictures fold
     if (path === '/api/gallery/library') {
       return route.fulfill({ json: {
         items: [{
-          id: 'img-1', filename: 'source-fixture.jpg', url: '/api/gallery/source/img-1',
+          id: 'img-1', filename: 'source-fixture.jpg', url: '/api/gallery/source/img-1/source-fixture.jpg',
           prompt: 'fixture', caption: '', model: 'local-folder', read_only: true,
           favorite: false, tags: '', ai_tags: '', created_at: '2026-09-06T13:30:00',
         }],
