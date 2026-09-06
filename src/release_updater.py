@@ -673,7 +673,7 @@ class UpdateExecutor:
                             )
                         with source, destination.open("wb") as handle:
                             shutil.copyfileobj(source, handle)
-                        destination.chmod(member.mode & 0o777)
+                        destination.chmod(member.mode & 0o755)
                     elif member.issym():
                         link = PurePosixPath(member.linkname)
                         if link.is_absolute() or ".." in link.parts:

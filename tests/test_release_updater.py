@@ -500,3 +500,31 @@ def test_release_archive_rejects_parent_traversal(tmp_path):
         executor._extract_release(archive, tmp_path / "extract")
 
     assert not (tmp_path / "outside").exists()
+
+
+def test_release_archive_strips_group_and_other_write_bits(tmp_path):
+    archive = tmp_path / "writable.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, mode in (
+            ("pandamonium/config.py", 0o664),
+            ("pandamonium/run", 0o775),
+        ):
+            payload = b"proof\n"
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            info.mode = mode
+            tar.addfile(info, io.BytesIO(payload))
+    executor = release_updater.UpdateExecutor(
+        release_updater.UpdateConfig(
+            tmp_path / "install",
+            tmp_path / "data",
+            tmp_path / "backups",
+            "pandamonium.service",
+            "http://127.0.0.1:7000",
+        )
+    )
+
+    extracted = executor._extract_release(archive, tmp_path / "extract")
+
+    assert extracted.joinpath("config.py").stat().st_mode & 0o777 == 0o644
+    assert extracted.joinpath("run").stat().st_mode & 0o777 == 0o755
