@@ -108,6 +108,12 @@ its owner-scoped cache removes only Pandamonium metadata and thumbnails and
 never deletes an Immich original. If Immich is offline, a matching cached page
 can remain visible with an explicit stale/offline state.
 
+Immich connection controls on desktop and mobile:
+
+![Immich Gallery settings on desktop](images/gallery-immich-settings-desktop.png)
+
+![Immich Gallery settings on mobile](images/gallery-immich-settings-mobile.png)
+
 ### Atomic native Linux updates
 
 The fixed footer can install a signed Pandamonium release only when Linux is
