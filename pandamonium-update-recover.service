@@ -1,0 +1,15 @@
+[Unit]
+Description=Recover an interrupted Pandamonium release activation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=/etc/pandamonium/update.env
+ExecStart=/opt/pandamonium/current/venv/bin/python /opt/pandamonium/current/scripts/pandamonium-update recover
+
+[Install]
+WantedBy=multi-user.target

@@ -51,6 +51,7 @@ import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 import marketplaceModule from './js/marketplace.js';
+import updaterModule from './js/updater.js';
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -4363,6 +4364,7 @@ function startPandamoniumApp() {
   // Ensure proper initial state
   voiceRecorderModule.init();
   if (censorModule) censorModule.init();
+  updaterModule.init();
 
   // Auto-focus message input on load
   const msgEl = document.getElementById('message');

@@ -48,15 +48,23 @@ def test_backup_list_sorts_by_captured_mtime(monkeypatch):
     backup = _load_backup_cli()
     first = SimpleNamespace(name="older.tar.gz")
     second = SimpleNamespace(name="newer.tar.gz")
-    monkeypatch.setattr(backup, "_BACKUP_DIR", SimpleNamespace(
-        is_dir=lambda: True,
-        iterdir=lambda: [first, second],
-    ))
-    monkeypatch.setattr(backup, "_backup_entry", lambda p: {
-        "name": p.name,
-        "modified": "2026-10-25T01:45:00" if p is first else "2026-10-25T01:15:00",
-        "_mtime": 100 if p is first else 200,
-    })
+    monkeypatch.setattr(
+        backup,
+        "_BACKUP_DIR",
+        SimpleNamespace(
+            is_dir=lambda: True,
+            iterdir=lambda: [first, second],
+        ),
+    )
+    monkeypatch.setattr(
+        backup,
+        "_backup_entry",
+        lambda p: {
+            "name": p.name,
+            "modified": "2026-10-25T01:45:00" if p is first else "2026-10-25T01:15:00",
+            "_mtime": 100 if p is first else 200,
+        },
+    )
     seen = []
     monkeypatch.setattr(backup, "emit", lambda payload, args: seen.append(payload))
 
@@ -167,7 +175,9 @@ def test_restore_extracts_regular_files_without_extractall(tmp_path, monkeypatch
     assert list(repo.glob("data.before-restore-*"))
 
 
-def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(tmp_path, monkeypatch):
+def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(
+    tmp_path, monkeypatch
+):
     backup = _load_backup_cli()
     repo = tmp_path / "repo"
     data = repo / "data"
@@ -190,7 +200,9 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(tmp_path,
     assert snapshot["integrity"]["verified"] is False
     assert snapshot["integrity"]["sha256"]
     with tarfile.open(archive, "r:gz") as tar:
-        manifest = json.loads(tar.extractfile("data/.pandamonium-backup-manifest.json").read())
+        manifest = json.loads(
+            tar.extractfile("data/.pandamonium-backup-manifest.json").read()
+        )
     assert manifest["scope"] == "pandamonium canonical data directory"
     assert "data/deep_research" in manifest["exclusions"]
     assert "qdrant" in manifest["external_vectors"]
@@ -200,3 +212,34 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(tmp_path,
     assert proof["ok"] is True
     assert proof["proof_recorded"] is True
     assert Path(str(archive) + ".verified.json").exists()
+
+
+def test_external_data_root_round_trips_without_restoring_into_source(
+    tmp_path, monkeypatch
+):
+    backup = _load_backup_cli()
+    repo = tmp_path / "release"
+    repo.mkdir()
+    data = tmp_path / "persistent" / "data"
+    data.mkdir(parents=True)
+    (data / "owner.txt").write_text("before", encoding="utf-8")
+    monkeypatch.setattr(backup, "_REPO_ROOT", repo)
+    monkeypatch.setattr(backup, "_DATA_DIR", data)
+    archive = tmp_path / "snapshot.tar.gz"
+    emitted = []
+    monkeypatch.setattr(backup, "emit", lambda payload, args: emitted.append(payload))
+
+    backup.cmd_snapshot(
+        SimpleNamespace(
+            out=str(archive),
+            include_research=True,
+            include_attachments=True,
+            pretty=False,
+        )
+    )
+    (data / "owner.txt").write_text("after", encoding="utf-8")
+    backup.cmd_restore(_restore_args(archive))
+
+    assert (data / "owner.txt").read_text(encoding="utf-8") == "before"
+    assert not (repo / "data").exists()
+    assert list(data.parent.glob("data.before-restore-*"))

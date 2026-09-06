@@ -986,12 +986,19 @@
         </div>
       </div>
     </div>
-    <section class="sidebar-update-status" id="sidebar-update-status" aria-live="polite" aria-label="Checking application version">
+    <section class="sidebar-update-status" id="sidebar-update-status" aria-live="polite" aria-label="Application update status">
       <div class="sidebar-update-copy">
         <span class="sidebar-update-version" id="sidebar-update-version">Version —</span>
-        <span class="sidebar-update-state is-checking" id="sidebar-update-state">Checking for updates…</span>
+        <span class="sidebar-update-commit" id="sidebar-update-commit"></span>
+        <span class="sidebar-update-state is-unknown" id="sidebar-update-state">Not checked</span>
+        <span class="sidebar-update-detail" id="sidebar-update-detail" hidden></span>
+        <span class="sidebar-update-backup" id="sidebar-update-backup" hidden></span>
       </div>
-      <a class="sidebar-update-action" id="sidebar-update-action" href="#" target="_blank" rel="noopener noreferrer" hidden>Update</a>
+      <div class="sidebar-update-actions">
+        <button type="button" class="sidebar-update-action" id="sidebar-update-check">Check for updates</button>
+        <button type="button" class="sidebar-update-action is-primary" id="sidebar-update-action" hidden>Update now</button>
+        <button type="button" class="sidebar-update-action" id="sidebar-update-rollback" hidden>Rollback</button>
+      </div>
     </section>
     <div class="sidebar-user-bar" id="sidebar-user-bar">
       <div class="user-bar-left" id="user-bar-profile">
@@ -1056,37 +1063,6 @@
       if (el) {
         el.textContent = 'Type /setup, then choose Local models or API.';
       }
-      fetch('/api/version').then(function(r){return r.json()}).then(function(d){
-        if (d.version) window._appVersion = d.version;
-        var widget = document.getElementById('sidebar-update-status');
-        var version = document.getElementById('sidebar-update-version');
-        var state = document.getElementById('sidebar-update-state');
-        var action = document.getElementById('sidebar-update-action');
-        if (!widget || !version || !state || !action) return;
-        version.textContent = 'Version ' + (d.version ? 'v' + d.version : 'unknown');
-        state.classList.remove('is-checking', 'is-current', 'is-available', 'is-unknown');
-        if (d.update_available && d.latest_version && d.update_url) {
-          state.textContent = 'v' + d.latest_version + ' available';
-          state.classList.add('is-available');
-          action.href = d.update_url;
-          action.hidden = false;
-          widget.setAttribute('aria-label', 'Version ' + d.version + '; update ' + d.latest_version + ' available');
-        } else {
-          var known = d.update_status === 'current';
-          state.textContent = known ? 'Up to date' : 'Update check unavailable';
-          state.classList.add(known ? 'is-current' : 'is-unknown');
-          action.hidden = true;
-          action.removeAttribute('href');
-          widget.setAttribute('aria-label', 'Version ' + (d.version || 'unknown') + '; ' + state.textContent);
-        }
-      }).catch(function(){
-        var state = document.getElementById('sidebar-update-state');
-        if (state) {
-          state.textContent = 'Update check unavailable';
-          state.classList.remove('is-checking');
-          state.classList.add('is-unknown');
-        }
-      });
     })();
     </script>
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>

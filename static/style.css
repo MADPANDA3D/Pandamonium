@@ -480,9 +480,9 @@ body.bg-pattern-sparkles {
     /* ===== Sidebar User Bar ===== */
     .sidebar-update-status {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 7px;
       margin: 8px 12px 0;
       padding: 9px 10px;
       min-height: 44px;
@@ -513,7 +513,7 @@ body.bg-pattern-sparkles {
       color: var(--fg);
       font-size: 9px;
       opacity: 0.6;
-      white-space: nowrap;
+      line-height: 1.3;
     }
 
     .sidebar-update-state::before {
@@ -528,18 +528,45 @@ body.bg-pattern-sparkles {
     .sidebar-update-state.is-current { color: var(--color-success); opacity: 0.85; }
     .sidebar-update-state.is-available { color: var(--accent, var(--red)); opacity: 1; }
     .sidebar-update-state.is-unknown { opacity: 0.45; }
+    .sidebar-update-state.is-checking { color: var(--accent, var(--red)); opacity: 0.8; }
+
+    .sidebar-update-commit,
+    .sidebar-update-detail,
+    .sidebar-update-backup {
+      color: var(--fg);
+      font-size: 8px;
+      line-height: 1.35;
+      opacity: 0.48;
+      overflow-wrap: anywhere;
+    }
+
+    .sidebar-update-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
 
     .sidebar-update-action {
       flex-shrink: 0;
       padding: 5px 8px;
+      border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
       border-radius: 6px;
-      background: var(--accent, var(--red));
-      color: var(--bg);
+      background: color-mix(in srgb, var(--fg) 5%, transparent);
+      color: var(--fg);
       font-size: 9px;
       font-weight: 700;
       line-height: 1;
       text-decoration: none;
+      cursor: pointer;
     }
+
+    .sidebar-update-action.is-primary {
+      border-color: transparent;
+      background: var(--accent, var(--red));
+      color: var(--bg);
+    }
+
+    .sidebar-update-action:disabled { cursor: wait; opacity: 0.5; }
 
     .sidebar-update-action:hover { filter: brightness(1.1); }
 

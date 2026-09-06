@@ -36,6 +36,12 @@ Run the tool from the repository root:
 The script depends only on the Python standard library, so any `python3` on your
 `PATH` will run it — you don't need the app's virtualenv active.
 
+If `PANDAMONIUM_DATA_DIR` (or the legacy `ODYSSEUS_DATA_DIR`) points outside the
+source tree, snapshot and restore use that exact canonical directory while
+keeping the archive rooted at `data/`. Restore stages beside the external data
+directory and swaps it atomically on the same filesystem; the replaced state is
+retained as `<name>.before-restore-<timestamp>` beside it.
+
 Every command prints a JSON result. Add `--pretty` for indented output.
 
 Every new snapshot embeds a `jos-p7.backup.v1` manifest with its scope, source
@@ -112,7 +118,9 @@ The tool reads `data/` and writes `backups/` relative to the repository root, so
 where you run it matters:
 
 - **Native installs** — run it from the repo root as shown above. `data/` and
-  `backups/` are both in the repo directory.
+  `backups/` are both in the repo directory unless `PANDAMONIUM_DATA_DIR`
+  selects an external canonical data root. Managed atomic updates always take a
+  verified full snapshot with both large optional categories included.
 - **Docker** — `docker-compose.yml` bind-mounts the host's `./data` to
   `/app/data`, so the live data is also present on the host. **Run the tool on
   the host** from the repo root; the snapshot reads the bind-mounted `./data` and

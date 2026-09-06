@@ -29,7 +29,11 @@ import argparse, hashlib, io, json, logging, os, shutil, sqlite3, subprocess, sy
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-_DATA_DIR = _REPO_ROOT / "data"
+_DATA_DIR = Path(
+    os.getenv("PANDAMONIUM_DATA_DIR")
+    or os.getenv("ODYSSEUS_DATA_DIR")
+    or (_REPO_ROOT / "data")
+).resolve()
 _BACKUP_DIR = _REPO_ROOT / "backups"
 _MANIFEST_NAME = "data/.pandamonium-backup-manifest.json"
 _LEGACY_MANIFEST_NAME = "data/.odysseus-backup-manifest.json"
@@ -70,6 +74,13 @@ def _reject_output_inside_data(out_path: Path) -> None:
 
 
 def _source_version() -> str:
+    revision_file = _REPO_ROOT / "SOURCE_REVISION"
+    try:
+        revision = revision_file.read_text(encoding="utf-8").strip()
+        if revision:
+            return revision[:80]
+    except OSError:
+        pass
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT,
@@ -179,6 +190,7 @@ def cmd_snapshot(args):
             db_map[db] = staged
 
         with tarfile.open(out_path, "w:gz") as tar:
+            tar.add(_DATA_DIR, arcname="data", recursive=False)
             manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
             manifest_info = tarfile.TarInfo(_MANIFEST_NAME)
             manifest_info.size = len(manifest_bytes)
@@ -187,15 +199,20 @@ def cmd_snapshot(args):
             files_added += 1
             total_bytes += len(manifest_bytes)
             for p in sorted(_DATA_DIR.rglob("*")):
-                if not p.is_file() or p.is_symlink():
+                if p.is_symlink():
                     continue
-                rel = p.relative_to(_DATA_DIR.parent)
+                rel = Path("data") / p.relative_to(_DATA_DIR)
                 if str(rel) == _MANIFEST_NAME:
                     continue
                 # Skip user-asked-to-skip categories
                 if not args.include_research and "deep_research" in rel.parts:
                     continue
                 if not args.include_attachments and "mail-attachments" in rel.parts:
+                    continue
+                if p.is_dir():
+                    tar.add(p, arcname=str(rel), recursive=False)
+                    continue
+                if not p.is_file():
                     continue
                 # Substitute SQLite snapshots for the live files
                 source = db_map.get(p, p)
@@ -299,12 +316,20 @@ def _validate_restore_members(members):
             fail(f"refusing tarball with special file entry: {m.name!r}")
 
 
-def _extract_restore_members(tar, members, root: Path) -> None:
+def _extract_restore_members(
+    tar,
+    members,
+    root: Path,
+    owner: tuple[int, int] | None = None,
+    root_mode: int | None = None,
+) -> None:
     """Extract only regular files/directories after validation."""
+    directories = []
     for m in members:
         target = root.joinpath(*PurePosixPath(m.name).parts)
         if m.isdir():
-            target.mkdir(parents=True, exist_ok=True)
+            target.mkdir(parents=True, mode=0o700, exist_ok=True)
+            directories.append((target, m))
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         src = tar.extractfile(m)
@@ -312,6 +337,25 @@ def _extract_restore_members(tar, members, root: Path) -> None:
             fail(f"extract failed: could not read {m.name!r}")
         with src, open(target, "wb") as dst:
             shutil.copyfileobj(src, dst)
+        target.chmod((m.mode & 0o777) or 0o600)
+        if os.geteuid() == 0 and owner is not None:
+            os.chown(target, *owner)
+    for target, member in reversed(directories):
+        # A malformed/legacy archive can describe a directory with a regular
+        # file mode. Always retain owner traversal so restored content remains
+        # reachable while preserving the archive's other permission bits.
+        target.chmod(((member.mode & 0o777) or 0o755) | 0o700)
+        if os.geteuid() == 0 and owner is not None:
+            os.chown(target, *owner)
+    data_root = root / "data"
+    if data_root.is_dir():
+        for directory in (item for item in data_root.rglob("*") if item.is_dir()):
+            if os.geteuid() == 0 and owner is not None:
+                os.chown(directory, *owner)
+        if root_mode is not None:
+            data_root.chmod((root_mode & 0o777) | 0o700)
+        if os.geteuid() == 0 and owner is not None:
+            os.chown(data_root, *owner)
 
 
 def cmd_restore(args):
@@ -325,18 +369,33 @@ def cmd_restore(args):
     # `data/`. Avoid extractall() so symlink/hardlink entries can't redirect a
     # later write outside the repo.
     stash = None
+    owner = None
+    root_mode = None
+    if os.geteuid() == 0 and _DATA_DIR.exists():
+        data_stat = _DATA_DIR.stat()
+        owner = (data_stat.st_uid, data_stat.st_gid)
+        root_mode = data_stat.st_mode
     with tarfile.open(path, "r:gz") as tar:
         members = tar.getmembers()
         _validate_restore_members(members)
         manifest = _read_manifest(tar, members)
-        # Save a safety copy of current data/ before extracting.
-        if _DATA_DIR.exists() or _DATA_DIR.is_symlink():
-            stash = _REPO_ROOT / f"data.before-restore-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            os.rename(_DATA_DIR, stash)
-        try:
-            _extract_restore_members(tar, members, _REPO_ROOT)
-        except Exception as e:
-            fail(f"extract failed: {e}")
+        # Extract beside the configured data directory, then swap on the same
+        # filesystem. This preserves external native-install data roots too.
+        with tempfile.TemporaryDirectory(dir=_DATA_DIR.parent) as tmp:
+            stage = Path(tmp)
+            try:
+                _extract_restore_members(tar, members, stage, owner, root_mode)
+                if _DATA_DIR.exists() or _DATA_DIR.is_symlink():
+                    stash = _DATA_DIR.with_name(
+                        f"{_DATA_DIR.name}.before-restore-"
+                        f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+                    )
+                    os.rename(_DATA_DIR, stash)
+                os.replace(stage / "data", _DATA_DIR)
+            except Exception as e:
+                if stash and stash.exists() and not _DATA_DIR.exists():
+                    os.rename(stash, _DATA_DIR)
+                fail(f"extract failed: {e}")
     emit({
         "ok": True,
         "restored_from": str(path),

@@ -130,8 +130,20 @@ The canonical command is `pandamonium`:
 ```bash
 ./scripts/pandamonium help
 ./scripts/pandamonium backup snapshot
+./scripts/pandamonium update check
+./scripts/pandamonium update status
 ./scripts/pandamonium mcp list
 ```
+
+Managed native Linux installs can enable signed, checksummed updates from the
+fixed footer. Each install stages an immutable release, verifies a full data
+backup, rehearses idempotent migrations, atomically switches `current`, and
+automatically restores the prior release and data if health checks fail. See
+[Atomic native Linux updates](docs/setup.md#atomic-native-linux-updates).
+
+Docker, ordinary source checkouts, macOS, and Windows still use their platform's
+normal upgrade procedure; the footer reports that host-managed updates are
+required instead of attempting an in-container or in-checkout mutation.
 
 The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment

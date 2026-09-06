@@ -9,10 +9,17 @@ test('New Chat preserves configured Friday as the conversation target', async ({
     if (path === '/api/version') {
       return route.fulfill({ json: {
         version: '1.0.9',
+        commit: '1111111111111111111111111111111111111111',
+        release: '1.0.9-11111111',
         latest_version: '1.0.10',
+        latest_commit: '2222222222222222222222222222222222222222',
         update_available: true,
         update_url: 'https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.10',
         update_status: 'available',
+        compatible: true,
+        can_update: true,
+        installation: { supported: true, trigger: 'systemd-path' },
+        operation: { status: 'idle' },
       } });
     }
     if (path === '/api/selector-catalog') {
@@ -45,12 +52,11 @@ test('New Chat preserves configured Friday as the conversation target', async ({
   await page.goto('/static/index.html');
 
   await expect(page.locator('#sidebar-update-version')).toHaveText('Version v1.0.9');
-  await expect(page.locator('#sidebar-update-state')).toHaveText('v1.0.10 available');
+  await expect(page.locator('#sidebar-update-commit')).toHaveText('Deployed 1.0.9-11111111 · 11111111');
+  await expect(page.locator('#sidebar-update-state')).toHaveText('v1.0.10 available · 22222222');
+  await expect(page.locator('#sidebar-update-check')).toHaveText('Check for updates');
   await expect(page.locator('#sidebar-update-action')).toBeVisible();
-  await expect(page.locator('#sidebar-update-action')).toHaveAttribute(
-    'href',
-    'https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.10',
-  );
+  await expect(page.locator('#sidebar-update-action')).toHaveText('Update to v1.0.10');
 
   await page.locator('#model-picker-btn').click();
   const friday = page.locator('.model-switch-item').filter({ hasText: 'Friday' });
