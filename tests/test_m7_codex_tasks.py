@@ -272,6 +272,41 @@ async def test_direct_codex_turn_reuses_mapping_and_rebinds_every_event_to_frida
 
 
 @pytest.mark.asyncio
+async def test_completed_friday_turn_stays_friday_in_the_next_round(broker_fixture):
+    adapter, _tasks_file = broker_fixture
+    first, first_action = await jarvis_agent.direct_codex_turn(
+        "session-1",
+        "Inspect the fixture.",
+        owner="leo",
+        workspace="disposable",
+        presenter="Friday",
+    )
+    adapter.remote_status[first["remote_task_id"]] = "completed"
+    first = await jarvis_agent.refresh_task(first["task_id"], owner="leo")
+
+    second, second_action = await jarvis_agent.direct_codex_turn(
+        "session-1",
+        "Now summarize the same fixture.",
+        owner="leo",
+        workspace="other-project",
+        presenter="Friday",
+    )
+    adapter.remote_status[second["remote_task_id"]] = "completed"
+    second = await jarvis_agent.refresh_task(second["task_id"], owner="leo")
+
+    assert (first_action, second_action) == ("started", "started")
+    assert first["task_id"] != second["task_id"]
+    assert adapter.started[1]["codex_thread_id"] == THREAD_ID
+    assert adapter.started[1]["workspace"] == "disposable"
+    assert {first["presenter"], second["presenter"]} == {"Friday"}
+    assert {
+        event["presenter"]
+        for task in (first, second)
+        for event in task["events"]
+    } == {"Friday"}
+
+
+@pytest.mark.asyncio
 async def test_broker_refuses_silent_project_reroute_for_active_conversation(broker_fixture):
     await jarvis_agent.start_task(
         "pc-codex", "session-1", "disposable", "Inspect.", owner="leo"

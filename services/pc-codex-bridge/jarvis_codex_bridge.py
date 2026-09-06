@@ -606,10 +606,9 @@ def _handle_server_message(task: Task, message: dict) -> None:
         metadata = {"phase": phase}
         if phase == "commentary":
             text, milestone = _milestone_commentary(text)
-            if not text:
+            if not milestone:
                 return
-            if milestone:
-                metadata["milestone"] = True
+            metadata["milestone"] = True
         else:
             text = _extract_artifacts(task, text)
             if not text:

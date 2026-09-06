@@ -657,6 +657,21 @@ def test_commentary_milestone_marker_is_stripped_and_tagged(tmp_path):
     assert task.data["events"][0]["metadata"] == {"phase": "commentary", "milestone": True}
 
 
+def test_internal_polling_commentary_is_not_exposed_as_progress(tmp_path):
+    task = _task(tmp_path)
+
+    bridge._handle_server_message(task, {
+        "method": "item/completed",
+        "params": {"item": {
+            "type": "agentMessage",
+            "phase": "commentary",
+            "text": "The result is null, so I will poll again.",
+        }},
+    })
+
+    assert task.data["events"] == []
+
+
 def test_unmarked_commentary_cannot_set_milestone(tmp_path):
     task = _task(tmp_path)
 
@@ -669,8 +684,7 @@ def test_unmarked_commentary_cannot_set_milestone(tmp_path):
         }},
     })
 
-    assert task.data["events"][0]["text"] == "I will mention [[ODYSSEUS_MILESTONE]] later."
-    assert "milestone" not in task.data["events"][0]["metadata"]
+    assert task.data["events"] == []
 
     glued = _task(tmp_path / "glued")
     bridge._handle_server_message(glued, {
@@ -681,10 +695,10 @@ def test_unmarked_commentary_cannot_set_milestone(tmp_path):
             "text": "[[ODYSSEUS_MILESTONE]]not-the-contract",
         }},
     })
-    assert "milestone" not in glued.data["events"][0]["metadata"]
+    assert glued.data["events"] == []
 
 
-def test_matching_commentary_and_milestone_are_both_preserved(tmp_path):
+def test_only_marked_milestone_commentary_is_preserved(tmp_path):
     task = _task(tmp_path)
 
     for text in (
@@ -700,13 +714,8 @@ def test_matching_commentary_and_milestone_are_both_preserved(tmp_path):
             }},
         })
 
-    assert [event["text"] for event in task.data["events"]] == [
-        "The focused tests now pass.",
-        "The focused tests now pass.",
-    ]
-    assert "milestone" not in task.data["events"][0]["metadata"]
-    assert task.data["events"][1]["metadata"]["milestone"] is True
-    assert task.data["events"][0]["event_id"] != task.data["events"][1]["event_id"]
+    assert [event["text"] for event in task.data["events"]] == ["The focused tests now pass."]
+    assert task.data["events"][0]["metadata"]["milestone"] is True
 
 
 def test_steer_uses_active_turn_and_existing_stdout_dispatch(tmp_path):

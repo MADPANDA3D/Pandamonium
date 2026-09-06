@@ -35,6 +35,7 @@ from src.extension_registry import ExtensionRegistry
 
 def test_voice_intent_separates_foreground_switch_from_background_delegation():
     assert _target_switch("Talk to PC Codex") == "pc-codex"
+    assert _target_switch("Let me talk to Friday") == "pc-codex"
     assert _target_switch("Please switch me back to Jarvis") == "jarvis"
     assert _target_switch("Connect me to Jarvis") == "jarvis"
     assert _target_switch("Talk about the result Hermes found") is None
