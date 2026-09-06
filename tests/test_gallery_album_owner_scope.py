@@ -52,7 +52,7 @@ def test_delete_album_cleanup_is_owner_scoped():
     fns = _function_sources()
     body = fns["delete_album"]
     assert "GalleryImage.album_id == album_id" in body
-    assert "GalleryImage.owner == user" in body
+    assert "q = _owner_filter(q, user)" in body
     assert 'q.update({"album_id": None}' in body
 
 
@@ -60,4 +60,4 @@ def test_get_or_404_album_enforces_owner():
     # Guard the precedent we rely on: the helper rejects another user's album.
     fns = _function_sources()
     helper = fns["_get_or_404_album"]
-    assert "album.owner != user" in helper
+    assert "_owner_filter(q, user, GalleryAlbum).first()" in helper
