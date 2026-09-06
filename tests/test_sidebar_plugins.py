@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from routes.extension_routes import public_extension_catalog
 
-
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -36,5 +35,9 @@ def test_plugins_sidebar_uses_sanitized_extension_registry_projection():
     app = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
     assert 'id="plugins-section"' in index
     assert 'id="plugins-list"' in index
+    assert 'id="add-plugins-btn"' in index
+    assert 'id="marketplace-modal"' in index
+    assert 'aria-haspopup="dialog"' in index
     assert "/api/extensions/catalog" in app
+    assert "marketplaceModule.init" in app
     assert "applyExtensionSurfaceControl" in app

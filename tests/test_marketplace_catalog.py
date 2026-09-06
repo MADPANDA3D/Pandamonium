@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from src.extension_installer import normalize_git_source_url, validate_git_ref
 from src.marketplace_catalog import (
     MarketplaceCatalogError,
+    marketplace_catalog_view,
     preview_catalog_install,
     validate_published_catalog,
     verify_catalog_artifact,
@@ -295,3 +296,104 @@ def test_offline_incompatible_and_revoked_install_previews_fail_closed():
             architecture="amd64",
             online=True,
         )
+
+
+def test_marketplace_view_projects_catalog_and_registry_without_mutation():
+    catalog, trusted, _catalog_key = _fixture_catalog()
+    registry = {
+        "extensions": {
+            "atlas": {
+                "enabled": True,
+                "manifest": {"version": "1.0.0"},
+            }
+        }
+    }
+
+    view = marketplace_catalog_view(
+        catalog,
+        trusted_keys=trusted,
+        registry_snapshot=registry,
+        pandamonium_version="1.0.10",
+        platform="linux",
+        architecture="amd64",
+    )
+
+    assert view["status"] == "ready"
+    assert view["catalog"]["signature_state"] == "verified"
+    assert view["runtime"] == {
+        "pandamonium_version": "1.0.10",
+        "platform": "linux",
+        "architecture": "amd64",
+    }
+    assert len(view["plugins"]) == 1
+    plugin = view["plugins"][0]
+    assert plugin["id"] == "atlas"
+    assert plugin["availability"] == "available"
+    assert plugin["compatibility"]["state"] == "compatible"
+    assert plugin["installation"] == {
+        "state": "update_available",
+        "current_version": "1.0.0",
+        "target_version": "2.0.0",
+        "enabled": True,
+        "update_available": True,
+    }
+    assert plugin["provenance"]["digest_state"] == "verified"
+    assert plugin["provenance"]["signature_state"] == "verified"
+    assert plugin["permissions"]["default"] == "read_only"
+    assert plugin["dependencies"][0]["id"] == "base-tools"
+    assert "artifact" not in plugin
+    assert "value" not in plugin["provenance"]
+
+
+def test_marketplace_view_keeps_incompatible_revoked_disabled_empty_and_offline_states_clear():
+    catalog, trusted, catalog_key = _fixture_catalog()
+    catalog["entries"][0]["compatibility"]["pandamonium_max"] = "1.0.9"
+    catalog["entries"][0]["review"]["status"] = "revoked"
+    _resign(catalog, catalog_key)
+    registry = {
+        "extensions": {
+            "atlas": {
+                "enabled": False,
+                "manifest": {"version": "2.0.0"},
+            }
+        }
+    }
+
+    view = marketplace_catalog_view(
+        catalog,
+        trusted_keys=trusted,
+        registry_snapshot=registry,
+        pandamonium_version="1.0.10",
+        platform="linux",
+        architecture="amd64",
+    )
+    plugin = view["plugins"][0]
+    assert plugin["availability"] == "revoked"
+    assert plugin["compatibility"]["state"] == "incompatible"
+    assert plugin["installation"]["state"] == "disabled"
+
+    empty, empty_trusted, _key = _fixture_catalog()
+    empty["entries"] = []
+    _resign(empty, _key)
+    assert marketplace_catalog_view(
+        empty,
+        trusted_keys=empty_trusted,
+        registry_snapshot={},
+        pandamonium_version="1.0.10",
+        platform="linux",
+        architecture="amd64",
+    )["status"] == "empty"
+    assert marketplace_catalog_view(
+        None,
+        trusted_keys={},
+        registry_snapshot={},
+        pandamonium_version="1.0.10",
+        platform="linux",
+        architecture="amd64",
+        online=False,
+    ) == {
+        "schema_version": "pandamonium.marketplace-view.v1",
+        "status": "offline",
+        "failure": "marketplace_catalog_offline",
+        "plugins": [],
+    }

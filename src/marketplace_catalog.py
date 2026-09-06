@@ -379,6 +379,149 @@ def preview_catalog_install(
     }
 
 
+def marketplace_catalog_view(
+    catalog: Any,
+    *,
+    trusted_keys: Mapping[str, str | bytes],
+    registry_snapshot: Mapping[str, Any],
+    pandamonium_version: str,
+    platform: str,
+    architecture: str,
+    online: bool = True,
+) -> dict[str, Any]:
+    """Project a verified catalog and existing registry into a read-only UI view."""
+    if not online:
+        return {
+            "schema_version": "pandamonium.marketplace-view.v1",
+            "status": "offline",
+            "failure": "marketplace_catalog_offline",
+            "plugins": [],
+        }
+
+    normalized = validate_published_catalog(catalog, trusted_keys=trusted_keys)
+    installed = registry_snapshot.get("extensions", {})
+    if not isinstance(installed, Mapping):
+        installed = {}
+
+    latest: dict[str, dict[str, Any]] = {}
+    for entry in normalized["entries"]:
+        extension_id = entry["manifest"]["extension_id"]
+        current = latest.get(extension_id)
+        if current is None or _semver(entry["manifest"]["version"]) > _semver(
+            current["manifest"]["version"]
+        ):
+            latest[extension_id] = entry
+
+    plugins = []
+    runtime_version = _semver(pandamonium_version)
+    for entry in latest.values():
+        manifest = entry["manifest"]
+        extension_id = manifest["extension_id"]
+        target_version = manifest["version"]
+        compatibility = entry["compatibility"]
+        compatible = (
+            _semver(compatibility["pandamonium_min"])
+            <= runtime_version
+            <= _semver(compatibility["pandamonium_max"])
+            and platform in compatibility["platforms"]
+            and architecture in compatibility["architectures"]
+        )
+        review_status = entry["review"]["status"]
+        availability = (
+            "revoked"
+            if review_status == "revoked"
+            else "deprecated"
+            if review_status == "deprecated"
+            else "available"
+            if compatible
+            else "incompatible"
+        )
+
+        local = installed.get(extension_id)
+        if not isinstance(local, Mapping):
+            local = {}
+        local_manifest = local.get("manifest")
+        current_version = (
+            str(local_manifest.get("version"))
+            if isinstance(local_manifest, Mapping) and local_manifest.get("version")
+            else None
+        )
+        try:
+            update_available = bool(
+                current_version and _semver(target_version) > _semver(current_version)
+            )
+        except MarketplaceCatalogError:
+            update_available = False
+        enabled = bool(local.get("enabled")) if current_version else False
+        installation_state = (
+            "disabled"
+            if current_version and not enabled
+            else "update_available"
+            if update_available
+            else "installed"
+            if current_version
+            else "available"
+        )
+
+        plugins.append(
+            {
+                "id": extension_id,
+                "name": manifest["name"],
+                "version": target_version,
+                "summary": entry["summary"],
+                "categories": entry["categories"],
+                "license": entry["license"],
+                "availability": availability,
+                "publisher": entry["publisher"],
+                "provenance": {
+                    "source_url": manifest["source"]["url"],
+                    "source_revision": manifest["source"]["revision"],
+                    "sha256": entry["artifact"]["sha256"],
+                    "digest_state": "verified",
+                    "signature_state": "verified",
+                },
+                "compatibility": {
+                    **compatibility,
+                    "state": "compatible" if compatible else "incompatible",
+                },
+                "permissions": {
+                    **manifest["permissions"],
+                    "data_boundaries": manifest["data_boundaries"],
+                },
+                "dependencies": entry["dependencies"],
+                "configuration": entry["configuration"],
+                "restart_required": entry["restart_required"],
+                "review": entry["review"],
+                "installation": {
+                    "state": installation_state,
+                    "current_version": current_version,
+                    "target_version": target_version,
+                    "enabled": enabled,
+                    "update_available": update_available,
+                },
+            }
+        )
+
+    plugins.sort(key=lambda item: (item["name"].lower(), item["id"]))
+    return {
+        "schema_version": "pandamonium.marketplace-view.v1",
+        "status": "ready" if plugins else "empty",
+        "failure": None,
+        "catalog": {
+            "id": normalized["catalog_id"],
+            "generated_at": normalized["generated_at"],
+            "expires_at": normalized["expires_at"],
+            "signature_state": "verified",
+        },
+        "runtime": {
+            "pandamonium_version": pandamonium_version,
+            "platform": platform,
+            "architecture": architecture,
+        },
+        "plugins": plugins,
+    }
+
+
 def verify_catalog_artifact(artifact: Mapping[str, Any], content: bytes) -> bool:
     """Verify downloaded bytes against signed catalog size and SHA-256 metadata."""
     if len(content) != artifact.get("size_bytes"):

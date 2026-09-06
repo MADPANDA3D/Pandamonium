@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -7,6 +8,11 @@ import pytest
 import src.extension_installer as installer
 from routes.extension_routes import setup_extension_routes
 from src.authority_protocol import AuthorityStore
+from src.extension_host import (
+    ExtensionRuntimeHost,
+    LiveCatalogWebAdapter,
+    configured_extension_urls,
+)
 from src.extension_installer import (
     ExtensionLifecycleError,
     ExtensionLifecycleManager,
@@ -15,9 +21,7 @@ from src.extension_installer import (
     normalize_git_source_url,
     validate_git_ref,
 )
-from src.extension_host import ExtensionRuntimeHost, LiveCatalogWebAdapter, configured_extension_urls
 from src.extension_registry import ExtensionRegistry
-
 
 SOURCE_URL = "https://github.com/example/jos-extension-fixture.git"
 ORACLE_SOURCE_URL = "https://github.com/MADPANDA3D/ORACLE.git"
@@ -460,11 +464,15 @@ def test_manifest_source_and_revision_mismatch_fail_before_approval(tmp_path, gi
 def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixture):
     repo, _v1, _v2 = git_fixture
     manager, _authority, _registry = _manager(tmp_path, repo)
-    routes = {route.path: route for route in setup_extension_routes(manager).routes}
+    routes = {
+        route.path: route
+        for route in setup_extension_routes(manager, marketplace_loader=lambda: None).routes
+    }
 
     assert set(routes) == {
         "/api/extensions",
         "/api/extensions/catalog",
+        "/api/extensions/marketplace",
         "/api/extensions/plans/source",
         "/api/extensions/plans/lifecycle",
         "/api/extensions/plans/{plan_id}/execute",
@@ -474,8 +482,17 @@ def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixt
         for path, route in routes.items()
     }
     assert dependencies["/api/extensions/catalog"] == {"require_user"}
+    assert dependencies["/api/extensions/marketplace"] == {"require_user"}
+    assert asyncio.run(
+        routes["/api/extensions/marketplace"].endpoint(_owner="operator")
+    ) == {
+        "schema_version": "pandamonium.marketplace-view.v1",
+        "status": "offline",
+        "failure": "marketplace_catalog_offline",
+        "plugins": [],
+    }
     assert all(
         "require_admin" in route_dependencies
         for path, route_dependencies in dependencies.items()
-        if path != "/api/extensions/catalog"
+        if path not in {"/api/extensions/catalog", "/api/extensions/marketplace"}
     )

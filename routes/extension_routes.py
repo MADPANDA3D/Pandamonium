@@ -3,22 +3,62 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import platform
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.constants import APP_VERSION, DATA_DIR
 from core.middleware import require_admin
 from src.auth_helpers import require_user
 from src.authority_protocol import operator_identity
 from src.extension_host import live_catalog_web_adapter
-from src.extension_mcp_adapter import mcp_extension_adapter
 from src.extension_installer import (
     ExtensionLifecycleError,
     ExtensionLifecycleManager,
     InlineWebAdapter,
 )
-from src.extension_skill_adapter import SkillBundleAdapter
+from src.extension_mcp_adapter import mcp_extension_adapter
 from src.extension_registry import ExtensionContractError
+from src.extension_skill_adapter import SkillBundleAdapter
+from src.marketplace_catalog import MarketplaceCatalogError, marketplace_catalog_view
+
+MARKETPLACE_DIR = Path(DATA_DIR) / "marketplace"
+
+
+def _marketplace_files() -> tuple[Any, Mapping[str, str | bytes]] | None:
+    catalog_path = MARKETPLACE_DIR / "catalog.json"
+    keys_path = MARKETPLACE_DIR / "trusted_keys.json"
+    if not catalog_path.exists() and not keys_path.exists():
+        return None
+    if not catalog_path.is_file() or not keys_path.is_file():
+        raise MarketplaceCatalogError("marketplace_configuration_incomplete")
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        keys = json.loads(keys_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise MarketplaceCatalogError("marketplace_configuration_invalid") from exc
+    if not isinstance(keys, Mapping):
+        raise MarketplaceCatalogError("marketplace_trust_store_invalid")
+    return catalog, keys
+
+
+def _runtime_platform() -> tuple[str, str]:
+    system = {"darwin": "macos", "win32": "windows"}.get(
+        platform.system().lower(), platform.system().lower()
+    )
+    machine = platform.machine().lower()
+    architecture = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }.get(machine, machine)
+    return system, architecture
 
 
 class SourcePlanRequest(BaseModel):
@@ -55,7 +95,12 @@ def public_extension_catalog(registry) -> dict[str, list[dict[str, str]]]:
 
 
 def setup_extension_routes(
-    manager: ExtensionLifecycleManager | None = None, *, skills_manager=None
+    manager: ExtensionLifecycleManager | None = None,
+    *,
+    skills_manager=None,
+    marketplace_loader: Callable[
+        [], tuple[Any, Mapping[str, str | bytes]] | None
+    ] = _marketplace_files,
 ) -> APIRouter:
     manager = manager or ExtensionLifecycleManager(
         adapters=[
@@ -97,6 +142,39 @@ def setup_extension_routes(
     @router.get("/catalog")
     async def list_public_extensions(_owner: str = Depends(require_user)):
         return await asyncio.to_thread(public_extension_catalog, manager.registry)
+
+    @router.get("/marketplace")
+    async def list_marketplace(_owner: str = Depends(require_user)):
+        system, architecture = _runtime_platform()
+        try:
+            loaded = await asyncio.to_thread(marketplace_loader)
+            if loaded is None:
+                return marketplace_catalog_view(
+                    None,
+                    trusted_keys={},
+                    registry_snapshot={},
+                    pandamonium_version=APP_VERSION,
+                    platform=system,
+                    architecture=architecture,
+                    online=False,
+                )
+            catalog, trusted_keys = loaded
+            return await asyncio.to_thread(
+                marketplace_catalog_view,
+                catalog,
+                trusted_keys=trusted_keys,
+                registry_snapshot=manager.registry.snapshot(),
+                pandamonium_version=APP_VERSION,
+                platform=system,
+                architecture=architecture,
+            )
+        except MarketplaceCatalogError as exc:
+            return {
+                "schema_version": "pandamonium.marketplace-view.v1",
+                "status": "error",
+                "failure": exc.code,
+                "plugins": [],
+            }
 
     @router.post("/plans/source", dependencies=[Depends(require_admin)])
     async def preview_source_plan(payload: SourcePlanRequest, owner: str = Depends(require_user)):

@@ -50,6 +50,7 @@ import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+import marketplaceModule from './js/marketplace.js';
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -402,8 +403,13 @@ async function _renderFirstRunGuide(identityStatus, options = {}) {
 async function initPluginSidebar() {
   const list = el('plugins-list');
   if (!list) return;
+  const clearInstalled = () => {
+    Array.from(list.children).forEach(child => {
+      if (child.id !== 'add-plugins-btn') child.remove();
+    });
+  };
   const showMessage = (message) => {
-    list.replaceChildren();
+    clearInstalled();
     const row = document.createElement('div');
     row.className = 'list-item';
     row.setAttribute('aria-disabled', 'true');
@@ -424,7 +430,7 @@ async function initPluginSidebar() {
     }
     plugins.sort((a, b) => String(a.name).localeCompare(String(b.name)));
     if (!plugins.length) return showMessage('No plugins installed');
-    list.replaceChildren();
+    clearInstalled();
     for (const plugin of plugins) {
       const canOpen = plugin.state === 'enabled' && (plugin.legacy || surfaces.has(plugin.id));
       const row = document.createElement('div');
@@ -459,6 +465,7 @@ async function initPluginSidebar() {
 // EVENT LISTENERS INITIALIZATION
 // ============================================
 function initializeEventListeners() {
+  marketplaceModule.init();
   initPluginSidebar();
   // Chat form submission
 //  document.getElementById('chat-form').addEventListener('submit', chatModule.handleChatSubmit);

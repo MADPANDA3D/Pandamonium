@@ -977,6 +977,11 @@
           <span class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/></svg>Plugins</span>
         </div>
         <div id="plugins-list" aria-live="polite">
+          <button type="button" class="list-item marketplace-launcher" id="add-plugins-btn" aria-haspopup="dialog" aria-controls="marketplace-modal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></svg>
+            <span class="grow">Add Plugins</span>
+            <span class="marketplace-launcher-meta">Browse</span>
+          </button>
           <div class="list-item" aria-disabled="true"><span class="grow">Loading plugins…</span></div>
         </div>
       </div>
@@ -1531,6 +1536,43 @@
       </div>
       <div class="modal-body guide-modal-body">
         <div id="guide-panel"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="marketplace-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content marketplace-modal-content" role="dialog" aria-modal="true" aria-labelledby="marketplace-title">
+      <div class="modal-header marketplace-modal-header">
+        <div>
+          <h4 id="marketplace-title">Add Plugins</h4>
+          <p>Read-only marketplace · installs require an explicit M6-authorized request</p>
+        </div>
+        <button type="button" class="close-btn" id="close-marketplace-modal" aria-label="Close Add Plugins">✖</button>
+      </div>
+      <div class="modal-body marketplace-modal-body">
+        <div class="marketplace-toolbar">
+          <label class="marketplace-search-wrap">
+            <span class="sr-only">Search plugins</span>
+            <input id="marketplace-search" type="search" placeholder="Search plugins, publishers, or categories" autocomplete="off">
+          </label>
+          <label>
+            <span class="sr-only">Filter by category</span>
+            <select id="marketplace-category" aria-label="Filter plugins by category"><option value="">All categories</option></select>
+          </label>
+          <button type="button" id="marketplace-retry">Refresh</button>
+        </div>
+        <div id="marketplace-summary" class="marketplace-summary" role="status" aria-live="polite"></div>
+        <div id="marketplace-workspace" class="marketplace-workspace">
+          <section class="marketplace-results-pane" aria-label="Marketplace plugins">
+            <div id="marketplace-results" class="marketplace-results"></div>
+          </section>
+          <article id="marketplace-detail" class="marketplace-detail" tabindex="-1" aria-live="polite">
+            <button type="button" id="marketplace-back" class="marketplace-back">← Back to plugins</button>
+            <div id="marketplace-detail-content" class="marketplace-detail-content">
+              <div class="marketplace-state"><strong>Select a plugin</strong><span>Review compatibility, provenance, permissions, and dependencies.</span></div>
+            </div>
+          </article>
+        </div>
       </div>
     </div>
   </div>
