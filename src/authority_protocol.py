@@ -73,6 +73,7 @@ _DEFAULT_EFFECT_BY_CAPABILITY = {
         name: "read"
         for name in {
             "get_workspace", "read_file", "grep", "glob", "ls", "web_search", "web_fetch",
+            "inspect_network",
             "get_runtime_status", "read_agent_task", "search_jarvis_knowledge", "read_calendar",
             "list_sessions", "search_chats", "list_email_accounts", "list_emails", "read_email",
             "list_models", "list_cached_models", "list_downloads", "list_serve_presets",

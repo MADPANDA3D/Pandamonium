@@ -349,8 +349,11 @@ _DOMAIN_RULES = {
 ## File rules
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
-- For current host or network discovery, inspect with read-only commands before answering; do not change network state unless the user asks.
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+    "network_inspection": """\
+## Network inspection rules
+- Use `inspect_network` before making claims or diagrams about the current network. It runs only fixed, bounded, read-only probes and cannot accept commands or paths.
+- Distinguish the running service's visible network view from any wider topology that the probes cannot observe. If a probe is unavailable or incomplete, state that limitation instead of guessing.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -394,6 +397,7 @@ _DOMAIN_TOOL_MAP = {
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
+    "network_inspection": {"inspect_network"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"manage_mcp", "api_call"},
@@ -591,6 +595,7 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
 `calendar` accepts a name ("Main") or short-id prefix.""",
     "read_calendar": "- ```read_calendar``` — Admin-only: refresh and read the authenticated user's Calendar without event mutations. Args (JSON): {\"action\":\"list_events|list_calendars\", \"start\":\"ISO datetime\"?, \"end\":\"ISO datetime\"?, \"calendar\":\"name or id\"?, \"max_results\":50?}. `list_events` requires explicit start/end no more than 366 days apart. Results are owner-scoped and bounded; if freshness could not be confirmed, say so explicitly. This tool is unavailable in plan mode because its CalDAV pull may update the local cache.",
     "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version plus server-verified model, context, voice, and configured-worker runtime facts. Use this for claims about what is actually running; do not infer application version, provider, or architecture from a worker/model display alias.",
+    "inspect_network": "- ```inspect_network``` — Collect the network view visible to the running Pandamonium service with fixed, bounded, read-only interface, route, neighbor, and optional Tailscale probes. Takes no arguments. Use the returned evidence for current-network claims and say when the wider topology remains unobserved.",
     "start_agent_task": """\
 ```start_agent_task
 {"worker":"<runtime worker id>","workspace":"<allowed alias>","prompt":"<self-contained read-only task>"}
@@ -1242,11 +1247,12 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi-?fi|wifi|topology|subnet|router|devices?)\b",
         r"\b(?:network|lan|wi-?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
         r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
+        r"\b(?:network|lan|wi[-‑]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\bi(?:['’]?m| am)\b.{0,16}\b(?:on|using|connected to)\b",
     )
     if current_network_subject and has(
         r"\b(?:make|create|draw|diagram|map|show|what|inspect|check|discover|scan|list|overview|components?)\b"
     ):
-        domains.add("files")
+        domains.add("network_inspection")
     if re.match(
         r"^\s*(?:(?:please|ok(?:ay)?|alright|right|sure|cool|great|thanks)[\s,.!-]+)*"
         r"(?:(?:execute|exec)\b\s+\S+|"
