@@ -60,6 +60,7 @@ let _selectorItems = [];
 let _selectorCatalogState = 'loading';
 let _selectorCatalogError = '';
 let _agentCatalogVerified = false;
+let _lastConversationTargetEvent = '';
 const _PENDING_AGENT_KEY = '__pending__';
 
 function _loadAgentSelections() {
@@ -117,6 +118,11 @@ export function getSelectedAgentTarget() {
   return _selectedAgent()?.target || '';
 }
 
+export function getSelectedAgentSelection() {
+  const selected = _selectedAgent();
+  return selected ? { ...selected } : null;
+}
+
 export function clearPendingAgentTarget() {
   _selectedAgents.delete(_PENDING_AGENT_KEY);
 }
@@ -134,6 +140,38 @@ export function movePendingAgentTarget(sessionId) {
   _selectedAgents.set(id, pending);
   _selectedAgents.delete(_PENDING_AGENT_KEY);
   _saveAgentSelections();
+}
+
+export function syncSessionAgentTargets(sessionItems = []) {
+  for (const session of sessionItems) {
+    const sessionId = String(session?.id || '').trim();
+    const target = String(session?.agent_target || 'jarvis').trim();
+    if (!sessionId || !/^[a-z][a-z0-9_-]{0,63}$/.test(target)) continue;
+    const known = _selectorItems.find(item => item.target === target);
+    _selectedAgents.set(sessionId, {
+      target,
+      label: known?.display || target,
+      kind: known?.kind === 'worker' ? 'worker' : 'agent',
+      available: known ? !known.disabled : target === 'jarvis',
+      reason: known?.staleReason || (target === 'jarvis' ? '' : 'not currently available'),
+    });
+  }
+  _saveAgentSelections();
+}
+
+function _emitConversationTarget(selectedAgent) {
+  if (!selectedAgent) return;
+  const detail = {
+    target: selectedAgent.target,
+    label: selectedAgent.label || selectedAgent.target,
+    kind: selectedAgent.kind,
+    available: selectedAgent.available !== false,
+    reason: selectedAgent.reason || '',
+  };
+  const signature = JSON.stringify(detail);
+  if (signature === _lastConversationTargetEvent) return;
+  _lastConversationTargetEvent = signature;
+  document.dispatchEvent(new CustomEvent('odysseus:conversation-target-changed', { detail }));
 }
 
 async function _refreshSelectorCatalog() {
@@ -195,11 +233,6 @@ async function _refreshSelectorCatalog() {
       });
     }
     _saveAgentSelections();
-    const codexBrowser = document.getElementById('codex-browser-toggle');
-    if (codexBrowser) {
-      const pcCodex = _selectorItems.find(item => item.target === 'pc-codex');
-      codexBrowser.hidden = !pcCodex;
-    }
   } catch (_) {
     _selectorCatalogState = 'error';
     _selectorCatalogError = 'Selector discovery is unavailable. Existing choices were not rerouted.';
@@ -553,7 +586,6 @@ function _initModelPickerDropdown() {
   async function _pick(m) {
     const currentSessionId = _deps.getCurrentSessionId();
     const _pendingChat = _deps.getPendingChat();
-    const opensCodexBrowser = m?.kind === 'worker' && m?.target === 'pc-codex';
 
     // Remember this pick so it surfaces under "Recent" next time the picker
     // opens — the whole point of quick-switch.
@@ -569,13 +601,29 @@ function _initModelPickerDropdown() {
 
     // Blur search input before closing to dismiss keyboard on mobile
     if (document.activeElement) document.activeElement.blur();
-    if (!opensCodexBrowser) _close();
+    _close();
     // Refocus main textarea — skip on mobile to avoid keyboard bounce
-    if (!opensCodexBrowser && window.innerWidth >= 768) {
+    if (window.innerWidth >= 768) {
       const _ta = document.getElementById('message');
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
     if (m.kind === 'agent' || m.kind === 'worker') {
+      if (currentSessionId) {
+        const fd = new FormData();
+        fd.append('agent_target', m.target);
+        try {
+          const response = await fetch(`${API_BASE}/api/session/${currentSessionId}`, {
+            method: 'PATCH',
+            body: fd,
+          });
+          if (!response.ok) throw new Error(`target_${response.status}`);
+          const session = _deps.getSessions().find(item => item.id === currentSessionId);
+          if (session) session.agent_target = m.target;
+        } catch (_) {
+          uiModule.showError(`Failed to select ${m.display}`);
+          return;
+        }
+      }
       _selectedAgents.set(_agentSelectionKey(), {
         target: m.target,
         label: m.display,
@@ -585,12 +633,11 @@ function _initModelPickerDropdown() {
       });
       _saveAgentSelections();
       updateModelPicker();
-      if (opensCodexBrowser) {
-        window.codexWorkspaceBrowser?.open?.();
-        uiModule.showToast(`${m.display} selected — choose an approved project or task`);
-      } else {
-        uiModule.showToast(`Talking to ${m.display}`);
-      }
+      uiModule.showToast(
+        m.target === 'pc-codex'
+          ? `${m.display} selected — choose an approved project or task in the sidebar`
+          : `Talking to ${m.display}`,
+      );
       return;
     }
     const agentSelectionKey = _agentSelectionKey();
@@ -615,6 +662,7 @@ function _initModelPickerDropdown() {
       const fd = new FormData();
       fd.append('model', m.mid);
       fd.append('endpoint_url', m.url);
+      fd.append('agent_target', 'jarvis');
       if (m.endpointId) fd.append('endpoint_id', m.endpointId);
       try {
         const res = await fetch(`${API_BASE}/api/session/${currentSessionId}`, { method: 'PATCH', body: fd });
@@ -624,7 +672,7 @@ function _initModelPickerDropdown() {
         }
         const sessions = _deps.getSessions();
         const s = sessions.find(x => x.id === currentSessionId);
-        if (s) { s.model = m.mid; s.endpoint_url = m.url; }
+        if (s) { s.model = m.mid; s.endpoint_url = m.url; s.agent_target = 'jarvis'; }
         clearSelectedAgent();
         // Header stays as session name — model info shown in picker only
       } catch (e) {
@@ -792,6 +840,7 @@ export function updateModelPicker() {
     if (selectedAgent.available === false) {
       label.title = `${selectedAgent.label}: ${selectedAgent.reason || 'unavailable'}`;
     }
+    _emitConversationTarget(selectedAgent);
     return;
   }
   let modelId = null;

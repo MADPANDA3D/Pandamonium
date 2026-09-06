@@ -11,6 +11,7 @@ import {
   initModelPicker,
   movePendingAgentTarget,
   preserveSelectedAgentForNewChat,
+  syncSessionAgentTargets,
   updateModelPicker,
 } from './modelPicker.js';
 import themeModule from './theme.js';
@@ -1044,7 +1045,17 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
-  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+  const currentTarget = getSelectedAgentTarget()
+    || sessions.find(session => session.id === currentSessionId)?.agent_target
+    || 'jarvis';
+  let orderedSessions = sessions.filter(s => (
+    !s.archived
+    && s.folder !== 'Assistant'
+    && !_isIncognitoSession(s.id)
+    && (s.name || '').trim() !== 'Nobody'
+    && (s.name || '').trim() !== 'Incognito'
+    && String(s.agent_target || 'jarvis') === currentTarget
+  ));
 
   if (savedOrder) {
     try {
@@ -1238,9 +1249,7 @@ function _renderSessionListImpl() {
         visibleFolder.push(folderSessions[activeInFolder]);
       }
 
-      visibleFolder.forEach(s => {
-        content.appendChild(createSessionItem(s));
-      });
+      _appendSessionItemsWithDateHeaders(content, visibleFolder);
 
       if (folderSessions.length > FOLDER_MAX_VISIBLE) {
         const rem = folderSessions.length - FOLDER_MAX_VISIBLE;
@@ -1340,9 +1349,7 @@ function _renderSessionListImpl() {
   }
 
   if (unfiledTarget) {
-    visibleUnfiled.forEach(s => {
-      unfiledTarget.appendChild(createSessionItem(s));
-    });
+    _appendSessionItemsWithDateHeaders(unfiledTarget, visibleUnfiled);
   }
 
   // "Show more" / "Show less" toggle
@@ -1632,10 +1639,11 @@ export async function loadSessions() {
       fetched = await res.json();
     }
     sessions = _normalizeSessionsList(fetched);
+    syncSessionAgentTargets(sessions);
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');
-    if (sessions.length === 0) {
+    if (sessions.length === 0 && getSelectedAgentTarget() !== 'pc-codex') {
       sessionsSection.classList.add('hidden');
     } else {
       sessionsSection.classList.remove('hidden');
@@ -2215,6 +2223,7 @@ export async function materializePendingSession() {
   fd.append('name', name);
   fd.append('endpoint_url', pending.url || '');
   fd.append('model', pending.modelId || '');
+  fd.append('agent_target', getSelectedAgentTarget() || 'jarvis');
   if (pending.url && pending.modelId) {
     fd.append('skip_validation', 'true');
   }

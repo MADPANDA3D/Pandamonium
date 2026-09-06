@@ -72,6 +72,7 @@ class Session:
     headers: Optional[Dict[str, str]] = None
     history: List[ChatMessage] = None
     owner: Optional[str] = None
+    agent_target: str = "jarvis"
     is_important: bool = False
     message_count: int = 0
 

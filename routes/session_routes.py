@@ -172,6 +172,38 @@ def _persist_session_headers(session_id: str, headers: dict | None) -> None:
         db.close()
 
 
+_SESSION_AGENT_TARGET_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+
+
+def _validated_session_agent_target(value: str | None, *, default: str = "jarvis") -> str:
+    target = (value if isinstance(value, str) else default).strip()
+    if not _SESSION_AGENT_TARGET_RE.fullmatch(target):
+        raise HTTPException(400, "Invalid conversation identity")
+    if target == "jarvis":
+        return target
+    from src.agent_worker_adapters import worker_catalog
+    details = worker_catalog().get(target)
+    if not details or not details.get("configured"):
+        raise HTTPException(400, "Selected agent is not configured")
+    return target
+
+
+def _persist_session_agent_target(session_id: str, target: str) -> None:
+    db = SessionLocal()
+    try:
+        db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
+        if not db_session:
+            raise HTTPException(404, f"Session {session_id} not found")
+        db_session.agent_target = target
+        db_session.updated_at = utcnow_naive()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 _HIDDEN_SYSTEM_SESSION_NAMES = {
     "[Task] Chat Sessions Tidy",
     "[Task] Documents Tidy",
@@ -265,7 +297,8 @@ def setup_session_routes(
             last_msg_map = {}
             mode_map = {}
             msg_count_map = {}
-            q = db.query(DbSession.id, DbSession.folder, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count).filter(DbSession.archived == False)
+            agent_target_map = {}
+            q = db.query(DbSession.id, DbSession.folder, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count, DbSession.agent_target).filter(DbSession.archived == False)
             q = owner_filter(q, DbSession, user)
             rows = q.all()
             for row in rows:
@@ -283,6 +316,7 @@ def setup_session_routes(
                 )
                 mode_map[row.id] = row.mode
                 msg_count_map[row.id] = row.message_count or 0
+                agent_target_map[row.id] = row.agent_target or "jarvis"
             # Sessions with active documents that have content
             from sqlalchemy import func
             doc_session_ids = set(
@@ -315,6 +349,7 @@ def setup_session_routes(
                      "has_documents": s.id in doc_session_ids,
                      "has_images": s.id in img_session_ids,
                      "mode": mode_map.get(s.id),
+                     "agent_target": agent_target_map.get(s.id, "jarvis"),
                      "message_count": msg_count_map.get(s.id, 0)}
                     for s in user_sessions.values()
                     if not s.archived
@@ -333,6 +368,7 @@ def setup_session_routes(
         skip_validation: str = Form(None),
         api_key: str = Form(""),
         endpoint_id: str = Form(""),
+        agent_target: str = Form(None),
     ):
         skip_val = str(skip_validation).lower() == "true"
         user = effective_user(request)
@@ -419,6 +455,7 @@ def setup_session_routes(
                                         f"Model not found at server. Available: {', '.join(avail)}")
                 model_to_use = found
         
+        target = _validated_session_agent_target(agent_target)
         sid = str(uuid.uuid4())
         user = effective_user(request)
         session = session_manager.create_session(
@@ -429,6 +466,8 @@ def setup_session_routes(
             rag=str(rag).lower() == "true" if rag else False,
             owner=user,
         )
+        _persist_session_agent_target(sid, target)
+        session.agent_target = target
         # Set auth headers for custom API-key endpoints
         resolved_key = request_api_key
         resolved_base = endpoint_url
@@ -452,7 +491,8 @@ def setup_session_routes(
             name=session.name,
             model=model_to_use,
             rag=str(rag).lower() == "true" if rag else False,
-            archived=False
+            archived=False,
+            agent_target=target,
         )    
     @router.patch("/session/{sid}")
     def rename_session(
@@ -460,6 +500,7 @@ def setup_session_routes(
         name: str = Form(None), folder: str = Form(None),
         model: str = Form(None), endpoint_url: str = Form(None),
         endpoint_id: str = Form(None),
+        agent_target: str = Form(None),
     ):
         _verify_session_owner(request, sid)
         try:
@@ -482,6 +523,11 @@ def setup_session_routes(
                     result["folder"] = folder if folder else None
             finally:
                 db.close()
+        if isinstance(agent_target, str):
+            target = _validated_session_agent_target(agent_target)
+            _persist_session_agent_target(sid, target)
+            session.agent_target = target
+            result["agent_target"] = target
         # Switch model/endpoint mid-session
         if model is not None and endpoint_url is not None:
             user = effective_user(request)

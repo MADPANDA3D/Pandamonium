@@ -68,6 +68,15 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 _HERMES_AGENT_ENDPOINT_NAME = "Hermes API"
 _HERMES_AGENT_MODEL = "hermes-agent"
+
+
+def _authoritative_agent_target(session, requested: str = "") -> str:
+    """Prefer the persisted session target over caller-supplied routing state."""
+    stored_value = getattr(session, "agent_target", "")
+    stored = stored_value.strip() if isinstance(stored_value, str) else ""
+    return stored or str(requested or "").strip()
+
+
 def _selected_worker_request(
     message: str,
     *,
@@ -854,6 +863,9 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = effective_user(request)
+            # The session row owns conversational routing. A stale or forged
+            # browser value cannot silently move an established conversation.
+            agent_target = _authoritative_agent_target(sess, agent_target)
             selected_agent_label = ""
             selected_agent_workspace = None
             selected_agent_worker = ""

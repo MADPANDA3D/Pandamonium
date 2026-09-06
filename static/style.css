@@ -3318,10 +3318,8 @@ body.bg-pattern-sparkles {
     .model-picker-list .model-switch-status.is-error {
       color: color-mix(in srgb, var(--red) 80%, var(--fg));
     }
-    .codex-browser-toggle,
     .codex-browser-more,
-    .codex-project-return,
-    .codex-browser-head button {
+    .codex-project-return {
       width: 100%;
       padding: 7px 8px;
       border: 0;
@@ -3333,30 +3331,20 @@ body.bg-pattern-sparkles {
       text-align: left;
       cursor: pointer;
     }
-    .codex-browser-toggle:hover,
     .codex-browser-more:hover,
-    .codex-project-return:hover,
-    .codex-browser-head button:hover {
+    .codex-project-return:hover {
       color: var(--fg);
       background: color-mix(in srgb, var(--red) 8%, transparent);
     }
     .codex-workspace-browser[hidden] { display: none; }
-    .model-picker-menu.codex-browser-open .model-picker-search-row,
-    .model-picker-menu.codex-browser-open .model-picker-list,
-    .model-picker-menu.codex-browser-open > .codex-browser-toggle {
-      display: none;
+    .codex-workspace-browser {
+      padding: 0 4px 8px;
     }
     .codex-browser-head {
-      display: grid;
-      grid-template-columns: 34px minmax(0, 1fr);
+      display: flex;
       align-items: center;
-      gap: 6px;
-      padding-bottom: 6px;
-    }
-    .codex-browser-head button {
-      border: 0;
-      border-radius: 4px;
-      text-align: center;
+      min-height: 28px;
+      padding: 0 4px 6px;
     }
     .codex-browser-head strong {
       overflow: hidden;
@@ -3379,6 +3367,24 @@ body.bg-pattern-sparkles {
     .codex-browser-list {
       max-height: min(300px, 52dvh);
       overflow-y: auto;
+    }
+    #codex-project-list {
+      max-height: none;
+      overflow: visible;
+    }
+    .codex-project-group {
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    }
+    .codex-project-group > .codex-browser-row[aria-expanded="true"] {
+      background: color-mix(in srgb, var(--red) 8%, transparent);
+    }
+    .codex-project-group > #codex-task-view {
+      margin: 0 4px 8px 10px;
+      padding: 6px 0 0 8px;
+      border-left: 1px solid color-mix(in srgb, var(--red) 32%, var(--border));
+    }
+    #codex-action-view {
+      padding: 0 4px;
     }
     .codex-browser-row {
       width: 100%;

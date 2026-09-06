@@ -125,6 +125,7 @@ class SessionResponse(BaseModel):
     model: str = Field(..., description="Model being used")
     rag: bool = Field(default=False, description="RAG enabled")
     archived: bool = Field(default=False, description="Whether session is archived")
+    agent_target: str = Field(default="jarvis", description="Server-owned conversation identity")
 
 
 class MemoryResponse(BaseModel):

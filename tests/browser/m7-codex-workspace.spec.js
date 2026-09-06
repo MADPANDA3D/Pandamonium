@@ -5,6 +5,16 @@ const selector = {
     schema_version: 'pandamonium.discovery.v1',
     generated_at: '2026-09-05T12:00:00Z',
     entities: [{
+      kind: 'agent', id: 'agent:jarvis', display_name: 'Jarvis', availability: 'available',
+      ownership: { scope: 'owner', id: 'owner:current' }, health: { state: 'healthy' },
+      permissions: { requires_authenticated_request: true, configured_scopes: ['owner:current'], delegation: 'narrower_only' },
+      source: { type: 'configuration', ref: 'tests/fixtures.py#agent' }, actions: [],
+    }, {
+      kind: 'agent', id: 'agent:gordon', display_name: 'Gordon', availability: 'available',
+      ownership: { scope: 'installation', id: 'installation:current' }, health: { state: 'healthy' },
+      permissions: { requires_authenticated_request: true, configured_scopes: ['owner:current'], delegation: 'narrower_only' },
+      source: { type: 'worker', ref: 'tests/fixtures.py#worker' }, actions: [],
+    }, {
       kind: 'worker', id: 'worker:pc', display_name: 'Friday', availability: 'available',
       ownership: { scope: 'installation', id: 'installation:current' },
       health: { state: 'healthy' },
@@ -12,21 +22,33 @@ const selector = {
       source: { type: 'worker', ref: 'tests/fixtures.py#worker' }, actions: [],
     }],
   },
-  selections: [{ entity_id: 'worker:pc', kind: 'worker', target: 'pc-codex', selectable: true, reason: null }],
+  selections: [
+    { entity_id: 'agent:jarvis', kind: 'agent', target: 'jarvis', selectable: true, reason: null },
+    { entity_id: 'agent:gordon', kind: 'agent', target: 'hermes', selectable: true, reason: null },
+    { entity_id: 'worker:pc', kind: 'worker', target: 'pc-codex', selectable: true, reason: null },
+  ],
 };
 
-async function mockShell(page, catalogHandler, taskHandler = null) {
+async function mockShell(page, catalogHandler, taskHandler = null, sessionItems = []) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/selector-catalog') return route.fulfill({ json: selector });
     if (url.pathname === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
     if (url.pathname === '/api/models') return route.fulfill({ json: { items: [] } });
     if (url.pathname === '/api/default-chat') return route.fulfill({ json: {} });
-    if (url.pathname === '/api/sessions' || url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
+    if (url.pathname === '/api/sessions') return route.fulfill({ json: sessionItems });
+    if (url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
     if (url.pathname.startsWith('/api/codex/')) return catalogHandler(route, url);
     if (url.pathname.startsWith('/api/agent-tasks') && taskHandler) return taskHandler(route, url);
     return route.fulfill({ json: {} });
   });
+}
+
+async function selectFriday(page) {
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#model-picker-list').getByText('Friday', { exact: true }).click();
+  await expect(page.locator('#model-picker-menu')).toBeHidden();
+  await expect(page.locator('#codex-workspace-browser')).toBeVisible();
 }
 
 test('Codex browser loads allowlisted projects lazily and paginates a large task catalog', async ({ page }) => {
@@ -68,16 +90,17 @@ test('Codex browser loads allowlisted projects lazily and paginates a large task
   });
 
   await page.goto('/static/index.html');
-  await page.locator('#model-picker-btn').click();
-  await expect(page.locator('#codex-browser-toggle')).toBeVisible();
+  await expect(page.locator('#codex-browser-toggle')).toHaveCount(0);
   expect(taskRequests).toBe(0);
-  await page.locator('#model-picker-list').getByText('Friday', { exact: true }).click();
-  await expect(page.locator('#codex-workspace-browser')).toBeVisible();
+  await selectFriday(page);
+  await expect(page.locator('#sessions-section > #codex-workspace-browser')).toBeVisible();
+  await expect(page.locator('#chats-section-label')).toHaveText('Friday Projects');
   await expect(page.locator('#codex-project-list')).toContainText('1,001 tasks · workspace:test-project');
   await expect(page.locator('#codex-project-list').getByText('Missing Project').locator('..')).toBeDisabled();
   expect(taskRequests).toBe(0);
 
   await page.locator('#codex-project-list').getByText('Test Project').click();
+  await expect(page.locator('.codex-project-group').filter({ hasText: 'Test Project' }).locator('#codex-task-view')).toBeVisible();
   await expect(page.locator('#codex-task-list .codex-browser-row')).toHaveCount(50);
   expect(taskRequests).toBe(1);
   await page.locator('#codex-task-more').click();
@@ -90,6 +113,49 @@ test('Codex browser loads allowlisted projects lazily and paginates a large task
   expect(taskRequests).toBe(3);
 });
 
+test('sidebar follows the server-owned target and persists selector changes', async ({ page }) => {
+  const now = new Date().toISOString();
+  const sessionItems = [
+    { id: 'jarvis-chat', name: 'Jarvis dated chat', model: 'fixture', endpoint_url: 'http://model.test', archived: false, agent_target: 'jarvis', created_at: now, updated_at: now, last_message_at: now, message_count: 1 },
+    { id: 'gordon-chat', name: 'Gordon dated chat', model: 'fixture', endpoint_url: 'http://model.test', archived: false, agent_target: 'hermes', created_at: now, updated_at: now, last_message_at: now, message_count: 1 },
+    { id: 'friday-chat', name: 'Legacy Friday chat', model: 'fixture', endpoint_url: 'http://model.test', archived: false, agent_target: 'pc-codex', created_at: now, updated_at: now, last_message_at: now, message_count: 1 },
+  ];
+  await mockShell(page, (route, url) => {
+    if (url.pathname === '/api/codex/projects') {
+      return route.fulfill({ json: { items: [], next_cursor: null } });
+    }
+    return route.fulfill({ json: { project_id: 'test-project', items: [], next_cursor: null } });
+  }, null, sessionItems);
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(3);
+
+  const activate = id => page.evaluate(async sessionId => {
+    const sessions = await import('/static/js/sessions.js');
+    sessions.setCurrentSessionId(sessionId);
+    sessions.updateModelPicker();
+  }, id);
+
+  await activate('jarvis-chat');
+  await expect(page.locator('#chats-section-label')).toHaveText('Jarvis Chats');
+  await expect(page.locator('#session-list .session-item')).toHaveCount(1);
+  await expect(page.locator('#session-list')).toContainText('Jarvis dated chat');
+  await expect(page.locator('#session-list .date-section-header')).toHaveText(['Today']);
+
+  await activate('gordon-chat');
+  await expect(page.locator('#chats-section-label')).toHaveText('Gordon Chats');
+  await expect(page.locator('#session-list .session-item')).toHaveCount(1);
+  await expect(page.locator('#session-list')).toContainText('Gordon dated chat');
+
+  const patchRequest = page.waitForRequest(request => (
+    request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/session/gordon-chat'
+  ));
+  await selectFriday(page);
+  expect((await patchRequest).postData()).toContain('pc-codex');
+  await expect(page.locator('#session-list')).toBeHidden();
+  await expect(page.locator('#codex-workspace-browser')).toBeVisible();
+  await expect(page.locator('#codex-project-list')).toContainText('No allowlisted Codex projects found');
+});
+
 test('Codex browser reports empty and workstation failure states explicitly', async ({ page }) => {
   let fail = false;
   await mockShell(page, (route, url) => {
@@ -98,8 +164,7 @@ test('Codex browser reports empty and workstation failure states explicitly', as
     return route.fulfill({ json: { items: [], next_cursor: null } });
   });
   await page.goto('/static/index.html');
-  await page.locator('#model-picker-btn').click();
-  await page.locator('#codex-browser-toggle').click();
+  await selectFriday(page);
   await expect(page.locator('#codex-project-list')).toContainText('No allowlisted Codex projects found');
 
   fail = true;
@@ -150,8 +215,7 @@ test('Codex browser resumes an exact fixture and renders progress and completion
   await page.goto('/static/index.html');
   await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule))).toBe(true);
   await page.evaluate(() => { window.sessionModule.getCurrentSessionId = () => 'session-1'; });
-  await page.locator('#model-picker-btn').click();
-  await page.locator('#codex-browser-toggle').click();
+  await selectFriday(page);
   await page.getByText('Disposable Test Project').click();
   await page.getByText('Fixture resume task').click();
   await expect(page.locator('#codex-task-identity')).toContainText(`exact task ${THREAD_ID}`);
@@ -206,8 +270,7 @@ test('Codex browser creates once, steers, and cancels the running fixture', asyn
   await page.goto('/static/index.html');
   await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule))).toBe(true);
   await page.evaluate(() => { window.sessionModule.getCurrentSessionId = () => 'session-1'; });
-  await page.locator('#model-picker-btn').click();
-  await page.locator('#codex-browser-toggle').click();
+  await selectFriday(page);
   await page.getByText('Disposable Test Project').click();
   await page.locator('#codex-new-task').click();
   await page.locator('#codex-task-prompt').fill('Apply one reversible fixture edit.');
@@ -253,8 +316,7 @@ test('Codex browser keeps waiting and failure events visible', async ({ page }) 
   await page.goto('/static/index.html');
   await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule))).toBe(true);
   await page.evaluate(() => { window.sessionModule.getCurrentSessionId = () => 'session-1'; });
-  await page.locator('#model-picker-btn').click();
-  await page.locator('#codex-browser-toggle').click();
+  await selectFriday(page);
   await page.getByText('Disposable Test Project').click();
   await page.locator('#codex-new-task').click();
   await page.locator('#codex-task-prompt').fill('Inspect the failure fixture.');

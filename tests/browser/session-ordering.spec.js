@@ -24,12 +24,14 @@ test('chat dates and latest-message order refresh live without restoring archive
     'Current chat',
     new Date(today.getTime() - 10 * 86400000).toISOString(),
     todayAt(1),
+    { folder: 'Work' },
   );
   const recent = sessionFixture(
     'session-recent',
     'Recent chat',
     todayAt(1),
     todayAt(2),
+    { folder: 'Work' },
   );
   const favoriteYesterday = sessionFixture(
     'session-favorite',
@@ -129,4 +131,8 @@ test('chat dates and latest-message order refresh live without restoring archive
   await expect(dateHeaders).toHaveText(['Today', 'Yesterday']);
   await expect.poll(() => page.evaluate(() => window.__sessionOrderingPageMarker)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe('session-current');
+
+  await page.evaluate(() => window.sessionModule.setSortMode('group'));
+  await expect(page.locator('#session-list .session-folder-content .date-section-header')).toHaveText(['Today', 'Yesterday']);
+  await expect(page.locator('#session-list .session-folder-content').first()).toContainText('Current chat');
 });

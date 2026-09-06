@@ -53,7 +53,8 @@ def test_list_sessions_excludes_other_users_sessions(monkeypatch):
     try:
         db.query(DbSession).delete()
         db.add(DbSession(id=alice_id, owner="alice", name="alice session",
-                         endpoint_url="http://localhost", model="gpt-4", archived=False))
+                         endpoint_url="http://localhost", model="gpt-4", archived=False,
+                         agent_target="hermes"))
         db.add(DbSession(id=bob_id, owner="bob", name="bob session",
                          endpoint_url="http://localhost", model="gpt-4", archived=False))
         db.commit()
@@ -74,6 +75,7 @@ def test_list_sessions_excludes_other_users_sessions(monkeypatch):
     returned_ids = {s["id"] for s in result}
     assert alice_id in returned_ids
     assert bob_id not in returned_ids
+    assert result[0]["agent_target"] == "hermes"
 
 
 def test_auto_sort_skip_llm_cleans_owner_stamped_sessions_when_auth_disabled(monkeypatch):

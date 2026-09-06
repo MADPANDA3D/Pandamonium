@@ -1,3 +1,5 @@
+import { getSelectedAgentSelection } from './modelPicker.js';
+
 const PAGE_SIZE = 50;
 
 const state = {
@@ -6,6 +8,7 @@ const state = {
   selectedProject: null,
   projectRequest: 0,
   taskRequest: 0,
+  identityLabel: 'Codex',
   selectedProjectName: '',
   selectedTask: null,
   activeTask: null,
@@ -39,13 +42,24 @@ function statusRow(text, isError = false) {
 function renderProjects(items, append = false) {
   const list = byId('codex-project-list');
   if (!list) return;
-  if (!append) list.innerHTML = '';
+  const taskView = byId('codex-task-view');
+  if (!append) {
+    if (taskView) {
+      taskView.hidden = true;
+      byId('codex-project-view')?.appendChild(taskView);
+    }
+    list.innerHTML = '';
+  }
   items.forEach(project => {
+    const group = document.createElement('div');
+    group.className = 'codex-project-group';
+    group.dataset.projectId = String(project.project_id || '');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'codex-browser-row';
     button.dataset.projectId = String(project.project_id || '');
     button.dataset.projectName = String(project.display_name || project.project_id || 'Project');
+    button.setAttribute('aria-expanded', 'false');
     button.disabled = project.availability !== 'available';
     button.title = button.disabled ? String(project.reason || 'Project unavailable') : String(project.approved_root || 'Approved project');
     const title = document.createElement('strong');
@@ -55,7 +69,8 @@ function renderProjects(items, append = false) {
       ? String(project.reason || 'unavailable').replace(/_/g, ' ')
       : `${Number.isFinite(project.task_count) ? `${project.task_count.toLocaleString()} tasks` : 'Open task catalog'} · ${project.approved_root}`;
     button.append(title, detail);
-    list.appendChild(button);
+    group.appendChild(button);
+    list.appendChild(group);
   });
   if (!list.children.length) list.appendChild(statusRow('No allowlisted Codex projects found.'));
 }
@@ -109,14 +124,33 @@ async function loadProjects({ append = false } = {}) {
 }
 
 async function selectProject(projectId, displayName = '') {
+  collapseProject();
   state.selectedProject = projectId;
   state.selectedProjectName = displayName || projectId;
   state.taskCursor = null;
-  byId('codex-project-view').hidden = true;
-  byId('codex-task-view').hidden = false;
+  const group = [...document.querySelectorAll('.codex-project-group')]
+    .find(item => item.dataset.projectId === String(projectId));
+  const taskView = byId('codex-task-view');
+  group?.querySelector('.codex-browser-row')?.setAttribute('aria-expanded', 'true');
+  if (group && taskView) group.appendChild(taskView);
+  byId('codex-project-view').hidden = false;
+  taskView.hidden = false;
   byId('codex-browser-title').textContent = displayName || projectId;
   if (byId('codex-task-search')) byId('codex-task-search').value = '';
   await loadTasks();
+}
+
+function collapseProject() {
+  const taskView = byId('codex-task-view');
+  if (taskView) {
+    taskView.hidden = true;
+    byId('codex-project-view')?.appendChild(taskView);
+  }
+  document.querySelectorAll('.codex-project-group .codex-browser-row[aria-expanded="true"]')
+    .forEach(button => button.setAttribute('aria-expanded', 'false'));
+  state.selectedProject = null;
+  state.selectedProjectName = '';
+  byId('codex-browser-title').textContent = `${state.identityLabel} projects`;
 }
 
 function showAction(task = null) {
@@ -288,30 +322,51 @@ async function loadTasks({ append = false } = {}) {
   }
 }
 
-function open() {
+function open(detail = {}) {
   const browser = byId('codex-workspace-browser');
-  const menu = byId('model-picker-menu');
-  const toggle = byId('codex-browser-toggle');
-  if (!browser || !menu || !toggle || toggle.hidden) return;
+  if (!browser) return;
+  const sessionsSection = byId('sessions-section');
+  const sessionList = byId('session-list');
+  const label = byId('chats-section-label');
+  state.identityLabel = detail.label || 'Codex';
+  if (sessionsSection) sessionsSection.classList.remove('hidden');
+  if (sessionList) sessionList.hidden = true;
+  if (label) label.textContent = `${state.identityLabel} Projects`;
+  if (byId('chats-library-btn')) byId('chats-library-btn').hidden = true;
+  if (byId('session-sort-btn')) byId('session-sort-btn').hidden = true;
+  const bulkBar = byId('session-bulk-bar');
+  if (bulkBar && !bulkBar.classList.contains('hidden')) byId('session-bulk-cancel')?.click();
+  bulkBar?.classList.add('hidden');
   browser.hidden = false;
-  menu.classList.add('codex-browser-open');
-  toggle.setAttribute('aria-expanded', 'true');
   byId('codex-project-view').hidden = false;
-  byId('codex-task-view').hidden = true;
   byId('codex-action-view').hidden = true;
-  byId('codex-browser-title').textContent = 'Codex projects';
+  collapseProject();
+  const list = byId('codex-project-list');
+  if (detail.available === false) {
+    list?.replaceChildren(statusRow(detail.reason || 'Friday is not currently available.', true));
+    byId('codex-project-more').hidden = true;
+    return;
+  }
   loadProjects();
 }
 
-function close() {
+function close(detail = {}) {
   const browser = byId('codex-workspace-browser');
-  const menu = byId('model-picker-menu');
-  const toggle = byId('codex-browser-toggle');
+  const sessionList = byId('session-list');
+  const label = byId('chats-section-label');
   if (browser) browser.hidden = true;
+  if (sessionList) sessionList.hidden = false;
+  if (label) label.textContent = `${detail.label || 'Jarvis'} Chats`;
+  if (byId('chats-library-btn')) byId('chats-library-btn').hidden = false;
+  if (byId('session-sort-btn')) byId('session-sort-btn').hidden = false;
   state.eventSource?.close();
   state.eventSource = null;
-  if (menu) menu.classList.remove('codex-browser-open');
-  if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  window.sessionModule?.renderSessionList?.();
+}
+
+function syncTarget(detail = {}) {
+  if (detail.target === 'pc-codex') open(detail);
+  else close(detail);
 }
 
 function debounce(fn, delay = 250) {
@@ -325,18 +380,15 @@ function debounce(fn, delay = 250) {
 function bind() {
   if (document.documentElement.dataset.codexWorkspaceBound === '1') return;
   document.documentElement.dataset.codexWorkspaceBound = '1';
-  byId('codex-browser-toggle')?.addEventListener('click', event => { event.stopPropagation(); open(); });
-  byId('codex-browser-back')?.addEventListener('click', close);
   byId('codex-project-return')?.addEventListener('click', () => {
-    state.selectedProject = null;
-    byId('codex-project-view').hidden = false;
-    byId('codex-task-view').hidden = true;
+    collapseProject();
     byId('codex-action-view').hidden = true;
-    byId('codex-browser-title').textContent = 'Codex projects';
   });
   byId('codex-project-list')?.addEventListener('click', event => {
     const button = event.target.closest('.codex-browser-row[data-project-id]');
-    if (button && !button.disabled) selectProject(button.dataset.projectId, button.dataset.projectName);
+    if (button && !button.dataset.taskId && !button.disabled) {
+      selectProject(button.dataset.projectId, button.dataset.projectName);
+    }
   });
   byId('codex-task-list')?.addEventListener('click', event => {
     const button = event.target.closest('.codex-browser-row[data-task-id]');
@@ -354,6 +406,7 @@ function bind() {
   byId('codex-task-return')?.addEventListener('click', () => {
     state.selectedTask = null;
     byId('codex-action-view').hidden = true;
+    byId('codex-project-view').hidden = false;
     byId('codex-task-view').hidden = false;
     byId('codex-browser-title').textContent = state.selectedProjectName || state.selectedProject;
   });
@@ -369,10 +422,12 @@ function bind() {
   byId('codex-task-more')?.addEventListener('click', () => loadTasks({ append: true }));
   byId('codex-project-search')?.addEventListener('input', debounce(() => loadProjects()));
   byId('codex-task-search')?.addEventListener('input', debounce(() => loadTasks()));
-  document.addEventListener('odysseus:model-picker-closed', close);
+  document.addEventListener('odysseus:conversation-target-changed', event => syncTarget(event.detail || {}));
+  const selected = getSelectedAgentSelection();
+  if (selected) syncTarget(selected);
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
 else bind();
 
-window.codexWorkspaceBrowser = { open, close, loadProjects, loadTasks };
+window.codexWorkspaceBrowser = { open, close, syncTarget, loadProjects, loadTasks };

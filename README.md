@@ -58,6 +58,9 @@ following maintained platform capabilities.
 - One owner-visible selector classifies inference models, conversational agents,
   and execution workers from the same live discovery and health data in chat
   and voice, including explicit unavailable states without silent rerouting.
+- The server persists each conversation target. The left sidebar follows that
+  target: conversational identities show only their dated chats, while a Codex
+  worker shows its allowlisted projects with tasks loaded beneath each project.
 
 ### Governed agents, tools, and extensions
 
