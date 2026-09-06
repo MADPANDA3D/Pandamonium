@@ -112,10 +112,18 @@ credentials and does not connect anything automatically. If the service is not
 discoverable, use **Connect Immich manually**.
 
 In Immich, open the profile menu, choose **Account Settings → API Keys**, and
-create a key named `Pandamonium`. For browsing, grant `album.read`, `asset.read`,
-`asset.view`, and `asset.download`; add `asset.upload` only if you want to export
-local Gallery images to Immich. Copy the key once, paste it into Pandamonium,
-then save and test the connection. See the
+create a key named `Pandamonium`. For every Gallery feature currently shipped,
+enable only these permissions:
+
+- `album.read` — list Immich albums
+- `asset.read` — browse, search, and read photo metadata
+- `asset.view` — display thumbnails and previews
+- `asset.download` — open, download, or import originals
+- `asset.upload` — export local Gallery images to Immich
+
+Leave every other permission disabled. Pandamonium does not update or delete
+Immich content. Copy the key once, paste it into Pandamonium, then save and test
+the connection. See the
 [official Immich user-settings guide](https://docs.immich.app/features/user-settings/).
 Pandamonium encrypts the key at rest and proxies Immich metadata, thumbnails,
 previews, and downloads server-side, so the browser never receives the
