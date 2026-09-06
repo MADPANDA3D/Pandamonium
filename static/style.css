@@ -42601,7 +42601,7 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
     animation: none;
   }
 }
-/* Read-only signed plugin marketplace (MAD-789). */
+/* Signed plugin marketplace lifecycle (MAD-789/MAD-790). */
 .marketplace-modal-content .sr-only {
   position: absolute;
   width: 1px;
@@ -42714,6 +42714,22 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 .marketplace-facts a { color: var(--accent, var(--red)); }
 .marketplace-detail-section { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--fg) 9%, transparent); }
 .marketplace-detail-section ul { margin: 0; padding-left: 18px; font-size: 11px; line-height: 1.6; }
+.marketplace-action-status { min-height: 18px; }
+.marketplace-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.marketplace-action-buttons button {
+  width: auto;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg);
+  cursor: pointer;
+}
+.marketplace-action-buttons button:disabled { cursor: wait; opacity: .55; }
+.marketplace-action-buttons .marketplace-action-primary { border-color: var(--accent, var(--red)); background: var(--accent, var(--red)); color: white; }
+.marketplace-action-preview { margin-top: 10px; padding: 11px; border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 35%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--accent, var(--red)) 7%, transparent); }
+.marketplace-action-preview p { margin-top: 6px; overflow-wrap: anywhere; }
 .marketplace-state { min-height: 180px; display: grid; place-content: center; gap: 5px; text-align: center; opacity: .65; }
 .marketplace-state span { font-size: 11px; }
 

@@ -20,6 +20,7 @@ const marketplace = {
       dependencies: [{ dependency_type: 'plugin', id: 'base-tools', minimum_version: '1.2.0', maximum_version: '1.9.9', optional: true }],
       configuration: [{ key: 'ATLAS_API_TOKEN', description: 'Owner-supplied API token reference', required: false, secret: true }],
       restart_required: 'none', review: { status: 'active', reviewed_at: '2026-09-06T07:00:00Z', reviewer: 'pandamonium-security', security_advisories: [] },
+      removal: { remove_paths: ['cache'], preserve_paths: ['data'] }, rollback: { strategy: 'pinned_revision', retain_revisions: 3, available_revisions: ['0'.repeat(40)] },
       installation: { state: 'update_available', current_version: '1.0.0', target_version: '2.0.0', enabled: true, update_available: true },
     },
     {
@@ -30,6 +31,7 @@ const marketplace = {
       compatibility: { state: 'incompatible', pandamonium_min: '2.0.0', pandamonium_max: '2.9.99', platforms: ['linux'], architectures: ['amd64'] },
       permissions: { default: 'read_only', capabilities: {}, data_boundaries: { read: [], write: [], network: [] } },
       dependencies: [], configuration: [], restart_required: 'pandamonium',
+      removal: { remove_paths: [], preserve_paths: ['data'] }, rollback: { strategy: 'pinned_revision', retain_revisions: 2, available_revisions: [] },
       review: { status: 'revoked', reviewed_at: '2026-09-06T07:00:00Z', reviewer: 'pandamonium-security', security_advisories: [{ id: 'ADV-1', url: 'https://example.com/advisory', severity: 'high', summary: 'Fixture revocation.' }] },
       installation: { state: 'disabled', current_version: '1.0.0', target_version: '1.0.0', enabled: false, update_available: false },
     },
@@ -40,6 +42,17 @@ async function mockApp(page, response = marketplace) {
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/extensions/marketplace') return route.fulfill({ json: response });
+    if (path === '/api/extensions/marketplace/plans') {
+      const request = route.request().postDataJSON();
+      return route.fulfill({ json: {
+        plan_id: `plan-${request.operation}`, operation: request.operation, extension_id: request.extension_id,
+        authority_decision: { decision: 'approval_required', decision_id: `decision-${request.operation}` },
+        marketplace: { artifact: { sha256: 'a'.repeat(64), size_bytes: 27, digest_state: 'verified', signature_state: 'verified' }, current_version: '1.0.0', target_version: '2.0.0', dependencies: response.plugins[0].dependencies, configuration: response.plugins[0].configuration, restart_required: 'none' },
+        removal: { ...response.plugins[0].removal, deleted_paths: [], retained_paths: ['cache', 'data'], package_recoverable: true },
+      } });
+    }
+    if (path.startsWith('/api/authority/decisions/')) return route.fulfill({ json: { decision: 'allow' } });
+    if (/\/api\/extensions\/plans\/[^/]+\/execute$/.test(path)) return route.fulfill({ json: { result: { status: 'succeeded' } } });
     if (path === '/api/extensions/catalog') return route.fulfill({ json: { plugins: [] } });
     if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
     if (path === '/api/models' || path === '/api/model-endpoints' || path === '/api/sessions') return route.fulfill({ json: [] });
@@ -47,7 +60,7 @@ async function mockApp(page, response = marketplace) {
   });
 }
 
-test('Plugins → Add Plugins opens a wide read-only searchable detail view', async ({ page }) => {
+test('Plugins → Add Plugins previews and executes the approved lifecycle', async ({ page }) => {
   await mockApp(page);
   await page.goto('/static/index.html');
 
@@ -55,7 +68,7 @@ test('Plugins → Add Plugins opens a wide read-only searchable detail view', as
   await page.keyboard.press('Enter');
   await expect(page.locator('#marketplace-modal')).toBeVisible();
   await expect(page.locator('#marketplace-search')).toBeFocused();
-  await expect(page.getByRole('dialog', { name: 'Add Plugins' })).toContainText('Read-only marketplace');
+  await expect(page.getByRole('dialog', { name: 'Add Plugins' })).toContainText('Signed marketplace');
   await expect(page.getByRole('button', { name: /Atlas/ })).toContainText('Update available');
   await expect(page.getByRole('button', { name: /Robin/ })).toContainText('Revoked');
 
@@ -70,7 +83,17 @@ test('Plugins → Add Plugins opens a wide read-only searchable detail view', as
   await expect(detail).toContainText('read_only');
   await expect(detail).toContainText('base-tools');
   await expect(detail).toContainText('No restart');
-  await expect(detail.locator('button', { hasText: /Install|Update|Disable|Remove/ })).toHaveCount(0);
+  await expect(detail.getByRole('button', { name: 'Update' })).toBeVisible();
+  await expect(detail.getByRole('button', { name: 'Disable' })).toBeVisible();
+  await expect(detail.getByRole('button', { name: 'Rollback' })).toBeVisible();
+  await expect(detail.getByRole('button', { name: 'Remove' })).toBeVisible();
+  await detail.getByRole('button', { name: 'Update' }).click();
+  await expect(detail).toContainText('Approval required: Update Atlas');
+  await expect(detail).toContainText(`Verified sha256:${'a'.repeat(64)}`);
+  await expect(detail).toContainText('1.0.0 → 2.0.0');
+  await expect(detail).toContainText('1 declared configuration keys');
+  await detail.getByRole('button', { name: 'Approve once' }).click();
+  await expect(page.locator('#marketplace-summary')).toContainText('Atlas: Update completed.');
   const cards = await page.locator('.marketplace-card').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().toJSON()));
   expect(cards[0].height).toBeGreaterThan(90);
   expect(cards[1].top).toBeGreaterThan(cards[0].bottom);

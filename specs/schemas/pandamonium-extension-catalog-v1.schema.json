@@ -65,7 +65,7 @@
       "properties": {
         "url": {"type": "string", "format": "uri", "pattern": "^https://"},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "size_bytes": {"type": "integer", "minimum": 1},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 536870912},
         "signature": {"$ref": "#/$defs/signature"}
       }
     },

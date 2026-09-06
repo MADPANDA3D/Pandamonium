@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import copy
 import hashlib
@@ -5,13 +6,25 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from fastapi import HTTPException
 
-from src.extension_installer import normalize_git_source_url, validate_git_ref
+from routes.extension_routes import MarketplacePlanRequest, setup_extension_routes
+from src.authority_protocol import AuthorityStore
+from src.extension_installer import (
+    ExtensionLifecycleManager,
+    InlineWebAdapter,
+    normalize_git_source_url,
+    validate_git_ref,
+)
+from src.extension_registry import ExtensionRegistry
 from src.marketplace_catalog import (
     MarketplaceCatalogError,
+    catalog_dependency_status,
+    download_catalog_artifact,
     marketplace_catalog_view,
     preview_catalog_install,
     validate_published_catalog,
@@ -176,6 +189,254 @@ def test_signed_catalog_previews_only_existing_pinned_extension_contract():
         "secret": True,
     }
     assert verify_catalog_artifact(plan["artifact"], ARTIFACT) is True
+
+
+def test_marketplace_plan_bridges_verified_catalog_to_existing_manager():
+    catalog, trusted, _key = _fixture_catalog()
+    captured = {}
+
+    class Registry:
+        @staticmethod
+        def snapshot():
+            return {
+                "extensions": {
+                    "atlas": {
+                        "enabled": True,
+                        "manifest": {"version": "1.0.0"},
+                    }
+                }
+            }
+
+    class Manager:
+        adapters = ()
+        registry = Registry()
+
+        @staticmethod
+        def snapshot():
+            return {"extensions": {}, "plans": {}}
+
+        @staticmethod
+        def preview_source(*args, **kwargs):
+            captured.update({"args": args, "kwargs": kwargs})
+            return {"plan_id": "verified-plan", "status": "pending_approval"}
+
+    route = next(
+        item
+        for item in setup_extension_routes(
+            Manager(),
+            marketplace_loader=lambda: (catalog, trusted),
+            artifact_loader=lambda _artifact: ARTIFACT,
+        ).routes
+        if item.path == "/api/extensions/marketplace/plans"
+    )
+    result = asyncio.run(
+        route.endpoint(
+            MarketplacePlanRequest(
+                operation="upgrade", extension_id="atlas", version="2.0.0"
+            ),
+            owner="operator",
+        )
+    )
+
+    assert result == {"plan_id": "verified-plan", "status": "pending_approval"}
+    assert captured["args"] == (
+        "upgrade",
+        "https://github.com/example/atlas-lab.git",
+        "1" * 40,
+    )
+    assert captured["kwargs"]["expected_manifest"] == catalog["entries"][0]["manifest"]
+    assert captured["kwargs"]["distribution"]["artifact"] == {
+        "sha256": hashlib.sha256(ARTIFACT).hexdigest(),
+        "size_bytes": len(ARTIFACT),
+        "digest_state": "verified",
+        "signature_state": "verified",
+    }
+    assert captured["kwargs"]["distribution"]["current_version"] == "1.0.0"
+    assert captured["kwargs"]["distribution"]["target_version"] == "2.0.0"
+
+    bad_route = next(
+        item
+        for item in setup_extension_routes(
+            Manager(),
+            marketplace_loader=lambda: (catalog, trusted),
+            artifact_loader=lambda _artifact: b"x" * len(ARTIFACT),
+        ).routes
+        if item.path == "/api/extensions/marketplace/plans"
+    )
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            bad_route.endpoint(
+                MarketplacePlanRequest(
+                    operation="install", extension_id="atlas", version="2.0.0"
+                ),
+                owner="operator",
+            )
+        )
+    assert error.value.detail == "marketplace_artifact_digest_mismatch"
+
+
+def test_marketplace_dependencies_never_install_host_packages_implicitly():
+    optional = [
+        {
+            "dependency_type": "optional_package",
+            "id": "renderer",
+            "minimum_version": "1.0.0",
+            "maximum_version": "1.9.9",
+            "optional": True,
+        }
+    ]
+    assert (
+        catalog_dependency_status(optional, {})[0]["state"] == "declared_not_installed"
+    )
+    required = copy.deepcopy(optional)
+    required[0]["optional"] = False
+    with pytest.raises(
+        MarketplaceCatalogError, match="marketplace_host_dependency_required"
+    ):
+        catalog_dependency_status(required, {})
+
+
+def test_marketplace_artifact_download_is_bounded_across_redirects(monkeypatch):
+    catalog, trusted, _key = _fixture_catalog()
+    artifact = validate_published_catalog(catalog, trusted_keys=trusted)["entries"][0][
+        "artifact"
+    ]
+
+    def handler(request):
+        if request.url.host == "example.test":
+            return httpx.Response(
+                302, headers={"location": "https://cdn.example.test/artifact"}
+            )
+        return httpx.Response(200, content=ARTIFACT)
+
+    monkeypatch.setattr(
+        "src.marketplace_catalog.validate_public_http_url", lambda value: value
+    )
+    factory = lambda **kwargs: httpx.Client(
+        transport=httpx.MockTransport(handler), **kwargs
+    )
+    redirected = {**artifact, "url": "https://example.test/artifact"}
+    assert download_catalog_artifact(redirected, client_factory=factory) == ARTIFACT
+
+    def downgrade_handler(_request):
+        return httpx.Response(
+            302, headers={"location": "http://cdn.example.test/artifact"}
+        )
+
+    downgrade_factory = lambda **kwargs: httpx.Client(
+        transport=httpx.MockTransport(downgrade_handler), **kwargs
+    )
+    with pytest.raises(
+        MarketplaceCatalogError, match="marketplace_artifact_redirect_invalid"
+    ):
+        download_catalog_artifact(redirected, client_factory=downgrade_factory)
+
+    oversized = {**redirected, "size_bytes": len(ARTIFACT) - 1}
+    with pytest.raises(
+        MarketplaceCatalogError, match="marketplace_artifact_size_mismatch"
+    ):
+        download_catalog_artifact(oversized, client_factory=factory)
+
+
+def test_signed_fixture_completes_full_marketplace_lifecycle(tmp_path):
+    catalog, trusted, catalog_key = _fixture_catalog()
+    v2 = catalog["entries"][0]
+    v2["manifest"].update(
+        {
+            "version": "2.0.0",
+            "runtime": {"type": "web", "entrypoint": "index.html"},
+            "capabilities": {
+                "descriptor": {"type": "inline"},
+                "schemas": [
+                    {
+                        "name": "update_fixture",
+                        "description": "Use updated fixture",
+                        "parameters": {"type": "object", "properties": {}},
+                    }
+                ],
+            },
+            "health": {"type": "catalog", "timeout_seconds": 3},
+        }
+    )
+    v2["manifest"]["permissions"]["capabilities"] = {}
+    v1 = copy.deepcopy(v2)
+    v1["manifest"]["version"] = "1.0.0"
+    v1["manifest"]["source"]["revision"] = "0" * 40
+    v1["manifest"]["capabilities"]["schemas"][0]["name"] = "inspect_fixture"
+    catalog["entries"] = [v1, v2]
+    _resign(catalog, catalog_key)
+    manifests = {
+        entry["manifest"]["source"]["revision"]: entry["manifest"]
+        for entry in catalog["entries"]
+    }
+
+    class FixtureGit:
+        @staticmethod
+        def resolve_revision(source_url, requested_ref="HEAD"):
+            return (
+                normalize_git_source_url(source_url, check_public=False),
+                requested_ref,
+                requested_ref,
+            )
+
+        @staticmethod
+        def checkout(_source_url, _requested_ref, revision, destination):
+            destination.mkdir(parents=True)
+            manifest = copy.deepcopy(manifests[revision])
+            manifest["source"]["revision"] = "self"
+            (destination / "jarvis-extension.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            (destination / "index.html").write_text("fixture", encoding="utf-8")
+
+    authority = AuthorityStore(tmp_path / "authority.json")
+    registry = ExtensionRegistry(tmp_path / "registry.json")
+    manager = ExtensionLifecycleManager(
+        root=tmp_path / "managed",
+        registry=registry,
+        authority=authority,
+        git_client=FixtureGit(),
+        adapters=[InlineWebAdapter()],
+    )
+    router = setup_extension_routes(
+        manager,
+        marketplace_loader=lambda: (catalog, trusted),
+        artifact_loader=lambda _artifact: ARTIFACT,
+    )
+    endpoint = next(
+        item.endpoint
+        for item in router.routes
+        if item.path == "/api/extensions/marketplace/plans"
+    )
+
+    def run(operation, version=None):
+        plan = asyncio.run(
+            endpoint(
+                MarketplacePlanRequest(
+                    operation=operation, extension_id="atlas", version=version
+                ),
+                owner="operator",
+            )
+        )
+        authority.resolve(
+            plan["authority_decision"]["decision_id"],
+            operator_id="operator",
+            choice="approve",
+            scope="once",
+        )
+        return manager.execute_plan(plan["plan_id"], operator_id="operator")
+
+    run("install", "1.0.0")
+    assert set(registry.effective_capabilities()) == {"inspect_fixture"}
+    run("upgrade", "2.0.0")
+    assert set(registry.effective_capabilities()) == {"update_fixture"}
+    run("rollback")
+    assert set(registry.effective_capabilities()) == {"inspect_fixture"}
+    run("disable")
+    assert registry.effective_capabilities() == {}
+    removed = run("uninstall")
+    assert removed["result"]["structured"]["recoverable"] is True
+    assert registry.snapshot()["extensions"] == {}
 
 
 @pytest.mark.parametrize(
@@ -375,14 +636,17 @@ def test_marketplace_view_keeps_incompatible_revoked_disabled_empty_and_offline_
     empty, empty_trusted, _key = _fixture_catalog()
     empty["entries"] = []
     _resign(empty, _key)
-    assert marketplace_catalog_view(
-        empty,
-        trusted_keys=empty_trusted,
-        registry_snapshot={},
-        pandamonium_version="1.0.10",
-        platform="linux",
-        architecture="amd64",
-    )["status"] == "empty"
+    assert (
+        marketplace_catalog_view(
+            empty,
+            trusted_keys=empty_trusted,
+            registry_snapshot={},
+            pandamonium_version="1.0.10",
+            platform="linux",
+            architecture="amd64",
+        )["status"]
+        == "empty"
+    )
     assert marketplace_catalog_view(
         None,
         trusted_keys={},

@@ -72,8 +72,8 @@ following maintained platform capabilities.
 - Generic extension manifests, installed-plugin visibility, pinned Git source
   installation, capability registration, enable/disable lifecycle, and
   rollback without giving extensions authority over the host.
-- Signed, read-only plugin marketplace discovery with searchable metadata,
-  compatibility, provenance, permissions, and installed-state projection.
+- Signed plugin marketplace discovery and approval-gated install, update,
+  enable/disable, rollback, and recoverable removal through the native lifecycle.
 - Scoped client-state and foreground-action bridges for extensions that need
   to interact with the active browser surface.
 - ORACLE remains an optional reference extension; clean installations start

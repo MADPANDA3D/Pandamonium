@@ -1,7 +1,7 @@
 # Pandamonium published extension catalog contract
 
-Status: accepted architecture checkpoint for MAD-788. No package is published,
-installed, enabled, updated, or deployed by this checkpoint.
+Status: accepted architecture checkpoint for MAD-788; the MAD-790 lifecycle
+bridge implements this contract without publishing a package.
 
 ## One catalog, installer, and registry
 
@@ -42,7 +42,8 @@ rollback retention, and removal/preservation paths.
    the existing extension source preview. `HEAD`, branches, mutable tags,
    `self`, and arbitrary repository scripts are not catalog install inputs.
 7. Reconcile the checked-out manifest with the signed entry before the existing
-   authority decision can execute. This execution seam belongs to MAD-790.
+   authority decision can execute. `POST /api/extensions/marketplace/plans`
+   now owns this seam and reuses the native lifecycle manager.
 
 An update is another signed entry for the same extension ID at a different
 version and immutable revision. The existing `upgrade` preview must show the

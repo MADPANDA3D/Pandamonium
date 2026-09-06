@@ -9,11 +9,12 @@ import hashlib
 import hmac
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import (
@@ -35,6 +36,7 @@ from src.extension_registry import (
     ExtensionContractError,
     validate_extension_manifest,
 )
+from src.url_security import validate_public_http_url
 
 CATALOG_VERSION = "pandamonium.extension-catalog.v1"
 SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -43,6 +45,8 @@ ID_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
 CONFIG_KEY_PATTERN = r"^[A-Z][A-Z0-9_]{0,127}$"
 CATEGORY_PATTERN = r"^[a-z][a-z0-9-]{0,39}$"
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
+MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
+MAX_ARTIFACT_REDIRECTS = 3
 
 
 class MarketplaceCatalogError(ValueError):
@@ -104,7 +108,7 @@ class Publisher(_StrictModel):
 class Artifact(_StrictModel):
     url: str = Field(min_length=1, max_length=2_048)
     sha256: str = Field(pattern=SHA256_PATTERN)
-    size_bytes: int = Field(ge=1)
+    size_bytes: int = Field(ge=1, le=MAX_ARTIFACT_BYTES)
     signature: Signature
 
     _validate_url = field_validator("url")(_https)
@@ -327,8 +331,11 @@ def preview_catalog_install(
     platform: str,
     architecture: str,
     online: bool,
+    operation: str = "install",
 ) -> dict[str, Any]:
     """Build input for the existing source preview; never fetch or execute."""
+    if operation not in {"install", "upgrade"}:
+        raise MarketplaceCatalogError("marketplace_operation_invalid")
     normalized = validate_published_catalog(catalog, trusted_keys=trusted_keys)
     if not online:
         raise MarketplaceCatalogError("marketplace_catalog_offline")
@@ -356,7 +363,7 @@ def preview_catalog_install(
     manifest = entry["manifest"]
     return {
         "catalog_id": normalized["catalog_id"],
-        "operation": "install",
+        "operation": operation,
         "extension_id": manifest["extension_id"],
         "version": manifest["version"],
         "source_url": manifest["source"]["url"],
@@ -379,6 +386,46 @@ def preview_catalog_install(
     }
 
 
+def catalog_dependency_status(
+    dependencies: list[Mapping[str, Any]], registry_snapshot: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Fail closed on required dependencies without installing host packages."""
+    installed = registry_snapshot.get("extensions", {})
+    if not isinstance(installed, Mapping):
+        installed = {}
+    result = []
+    for dependency in dependencies:
+        item = dict(dependency)
+        if item["dependency_type"] == "optional_package":
+            if not item["optional"]:
+                raise MarketplaceCatalogError("marketplace_host_dependency_required")
+            item["state"] = "declared_not_installed"
+            result.append(item)
+            continue
+        record = installed.get(item["id"])
+        manifest = record.get("manifest") if isinstance(record, Mapping) else None
+        version = (
+            str(manifest.get("version") or "") if isinstance(manifest, Mapping) else ""
+        )
+        try:
+            version_compatible = bool(
+                version
+                and _semver(item["minimum_version"])
+                <= _semver(version)
+                <= _semver(item["maximum_version"])
+            )
+        except MarketplaceCatalogError:
+            version_compatible = False
+        satisfied = bool(
+            isinstance(record, Mapping) and record.get("enabled") and version_compatible
+        )
+        if not satisfied and not item["optional"]:
+            raise MarketplaceCatalogError("marketplace_plugin_dependency_unavailable")
+        item["state"] = "satisfied" if satisfied else "optional_unavailable"
+        result.append(item)
+    return result
+
+
 def marketplace_catalog_view(
     catalog: Any,
     *,
@@ -388,6 +435,7 @@ def marketplace_catalog_view(
     platform: str,
     architecture: str,
     online: bool = True,
+    lifecycle_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project a verified catalog and existing registry into a read-only UI view."""
     if not online:
@@ -402,6 +450,9 @@ def marketplace_catalog_view(
     installed = registry_snapshot.get("extensions", {})
     if not isinstance(installed, Mapping):
         installed = {}
+    lifecycle_extensions = (lifecycle_snapshot or {}).get("extensions", {})
+    if not isinstance(lifecycle_extensions, Mapping):
+        lifecycle_extensions = {}
 
     latest: dict[str, dict[str, Any]] = {}
     for entry in normalized["entries"]:
@@ -453,6 +504,12 @@ def marketplace_catalog_view(
         except MarketplaceCatalogError:
             update_available = False
         enabled = bool(local.get("enabled")) if current_version else False
+        local_lifecycle = lifecycle_extensions.get(extension_id)
+        history = (
+            list(local_lifecycle.get("history") or [])
+            if isinstance(local_lifecycle, Mapping)
+            else []
+        )
         installation_state = (
             "disabled"
             if current_version and not enabled
@@ -491,6 +548,11 @@ def marketplace_catalog_view(
                 "dependencies": entry["dependencies"],
                 "configuration": entry["configuration"],
                 "restart_required": entry["restart_required"],
+                "removal": manifest["removal"],
+                "rollback": {
+                    **manifest["rollback"],
+                    "available_revisions": history,
+                },
                 "review": entry["review"],
                 "installation": {
                     "state": installation_state,
@@ -530,3 +592,64 @@ def verify_catalog_artifact(artifact: Mapping[str, Any], content: bytes) -> bool
     if not hmac.compare_digest(observed, str(artifact.get("sha256") or "")):
         raise MarketplaceCatalogError("marketplace_artifact_digest_mismatch")
     return True
+
+
+def download_catalog_artifact(
+    artifact: Mapping[str, Any],
+    *,
+    client_factory: Callable[..., httpx.Client] = httpx.Client,
+) -> bytes:
+    """Download one bounded artifact while revalidating every redirect target."""
+    expected = artifact.get("size_bytes")
+    if (
+        not isinstance(expected, int)
+        or isinstance(expected, bool)
+        or not 1 <= expected <= MAX_ARTIFACT_BYTES
+    ):
+        raise MarketplaceCatalogError("marketplace_artifact_size_invalid")
+    url = str(artifact.get("url") or "")
+    try:
+        with client_factory(
+            follow_redirects=False, trust_env=False, timeout=30
+        ) as client:
+            for redirect_count in range(MAX_ARTIFACT_REDIRECTS + 1):
+                url = validate_public_http_url(url)
+                if urlparse(url).scheme != "https":
+                    raise MarketplaceCatalogError(
+                        "marketplace_artifact_redirect_invalid"
+                    )
+                with client.stream(
+                    "GET", url, headers={"Accept": "application/octet-stream"}
+                ) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location or redirect_count == MAX_ARTIFACT_REDIRECTS:
+                            raise MarketplaceCatalogError(
+                                "marketplace_artifact_redirect_invalid"
+                            )
+                        url = urljoin(url, location)
+                        continue
+                    if response.status_code != 200:
+                        raise MarketplaceCatalogError(
+                            "marketplace_artifact_unavailable"
+                        )
+                    declared = response.headers.get("content-length")
+                    if declared is not None and (
+                        not declared.isdigit() or int(declared) != expected
+                    ):
+                        raise MarketplaceCatalogError(
+                            "marketplace_artifact_size_mismatch"
+                        )
+                    content = bytearray()
+                    for chunk in response.iter_bytes():
+                        content.extend(chunk)
+                        if len(content) > expected:
+                            raise MarketplaceCatalogError(
+                                "marketplace_artifact_size_mismatch"
+                            )
+                    return bytes(content)
+    except MarketplaceCatalogError:
+        raise
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        raise MarketplaceCatalogError("marketplace_artifact_unavailable") from exc
+    raise MarketplaceCatalogError("marketplace_artifact_redirect_invalid")

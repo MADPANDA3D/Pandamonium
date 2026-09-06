@@ -13,6 +13,7 @@ let plugins = [];
 let selectedId = null;
 let previousFocus = null;
 let loadGeneration = 0;
+let actionGeneration = 0;
 
 const labels = {
   available: 'Available',
@@ -157,6 +158,126 @@ function listOrNone(values, formatter) {
   return list;
 }
 
+async function api(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    credentials: 'same-origin',
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.detail || `marketplace_http_${response.status}`);
+  return payload;
+}
+
+function actionOptions(plugin) {
+  const installation = plugin.installation || {};
+  const actions = [];
+  if (!installation.current_version && plugin.availability === 'available') {
+    actions.push(['install', 'Install']);
+  } else if (installation.current_version) {
+    if (installation.update_available && plugin.availability === 'available') actions.push(['upgrade', 'Update']);
+    if (installation.enabled) actions.push(['disable', 'Disable']);
+    else if (plugin.availability === 'available') actions.push(['enable', 'Enable']);
+    if (plugin.rollback?.available_revisions?.length) actions.push(['rollback', 'Rollback']);
+    actions.push(['uninstall', 'Remove']);
+  }
+  return actions;
+}
+
+function actionLabel(operation) {
+  return { install: 'Install', upgrade: 'Update', enable: 'Enable', disable: 'Disable', rollback: 'Rollback', uninstall: 'Remove' }[operation] || operation;
+}
+
+async function executeAction(plan, plugin, operation, status, actions) {
+  actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  try {
+    const decision = plan.authority_decision || {};
+    if (decision.decision === 'approval_required') {
+      await api(`/api/authority/decisions/${encodeURIComponent(decision.decision_id)}`, {
+        method: 'POST', body: JSON.stringify({ choice: 'approve', scope: 'once' }),
+      });
+    } else if (decision.decision !== 'allow') {
+      throw new Error('extension_action_denied');
+    }
+    status.textContent = `${actionLabel(operation)} in progress…`;
+    const result = await api(`/api/extensions/plans/${encodeURIComponent(plan.plan_id)}/execute`, { method: 'POST' });
+    if (result.result?.status !== 'succeeded') throw new Error('extension_action_failed');
+    window.dispatchEvent(new Event('pandamonium:extensions-changed'));
+    await load();
+    summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
+  } catch (error) {
+    status.textContent = `${actionLabel(operation)} failed: ${error?.message || error}`;
+    actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+  }
+}
+
+async function prepareAction(plugin, operation, section, status, actions) {
+  const generation = ++actionGeneration;
+  actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  status.textContent = `Preparing ${actionLabel(operation).toLowerCase()} preview…`;
+  try {
+    const plan = await api('/api/extensions/marketplace/plans', {
+      method: 'POST',
+      body: JSON.stringify({
+        operation,
+        extension_id: plugin.id,
+        ...(operation === 'install' || operation === 'upgrade' ? { version: plugin.version } : {}),
+      }),
+    });
+    if (generation !== actionGeneration || selectedId !== plugin.id) return;
+    section.querySelector('.marketplace-action-preview')?.remove();
+    const preview = element('div', 'marketplace-action-preview');
+    const artifact = plan.marketplace?.artifact;
+    const removal = plan.removal || plugin.removal || {};
+    preview.append(
+      element('strong', '', `Approval required: ${actionLabel(operation)} ${plugin.name}`),
+      element('p', '', [
+        artifact ? `Verified sha256:${artifact.sha256}` : null,
+        plan.marketplace?.target_version
+          ? `${plan.marketplace.current_version || 'not installed'} → ${plan.marketplace.target_version}`
+          : null,
+        `${(plan.marketplace?.dependencies || plugin.dependencies || []).length} declared dependencies`,
+        `${(plan.marketplace?.configuration || plugin.configuration || []).length} declared configuration keys`,
+        `${plan.marketplace?.restart_required || plugin.restart_required || 'none'} restart`,
+        operation === 'uninstall' ? `Delete now: ${(removal.deleted_paths || []).join(', ') || 'no user data'}; retain: ${(removal.retained_paths || []).join(', ') || 'all user data'}; package archived for recovery` : null,
+      ].filter(Boolean).join(' · ')),
+    );
+    const approvalActions = element('div', 'marketplace-action-buttons');
+    const approve = element('button', 'marketplace-action-primary', 'Approve once');
+    approve.type = 'button';
+    approve.addEventListener('click', () => executeAction(plan, plugin, operation, status, approvalActions));
+    const cancel = element('button', '', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => renderDetail(plugin));
+    approvalActions.append(approve, cancel);
+    preview.append(approvalActions);
+    actions.replaceChildren();
+    section.append(preview);
+    status.textContent = 'Review the exact signed package, data, and restart scope before approval.';
+    approve.focus();
+  } catch (error) {
+    status.textContent = `${actionLabel(operation)} unavailable: ${error?.message || error}`;
+    actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+  }
+}
+
+function renderActions(plugin) {
+  const section = detailSection('Manage plugin');
+  const status = element('p', 'marketplace-action-status', 'Choose an action to preview its exact approval scope.');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  const actions = element('div', 'marketplace-action-buttons');
+  actionOptions(plugin).forEach(([operation, label]) => {
+    const button = element('button', operation === 'install' || operation === 'upgrade' ? 'marketplace-action-primary' : '', label);
+    button.type = 'button';
+    button.addEventListener('click', () => prepareAction(plugin, operation, section, status, actions));
+    actions.append(button);
+  });
+  if (!actions.children.length) status.textContent = 'No lifecycle action is available for this package state.';
+  section.append(status, actions);
+  return section;
+}
+
 function renderDetail(plugin) {
   detailContent.replaceChildren();
   const heading = element('div');
@@ -215,11 +336,21 @@ function renderDetail(plugin) {
   configuration.append(listOrNone(plugin.configuration, item => `${item.key} · ${item.required ? 'required' : 'optional'}${item.secret ? ' · secret reference' : ''} — ${item.description}`));
   detailContent.append(configuration);
 
+  const removal = detailSection('Removal and rollback');
+  removal.append(listOrNone([
+    `Declared removable paths: ${(plugin.removal?.remove_paths || []).join(', ') || 'none'}`,
+    `Declared preserve paths: ${(plugin.removal?.preserve_paths || []).join(', ') || 'all user data'}`,
+    'Removal defaults to retaining user data and archives the package for recovery',
+    `Retained revisions: ${plugin.rollback?.retain_revisions || 0}`,
+  ], value => value));
+  detailContent.append(removal);
+
   if (plugin.review?.security_advisories?.length) {
     const advisories = detailSection('Security advisories');
     advisories.append(listOrNone(plugin.review.security_advisories, item => `${item.id} · ${item.severity} — ${item.summary}`));
     detailContent.append(advisories);
   }
+  detailContent.append(renderActions(plugin));
 }
 
 function selectPlugin(id, focus = true) {

@@ -467,6 +467,7 @@ async function initPluginSidebar() {
 function initializeEventListeners() {
   marketplaceModule.init();
   initPluginSidebar();
+  window.addEventListener('pandamonium:extensions-changed', initPluginSidebar);
   // Chat form submission
 //  document.getElementById('chat-form').addEventListener('submit', chatModule.handleChatSubmit);
 
