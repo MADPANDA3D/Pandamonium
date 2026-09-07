@@ -7,16 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v388';
-const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
-const UPDATE_WORKER_PENDING = 'pending-worker-update';
-const UPDATE_RECONCILE_ATTEMPTS = 8;
-const UPDATE_RECONCILE_DELAY_MS = 650;
-const UPDATE_STATUS_TIMEOUT_MS = 5000;
-const UPDATE_CLIENT_NAVIGATION_GRACE_MS = 750;
-const UPDATE_ACTIVE_STATES = new Set(['queued', 'running']);
-const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'recovered', 'rolled_back', 'failed']);
-const UPDATE_RETRYABLE_STATUS_CODES = new Set([408, 425, 429]);
+const CACHE_NAME = 'pandamonium-v387';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -104,76 +95,12 @@ self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
 
-function wait(delayMs) {
-  return new Promise(resolve => setTimeout(resolve, delayMs));
-}
-
-async function waitForTerminalUpdate() {
-  for (let attempt = 0; attempt < UPDATE_RECONCILE_ATTEMPTS; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), UPDATE_STATUS_TIMEOUT_MS);
-    try {
-      const response = await fetch('/api/update/status', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-        signal: controller.signal,
-      });
-      if (response.status === 401 || response.status === 403 || response.redirected) return false;
-      if (!response.ok) {
-        if (response.status >= 500 || UPDATE_RETRYABLE_STATUS_CODES.has(response.status)) {
-          throw new Error('Update status unavailable');
-        }
-        return false;
-      }
-      const operation = await response.json();
-      if (!operation || typeof operation !== 'object') {
-        throw new Error('Invalid update status response');
-      }
-      if (UPDATE_TERMINAL_STATES.has(operation?.status)) return true;
-      if (!UPDATE_ACTIVE_STATES.has(operation?.status)) return false;
-    } catch (_) {
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (attempt + 1 < UPDATE_RECONCILE_ATTEMPTS) await wait(UPDATE_RECONCILE_DELAY_MS);
-  }
-  return false;
-}
-
-async function reconcileUpdateClients() {
-  if (!await waitForTerminalUpdate()) return;
-  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  const navigations = Promise.allSettled(windows.map(client => {
-    const url = new URL(client.url);
-    const marker = url.searchParams.get(UPDATE_RECONCILE_QUERY);
-    if (marker === UPDATE_WORKER_PENDING) {
-      client.postMessage?.({ type: 'pandamonium-update-reconciled' });
-      return;
-    }
-    if (marker === CACHE_NAME) return;
-    url.searchParams.set(UPDATE_RECONCILE_QUERY, CACHE_NAME);
-    return client.navigate(url.href);
-  }));
-  // Chromium can keep an in-scope navigation pending until this replacement
-  // worker's activate event completes. Keep the worker alive long enough to
-  // submit and normally settle every navigation, but break that lifecycle
-  // dependency after a bounded grace period so activation cannot deadlock.
-  await Promise.race([navigations, wait(UPDATE_CLIENT_NAVIGATION_GRACE_MS)]);
-}
-
-async function activateWorker() {
-  const keys = await caches.keys();
-  const replacesPandamoniumWorker = keys.some(
-    key => key.startsWith('pandamonium-') && key !== CACHE_NAME,
-  );
-  await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
-  await self.clients.claim();
-  if (replacesPandamoniumWorker) await reconcileUpdateClients();
-}
-
 self.addEventListener('activate', (e) => {
-  e.waitUntil(activateWorker());
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (e) => {
