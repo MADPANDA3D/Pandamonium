@@ -305,6 +305,10 @@ async def test_live_catalog_clamps_retrieved_and_admin_keyword_tools(monkeypatch
 
 
 def test_network_file_mutation_requires_an_explicit_file_target():
+    read_prompt = "Read router.conf and compare it with my current network"
+    read_intent = agent_loop._classify_agent_request([], read_prompt)
+    assert {"files", "network_inspection"} <= read_intent["domains"]
+
     assert agent_loop._requests_file_mutation(
         "Edit this file to match my current network"
     )
@@ -317,6 +321,9 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     assert not agent_loop._requests_file_mutation(
         "Explain what I should change about my current network"
     )
+    assert not agent_loop._requests_file_mutation(
+        "Update the configuration of my current network"
+    )
 
     retrieved = {
         "ask_user", "bash", "edit_file", "inspect_network", "read_file", "write_file",
@@ -324,11 +331,16 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     read_only = agent_loop._clamp_network_inspection_tools(
         {"files", "network_inspection"}, retrieved
     )
+    mutation_prompt = "Update router.conf after inspecting my current network"
+    mutation_intent = agent_loop._classify_agent_request([], mutation_prompt)
     mutation = agent_loop._clamp_network_inspection_tools(
-        {"files", "network_inspection"}, retrieved, allow_file_mutation=True
+        mutation_intent["domains"],
+        retrieved,
+        allow_file_mutation=agent_loop._requests_file_mutation(mutation_prompt),
     )
 
     assert read_only == {"ask_user", "inspect_network", "read_file"}
+    assert {"files", "network_inspection"} <= mutation_intent["domains"]
     assert {"edit_file", "inspect_network", "write_file"} <= mutation
 
 
@@ -343,6 +355,7 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "Why is my device slow?",
         "Help me set up my device",
         "Visualize my network graph data structure",
+        "What is a local area network?",
     )
 
     for prompt in prompts:

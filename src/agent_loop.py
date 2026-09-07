@@ -417,6 +417,22 @@ _NETWORK_FILE_MUTATION_TOOLS = {
 }
 
 
+def _requests_named_file_access(text: str) -> bool:
+    """Return whether an action names a disk file rather than a web URL."""
+    q = str(text or "").lower()
+    if re.search(r"https?://|\bwww\.", q):
+        return False
+    action = (
+        r"(?:append|change|compare|create|delete|edit|fix|inspect|modify|open|"
+        r"read|remove|rename|replace|review|save|update|write)"
+    )
+    target = r"[\w.-]+\.[a-z0-9]{1,12}"
+    return bool(
+        re.search(rf"\b{action}\b.{{0,48}}\b{target}\b", q)
+        or re.search(rf"\b{target}\b.{{0,48}}\b{action}\b", q)
+    )
+
+
 def _requests_file_mutation(text: str) -> bool:
     """Return whether a network/file comparison explicitly asks for a write."""
     q = str(text or "").lower()
@@ -425,7 +441,7 @@ def _requests_file_mutation(text: str) -> bool:
         r"rename|replace|save|update|write)"
     )
     target = (
-        r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|config(?:uration)?|"
+        r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|"
         r"[\w.-]+\.[a-z0-9]{1,12})"
     )
     return bool(
@@ -1319,7 +1335,11 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("ui")
     if has(r"\b(session|chat history|rename chat|delete chat|archive chat|fork chat|list chats)\b"):
         domains.add("sessions")
-    if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b"):
+    if (
+        has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b")
+        or _requests_named_file_access(text)
+        or _requests_file_mutation(text)
+    ):
         domains.add("files")
     non_host_network_patterns = (
         r"\b(?:neural|social|application|app|software|blockchain|graph|adversarial)\s+networks?\b",
@@ -1348,8 +1368,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     )
     current_network_subject = (
         has_current_network(
-            r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b",
-            r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
+            r"\b(?:my|our|this|current|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,32}\b(?:my|our|this|current|home)\b",
             r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
             r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
         )
