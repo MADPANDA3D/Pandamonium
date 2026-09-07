@@ -324,6 +324,12 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     assert not agent_loop._requests_file_mutation(
         "Update the configuration of my current network"
     )
+    assert not agent_loop._requests_file_mutation(
+        "Update my current network route to 192.168.1.1"
+    )
+    assert not agent_loop._requests_named_file_access(
+        "Compare my current network to release v1.0.20"
+    )
 
     retrieved = {
         "ask_user", "bash", "edit_file", "inspect_network", "read_file", "write_file",

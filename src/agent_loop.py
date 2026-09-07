@@ -426,7 +426,7 @@ def _requests_named_file_access(text: str) -> bool:
         r"(?:append|change|compare|create|delete|edit|fix|inspect|modify|open|"
         r"read|remove|rename|replace|review|save|update|write)"
     )
-    target = r"[\w.-]+\.[a-z0-9]{1,12}"
+    target = r"[\w.-]+\.[a-z][a-z0-9]{0,11}"
     return bool(
         re.search(rf"\b{action}\b.{{0,48}}\b{target}\b", q)
         or re.search(rf"\b{target}\b.{{0,48}}\b{action}\b", q)
@@ -442,7 +442,7 @@ def _requests_file_mutation(text: str) -> bool:
     )
     target = (
         r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|"
-        r"[\w.-]+\.[a-z0-9]{1,12})"
+        r"[\w.-]+\.[a-z][a-z0-9]{0,11})"
     )
     return bool(
         re.search(rf"\b{mutation}\b.{{0,48}}\b{target}\b", q)
