@@ -1257,14 +1257,22 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("files")
     non_host_network_subject = has(
         r"\b(?:neural|social|application|app|software|blockchain|graph|adversarial)\s+networks?\b",
+        r"\bnetwork\s+(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b",
+        r"\b(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b.{0,24}\bnetwork\b",
         r"\b(?:bluetooth|usb|audio|input|peripheral)\b.{0,32}\bdevices?\b",
         r"\bdevices?\b.{0,32}\b(?:bluetooth|usb|audio|input|peripheral)\b",
     )
-    current_network_subject = not non_host_network_subject and has(
-        r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b",
-        r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
-        r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
-        r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
+    current_network_subject = not non_host_network_subject and (
+        has(
+            r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
+            r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
+        )
+        or has(
+            r"\bmy\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b",
+            r"\b(?:which|what)\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,24}\b(?:am i|i(?:['’]?m| am)|using)\b",
+        )
     )
     if current_network_subject:
         domains.add("network_inspection")

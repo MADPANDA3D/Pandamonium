@@ -103,6 +103,9 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         "Describe my network",
         "How is my home network configured?",
         "Is my network secure?",
+        "What is my IP address?",
+        "What is my default gateway?",
+        "Which DNS server am I using?",
     )
 
     for prompt in prompts:
@@ -199,6 +202,8 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "Show my social network connections",
         "Describe my application network graph",
         "Why can't my Bluetooth devices connect?",
+        "Why is my network request failing?",
+        "Why did my network response time out?",
     )
 
     for prompt in prompts:
@@ -276,7 +281,7 @@ def test_supported_native_platforms_have_fixed_read_only_probes():
 
     expected_commands = {
         "linux": {"ip", "tailscale"},
-        "macos": {"ifconfig", "route", "arp", "tailscale"},
+        "macos": {"ifconfig", "route", "scutil", "arp", "tailscale"},
         "windows": {"ipconfig", "route", "arp", "tailscale"},
     }
     for platform, commands in expected_commands.items():
@@ -315,7 +320,10 @@ def test_linux_container_uses_internal_network_fallback_without_iproute2(monkeyp
     monkeypatch.setattr(
         network_tools,
         "_read_linux_kernel_table",
-        lambda path: "Iface Destination Gateway" if path == "/proc/net/route" else "",
+        lambda path: {
+            "/proc/net/route": "Iface Destination Gateway",
+            "/etc/resolv.conf": "nameserver 127.0.0.11",
+        }.get(path, ""),
     )
 
     result = asyncio.run(network_tools.NetworkInspectionTool().execute("", {}))
@@ -326,6 +334,7 @@ def test_linux_container_uses_internal_network_fallback_without_iproute2(monkeyp
     assert snapshot["probes"]["kernel_network"]["exit_code"] == 0
     assert "eth0" in result["output"]
     assert "172.17.0.2" in result["output"]
+    assert "resolver" in result["output"]
 
 
 def test_combined_network_snapshot_has_one_bounded_formatter_payload(monkeypatch):
