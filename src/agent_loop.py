@@ -1257,14 +1257,19 @@ def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
         # replies must share a concrete subject with the question so an echoed
         # verb cannot smuggle in a new task/topic.
         return len(words) <= 3 or bool(question_terms & reply_terms)
+    if leading in contextual_response_verbs:
+        return False
 
     standalone_request_verbs = {
-        "add", "analyze", "analyse", "browse", "build", "calculate", "change",
-        "compare", "configure", "convert", "create", "debug", "define", "delete",
-        "describe", "draft", "edit", "explain", "find", "fix", "generate", "help",
-        "install", "list", "map", "open", "recommend", "remove", "review", "run",
-        "schedule", "search", "send", "set", "show", "summarize", "summarise",
-        "tell", "translate", "update", "upload", "visualize", "visualise", "write",
+        "add", "analyze", "analyse", "answer", "audit", "browse", "build",
+        "calculate", "change", "check", "compare", "configure", "convert", "create",
+        "debug", "define", "delete", "deploy", "design", "diagram", "discuss", "draft",
+        "draw", "edit", "explain", "explore", "fetch", "find", "fix", "generate", "get",
+        "help", "implement", "inspect", "install", "investigate", "list", "make", "map",
+        "open", "outline", "publish", "query", "read", "recommend", "remove", "research",
+        "review", "run", "scan", "schedule", "search", "send", "set", "show",
+        "summarize", "summarise", "tell", "test", "translate", "update", "upload",
+        "verify", "visualize", "visualise", "write",
     }
     if leading in standalone_request_verbs:
         return False

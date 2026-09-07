@@ -89,6 +89,8 @@ def test_generic_network_followup_does_not_inherit_after_topic_switch():
         "Summarize neural networks",
         "Visualize a neural network",
         "Provide a summary of neural networks",
+        "Use a neural network",
+        "Draw a neural network",
     ):
         messages = [
             {"role": "user", "content": REPRO},
