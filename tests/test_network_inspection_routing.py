@@ -1,6 +1,7 @@
 """Regression coverage for constrained current-network inspection."""
 
 import asyncio
+import json
 
 from src import agent_loop
 from src.action_protocol import _READ_ONLY
@@ -9,6 +10,7 @@ from src.agent_tools import network_tools
 from src.authority_protocol import action_effect_for
 from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
 from src.tool_security import NON_ADMIN_BLOCKED_TOOLS, PLAN_MODE_READONLY_TOOLS
+from src.tool_execution import format_tool_result
 
 
 REPRO = "Ok Jarvis make a diagram of my network please"
@@ -163,7 +165,8 @@ def test_inspection_ignores_supplied_commands_and_executes_only_fixed_probes(mon
     ]
     assert [argv for argv, _kwargs in calls] == expected
     assert all(kwargs["stdout"] == asyncio.subprocess.PIPE for _argv, kwargs in calls)
-    assert result["inspection_available"] is True
+    snapshot = json.loads(result["output"])
+    assert snapshot["inspection_available"] is True
     assert result["exit_code"] == 0
     assert "touch" not in result["output"]
 
@@ -219,11 +222,39 @@ def test_linux_container_uses_internal_network_fallback_without_iproute2(monkeyp
 
     result = asyncio.run(network_tools.NetworkInspectionTool().execute("", {}))
 
-    assert result["inspection_available"] is True
-    assert result["successful_probes"] == ["kernel_network"]
-    assert result["probes"]["kernel_network"]["exit_code"] == 0
+    snapshot = json.loads(result["output"])
+    assert snapshot["inspection_available"] is True
+    assert snapshot["successful_probes"] == ["kernel_network"]
+    assert snapshot["probes"]["kernel_network"]["exit_code"] == 0
     assert "eth0" in result["output"]
     assert "172.17.0.2" in result["output"]
+
+
+def test_combined_network_snapshot_has_one_bounded_formatter_payload(monkeypatch):
+    async def large_probe(argv, platform):
+        return {
+            "available": True,
+            "command": " ".join(argv),
+            "exit_code": 0,
+            "output": "x" * 8_000,
+        }
+
+    monkeypatch.setattr(network_tools, "_platform_family", lambda platform=None: "linux")
+    monkeypatch.setattr(network_tools, "_run_probe", large_probe)
+    monkeypatch.setattr(
+        network_tools,
+        "_linux_kernel_probe",
+        lambda: {"available": True, "exit_code": 0, "output": "k" * 8_000},
+    )
+
+    result = asyncio.run(network_tools.NetworkInspectionTool().execute("", {}))
+    formatted = format_tool_result("inspect_network", result)
+
+    assert set(result) == {"output", "exit_code"}
+    assert len(result["output"]) < 9_100
+    assert len(formatted) < 9_200
+    assert "**data:**" not in formatted
+    assert formatted.count("```\n") == 1
 
 
 def test_unavailable_inspection_requires_an_honest_limitation():

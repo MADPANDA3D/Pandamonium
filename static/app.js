@@ -2518,7 +2518,13 @@ function initializeEventListeners() {
       const pickerWidth = cornerControl
         ? Math.ceil(cornerControl.getBoundingClientRect().width) + 8
         : 0;
-      inputTop.style.setProperty('--model-picker-clearance', `${pickerWidth}px`);
+      const nextClearance = `${pickerWidth}px`;
+      if (inputTop.style.getPropertyValue('--model-picker-clearance') !== nextClearance) {
+        inputTop.style.setProperty('--model-picker-clearance', nextClearance);
+        // The textarea's hidden measurement clone stores computed padding as
+        // inline style. Refresh it and the live height after this width changes.
+        if (textarea) uiModule.autoResize(textarea);
+      }
       if (_isMobile) return;
       // Keep a prompt inside the composer even when the picker crowds the row.
       // A blank placeholder makes the mobile/compact empty state feel broken.

@@ -55,8 +55,9 @@ _POSIX_TRUSTED_EXECUTABLES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     },
 }
 _PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
-_PROBE_OUTPUT_CHARS: Final[int] = 8_000
-_LINUX_KERNEL_TABLE_CHARS: Final[int] = 2_000
+_PROBE_OUTPUT_CHARS: Final[int] = 1_200
+_NETWORK_SNAPSHOT_CHARS: Final[int] = 9_000
+_LINUX_KERNEL_TABLE_CHARS: Final[int] = 300
 _LINUX_KERNEL_TABLES: Final[tuple[tuple[str, str], ...]] = (
     ("interfaces", "/proc/net/dev"),
     ("ipv4_routes", "/proc/net/route"),
@@ -241,12 +242,18 @@ class NetworkInspectionTool:
             "successful_probes": successful,
             "probes": probes,
         }
-        rendered = json.dumps(snapshot, ensure_ascii=False, indent=2)
-        if successful:
-            return {**snapshot, "output": rendered, "exit_code": 0}
-        return {
-            **snapshot,
-            "output": rendered,
-            "error": "No approved network probe completed successfully; report this limitation.",
-            "exit_code": 1,
-        }
+        if not successful:
+            snapshot["limitation"] = (
+                "No approved network probe completed successfully; report this limitation."
+            )
+        rendered = _truncate(
+            json.dumps(snapshot, ensure_ascii=False, indent=2),
+            _NETWORK_SNAPSHOT_CHARS,
+        )
+        # Return only the canonical formatter fields. Keeping the same snapshot
+        # duplicated as additional structured keys would feed it to the model a
+        # second time through format_tool_result.
+        result = {"output": rendered, "exit_code": 0 if successful else 1}
+        if not successful:
+            result["error"] = snapshot["limitation"]
+        return result

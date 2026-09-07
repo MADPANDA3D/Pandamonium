@@ -139,13 +139,17 @@ test('composer reserves the injected Compare eval picker width', async ({ page }
   await page.setViewportSize({ width: 900, height: 700 });
   await page.goto('/static/index.html');
 
+  await page.locator('.chat-input-bar:visible').evaluate(bar => { bar.style.width = '520px'; });
   const textarea = page.locator('#message:visible');
-  await textarea.fill('Compare prompts must stay clear of the replacement picker.');
+  await textarea.fill(
+    'Compare prompts must stay clear of the replacement picker and reflow to the correct measured height when that control is wider.'
+  );
+  const initialHeight = await textarea.evaluate(ta => ta.getBoundingClientRect().height);
   await page.locator('.chat-input-top:visible').evaluate(inputTop => {
     inputTop.querySelector('#model-picker-wrap').style.display = 'none';
     const comparePicker = document.createElement('div');
     comparePicker.className = 'cmp-eval-wrap';
-    comparePicker.style.width = '180px';
+    comparePicker.style.width = '240px';
     comparePicker.style.height = '28px';
     inputTop.appendChild(comparePicker);
   });
@@ -153,7 +157,9 @@ test('composer reserves the injected Compare eval picker width', async ({ page }
   await expect.poll(async () => page.locator('.chat-input-top:visible').evaluate(inputTop => {
     const ta = inputTop.querySelector('#message');
     return parseFloat(getComputedStyle(ta).paddingRight) || 0;
-  })).toBeGreaterThanOrEqual(188);
+  })).toBeGreaterThanOrEqual(248);
+  await expect.poll(async () => textarea.evaluate(ta => ta.getBoundingClientRect().height))
+    .toBeGreaterThan(initialHeight);
   const clearsCompare = await page.locator('.chat-input-top:visible').evaluate(inputTop => {
     const ta = inputTop.querySelector('#message');
     const picker = inputTop.querySelector('.cmp-eval-wrap');
@@ -167,6 +173,29 @@ test('composer reserves the injected Compare eval picker width', async ({ page }
     inputTop.querySelector('#model-picker-wrap').style.display = '';
   });
   await assertComposerClearsPicker(page);
+});
+
+test('completed code fences preserve structured Qwen role markers', async ({ page }) => {
+  await mockApp(page);
+  await page.goto('/static/index.html');
+
+  const result = await page.evaluate(async () => {
+    const { stripToolBlocks } = await import('/static/js/chatRenderer.js');
+    return stripToolBlocks([
+      '<|assistant|> outside marker is stripped',
+      '```text',
+      '<|system|>',
+      '<|user|>',
+      '<|assistant|>',
+      '<|end|>',
+      '```',
+      '<|end|> trailing marker is stripped',
+    ].join('\n'));
+  });
+
+  expect(result).toContain('```text\n<|system|>\n<|user|>\n<|assistant|>\n<|end|>\n```');
+  expect(result).not.toContain('<|assistant|> outside');
+  expect(result).not.toContain('<|end|> trailing');
 });
 
 async function renderDiagram(page, source) {
