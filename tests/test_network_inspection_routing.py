@@ -106,6 +106,7 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         "What is my IP address?",
         "What is my default gateway?",
         "Which DNS server am I using?",
+        "What devices are on my home network?",
     )
 
     for prompt in prompts:
@@ -204,6 +205,8 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "Why can't my Bluetooth devices connect?",
         "Why is my network request failing?",
         "Why did my network response time out?",
+        "Why is my device slow?",
+        "Help me set up my device",
     )
 
     for prompt in prompts:

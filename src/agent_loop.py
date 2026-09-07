@@ -1264,10 +1264,10 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     )
     current_network_subject = not non_host_network_subject and (
         has(
-            r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b",
-            r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
+            r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
             r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
-            r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
         )
         or has(
             r"\bmy\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b",
