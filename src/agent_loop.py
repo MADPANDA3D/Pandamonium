@@ -1262,6 +1262,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("files")
     non_host_network_patterns = (
         r"\b(?:neural|social|application|app|software|blockchain|graph|adversarial)\s+networks?\b",
+        r"\bnetwork\s+graphs?\b.{0,32}\b(?:data structures?|algorithms?|software|applications?|code)\b",
+        r"\b(?:data structures?|algorithms?|software|applications?|code)\b.{0,32}\bnetwork\s+graphs?\b",
         r"\bcurrent\s+network\b.{0,40}\b(?:trends?|news|research|standards?|technolog\w*|developments?|market|landscape|best practices)\b",
         r"\bnetwork\s+(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b",
         r"\b(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b.{0,24}\bnetwork\b",

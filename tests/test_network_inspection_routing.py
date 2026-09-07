@@ -267,6 +267,7 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "Why did my network response time out?",
         "Why is my device slow?",
         "Help me set up my device",
+        "Visualize my network graph data structure",
     )
 
     for prompt in prompts:
@@ -477,17 +478,6 @@ def test_fixed_linux_table_read_is_bounded(monkeypatch):
     assert rendered.endswith("... (truncated at fixed table budget)")
 
 
-def test_hostname_resolution_times_out_off_the_event_loop(monkeypatch):
-    async def never_returns(*args, **kwargs):
-        del args, kwargs
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(asyncio, "to_thread", never_returns)
-    monkeypatch.setattr(network_tools, "_HOSTNAME_LOOKUP_TIMEOUT_SECONDS", 0.01)
-
-    assert asyncio.run(network_tools._resolve_hostname_addresses()) == []
-
-
 def test_supported_native_platforms_have_fixed_read_only_probes():
     assert network_tools._platform_family("linux") == "linux"
     assert network_tools._platform_family("darwin") == "macos"
@@ -527,9 +517,9 @@ def test_linux_container_uses_internal_network_fallback_without_iproute2(monkeyp
     monkeypatch.setattr(network_tools, "_run_probe", unavailable_probe)
     monkeypatch.setattr(network_tools.socket, "if_nameindex", lambda: [(1, "lo"), (2, "eth0")])
     monkeypatch.setattr(
-        network_tools.socket,
-        "getaddrinfo",
-        lambda hostname, port: [(2, 1, 6, "", ("172.17.0.2", 0))],
+        network_tools,
+        "_linux_interface_addresses",
+        lambda interfaces: ["172.17.0.2"] if "eth0" in interfaces else [],
     )
     monkeypatch.setattr(
         network_tools,
@@ -566,7 +556,7 @@ def test_combined_network_snapshot_has_one_bounded_formatter_payload(monkeypatch
     monkeypatch.setattr(
         network_tools,
         "_linux_kernel_probe",
-        lambda addresses=None: {
+        lambda: {
             "available": True,
             "exit_code": 0,
             "output": "k" * 8_000,

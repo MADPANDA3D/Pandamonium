@@ -57,16 +57,18 @@ _POSIX_TRUSTED_EXECUTABLES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     },
 }
 _PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
-_HOSTNAME_LOOKUP_TIMEOUT_SECONDS: Final[float] = 2.0
 _PROBE_OUTPUT_CHARS: Final[int] = 1_200
 _PROBE_READ_CHUNK_BYTES: Final[int] = 4_096
 _LINUX_KERNEL_OUTPUT_CHARS: Final[int] = 2_200
 _NETWORK_SNAPSHOT_CHARS: Final[int] = 9_000
 _LINUX_KERNEL_TABLE_CHARS: Final[int] = 300
+_LINUX_INTERFACE_LIMIT: Final[int] = 64
+_SIOCGIFADDR: Final[int] = 0x8915
 _LINUX_KERNEL_TABLES: Final[tuple[tuple[str, str], ...]] = (
     ("resolver", "/etc/resolv.conf"),
     ("ipv4_routes", "/proc/net/route"),
     ("neighbors", "/proc/net/arp"),
+    ("ipv6_addresses", "/proc/net/if_inet6"),
     ("ipv6_routes", "/proc/net/ipv6_route"),
     ("interfaces", "/proc/net/dev"),
 )
@@ -216,33 +218,36 @@ def _read_linux_kernel_table(path: str) -> str:
         return ""
 
 
-def _lookup_hostname_addresses() -> list[str]:
-    """Resolve the local hostname in a worker; NSS may block on DNS retries."""
+def _linux_interface_addresses(interfaces: list[str]) -> list[str]:
+    """Read primary IPv4 interface addresses without DNS or network I/O."""
+    try:
+        import fcntl
+        import struct
+    except ImportError:
+        return []
+
     addresses: set[str] = set()
     try:
-        for item in socket.getaddrinfo(socket.gethostname(), None):
-            address = item[4][0]
-            if address:
-                addresses.add(address)
-    except (OSError, socket.gaierror):
-        pass
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe_socket:
+            for interface in interfaces[:_LINUX_INTERFACE_LIMIT]:
+                try:
+                    request = struct.pack("256s", interface[:15].encode("utf-8"))
+                    response = fcntl.ioctl(probe_socket.fileno(), _SIOCGIFADDR, request)
+                    addresses.add(socket.inet_ntoa(response[20:24]))
+                except (OSError, UnicodeEncodeError):
+                    continue
+    except OSError:
+        return []
     return sorted(addresses)
 
 
-async def _resolve_hostname_addresses() -> list[str]:
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_lookup_hostname_addresses),
-            timeout=_HOSTNAME_LOOKUP_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        return []
-
-
-def _linux_kernel_probe(addresses: list[str] | None = None) -> dict:
+def _linux_kernel_probe() -> dict:
     """Collect the container-visible Linux network view without OS packages."""
     try:
-        interfaces = [name for _index, name in socket.if_nameindex()]
+        interfaces = [
+            name
+            for _index, name in socket.if_nameindex()[:_LINUX_INTERFACE_LIMIT]
+        ]
     except OSError:
         interfaces = []
 
@@ -251,10 +256,11 @@ def _linux_kernel_probe(addresses: list[str] | None = None) -> dict:
         for name, path in _LINUX_KERNEL_TABLES
         if (output := _read_linux_kernel_table(path))
     }
+    addresses = _linux_interface_addresses(interfaces)
     data = {
         "source": "python stdlib and fixed Linux kernel tables",
         "interfaces": interfaces,
-        "addresses": list(addresses or []),
+        "addresses": addresses,
         "kernel_tables": kernel_tables,
     }
     available = bool(interfaces or addresses or kernel_tables)
@@ -349,8 +355,7 @@ class NetworkInspectionTool:
         if platform == "linux":
             # python:3.x-slim does not ship iproute2. This fixed internal probe
             # keeps the official container useful without adding a dependency.
-            addresses = await _resolve_hostname_addresses()
-            probes["kernel_network"] = _linux_kernel_probe(addresses)
+            probes["kernel_network"] = _linux_kernel_probe()
         probes.update({
             name: await _run_probe(argv, platform)
             for name, argv in _platform_probes(platform)
