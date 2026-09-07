@@ -9,6 +9,7 @@ let startupReconcileNeeded = false;
 
 const POLL_INTERVAL_MS = 900;
 const STARTUP_RECONCILE_ATTEMPTS = 8;
+const WORKER_UPDATE_TIMEOUT_MS = 10000;
 // Covers the worker's eight bounded 5s status attempts, retry delays,
 // navigation grace, and normal install/activation overhead.
 const WORKER_ACTIVATION_TIMEOUT_MS = 60000;
@@ -405,15 +406,30 @@ function waitForWorkerReplacement(registration, previousWorker) {
   });
 }
 
+async function waitForRegistrationUpdate(registration) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve(registration.update()).then(() => true, () => false),
+      new Promise(resolve => {
+        timer = window.setTimeout(() => resolve(false), WORKER_UPDATE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function refreshApplicationWorker() {
   try {
     const scopeUrl = new URL('/static/', window.location.href).href;
     const registration = await navigator.serviceWorker?.getRegistration?.(scopeUrl);
     if (registration) {
       const previousWorker = registration.active;
-      try {
-        await registration.update();
-      } catch (_) {}
+      if (!await waitForRegistrationUpdate(registration)) {
+        window.location.reload();
+        return;
+      }
       const candidate = registration.installing || registration.waiting;
       if (candidate || registration.active !== previousWorker) {
         if (await waitForWorkerReplacement(registration, previousWorker)) return;

@@ -39,7 +39,7 @@ class FakeEventTarget {
   }
 }
 
-async function exerciseWorkerRefresh({ discoverReplacement }) {
+async function exerciseWorkerRefresh({ discoverReplacement, stallUpdate = false }) {
   const previousWorker = { state: 'activated' };
   const replacement = Object.assign(new FakeEventTarget(), { state: 'installing' });
   const registration = Object.assign(new FakeEventTarget(), {
@@ -49,6 +49,7 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     updateCalls: 0,
     async update() {
       this.updateCalls += 1;
+      if (stallUpdate) return new Promise(() => {});
       if (!discoverReplacement) return;
       this.installing = replacement;
       this.dispatch('updatefound');
@@ -80,10 +81,12 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
       timers.set(id, callback);
       return id;
     },
+    clearTimeout: id => timers.delete(id),
   } });
   try {
-    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh, waitForWorkerReplacement, WORKER_ACTIVATION_TIMEOUT_MS };`;
+    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh, waitForWorkerReplacement, WORKER_UPDATE_TIMEOUT_MS, WORKER_ACTIVATION_TIMEOUT_MS };`;
     const updater = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}#${discoverReplacement}`);
+    assert.ok(updater.WORKER_UPDATE_TIMEOUT_MS > 0, 'the worker update request must be bounded');
     assert.ok(
       updater.WORKER_ACTIVATION_TIMEOUT_MS >= ((8 * 5000) + (7 * 650) + 750),
       'the page must outwait the worker reconciliation budget',
@@ -124,10 +127,17 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     assert.equal(updater.needsWorkerRefresh('new', 'new', 'new', true, false), false);
     const refresh = updater.refreshApplicationWorker();
     await Promise.resolve();
-    if (!discoverReplacement) {
-      assert.equal(timers.size, 0, 'an unchanged worker must not wait on activation');
+    await Promise.resolve();
+    if (stallUpdate) {
+      assert.equal(timers.size, 1, 'a stalled worker update must have one timeout');
+      const [timerId, timeout] = [...timers.entries()][0];
+      timers.delete(timerId);
+      timeout();
     }
     await refresh;
+    if (!stallUpdate && !discoverReplacement) {
+      assert.equal(timers.size, 0, 'an unchanged worker must not wait on activation');
+    }
     return { registrationUrl, reloads, updateCalls: registration.updateCalls };
   } finally {
     if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
@@ -143,6 +153,10 @@ assert.deepEqual(
 );
 assert.deepEqual(
   await exerciseWorkerRefresh({ discoverReplacement: false }),
+  { registrationUrl: 'https://pandamonium.test/static/', reloads: 1, updateCalls: 1 },
+);
+assert.deepEqual(
+  await exerciseWorkerRefresh({ discoverReplacement: false, stallUpdate: true }),
   { registrationUrl: 'https://pandamonium.test/static/', reloads: 1, updateCalls: 1 },
 );
 
