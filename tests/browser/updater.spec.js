@@ -484,6 +484,169 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   expect(authPolls).toBe(1);
 });
 
+test('startup status reconciliation survives an initial version outage', async ({ page }) => {
+  let statusPolls = 0;
+  let versionRequests = 0;
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') {
+      versionRequests += 1;
+      if (versionRequests === 1) return route.abort('connectionrefused');
+      return route.fulfill({ json: {
+        version: '1.0.22', commit: null, release: '1.0.22-proof',
+        latest_version: '1.0.22', update_available: false, update_status: 'current',
+        compatible: true, can_update: false,
+        installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+        release_check: { status: 'current', message: null },
+      } });
+    }
+    if (path === '/api/update/status') {
+      statusPolls += 1;
+      if (statusPolls < 3) return route.abort('connectionrefused');
+      return route.fulfill({ json: {
+        status: 'succeeded', phase: 'complete', progress: 100,
+        message: 'Updated to v1.0.22', rollback_available: true,
+      } });
+    }
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await expect(page.locator('#updater-progress-title')).toHaveText('Update installed');
+  expect(statusPolls).toBe(3);
+  expect(versionRequests).toBe(2);
+});
+
+test('a later update consumes the startup worker marker and retries transient status responses', async ({ page }) => {
+  let applied = false;
+  let applyCalls = 0;
+  let documentLoads = 0;
+  let statusPolls = 0;
+  await page.addInitScript(() => {
+    navigator.serviceWorker.getRegistration = async (url) => {
+      sessionStorage.setItem('test-worker-registration-url', String(url));
+      return null;
+    };
+  });
+  page.on('request', request => {
+    if (request.resourceType() === 'document') documentLoads += 1;
+  });
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') return route.fulfill({ json: {
+      version: applied ? '1.0.23' : '1.0.22',
+      commit: applied ? NEW_COMMIT : OLD_COMMIT,
+      release: applied ? '1.0.23-22222222' : '1.0.22-11111111',
+      latest_version: applied ? '1.0.23' : '1.0.22',
+      update_available: false, update_status: 'current', compatible: true, can_update: false,
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'current', message: null },
+    } });
+    if (path === '/api/update/check') return route.fulfill({ json: {
+      version: '1.0.22', commit: OLD_COMMIT, release: '1.0.22-11111111',
+      latest_version: '1.0.23', latest_commit: NEW_COMMIT,
+      update_available: true, update_status: 'available', compatible: true, can_update: true,
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'available', message: null },
+    } });
+    if (path === '/api/update/apply') {
+      applyCalls += 1;
+      applied = true;
+      return route.fulfill({ json: {
+        status: 'queued', phase: 'queued', progress: 0, message: 'Update queued',
+        rollback_available: false,
+      } });
+    }
+    if (path === '/api/update/status') {
+      statusPolls += 1;
+      if (!applied) return route.fulfill({ json: { status: 'idle' } });
+      if (statusPolls <= 4) {
+        return route.fulfill({ status: [408, 425, 429][statusPolls - 2], json: {} });
+      }
+      return route.fulfill({ json: {
+        status: 'succeeded', phase: 'complete', progress: 100,
+        message: 'Updated to v1.0.23', rollback_available: true,
+      } });
+    }
+    return null;
+  });
+
+  await page.goto('/static/index.html?pandamonium-update-reconcile=pandamonium-v388');
+  await page.locator('#updater-check').click();
+  await page.locator('#updater-apply').click();
+  await page.locator('#styled-confirm-ok').click();
+  await expect.poll(() => documentLoads).toBe(2);
+  await expect(page.locator('#updater-progress-title')).toHaveText('Update installed');
+  expect(applyCalls).toBe(1);
+  expect(statusPolls).toBe(6);
+  expect(await page.evaluate(() => sessionStorage.getItem('test-worker-registration-url')))
+    .toBe('http://127.0.0.1:4173/static/');
+});
+
+for (const [status, title, pill] of [
+  [401, 'Sign in to continue', 'Sign in required'],
+  [403, 'Administrator access required', 'Admin required'],
+]) test(`updater reports HTTP ${status} authorization accurately`, async ({ page }) => {
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') return route.fulfill({ json: {
+      version: '1.0.22', commit: OLD_COMMIT, release: '1.0.22-11111111',
+      latest_version: '1.0.22', update_available: false, update_status: 'current',
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'current', message: null },
+    } });
+    if (path === '/api/update/status') return route.fulfill({ status, json: {} });
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  if (status === 401) {
+    await expect(page).toHaveURL('/login');
+    return;
+  }
+  await expect(page.locator('#updater-progress-title')).toHaveText(title);
+  await expect(page.locator('#updater-status-pill')).toHaveText(pill);
+});
+
+test('page polling stops after a nonretryable 400 response', async ({ page }) => {
+  let applied = false;
+  let statusPolls = 0;
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') return route.fulfill({ json: {
+      version: '1.0.22', commit: OLD_COMMIT, release: '1.0.22-11111111',
+      latest_version: '1.0.22', update_available: false, update_status: 'current',
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'current', message: null },
+    } });
+    if (path === '/api/update/check') return route.fulfill({ json: {
+      version: '1.0.22', commit: OLD_COMMIT, release: '1.0.22-11111111',
+      latest_version: '1.0.23', latest_commit: NEW_COMMIT,
+      update_available: true, update_status: 'available', compatible: true, can_update: true,
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'available', message: null },
+    } });
+    if (path === '/api/update/apply') {
+      applied = true;
+      return route.fulfill({ json: {
+        status: 'queued', phase: 'queued', progress: 0, message: 'Update queued',
+        rollback_available: false,
+      } });
+    }
+    if (path === '/api/update/status') {
+      statusPolls += 1;
+      return applied
+        ? route.fulfill({ status: 400, json: { detail: 'invalid request' } })
+        : route.fulfill({ json: { status: 'idle' } });
+    }
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await page.locator('#sidebar-update-check').click();
+  await page.locator('#updater-apply').click();
+  await page.locator('#styled-confirm-ok').click();
+  await expect(page.locator('#updater-progress-title')).toHaveText('Update queued');
+  await page.waitForTimeout(1200);
+  expect(statusPolls).toBe(2);
+});
+
 test('host-managed container keeps provenance and separates a GitHub outage from update mode', async ({ page }) => {
   let checks = 0;
   const base = {

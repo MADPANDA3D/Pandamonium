@@ -11,6 +11,7 @@ const CACHE_NAME = 'pandamonium-v388';
 const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const UPDATE_RECONCILE_ATTEMPTS = 8;
 const UPDATE_RECONCILE_DELAY_MS = 650;
+const UPDATE_STATUS_TIMEOUT_MS = 5000;
 const UPDATE_CLIENT_NAVIGATION_GRACE_MS = 750;
 const UPDATE_ACTIVE_STATES = new Set(['queued', 'running']);
 const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'recovered', 'rolled_back', 'failed']);
@@ -108,11 +109,14 @@ function wait(delayMs) {
 
 async function waitForTerminalUpdate() {
   for (let attempt = 0; attempt < UPDATE_RECONCILE_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), UPDATE_STATUS_TIMEOUT_MS);
     try {
       const response = await fetch('/api/update/status', {
         cache: 'no-store',
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
+        signal: controller.signal,
       });
       if (response.status === 401 || response.status === 403 || response.redirected) return false;
       if (!response.ok) {
@@ -125,7 +129,10 @@ async function waitForTerminalUpdate() {
       if (!operation) return false;
       if (UPDATE_TERMINAL_STATES.has(operation?.status)) return true;
       if (!UPDATE_ACTIVE_STATES.has(operation?.status)) return false;
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      clearTimeout(timeout);
+    }
     if (attempt + 1 < UPDATE_RECONCILE_ATTEMPTS) await wait(UPDATE_RECONCILE_DELAY_MS);
   }
   return false;

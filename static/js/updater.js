@@ -6,7 +6,6 @@ let modalOpener = null;
 let initialized = false;
 let startupReconcileAttempts = 0;
 let startupReconcileNeeded = false;
-let workerReconcileComplete = false;
 
 const POLL_INTERVAL_MS = 900;
 const STARTUP_RECONCILE_ATTEMPTS = 8;
@@ -17,6 +16,7 @@ const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
 const WORKER_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const SUCCESS_STATUSES = new Set(['succeeded', 'recovered', 'rolled_back']);
+const RETRYABLE_STATUS_CODES = new Set([408, 425, 429]);
 const PHASES = ['scan', 'verify', 'preserve', 'activate', 'complete'];
 
 const el = id => document.getElementById(id);
@@ -360,9 +360,9 @@ function stopPolling() {
   pollTimer = null;
 }
 
-function schedulePoll(delay = POLL_INTERVAL_MS) {
+function schedulePoll(delay = POLL_INTERVAL_MS, workerReconciled = false) {
   stopPolling();
-  pollTimer = window.setTimeout(pollStatus, delay);
+  pollTimer = window.setTimeout(() => pollStatus(workerReconciled), delay);
 }
 
 function waitForWorkerReplacement(registration, previousWorker) {
@@ -380,7 +380,11 @@ function waitForWorkerReplacement(registration, previousWorker) {
       resolve(replaced);
     };
     const inspect = () => {
-      if (registration.active && registration.active !== previousWorker) {
+      if (
+        registration.active
+        && registration.active !== previousWorker
+        && registration.active.state === 'activated'
+      ) {
         return finish(true);
       }
       const candidate = registration.installing || registration.waiting;
@@ -400,7 +404,8 @@ function waitForWorkerReplacement(registration, previousWorker) {
 
 async function refreshApplicationWorker() {
   try {
-    const registration = await navigator.serviceWorker?.getRegistration?.();
+    const scopeUrl = new URL('/static/', window.location.href).href;
+    const registration = await navigator.serviceWorker?.getRegistration?.(scopeUrl);
     if (registration) {
       const previousWorker = registration.active;
       const replacement = waitForWorkerReplacement(registration, previousWorker);
@@ -421,19 +426,19 @@ function needsWorkerRefresh(previousCommit, releaseCommit, startupRecovery, work
   );
 }
 
-async function pollStatus() {
-  if (pollInFlight) return schedulePoll();
+async function pollStatus(workerReconciled = false) {
+  if (pollInFlight) return schedulePoll(POLL_INTERVAL_MS, workerReconciled);
   pollInFlight = true;
   const operationAtStart = lastOperation;
   try {
     const operation = await api('/api/update/status', {}, 5000);
     if (operationAtStart !== lastOperation && ACTIVE_STATUSES.has(lastOperation.status)) {
-      return schedulePoll();
+      return schedulePoll(POLL_INTERVAL_MS, workerReconciled);
     }
     renderOperation(operation);
     startupReconcileAttempts = 0;
     if (ACTIVE_STATUSES.has(operation.status)) {
-      schedulePoll();
+      schedulePoll(POLL_INTERVAL_MS, workerReconciled);
     } else if (SUCCESS_STATUSES.has(operation.status)) {
       try {
         const previousCommit = lastRelease?.commit;
@@ -445,7 +450,7 @@ async function pollStatus() {
           previousCommit,
           release.commit,
           startupReconcileNeeded,
-          workerReconcileComplete,
+          workerReconciled,
         )) {
           let reload = false;
           try {
@@ -481,19 +486,26 @@ async function pollStatus() {
     }
   } catch (error) {
     if (error?.status === 401 || error?.status === 403) {
+      const forbidden = error.status === 403;
       stopPolling();
-      setPill('warning', 'Sign in required');
-      setState('Updater authentication expired', 'unknown');
+      setPill('warning', forbidden ? 'Admin required' : 'Sign in required');
+      setState(forbidden ? 'Administrator access required' : 'Updater authentication expired', 'unknown');
       setProgress({
         state: 'error',
-        title: 'Sign in to continue',
-        detail: 'Sign in with an administrator account, then reopen the updater to resume status checks.',
+        title: forbidden ? 'Administrator access required' : 'Sign in to continue',
+        detail: forbidden
+          ? 'This account is signed in but does not have permission to manage Pandamonium updates.'
+          : 'Sign in with an administrator account, then reopen the updater to resume status checks.',
         progress: Number(lastOperation.progress) || 0,
         phase: operationPhase(lastOperation.phase),
       });
       return;
     }
-    if (error?.status >= 400 && error?.status < 500) {
+    if (
+      error?.status >= 400
+      && error?.status < 500
+      && !RETRYABLE_STATUS_CODES.has(error.status)
+    ) {
       startupReconcileAttempts = 0;
       return;
     }
@@ -507,13 +519,13 @@ async function pollStatus() {
         progress: Number(lastOperation.progress) || 80,
         phase: operationPhase(lastOperation.phase),
       });
-      schedulePoll(650);
+      schedulePoll(650, workerReconciled);
     } else if (startupReconcileAttempts > 1) {
       startupReconcileAttempts -= 1;
       startupReconcileNeeded = true;
       setPill('connecting', 'Reconnecting');
       setState('Checking durable update status…', 'checking');
-      schedulePoll(650);
+      schedulePoll(650, workerReconciled);
     }
   } finally {
     pollInFlight = false;
@@ -653,7 +665,6 @@ async function init() {
   try {
     const url = new URL(window.location.href);
     workerReconcile = url.searchParams.has(WORKER_RECONCILE_QUERY);
-    workerReconcileComplete = workerReconcile;
     if (workerReconcile) {
       url.searchParams.delete(WORKER_RECONCILE_QUERY);
       window.history.replaceState(window.history.state, '', url);
@@ -692,24 +703,24 @@ async function init() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && ACTIVE_STATUSES.has(lastOperation.status)) schedulePoll(0);
   });
+  startupReconcileAttempts = STARTUP_RECONCILE_ATTEMPTS;
   try {
     renderRelease(await api('/api/version', {}, 15000));
-    startupReconcileAttempts = STARTUP_RECONCILE_ATTEMPTS;
-    await pollStatus();
-    const revisionReconciled = reloadRevision
-      && reloadRevision === lastRelease?.commit
-      && (SUCCESS_STATUSES.has(lastOperation.status) || lastOperation.status === 'failed');
-    if (revisionReconciled) {
-      try {
-        sessionStorage.removeItem(RELOAD_REVISION_KEY);
-        sessionStorage.removeItem(REOPEN_MODAL_KEY);
-      } catch (_) {}
-    }
-    if ((revisionReconciled || workerReconcile) && reopenModal) {
-      openModal({ checkNow: false, opener: el('sidebar-update-check') });
-    }
   } catch (_) {
     setState('Release check unavailable', 'unknown');
+  }
+  await pollStatus(workerReconcile);
+  const revisionReconciled = reloadRevision
+    && reloadRevision === lastRelease?.commit
+    && (SUCCESS_STATUSES.has(lastOperation.status) || lastOperation.status === 'failed');
+  if (revisionReconciled) {
+    try {
+      sessionStorage.removeItem(RELOAD_REVISION_KEY);
+      sessionStorage.removeItem(REOPEN_MODAL_KEY);
+    } catch (_) {}
+  }
+  if ((revisionReconciled || workerReconcile) && reopenModal) {
+    openModal({ checkNow: false, opener: el('sidebar-update-check') });
   }
 }
 

@@ -59,8 +59,12 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
       serviceWorker.dispatch('controllerchange');
     },
   });
+  let registrationUrl = null;
   const serviceWorker = Object.assign(new FakeEventTarget(), {
-    getRegistration: async () => registration,
+    getRegistration: async url => {
+      registrationUrl = url;
+      return registration;
+    },
   });
   const timers = new Map();
   let nextTimer = 1;
@@ -69,7 +73,7 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
-    location: { reload: () => { reloads += 1; } },
+    location: { href: 'https://pandamonium.test/', reload: () => { reloads += 1; } },
     setTimeout: callback => {
       const id = nextTimer;
       nextTimer += 1;
@@ -78,8 +82,23 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     },
   } });
   try {
-    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh };`;
+    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh, waitForWorkerReplacement };`;
     const updater = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}#${discoverReplacement}`);
+    const activatingWorker = Object.assign(new FakeEventTarget(), { state: 'activating' });
+    const activatingRegistration = Object.assign(new FakeEventTarget(), {
+      active: activatingWorker,
+      installing: activatingWorker,
+      waiting: null,
+    });
+    let activationSettled = false;
+    const activation = updater.waitForWorkerReplacement(activatingRegistration, previousWorker);
+    void activation.then(() => { activationSettled = true; });
+    await Promise.resolve();
+    assert.equal(activationSettled, false, 'an activating worker is not a completed replacement');
+    activatingWorker.state = 'activated';
+    activatingWorker.dispatch('statechange');
+    assert.equal(await activation, true);
+    timers.clear();
     assert.equal(
       updater.needsWorkerRefresh('old', 'new', true, true),
       false,
@@ -94,7 +113,7 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
       [...timers.values()][0]();
     }
     await refresh;
-    return { reloads, updateCalls: registration.updateCalls };
+    return { registrationUrl, reloads, updateCalls: registration.updateCalls };
   } finally {
     if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
     else delete globalThis.navigator;
@@ -105,11 +124,11 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
 
 assert.deepEqual(
   await exerciseWorkerRefresh({ discoverReplacement: true }),
-  { reloads: 0, updateCalls: 1 },
+  { registrationUrl: 'https://pandamonium.test/static/', reloads: 0, updateCalls: 1 },
 );
 assert.deepEqual(
   await exerciseWorkerRefresh({ discoverReplacement: false }),
-  { reloads: 1, updateCalls: 1 },
+  { registrationUrl: 'https://pandamonium.test/static/', reloads: 1, updateCalls: 1 },
 );
 
 async function activate(
@@ -136,9 +155,11 @@ async function activate(
     URL,
     Set,
     Promise,
+    AbortController,
     console,
-    setTimeout: callback => {
-      if (manualNavigationGrace) {
+    clearTimeout: () => {},
+    setTimeout: (callback, delay) => {
+      if (manualNavigationGrace && delay === 750) {
         navigationGraceTimers.push(callback);
         return navigationGraceTimers.length;
       }
@@ -154,11 +175,18 @@ async function activate(
       open: async () => ({ add: async () => {}, match: async () => null, put: async () => {} }),
       match: async () => null,
     },
-    fetch: async url => {
+    fetch: async (url, options = {}) => {
       if (url !== '/api/update/status') throw new Error(`Unexpected fetch: ${url}`);
       statusRequests += 1;
       const response = responses.shift();
       if (response instanceof Error) throw response;
+      if (response.hang) {
+        await new Promise((resolve, reject) => {
+          const abort = () => reject(Object.assign(new Error('timed out'), { name: 'AbortError' }));
+          if (options.signal?.aborted) abort();
+          else options.signal?.addEventListener('abort', abort, { once: true });
+        });
+      }
       return {
         ok: response.status >= 200 && response.status < 300,
         status: response.status,
@@ -238,6 +266,13 @@ assert.equal(boundedNavigation.navigated.length, 1);
 const bounded = await activate(futureWorker, Array.from({ length: 8 }, () => new Error('offline')));
 assert.equal(bounded.statusRequests, 8);
 assert.deepEqual(bounded.navigated, []);
+
+const timedOut = await activate(futureWorker, [
+  { hang: true },
+  { status: 200, body: { status: 'succeeded' } },
+]);
+assert.equal(timedOut.statusRequests, 2);
+assert.equal(timedOut.navigated.length, 1);
 
 for (const status of [401, 403]) {
   const authExpired = await activate(futureWorker, [{ status }]);
