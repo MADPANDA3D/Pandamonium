@@ -464,12 +464,15 @@ def test_non_host_removal_does_not_join_unrelated_subject_fragments():
 
 
 def test_temporal_current_network_topic_keeps_web_routing():
-    intent = agent_loop._classify_agent_request(
-        [], "What are the current network security trends?"
-    )
+    for prompt in (
+        "What are the current network security trends?",
+        "What are current home router prices?",
+        "What are current deals for home routers?",
+    ):
+        intent = agent_loop._classify_agent_request([], prompt)
 
-    assert intent["domains"] == {"web"}
-    assert "inspect_network" not in _selected_tools(intent)
+        assert intent["domains"] == {"web"}
+        assert "inspect_network" not in _selected_tools(intent)
 
 
 def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():

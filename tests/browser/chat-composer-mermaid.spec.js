@@ -190,12 +190,14 @@ test('completed code fences preserve structured Qwen role markers', async ({ pag
       '<|end|>',
       '```',
       '<|end|> trailing marker is stripped',
+      '```<|assistant|>``` same-line marker is stripped',
     ].join('\n'));
   });
 
   expect(result).toContain('```text\n<|system|>\n<|user|>\n<|assistant|>\n<|end|>\n```');
   expect(result).not.toContain('<|assistant|> outside');
   expect(result).not.toContain('<|end|> trailing');
+  expect(result).not.toContain('```<|assistant|>```');
 });
 
 async function renderDiagram(page, source) {

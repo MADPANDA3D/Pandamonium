@@ -484,7 +484,10 @@ const TOOL_NARRATION_RE = /(?:The (?:result|output) shows?:?\s*)?-?\s*(?:stdout|
 
 function replaceOutsideCodeFences(text, pattern, replacement) {
   return String(text || '')
-    .split(/(```[\s\S]*?```)/g)
+    // Match the same completed-fence shape that mdToHtml renders. Backticks
+    // without an opening-line newline are ordinary prose, so role markers in
+    // them must still be stripped before display.
+    .split(/(```(?:\w+)?\n[\s\S]*?```)/g)
     .map((part, index) => index % 2 ? part : part.replace(pattern, replacement))
     .join('');
 }
