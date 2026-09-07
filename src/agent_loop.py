@@ -415,6 +415,11 @@ _NETWORK_FILE_MUTATION_TOOLS = {
     "run_shell",
     "write_file",
 }
+_NAMED_FILE_TARGET_RE = (
+    r"[\w.-]+\.(?:bash|c|cc|cfg|cjs|conf|cpp|cs|css|csv|env|fish|go|h|hpp|"
+    r"htm|html|ini|java|js|json|jsx|kt|kts|lock|log|md|mjs|php|ps1|py|rb|rs|"
+    r"scss|sh|sql|swift|toml|ts|tsv|tsx|txt|xml|yaml|yml|zsh)"
+)
 
 
 def _requests_named_file_access(text: str) -> bool:
@@ -426,7 +431,7 @@ def _requests_named_file_access(text: str) -> bool:
         r"(?:append|change|compare|create|delete|edit|fix|inspect|modify|open|"
         r"read|remove|rename|replace|review|save|update|write)"
     )
-    target = r"[\w.-]+\.[a-z][a-z0-9]{0,11}"
+    target = _NAMED_FILE_TARGET_RE
     return bool(
         re.search(rf"\b{action}\b.{{0,48}}\b{target}\b", q)
         or re.search(rf"\b{target}\b.{{0,48}}\b{action}\b", q)
@@ -442,7 +447,7 @@ def _requests_file_mutation(text: str) -> bool:
     )
     target = (
         r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|"
-        r"[\w.-]+\.[a-z][a-z0-9]{0,11})"
+        rf"{_NAMED_FILE_TARGET_RE})"
     )
     return bool(
         re.search(rf"\b{mutation}\b.{{0,48}}\b{target}\b", q)
@@ -1219,8 +1224,9 @@ def _is_contextless_followup_reply(text: str) -> bool:
     if not reply or len(reply) > 160 or len(words) > 16 or "?" in reply:
         return False
     return not bool(re.match(
-        r"^(?:explain|search|write|create|map|compare|why|how|what|who|when|"
-        r"where|help|show|open|run|fix|debug|review|analy[sz]e)\b",
+        r"^(?:define|describe|explain|tell|search|write|create|map|compare|why|"
+        r"how|what|who|when|where|help|show|open|run|fix|debug|review|"
+        r"analy[sz]e)\b",
         reply,
         re.IGNORECASE,
     )) and not bool(re.search(

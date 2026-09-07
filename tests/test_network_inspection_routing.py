@@ -81,20 +81,25 @@ def test_network_scope_followups_keep_the_original_inspection_intent():
 
 
 def test_generic_network_followup_does_not_inherit_after_topic_switch():
-    switched = "Explain a neural network instead"
-    messages = [
-        {"role": "user", "content": REPRO},
-        {
-            "role": "assistant",
-            "content": "Could you provide the specific components?",
-        },
-        {"role": "user", "content": switched},
-    ]
+    for switched in (
+        "Explain a neural network instead",
+        "Define a neural network",
+        "Tell me about neural networks",
+        "Describe a neural network",
+    ):
+        messages = [
+            {"role": "user", "content": REPRO},
+            {
+                "role": "assistant",
+                "content": "Could you provide the specific components?",
+            },
+            {"role": "user", "content": switched},
+        ]
 
-    intent = agent_loop._classify_agent_request(messages, switched)
+        intent = agent_loop._classify_agent_request(messages, switched)
 
-    assert intent["continuation"] is False
-    assert "network_inspection" not in intent["domains"]
+        assert intent["continuation"] is False
+        assert "network_inspection" not in intent["domains"]
 
 
 def test_first_person_current_network_phrasing_mounts_only_inspection_tool():
@@ -329,6 +334,12 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     )
     assert not agent_loop._requests_named_file_access(
         "Compare my current network to release v1.0.20"
+    )
+    assert not agent_loop._requests_file_mutation(
+        "Remove printer.local from my current network"
+    )
+    assert not agent_loop._requests_named_file_access(
+        "Inspect router.internal on my current network"
     )
 
     retrieved = {
