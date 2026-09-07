@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 const releasedUpdater = readFileSync('tests/fixtures/releases/v1.0.21/updater.js', 'utf8');
 const releasedWorker = readFileSync('tests/fixtures/releases/v1.0.20/sw.js', 'utf8');
+const currentUpdater = readFileSync('static/js/updater.js', 'utf8');
 const currentWorker = readFileSync('static/sw.js', 'utf8');
 
 assert.equal(
@@ -17,6 +18,92 @@ assert.equal(
 );
 assert.doesNotMatch(releasedUpdater, /registration\.update\(\)/);
 assert.doesNotMatch(releasedWorker, /\/api\/update\/status|pandamonium-update-reconcile/);
+
+class FakeEventTarget {
+  constructor() {
+    this.listeners = new Map();
+  }
+
+  addEventListener(name, listener) {
+    const listeners = this.listeners.get(name) || new Set();
+    listeners.add(listener);
+    this.listeners.set(name, listeners);
+  }
+
+  removeEventListener(name, listener) {
+    this.listeners.get(name)?.delete(listener);
+  }
+
+  dispatch(name) {
+    for (const listener of this.listeners.get(name) || []) listener();
+  }
+}
+
+async function exerciseWorkerRefresh({ discoverReplacement }) {
+  const previousWorker = { state: 'activated' };
+  const replacement = Object.assign(new FakeEventTarget(), { state: 'installing' });
+  const registration = Object.assign(new FakeEventTarget(), {
+    active: previousWorker,
+    installing: null,
+    waiting: null,
+    updateCalls: 0,
+    async update() {
+      this.updateCalls += 1;
+      if (!discoverReplacement) return;
+      this.installing = replacement;
+      this.dispatch('updatefound');
+      await Promise.resolve();
+      replacement.state = 'activated';
+      this.active = replacement;
+      replacement.dispatch('statechange');
+      serviceWorker.dispatch('controllerchange');
+    },
+  });
+  const serviceWorker = Object.assign(new FakeEventTarget(), {
+    getRegistration: async () => registration,
+  });
+  const timers = new Map();
+  let nextTimer = 1;
+  let reloads = 0;
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    location: { reload: () => { reloads += 1; } },
+    setTimeout: callback => {
+      const id = nextTimer;
+      nextTimer += 1;
+      timers.set(id, callback);
+      return id;
+    },
+  } });
+  try {
+    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker };`;
+    const updater = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}#${discoverReplacement}`);
+    const refresh = updater.refreshApplicationWorker();
+    await Promise.resolve();
+    if (!discoverReplacement) {
+      assert.equal(timers.size, 1);
+      [...timers.values()][0]();
+    }
+    await refresh;
+    return { reloads, updateCalls: registration.updateCalls };
+  } finally {
+    if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    else delete globalThis.navigator;
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+  }
+}
+
+assert.deepEqual(
+  await exerciseWorkerRefresh({ discoverReplacement: true }),
+  { reloads: 0, updateCalls: 1 },
+);
+assert.deepEqual(
+  await exerciseWorkerRefresh({ discoverReplacement: false }),
+  { reloads: 1, updateCalls: 1 },
+);
 
 async function activate(workerSource, statusResponses) {
   const listeners = {};

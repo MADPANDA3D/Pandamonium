@@ -364,22 +364,36 @@ function schedulePoll(delay = POLL_INTERVAL_MS) {
   pollTimer = window.setTimeout(pollStatus, delay);
 }
 
-function waitForWorkerActivation(worker) {
-  if (!worker || worker.state === 'activated') return Promise.resolve(Boolean(worker));
+function waitForWorkerReplacement(registration, previousWorker) {
   return new Promise(resolve => {
+    let replacement = null;
     let settled = false;
-    const finish = () => {
+    let timer = null;
+    const finish = (replaced) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      worker.removeEventListener?.('statechange', onStateChange);
-      resolve(worker.state === 'activated');
+      registration.removeEventListener?.('updatefound', inspect);
+      navigator.serviceWorker?.removeEventListener?.('controllerchange', inspect);
+      replacement?.removeEventListener?.('statechange', inspect);
+      resolve(replaced);
     };
-    const onStateChange = () => {
-      if (worker.state === 'activated' || worker.state === 'redundant') finish();
+    const inspect = () => {
+      if (registration.active && registration.active !== previousWorker) {
+        return finish(true);
+      }
+      const candidate = registration.installing || registration.waiting;
+      if (candidate && candidate !== replacement) {
+        replacement?.removeEventListener?.('statechange', inspect);
+        replacement = candidate;
+        replacement.addEventListener?.('statechange', inspect);
+      }
+      if (replacement?.state === 'activated') finish(true);
     };
-    const timer = window.setTimeout(finish, WORKER_ACTIVATION_TIMEOUT_MS);
-    worker.addEventListener?.('statechange', onStateChange);
+    registration.addEventListener?.('updatefound', inspect);
+    navigator.serviceWorker?.addEventListener?.('controllerchange', inspect);
+    timer = window.setTimeout(() => finish(false), WORKER_ACTIVATION_TIMEOUT_MS);
+    inspect();
   });
 }
 
@@ -388,12 +402,11 @@ async function refreshApplicationWorker() {
     const registration = await navigator.serviceWorker?.getRegistration?.();
     if (registration) {
       const previousWorker = registration.active;
-      await registration.update();
-      const replacement = registration.installing || registration.waiting;
-      if (replacement || registration.active !== previousWorker) {
-        const activated = await waitForWorkerActivation(replacement);
-        if (activated || registration.active !== previousWorker) return;
-      }
+      const replacement = waitForWorkerReplacement(registration, previousWorker);
+      try {
+        await registration.update();
+      } catch (_) {}
+      if (await replacement) return;
     }
   } catch (_) {}
   window.location.reload();
@@ -670,7 +683,9 @@ async function init() {
     renderRelease(await api('/api/version', {}, 15000));
     startupReconcileAttempts = STARTUP_RECONCILE_ATTEMPTS;
     await pollStatus();
-    const revisionReconciled = reloadRevision && reloadRevision === lastRelease?.commit;
+    const revisionReconciled = reloadRevision
+      && reloadRevision === lastRelease?.commit
+      && (SUCCESS_STATUSES.has(lastOperation.status) || lastOperation.status === 'failed');
     if (revisionReconciled) {
       try {
         sessionStorage.removeItem(RELOAD_REVISION_KEY);

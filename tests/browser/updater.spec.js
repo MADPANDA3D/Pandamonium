@@ -158,7 +158,7 @@ for (const [scenario, bridgeReload] of [
           finishInitialStatus = () => resolve(route.fulfill({ json: { status: 'idle' } }));
         });
       }
-      if (statusPolls <= 4) {
+      if (statusPolls <= 4 || statusPolls === 7) {
         failedStatusPolls += 1;
         trace.push({ type: 'simulated-outage', path, statusPolls });
         return route.abort('connectionrefused');
@@ -208,7 +208,7 @@ for (const [scenario, bridgeReload] of [
 
   try {
     await expect.poll(() => navigations, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => statusPolls, { timeout: 15000 }).toBeGreaterThanOrEqual(6);
+    await expect.poll(() => statusPolls, { timeout: 15000 }).toBeGreaterThanOrEqual(8);
     await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', {
       timeout: 8000,
     });
@@ -219,14 +219,13 @@ for (const [scenario, bridgeReload] of [
     const cacheKeys = await page.evaluate(() => caches.keys());
     expect(cacheKeys).not.toContain(sourceCache);
     expect(applyCalls).toBe(1);
-    expect(failedStatusPolls).toBe(3);
+    expect(failedStatusPolls).toBe(4);
     expect(serviceWorkerStarts).toBeGreaterThanOrEqual(2);
     expect(manualReloads).toBe(bridgeReload ? 1 : 0);
     expect(await page.evaluate(() => document.visibilityState)).toBe('visible');
     expect(await page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toContain('/static/sw.js');
     await page.waitForTimeout(350);
-    expect(documentLoads).toBeGreaterThanOrEqual(bridgeReload ? 3 : 2);
-    expect(documentLoads).toBeLessThanOrEqual(bridgeReload ? 4 : 3);
+    expect(documentLoads).toBe(bridgeReload ? 3 : 2);
     expect(navigations).toBeLessThanOrEqual(bridgeReload ? 4 : 3);
     expect(new URL(page.url()).searchParams.has('pandamonium-update-reconcile')).toBe(false);
   } finally {
