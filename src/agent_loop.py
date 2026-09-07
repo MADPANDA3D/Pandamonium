@@ -405,11 +405,41 @@ _DOMAIN_TOOL_MAP = {
     "platform": {"get_runtime_status", "manage_mcp", "start_agent_task", "read_agent_task"},
 }
 
+_NETWORK_FILE_MUTATION_TOOLS = {
+    "append_file",
+    "bash",
+    "edit_file",
+    "manage_bg_jobs",
+    "python",
+    "replace_file",
+    "run_shell",
+    "write_file",
+}
+
+
+def _requests_file_mutation(text: str) -> bool:
+    """Return whether a network/file comparison explicitly asks for a write."""
+    q = str(text or "").lower()
+    mutation = (
+        r"(?:append|change|create|delete|edit|fix|insert|modify|move|remove|"
+        r"rename|replace|save|update|write)"
+    )
+    target = (
+        r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|config(?:uration)?|"
+        r"[\w.-]+\.[a-z0-9]{1,12})"
+    )
+    return bool(
+        re.search(rf"\b{mutation}\b.{{0,48}}\b{target}\b", q)
+        or re.search(rf"\b{target}\b.{{0,48}}\b{mutation}\b", q)
+    )
+
 
 def _clamp_network_inspection_tools(
     domains: set[str],
     tool_names: set[str],
     preserved_readers: Optional[set[str]] = None,
+    *,
+    allow_file_mutation: bool = False,
 ) -> set[str]:
     """Limit network turns to ambient tools plus explicitly named domains."""
     if "network_inspection" not in domains:
@@ -420,7 +450,10 @@ def _clamp_network_inspection_tools(
     for domain in domains:
         allowed.update(_DOMAIN_TOOL_MAP.get(domain, set()))
     allowed.update(preserved_readers or set())
-    return set(tool_names) & allowed
+    selected = set(tool_names) & allowed
+    if not allow_file_mutation:
+        selected.difference_update(_NETWORK_FILE_MUTATION_TOOLS)
+    return selected
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
     names = set(tool_names or set())
@@ -1308,6 +1341,11 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     def has_current_network(*patterns: str) -> bool:
         return any(re.search(pattern, network_subject_q) for pattern in patterns)
 
+    host_network_fact = (
+        r"(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver|"
+        r"routes?|routing table|arp table|arp entries|neighbor table|"
+        r"neighbor entries|network interfaces?|interface table)"
+    )
     current_network_subject = (
         has_current_network(
             r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b",
@@ -1316,11 +1354,11 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
             r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
         )
         or has_current_network(
-            r"\bmy\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b",
-            r"\b(?:which|what)\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,24}\b(?:am i|i(?:['’]?m| am)|using)\b",
-            r"\b(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,16}\b(?:of|for|on)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
-            r"\b(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,16}\b(?:does|is|has)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
-            r"\b(?:this|my|our|local)\s+(?:computer|machine|host|system)(?:['’]s)?\b.{0,16}\b(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b",
+            rf"\bmy\s+{host_network_fact}\b",
+            rf"\b(?:which|what)\s+{host_network_fact}\b.{{0,24}}\b(?:am i|i(?:['’]?m| am)|using)\b",
+            rf"\b{host_network_fact}\b.{{0,16}}\b(?:of|for|on)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
+            rf"\b{host_network_fact}\b.{{0,16}}\b(?:does|is|has|are)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
+            rf"\b(?:this|my|our|local)\s+(?:computer|machine|host|system)(?:['’]s)?\b.{{0,16}}\b{host_network_fact}\b",
         )
     )
     if current_network_subject:
@@ -3455,6 +3493,7 @@ async def stream_agent_loop(
             _intent_domains,
             _relevant_tools,
             preserved_readers=_network_upload_readers,
+            allow_file_mutation=_requests_file_mutation(_last_user),
         )
         if _network_clamped_tools != _relevant_tools:
             logger.info(

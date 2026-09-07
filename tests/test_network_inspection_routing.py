@@ -126,6 +126,10 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         "What is the IP address of this computer?",
         "What default gateway does this machine use?",
         "What is this host's DNS server?",
+        "What entries are in my ARP table?",
+        "What routes does this host use?",
+        "Which network interfaces are on this machine?",
+        "Show my neighbor table",
         "What devices are on my home network?",
     )
 
@@ -275,6 +279,57 @@ async def test_live_catalog_clamps_retrieved_and_admin_keyword_tools(monkeypatch
     }
     assert {"grep", "inspect_network", "ls", "read_file"} <= upload_tool_names
     assert upload_tool_names.isdisjoint({"bash", "write_file"})
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Read this file and compare it with my current network"}],
+        context_length=32_768,
+        max_rounds=1,
+        relevant_tools={
+            "bash", "edit_file", "grep", "inspect_network", "ls", "python",
+            "read_file", "write_file",
+        },
+    ):
+        pass
+
+    local_file_tool_names = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    assert {"grep", "inspect_network", "ls", "read_file"} <= local_file_tool_names
+    assert local_file_tool_names.isdisjoint({
+        "bash", "edit_file", "python", "write_file",
+    })
+
+
+def test_network_file_mutation_requires_an_explicit_file_target():
+    assert agent_loop._requests_file_mutation(
+        "Edit this file to match my current network"
+    )
+    assert agent_loop._requests_file_mutation(
+        "Update router.conf after inspecting my current network"
+    )
+    assert not agent_loop._requests_file_mutation(
+        "Read this file and compare it with my current network"
+    )
+    assert not agent_loop._requests_file_mutation(
+        "Explain what I should change about my current network"
+    )
+
+    retrieved = {
+        "ask_user", "bash", "edit_file", "inspect_network", "read_file", "write_file",
+    }
+    read_only = agent_loop._clamp_network_inspection_tools(
+        {"files", "network_inspection"}, retrieved
+    )
+    mutation = agent_loop._clamp_network_inspection_tools(
+        {"files", "network_inspection"}, retrieved, allow_file_mutation=True
+    )
+
+    assert read_only == {"ask_user", "inspect_network", "read_file"}
+    assert {"edit_file", "inspect_network", "write_file"} <= mutation
 
 
 def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
