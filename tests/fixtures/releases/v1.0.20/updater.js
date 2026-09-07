@@ -7,9 +7,6 @@ let initialized = false;
 
 const POLL_INTERVAL_MS = 900;
 const MODAL_ID = 'updater-modal';
-const RELOAD_REVISION_KEY = 'pandamonium:update-reload-revision';
-const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
-const WORKER_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const SUCCESS_STATUSES = new Set(['succeeded', 'recovered', 'rolled_back']);
 const PHASES = ['scan', 'verify', 'preserve', 'activate', 'complete'];
@@ -208,23 +205,17 @@ function renderRelease(data, { preserveOperation = false } = {}) {
   lastRelease = data;
   renderFacts(data);
   renderReleaseLink(data.update_url);
-  const check = el('sidebar-update-check');
   const action = el('sidebar-update-action');
-  const modalCheck = el('updater-check');
   const apply = el('updater-apply');
-  const hasReleaseAction = Boolean(data.update_available);
-  const canApply = Boolean(data.update_available && data.can_update);
-  if (check) check.hidden = hasReleaseAction;
   if (action) {
-    action.hidden = !hasReleaseAction;
+    action.hidden = !data.update_available;
     action.textContent = data.latest_version
       ? `${data.can_update ? 'Update to' : 'View'} v${data.latest_version}`
       : 'Review update';
   }
-  if (modalCheck) modalCheck.hidden = canApply;
   if (apply) {
-    apply.hidden = !canApply;
-    apply.textContent = data.latest_version ? `Update to v${data.latest_version}` : 'Update now';
+    apply.hidden = !(data.update_available && data.can_update);
+    apply.textContent = data.latest_version ? `Install v${data.latest_version}` : 'Install update';
   }
   if (data.update_available) {
     setState(
@@ -267,11 +258,6 @@ function renderOperation(operation = {}) {
   if (checkButton) {
     checkButton.disabled = false;
     checkButton.textContent = active ? 'View update progress' : 'Check for updates';
-  }
-  if (active) {
-    if (checkButton) checkButton.hidden = false;
-    if (action) action.hidden = true;
-    if (modalCheck) modalCheck.hidden = true;
   }
   if (active) {
     const progress = Number(operation.progress) || 0;
@@ -336,11 +322,7 @@ async function api(url, options = {}, timeoutMs = 8000) {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(data.detail || 'Update request failed');
-      error.status = response.status;
-      throw error;
-    }
+    if (!response.ok) throw new Error(data.detail || 'Update request failed');
     return data;
   } catch (error) {
     if (error?.name === 'AbortError') throw new Error('Update status timed out');
@@ -363,41 +345,17 @@ function schedulePoll(delay = POLL_INTERVAL_MS) {
 async function pollStatus() {
   if (pollInFlight) return schedulePoll();
   pollInFlight = true;
-  const operationAtStart = lastOperation;
   try {
     const operation = await api('/api/update/status', {}, 5000);
-    if (operationAtStart !== lastOperation && ACTIVE_STATUSES.has(lastOperation.status)) {
-      return schedulePoll();
-    }
     renderOperation(operation);
     if (ACTIVE_STATUSES.has(operation.status)) {
       schedulePoll();
     } else if (SUCCESS_STATUSES.has(operation.status)) {
       try {
-        const previousCommit = lastRelease?.commit;
         const release = await api('/api/version', {}, 5000);
         renderRelease(release, { preserveOperation: true });
         renderOperation(operation);
         stopPolling();
-        if (previousCommit && release.commit && previousCommit !== release.commit) {
-          let reload = false;
-          try {
-            reload = sessionStorage.getItem(RELOAD_REVISION_KEY) !== release.commit;
-            if (reload) {
-              sessionStorage.setItem(RELOAD_REVISION_KEY, release.commit);
-              sessionStorage.setItem(
-                REOPEN_MODAL_KEY,
-                String(!el(MODAL_ID)?.classList.contains('hidden')),
-              );
-            }
-          } catch (_) {
-            reload = false;
-          }
-          if (reload) {
-            navigator.serviceWorker?.getRegistration?.().then(registration => registration?.update()).catch(() => {});
-            window.setTimeout(() => window.location.reload(), 250);
-          }
-        }
       } catch (_) {
         setPill('connecting', 'Reconnecting');
         setState('Reconnecting after update…', 'checking');
@@ -413,20 +371,7 @@ async function pollStatus() {
     } else {
       stopPolling();
     }
-  } catch (error) {
-    if (error?.status === 401 || error?.status === 403) {
-      stopPolling();
-      setPill('warning', 'Sign in required');
-      setState('Updater authentication expired', 'unknown');
-      setProgress({
-        state: 'error',
-        title: 'Sign in to continue',
-        detail: 'Sign in with an administrator account, then reopen the updater to resume status checks.',
-        progress: Number(lastOperation.progress) || 0,
-        phase: operationPhase(lastOperation.phase),
-      });
-      return;
-    }
+  } catch (_) {
     if (ACTIVE_STATUSES.has(lastOperation.status)) {
       setPill('connecting', 'Reconnecting');
       setState('Reconnecting after restart…', 'checking');
@@ -451,10 +396,7 @@ function closeModal() {
   modal.setAttribute('aria-hidden', 'true');
   const opener = modalOpener;
   modalOpener = null;
-  const fallback = el('sidebar-update-action')?.hidden
-    ? el('sidebar-update-check')
-    : el('sidebar-update-action');
-  window.setTimeout(() => (opener?.hidden ? fallback : opener)?.focus?.(), 0);
+  window.setTimeout(() => opener?.focus?.(), 0);
 }
 
 function openModal({ checkNow = false, opener = null } = {}) {
@@ -463,19 +405,9 @@ function openModal({ checkNow = false, opener = null } = {}) {
   modalOpener = opener || document.activeElement || el('sidebar-update-check');
   modal.classList.remove('hidden');
   modal.removeAttribute('aria-hidden');
-  window.setTimeout(() => {
-    if (el('styled-confirm-overlay')?.classList.contains('hidden') !== false) {
-      el('close-updater-modal')?.focus();
-    }
-  }, 60);
-  const showOperation = ACTIVE_STATUSES.has(lastOperation.status)
-    || SUCCESS_STATUSES.has(lastOperation.status)
-    || lastOperation.status === 'failed';
-  if (lastRelease) renderRelease(lastRelease, { preserveOperation: showOperation });
-  if (showOperation) renderOperation(lastOperation);
-  if (ACTIVE_STATUSES.has(lastOperation.status)) {
-    schedulePoll(0);
-  }
+  window.setTimeout(() => el('close-updater-modal')?.focus(), 60);
+  if (lastRelease) renderRelease(lastRelease, { preserveOperation: ACTIVE_STATUSES.has(lastOperation.status) });
+  if (ACTIVE_STATUSES.has(lastOperation.status)) renderOperation(lastOperation);
   if (checkNow) check();
 }
 
@@ -514,10 +446,8 @@ async function check() {
 }
 
 async function update() {
-  const confirm = window.styledConfirm;
-  if (!lastRelease?.latest_version || !lastRelease?.latest_commit || typeof confirm !== 'function' || !await confirm(
+  if (!lastRelease?.latest_version || !lastRelease?.latest_commit || !window.confirm(
     `Install signed v${lastRelease.latest_version} (${shortCommit(lastRelease.latest_commit)})? Pandamonium will create and verify a rollback backup first.`,
-    { confirmText: `Update to v${lastRelease.latest_version}` },
   )) return;
   try {
     const operation = await api('/api/update/apply', {
@@ -531,10 +461,6 @@ async function update() {
     renderOperation(operation);
     schedulePoll(250);
   } catch (error) {
-    if (error instanceof Error && error.message.includes('available release changed')) {
-      await check();
-      return;
-    }
     setPill('error', 'Request failed');
     setProgress({
       state: 'error',
@@ -547,11 +473,7 @@ async function update() {
 }
 
 async function rollback() {
-  const confirm = window.styledConfirm;
-  if (typeof confirm !== 'function' || !await confirm(
-    'Roll back to the retained previous immutable release?',
-    { confirmText: 'Roll back', danger: true },
-  )) return;
+  if (!window.confirm('Roll back to the retained previous immutable release?')) return;
   try {
     const operation = await api('/api/update/rollback', { method: 'POST' }, 15000);
     renderOperation(operation);
@@ -571,19 +493,6 @@ async function rollback() {
 async function init() {
   if (initialized) return;
   initialized = true;
-  let reloadRevision = null;
-  let reopenModal = false;
-  let workerReconcile = false;
-  try {
-    const url = new URL(window.location.href);
-    workerReconcile = url.searchParams.has(WORKER_RECONCILE_QUERY);
-    if (workerReconcile) {
-      url.searchParams.delete(WORKER_RECONCILE_QUERY);
-      window.history.replaceState(window.history.state, '', url);
-    }
-    reloadRevision = sessionStorage.getItem(RELOAD_REVISION_KEY);
-    reopenModal = workerReconcile || sessionStorage.getItem(REOPEN_MODAL_KEY) === 'true';
-  } catch (_) {}
   el('sidebar-update-check')?.addEventListener('click', event => {
     openModal({
       checkNow: !ACTIVE_STATUSES.has(lastOperation.status),
@@ -618,16 +527,6 @@ async function init() {
   try {
     renderRelease(await api('/api/version', {}, 15000));
     await pollStatus();
-    const revisionReconciled = reloadRevision && reloadRevision === lastRelease?.commit;
-    if (revisionReconciled) {
-      try {
-        sessionStorage.removeItem(RELOAD_REVISION_KEY);
-        sessionStorage.removeItem(REOPEN_MODAL_KEY);
-      } catch (_) {}
-    }
-    if ((revisionReconciled || workerReconcile) && reopenModal) {
-      openModal({ checkNow: false, opener: el('sidebar-update-check') });
-    }
   } catch (_) {
     setState('Release check unavailable', 'unknown');
   }

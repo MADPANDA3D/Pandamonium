@@ -7,12 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v388';
-const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
-const UPDATE_RECONCILE_ATTEMPTS = 8;
-const UPDATE_RECONCILE_DELAY_MS = 650;
-const UPDATE_ACTIVE_STATES = new Set(['queued', 'running']);
-const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'recovered', 'rolled_back', 'failed']);
+const CACHE_NAME = 'pandamonium-v387';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -100,56 +95,12 @@ self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
 
-function wait(delayMs) {
-  return new Promise(resolve => setTimeout(resolve, delayMs));
-}
-
-async function waitForTerminalUpdate() {
-  for (let attempt = 0; attempt < UPDATE_RECONCILE_ATTEMPTS; attempt += 1) {
-    try {
-      const response = await fetch('/api/update/status', {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
-      if (response.status === 401 || response.status === 403 || response.redirected) return false;
-      if (!response.ok) {
-        if (response.status >= 500) throw new Error('Update status unavailable');
-        return false;
-      }
-      const operation = await response.json().catch(() => null);
-      if (!operation) return false;
-      if (UPDATE_TERMINAL_STATES.has(operation?.status)) return true;
-      if (!UPDATE_ACTIVE_STATES.has(operation?.status)) return false;
-    } catch (_) {}
-    if (attempt + 1 < UPDATE_RECONCILE_ATTEMPTS) await wait(UPDATE_RECONCILE_DELAY_MS);
-  }
-  return false;
-}
-
-async function reconcileUpdateClients() {
-  if (!await waitForTerminalUpdate()) return;
-  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  windows.forEach(client => {
-    const url = new URL(client.url);
-    if (url.searchParams.get(UPDATE_RECONCILE_QUERY) === CACHE_NAME) return;
-    url.searchParams.set(UPDATE_RECONCILE_QUERY, CACHE_NAME);
-    void client.navigate(url.href);
-  });
-}
-
-async function activateWorker() {
-  const keys = await caches.keys();
-  const replacesPandamoniumWorker = keys.some(
-    key => key.startsWith('pandamonium-') && key !== CACHE_NAME,
-  );
-  await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
-  await self.clients.claim();
-  if (replacesPandamoniumWorker) await reconcileUpdateClients();
-}
-
 self.addEventListener('activate', (e) => {
-  e.waitUntil(activateWorker());
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (e) => {
