@@ -135,6 +135,20 @@ def _decode_probe_stream(retained: bytes, total_bytes: int) -> str:
     return text[:max(0, _PROBE_OUTPUT_CHARS - len(suffix))] + suffix
 
 
+async def _terminate_probe(process, reader_tasks: tuple[asyncio.Task, ...]) -> None:
+    """Stop a probe and await all local tasks during timeout or cancellation."""
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    await process.wait()
+    for task in reader_tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*reader_tasks, return_exceptions=True)
+
+
 async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
     executable = _resolve_executable(argv[0], platform)
     if executable is None:
@@ -159,22 +173,22 @@ async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
         }
     stdout_task = asyncio.create_task(_read_probe_stream(process.stdout))
     stderr_task = asyncio.create_task(_read_probe_stream(process.stderr))
+    reader_tasks = (stdout_task, stderr_task)
     try:
         await asyncio.wait_for(process.wait(), timeout=_PROBE_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        await asyncio.gather(stdout_task, stderr_task)
+        await _terminate_probe(process, reader_tasks)
         return {
             "available": True,
             "command": " ".join(argv),
             "error": f"probe timed out after {_PROBE_TIMEOUT_SECONDS:g} seconds",
             "exit_code": None,
         }
+    except asyncio.CancelledError:
+        await _terminate_probe(process, reader_tasks)
+        raise
 
-    (stdout, stdout_total), (stderr, stderr_total) = await asyncio.gather(
-        stdout_task, stderr_task
-    )
+    (stdout, stdout_total), (stderr, stderr_total) = await asyncio.gather(*reader_tasks)
     decoded_stdout = _decode_probe_stream(stdout, stdout_total)
     decoded_stderr = _decode_probe_stream(stderr, stderr_total)
     result = {

@@ -245,6 +245,15 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         assert "inspect_network" not in _selected_tools(intent)
 
 
+def test_mixed_network_subject_keeps_explicit_current_host_inspection():
+    prompt = "Map my home network and explain how it differs from a neural network"
+
+    intent = agent_loop._classify_agent_request([], prompt)
+
+    assert "network_inspection" in intent["domains"]
+    assert "inspect_network" in _selected_tools(intent)
+
+
 def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():
     schema = next(
         item["function"]
@@ -339,6 +348,62 @@ def test_probe_pipe_reader_retains_only_the_fixed_prefix():
     assert total == network_tools._PROBE_OUTPUT_CHARS * 5
     assert len(rendered) <= network_tools._PROBE_OUTPUT_CHARS
     assert f"{total} bytes total" in rendered
+
+
+def test_cancelled_probe_terminates_process_and_reader_tasks(monkeypatch):
+    class HangingStream:
+        def __init__(self):
+            self.cancelled = False
+
+        async def read(self, size):
+            del size
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    class HangingProcess:
+        def __init__(self):
+            self.returncode = None
+            self.stdout = HangingStream()
+            self.stderr = HangingStream()
+            self.stopped = asyncio.Event()
+            self.killed = False
+
+        async def wait(self):
+            await self.stopped.wait()
+            self.returncode = -9
+            return self.returncode
+
+        def kill(self):
+            self.killed = True
+            self.stopped.set()
+
+    process = HangingProcess()
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        del args, kwargs
+        return process
+
+    monkeypatch.setattr(network_tools, "_resolve_executable", lambda *args: "/usr/bin/ip")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    async def cancel_probe():
+        task = asyncio.create_task(
+            network_tools._run_probe(("ip", "route", "show"), "linux")
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_probe())
+
+    assert process.killed is True
+    assert process.returncode == -9
+    assert process.stdout.cancelled is True
+    assert process.stderr.cancelled is True
 
 
 def test_fixed_linux_table_read_is_bounded(monkeypatch):
