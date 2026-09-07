@@ -516,6 +516,47 @@ test('startup status reconciliation survives an initial version outage', async (
   expect(versionRequests).toBe(2);
 });
 
+test('historical terminal status does not refresh an unchanged release', async ({ page }) => {
+  let documentLoads = 0;
+  let statusPolls = 0;
+  let registrationChecks = 0;
+  await page.addInitScript(() => {
+    navigator.serviceWorker.getRegistration = async () => {
+      window.__registrationChecks = (window.__registrationChecks || 0) + 1;
+      return null;
+    };
+  });
+  page.on('request', request => {
+    if (request.resourceType() === 'document') documentLoads += 1;
+  });
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') return route.fulfill({ json: {
+      version: '1.0.22', commit: OLD_COMMIT, release: '1.0.22-11111111',
+      latest_version: '1.0.22', update_available: false, update_status: 'current',
+      compatible: true, can_update: false,
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'current', message: null },
+    } });
+    if (path === '/api/update/status') {
+      statusPolls += 1;
+      if (statusPolls === 1) return route.abort('connectionrefused');
+      return route.fulfill({ json: {
+        status: 'succeeded', phase: 'complete', progress: 100,
+        message: 'Updated to v1.0.22', rollback_available: true,
+        target_commit: OLD_COMMIT,
+      } });
+    }
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await expect.poll(() => statusPolls).toBe(2);
+  await expect(page.locator('#updater-progress-title')).toHaveText('Update installed');
+  registrationChecks = await page.evaluate(() => window.__registrationChecks || 0);
+  expect(registrationChecks).toBe(0);
+  expect(documentLoads).toBe(1);
+});
+
 test('a later update consumes the startup worker marker and retries transient status responses', async ({ page }) => {
   let applied = false;
   let applyCalls = 0;

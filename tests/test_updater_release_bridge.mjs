@@ -100,12 +100,13 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     assert.equal(await activation, true);
     timers.clear();
     assert.equal(
-      updater.needsWorkerRefresh('old', 'new', true, true),
+      updater.needsWorkerRefresh('old', 'new', 'new', true, true),
       false,
       'a worker-marked navigation must not schedule a redundant fallback reload',
     );
-    assert.equal(updater.needsWorkerRefresh('old', 'new', false, false), true);
-    assert.equal(updater.needsWorkerRefresh('new', 'new', true, false), true);
+    assert.equal(updater.needsWorkerRefresh('old', 'new', 'new', false, false), true);
+    assert.equal(updater.needsWorkerRefresh(undefined, 'new', 'new', true, false), true);
+    assert.equal(updater.needsWorkerRefresh('new', 'new', 'new', true, false), false);
     const refresh = updater.refreshApplicationWorker();
     await Promise.resolve();
     if (!discoverReplacement) {

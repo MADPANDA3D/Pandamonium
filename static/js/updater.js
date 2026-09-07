@@ -418,11 +418,24 @@ async function refreshApplicationWorker() {
   window.location.reload();
 }
 
-function needsWorkerRefresh(previousCommit, releaseCommit, startupRecovery, workerReconciled) {
+function needsWorkerRefresh(
+  previousCommit,
+  releaseCommit,
+  operationCommit,
+  startupRecovery,
+  workerReconciled,
+) {
   return Boolean(
     releaseCommit
     && !workerReconciled
-    && ((previousCommit && previousCommit !== releaseCommit) || startupRecovery)
+    && (
+      (previousCommit && previousCommit !== releaseCommit)
+      || (
+        startupRecovery
+        && operationCommit === releaseCommit
+        && previousCommit !== releaseCommit
+      )
+    )
   );
 }
 
@@ -449,6 +462,7 @@ async function pollStatus(workerReconciled = false) {
         if (needsWorkerRefresh(
           previousCommit,
           release.commit,
+          operation.target_commit,
           startupReconcileNeeded,
           workerReconciled,
         )) {
