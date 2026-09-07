@@ -1243,7 +1243,20 @@ def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
         leading in contextual_response_verbs
         and re.search(rf"\b{re.escape(leading)}\b", str(question or ""), re.IGNORECASE)
     ):
-        return True
+        ignored = {
+            "a", "an", "and", "can", "could", "do", "for", "i", "in", "is",
+            "it", "me", "of", "or", "please", "the", "to", "would", "you", "your",
+        } | contextual_response_verbs
+        question_terms = {
+            word.lower()
+            for word in re.findall(r"[A-Za-z0-9_'-]+", str(question or ""))
+            if word.lower() not in ignored
+        }
+        reply_terms = {word.lower() for word in words[1:] if word.lower() not in ignored}
+        # Very terse choices are answers by construction. Longer imperative
+        # replies must share a concrete subject with the question so an echoed
+        # verb cannot smuggle in a new task/topic.
+        return len(words) <= 3 or bool(question_terms & reply_terms)
 
     standalone_request_verbs = {
         "add", "analyze", "analyse", "browse", "build", "calculate", "change",
