@@ -243,11 +243,25 @@ test('Mermaid retries unsafe generated labels once and retains fallback source',
   const validResult = await renderDiagram(page, valid);
   expect(validResult).toMatchObject({ state: 'rendered', hasSvg: true, sourceHidden: true });
 
+  await page.evaluate(() => {
+    const originalRender = window.mermaid.render.bind(window.mermaid);
+    window.__madMermaidRenderAttempts = [];
+    window.mermaid.render = (...args) => {
+      window.__madMermaidRenderAttempts.push(args[1]);
+      return originalRender(...args);
+    };
+  });
+
   const generated = [
     'graph TD',
     '  Internet[Internet] -->|WAN| Router[Home Router<br/>(Wi‑Fi + Ethernet)]',
     '  Router --> WiFi[Wi‑Fi Devices — phones, tablets]',
     '  Router --> Wired[Ethernet devices (NAS/server)]',
+    '  Router --> DB[(Inventory)]',
+    '  Router --> Input[/Input queue/]',
+    '  Router --> Output[\\Output queue\\]',
+    '  Router --> Batch[/Batch window\\]',
+    '  Router --> Archive[\\Archive window/]',
     '  subgraph Tailscale VPN',
     '    WiFi --> Tail[Tailscale nodes]',
     '  end',
@@ -256,6 +270,13 @@ test('Mermaid retries unsafe generated labels once and retains fallback source',
   expect(repairedResult).toMatchObject({ state: 'rendered', hasSvg: true, sourceHidden: true });
   expect(repairedResult.visualText).toContain('Home Router');
   expect(repairedResult.visualText).toContain('Wi‑Fi + Ethernet');
+  const renderAttempts = await page.evaluate(() => window.__madMermaidRenderAttempts);
+  expect(renderAttempts).toHaveLength(2);
+  expect(renderAttempts[1]).toContain('DB[(Inventory)]');
+  expect(renderAttempts[1]).toContain('Input[/Input queue/]');
+  expect(renderAttempts[1]).toContain('Output[\\Output queue\\]');
+  expect(renderAttempts[1]).toContain('Batch[/Batch window\\]');
+  expect(renderAttempts[1]).toContain('Archive[\\Archive window/]');
 
   const invalid = 'flowchart LR\n  Start[Still broken -->';
   const invalidResult = await renderDiagram(page, invalid);

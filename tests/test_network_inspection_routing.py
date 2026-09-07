@@ -196,6 +196,36 @@ async def test_live_catalog_clamps_retrieved_and_admin_keyword_tools(monkeypatch
     })
     assert all("manage_endpoints" not in message.get("content", "") for message in captured["messages"])
 
+    compound_prompt = "Search the web and compare it with how my home network is configured"
+    compound_intent = agent_loop._classify_agent_request([], compound_prompt)
+    assert compound_intent["domains"] == {"network_inspection", "web"}
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": compound_prompt}],
+        context_length=32_768,
+        max_rounds=1,
+        relevant_tools={"inspect_network", "manage_settings", "web_fetch"},
+    ):
+        pass
+
+    compound_tool_names = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    assert {"inspect_network", "web_fetch"} <= compound_tool_names
+    assert compound_tool_names.isdisjoint({
+        "manage_endpoints",
+        "manage_session",
+        "manage_settings",
+    })
+    assert all(
+        "manage_settings" not in message.get("content", "")
+        for message in captured["messages"]
+    )
+
 
 def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
     prompts = (

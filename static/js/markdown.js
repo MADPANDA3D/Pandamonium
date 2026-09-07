@@ -886,6 +886,13 @@ function quoteMermaidNodeLabels(definition) {
     (match, node, label) => {
       const trimmed = label.trim();
       if (!trimmed || (trimmed.startsWith('"') && trimmed.endsWith('"'))) return match;
+      const first = trimmed[0];
+      const last = trimmed[trimmed.length - 1];
+      const shapedLabel = (
+        (first === '(' && last === ')')
+        || ((first === '/' || first === '\\') && (last === '/' || last === '\\'))
+      );
+      if (shapedLabel) return match;
       return `${node}["${label.replace(/"/g, '&quot;')}"]`;
     },
   );
