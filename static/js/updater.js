@@ -396,6 +396,7 @@ function waitForWorkerReplacement(registration, previousWorker) {
         replacement.addEventListener?.('statechange', inspect);
       }
       if (replacement?.state === 'activated') finish(true);
+      else if (replacement?.state === 'redundant') finish(false);
     };
     registration.addEventListener?.('updatefound', inspect);
     navigator.serviceWorker?.addEventListener?.('controllerchange', inspect);

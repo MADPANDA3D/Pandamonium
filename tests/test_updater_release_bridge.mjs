@@ -103,6 +103,17 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     activatingWorker.dispatch('statechange');
     assert.equal(await activation, true);
     timers.clear();
+    const redundantWorker = Object.assign(new FakeEventTarget(), { state: 'installing' });
+    const redundantRegistration = Object.assign(new FakeEventTarget(), {
+      active: previousWorker,
+      installing: redundantWorker,
+      waiting: null,
+    });
+    const rejected = updater.waitForWorkerReplacement(redundantRegistration, previousWorker);
+    redundantWorker.state = 'redundant';
+    redundantWorker.dispatch('statechange');
+    assert.equal(await rejected, false, 'a redundant replacement must fail without waiting');
+    timers.clear();
     assert.equal(
       updater.needsWorkerRefresh('old', 'new', 'new', true, true),
       false,
