@@ -205,17 +205,23 @@ function renderRelease(data, { preserveOperation = false } = {}) {
   lastRelease = data;
   renderFacts(data);
   renderReleaseLink(data.update_url);
+  const check = el('sidebar-update-check');
   const action = el('sidebar-update-action');
+  const modalCheck = el('updater-check');
   const apply = el('updater-apply');
+  const hasReleaseAction = Boolean(data.update_available);
+  const canApply = Boolean(data.update_available && data.can_update);
+  if (check) check.hidden = hasReleaseAction;
   if (action) {
-    action.hidden = !data.update_available;
+    action.hidden = !hasReleaseAction;
     action.textContent = data.latest_version
       ? `${data.can_update ? 'Update to' : 'View'} v${data.latest_version}`
       : 'Review update';
   }
+  if (modalCheck) modalCheck.hidden = canApply;
   if (apply) {
-    apply.hidden = !(data.update_available && data.can_update);
-    apply.textContent = data.latest_version ? `Install v${data.latest_version}` : 'Install update';
+    apply.hidden = !canApply;
+    apply.textContent = data.latest_version ? `Update to v${data.latest_version}` : 'Update now';
   }
   if (data.update_available) {
     setState(
@@ -258,6 +264,11 @@ function renderOperation(operation = {}) {
   if (checkButton) {
     checkButton.disabled = false;
     checkButton.textContent = active ? 'View update progress' : 'Check for updates';
+  }
+  if (active) {
+    if (checkButton) checkButton.hidden = false;
+    if (action) action.hidden = true;
+    if (modalCheck) modalCheck.hidden = true;
   }
   if (active) {
     const progress = Number(operation.progress) || 0;
@@ -396,7 +407,10 @@ function closeModal() {
   modal.setAttribute('aria-hidden', 'true');
   const opener = modalOpener;
   modalOpener = null;
-  window.setTimeout(() => opener?.focus?.(), 0);
+  const fallback = el('sidebar-update-action')?.hidden
+    ? el('sidebar-update-check')
+    : el('sidebar-update-action');
+  window.setTimeout(() => (opener?.hidden ? fallback : opener)?.focus?.(), 0);
 }
 
 function openModal({ checkNow = false, opener = null } = {}) {
@@ -405,7 +419,11 @@ function openModal({ checkNow = false, opener = null } = {}) {
   modalOpener = opener || document.activeElement || el('sidebar-update-check');
   modal.classList.remove('hidden');
   modal.removeAttribute('aria-hidden');
-  window.setTimeout(() => el('close-updater-modal')?.focus(), 60);
+  window.setTimeout(() => {
+    if (el('styled-confirm-overlay')?.classList.contains('hidden') !== false) {
+      el('close-updater-modal')?.focus();
+    }
+  }, 60);
   if (lastRelease) renderRelease(lastRelease, { preserveOperation: ACTIVE_STATUSES.has(lastOperation.status) });
   if (ACTIVE_STATUSES.has(lastOperation.status)) renderOperation(lastOperation);
   if (checkNow) check();
@@ -446,8 +464,10 @@ async function check() {
 }
 
 async function update() {
-  if (!lastRelease?.latest_version || !lastRelease?.latest_commit || !window.confirm(
+  const confirm = window.styledConfirm;
+  if (!lastRelease?.latest_version || !lastRelease?.latest_commit || typeof confirm !== 'function' || !await confirm(
     `Install signed v${lastRelease.latest_version} (${shortCommit(lastRelease.latest_commit)})? Pandamonium will create and verify a rollback backup first.`,
+    { confirmText: `Update to v${lastRelease.latest_version}` },
   )) return;
   try {
     const operation = await api('/api/update/apply', {
@@ -461,6 +481,10 @@ async function update() {
     renderOperation(operation);
     schedulePoll(250);
   } catch (error) {
+    if (error instanceof Error && error.message.includes('available release changed')) {
+      await check();
+      return;
+    }
     setPill('error', 'Request failed');
     setProgress({
       state: 'error',
@@ -473,7 +497,11 @@ async function update() {
 }
 
 async function rollback() {
-  if (!window.confirm('Roll back to the retained previous immutable release?')) return;
+  const confirm = window.styledConfirm;
+  if (typeof confirm !== 'function' || !await confirm(
+    'Roll back to the retained previous immutable release?',
+    { confirmText: 'Roll back', danger: true },
+  )) return;
   try {
     const operation = await api('/api/update/rollback', { method: 'POST' }, 15000);
     renderOperation(operation);

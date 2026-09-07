@@ -626,7 +626,7 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
       overlay.removeEventListener('click', onBackdrop);
-      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       try { _prevFocus && _prevFocus.focus && _prevFocus.focus(); } catch {}
       resolve(result);
     }
@@ -657,7 +657,7 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
     okBtn.addEventListener('click', onOk);
     cancelBtn.addEventListener('click', onCancel);
     overlay.addEventListener('click', onBackdrop);
-    document.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     okBtn.focus();
   });
 }

@@ -501,7 +501,7 @@ body.bg-pattern-sparkles {
 
     .sidebar-update-version {
       color: var(--fg);
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 650;
       letter-spacing: 0.02em;
     }
@@ -511,7 +511,7 @@ body.bg-pattern-sparkles {
       align-items: center;
       gap: 5px;
       color: var(--fg);
-      font-size: 9px;
+      font-size: 11px;
       opacity: 0.6;
       line-height: 1.3;
     }
@@ -526,34 +526,35 @@ body.bg-pattern-sparkles {
     }
 
     .sidebar-update-state.is-current { color: var(--color-success); opacity: 0.85; }
-    .sidebar-update-state.is-available { color: var(--accent, var(--red)); opacity: 1; }
+    .sidebar-update-state.is-available { color: var(--green, #50fa7b); opacity: 1; }
     .sidebar-update-state.is-unknown { opacity: 0.45; }
-    .sidebar-update-state.is-checking { color: var(--accent, var(--red)); opacity: 0.8; }
+    .sidebar-update-state.is-checking { color: var(--green, #50fa7b); opacity: 0.8; }
 
     .sidebar-update-commit,
     .sidebar-update-detail,
     .sidebar-update-backup {
       color: var(--fg);
-      font-size: 8px;
+      font-size: 10px;
       line-height: 1.35;
       opacity: 0.48;
       overflow-wrap: anywhere;
     }
 
     .sidebar-update-actions {
-      display: flex;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
       gap: 5px;
     }
 
     .sidebar-update-action {
-      flex-shrink: 0;
-      padding: 5px 8px;
+      width: 100%;
+      min-height: 34px;
+      padding: 8px 10px;
       border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
       border-radius: 6px;
       background: color-mix(in srgb, var(--fg) 5%, transparent);
       color: var(--fg);
-      font-size: 9px;
+      font-size: 12px;
       font-weight: 700;
       line-height: 1;
       text-decoration: none;
@@ -561,9 +562,9 @@ body.bg-pattern-sparkles {
     }
 
     .sidebar-update-action.is-primary {
-      border-color: transparent;
-      background: var(--accent, var(--red));
-      color: var(--bg);
+      border-color: color-mix(in srgb, var(--green, #50fa7b) 65%, transparent);
+      background: var(--green, #50fa7b);
+      color: #07130b;
     }
 
     .sidebar-update-action:disabled { cursor: wait; opacity: 0.5; }
@@ -11362,7 +11363,7 @@ details a:hover {
 .updater-fact-grid dt {
   color: var(--fg);
   opacity: 0.48;
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -11370,7 +11371,7 @@ details a:hover {
   overflow: hidden;
   margin: 4px 0 0;
   color: var(--fg);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -11381,7 +11382,7 @@ details a:hover {
   right: 10px;
   bottom: 8px;
   color: #fff8e7;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.06em;
 }
 .updater-progress-meter {
@@ -11396,9 +11397,13 @@ details a:hover {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--red), #fff8e7);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--red) 48%, transparent);
+  background: linear-gradient(90deg, var(--green, #50fa7b), #fff8e7);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--green, #50fa7b) 48%, transparent);
   transition: width 0.35s ease;
+}
+.updater-progress-card[data-state="error"] .updater-progress-meter > span {
+  background: var(--red);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--red) 48%, transparent);
 }
 .updater-progress-card[data-state="reconnecting"] .mad-mcp-progress-logo {
   animation: mad-mcp-breathe 1.4s ease-in-out infinite;
@@ -11409,18 +11414,18 @@ details a:hover {
 }
 .updater-progress-card[data-state="ready"] .updater-progress-visual,
 .updater-progress-card[data-state="reconnecting"] .updater-progress-visual {
-  border-color: color-mix(in srgb, var(--red) 68%, transparent);
+  border-color: color-mix(in srgb, var(--green, #50fa7b) 68%, transparent);
 }
 #updater-status-pill[data-state="available"] {
-  border-color: var(--red);
-  color: var(--red);
-  box-shadow: 0 0 14px color-mix(in srgb, var(--red) 22%, transparent);
+  border-color: var(--green, #50fa7b);
+  color: var(--green, #50fa7b);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--green, #50fa7b) 22%, transparent);
 }
 .updater-release-link {
   flex-shrink: 0;
   align-self: center;
   color: #fff8e7;
-  font-size: 10px;
+  font-size: 12px;
   text-decoration: none;
 }
 .updater-release-link:hover,
@@ -11430,14 +11435,14 @@ details a:hover {
   gap: 5px;
   margin-top: 14px;
   padding: 11px 12px;
-  border-left: 2px solid var(--red);
-  background: color-mix(in srgb, var(--red) 7%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--fg) 38%, transparent);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
   color: var(--fg);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .updater-manual-guidance[hidden] { display: none; }
-.updater-manual-guidance strong { color: var(--red); font-size: 11px; }
+.updater-manual-guidance strong { color: var(--fg); font-size: 13px; }
 .updater-manual-guidance code {
   overflow-x: auto;
   padding: 7px 8px;
@@ -11452,15 +11457,34 @@ details a:hover {
   margin: 12px 0 0;
   color: var(--fg);
   opacity: 0.68;
-  font-size: 9px;
+  font-size: 11px;
 }
 .updater-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin-top: 14px;
 }
-.updater-dialog-actions button { margin-top: 0; }
+.updater-dialog-actions button {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 0;
+  font-size: 12px;
+}
+#updater-apply {
+  border-color: color-mix(in srgb, var(--green, #50fa7b) 65%, transparent);
+  background: var(--green, #50fa7b);
+  color: #07130b;
+}
+#updater-apply:hover { filter: brightness(1.08); }
+
+.updater-modal-content .mad-mcp-card-heading h5,
+.updater-modal-content .mad-mcp-progress-copy h5,
+.updater-modal-content .mad-mcp-catalog-heading h5 { font-size: 13px; }
+.updater-modal-content .mad-mcp-card-heading p,
+.updater-modal-content .mad-mcp-progress-copy p,
+.updater-modal-content .mad-mcp-catalog-heading p,
+.updater-modal-content .mad-mcp-phase-list { font-size: 12px; }
 
 @media (max-width: 680px) {
   .updater-modal-content {
