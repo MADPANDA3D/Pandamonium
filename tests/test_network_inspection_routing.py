@@ -268,11 +268,24 @@ def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():
 def test_inspection_ignores_supplied_commands_and_executes_only_fixed_probes(monkeypatch):
     calls = []
 
+    class FakeStream:
+        def __init__(self, content):
+            self.content = content
+
+        async def read(self, size):
+            chunk = self.content[:size]
+            self.content = self.content[size:]
+            return chunk
+
     class FakeProcess:
         returncode = 0
 
-        async def communicate(self):
-            return b"verified output", b""
+        def __init__(self):
+            self.stdout = FakeStream(b"verified output")
+            self.stderr = FakeStream(b"")
+
+        async def wait(self):
+            return self.returncode
 
         def kill(self):
             raise AssertionError("a successful fixed probe must not be killed")
@@ -305,6 +318,50 @@ def test_inspection_ignores_supplied_commands_and_executes_only_fixed_probes(mon
     assert snapshot["inspection_available"] is True
     assert result["exit_code"] == 0
     assert "touch" not in result["output"]
+
+
+def test_probe_pipe_reader_retains_only_the_fixed_prefix():
+    class LargeStream:
+        def __init__(self):
+            self.remaining = network_tools._PROBE_OUTPUT_CHARS * 5
+
+        async def read(self, size):
+            if self.remaining <= 0:
+                return b""
+            amount = min(size, self.remaining)
+            self.remaining -= amount
+            return b"x" * amount
+
+    retained, total = asyncio.run(network_tools._read_probe_stream(LargeStream()))
+    rendered = network_tools._decode_probe_stream(retained, total)
+
+    assert len(retained) == network_tools._PROBE_OUTPUT_CHARS
+    assert total == network_tools._PROBE_OUTPUT_CHARS * 5
+    assert len(rendered) <= network_tools._PROBE_OUTPUT_CHARS
+    assert f"{total} bytes total" in rendered
+
+
+def test_fixed_linux_table_read_is_bounded(monkeypatch):
+    observed = {}
+
+    class LargeTable:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size):
+            observed["size"] = size
+            return "x" * size
+
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: LargeTable())
+
+    rendered = network_tools._read_linux_kernel_table("/proc/net/route")
+
+    assert observed["size"] == network_tools._LINUX_KERNEL_TABLE_CHARS + 1
+    assert len(rendered) <= network_tools._LINUX_KERNEL_TABLE_CHARS
+    assert rendered.endswith("... (truncated at fixed table budget)")
 
 
 def test_supported_native_platforms_have_fixed_read_only_probes():

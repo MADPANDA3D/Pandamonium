@@ -58,6 +58,7 @@ _POSIX_TRUSTED_EXECUTABLES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
 }
 _PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
 _PROBE_OUTPUT_CHARS: Final[int] = 1_200
+_PROBE_READ_CHUNK_BYTES: Final[int] = 4_096
 _LINUX_KERNEL_OUTPUT_CHARS: Final[int] = 2_200
 _NETWORK_SNAPSHOT_CHARS: Final[int] = 9_000
 _LINUX_KERNEL_TABLE_CHARS: Final[int] = 300
@@ -113,6 +114,27 @@ def _resolve_executable(name: str, platform: str | None = None) -> str | None:
     return None
 
 
+async def _read_probe_stream(stream: asyncio.StreamReader) -> tuple[bytes, int]:
+    """Drain a subprocess pipe while retaining only a fixed byte prefix."""
+    retained = bytearray()
+    total_bytes = 0
+    while chunk := await stream.read(_PROBE_READ_CHUNK_BYTES):
+        total_bytes += len(chunk)
+        remaining = _PROBE_OUTPUT_CHARS - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+    return bytes(retained), total_bytes
+
+
+def _decode_probe_stream(retained: bytes, total_bytes: int) -> str:
+    """Decode a bounded pipe prefix and identify omitted bytes within the cap."""
+    text = retained.decode("utf-8", errors="replace").strip()
+    if total_bytes <= len(retained):
+        return text
+    suffix = f"\n... (truncated, {total_bytes} bytes total)"
+    return text[:max(0, _PROBE_OUTPUT_CHARS - len(suffix))] + suffix
+
+
 async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
     executable = _resolve_executable(argv[0], platform)
     if executable is None:
@@ -135,13 +157,14 @@ async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
             "command": " ".join(argv),
             "error": f"probe could not start: {exc}",
         }
+    stdout_task = asyncio.create_task(_read_probe_stream(process.stdout))
+    stderr_task = asyncio.create_task(_read_probe_stream(process.stderr))
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=_PROBE_TIMEOUT_SECONDS
-        )
+        await asyncio.wait_for(process.wait(), timeout=_PROBE_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         process.kill()
-        await process.communicate()
+        await process.wait()
+        await asyncio.gather(stdout_task, stderr_task)
         return {
             "available": True,
             "command": " ".join(argv),
@@ -149,12 +172,11 @@ async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
             "exit_code": None,
         }
 
-    decoded_stdout = _truncate(
-        stdout.decode("utf-8", errors="replace").strip(), _PROBE_OUTPUT_CHARS
+    (stdout, stdout_total), (stderr, stderr_total) = await asyncio.gather(
+        stdout_task, stderr_task
     )
-    decoded_stderr = _truncate(
-        stderr.decode("utf-8", errors="replace").strip(), _PROBE_OUTPUT_CHARS
-    )
+    decoded_stdout = _decode_probe_stream(stdout, stdout_total)
+    decoded_stderr = _decode_probe_stream(stderr, stderr_total)
     result = {
         "available": True,
         "command": " ".join(argv),
@@ -170,7 +192,11 @@ def _read_linux_kernel_table(path: str) -> str:
     """Read one fixed procfs network table with bounded output."""
     try:
         with open(path, encoding="utf-8", errors="replace") as table:
-            return _truncate(table.read(), _LINUX_KERNEL_TABLE_CHARS).strip()
+            content = table.read(_LINUX_KERNEL_TABLE_CHARS + 1)
+        if len(content) > _LINUX_KERNEL_TABLE_CHARS:
+            suffix = "\n... (truncated at fixed table budget)"
+            content = content[:_LINUX_KERNEL_TABLE_CHARS - len(suffix)] + suffix
+        return content.strip()
     except OSError:
         return ""
 
