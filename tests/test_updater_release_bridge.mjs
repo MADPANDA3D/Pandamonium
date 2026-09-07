@@ -78,8 +78,15 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     },
   } });
   try {
-    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker };`;
+    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh };`;
     const updater = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}#${discoverReplacement}`);
+    assert.equal(
+      updater.needsWorkerRefresh('old', 'new', true, true),
+      false,
+      'a worker-marked navigation must not schedule a redundant fallback reload',
+    );
+    assert.equal(updater.needsWorkerRefresh('old', 'new', false, false), true);
+    assert.equal(updater.needsWorkerRefresh('new', 'new', true, false), true);
     const refresh = updater.refreshApplicationWorker();
     await Promise.resolve();
     if (!discoverReplacement) {

@@ -6,6 +6,7 @@ let modalOpener = null;
 let initialized = false;
 let startupReconcileAttempts = 0;
 let startupReconcileNeeded = false;
+let workerReconcileComplete = false;
 
 const POLL_INTERVAL_MS = 900;
 const STARTUP_RECONCILE_ATTEMPTS = 8;
@@ -412,6 +413,14 @@ async function refreshApplicationWorker() {
   window.location.reload();
 }
 
+function needsWorkerRefresh(previousCommit, releaseCommit, startupRecovery, workerReconciled) {
+  return Boolean(
+    releaseCommit
+    && !workerReconciled
+    && ((previousCommit && previousCommit !== releaseCommit) || startupRecovery)
+  );
+}
+
 async function pollStatus() {
   if (pollInFlight) return schedulePoll();
   pollInFlight = true;
@@ -432,8 +441,11 @@ async function pollStatus() {
         renderRelease(release, { preserveOperation: true });
         renderOperation(operation);
         stopPolling();
-        if (release.commit && (
-          (previousCommit && previousCommit !== release.commit) || startupReconcileNeeded
+        if (needsWorkerRefresh(
+          previousCommit,
+          release.commit,
+          startupReconcileNeeded,
+          workerReconcileComplete,
         )) {
           let reload = false;
           try {
@@ -641,6 +653,7 @@ async function init() {
   try {
     const url = new URL(window.location.href);
     workerReconcile = url.searchParams.has(WORKER_RECONCILE_QUERY);
+    workerReconcileComplete = workerReconcile;
     if (workerReconcile) {
       url.searchParams.delete(WORKER_RECONCILE_QUERY);
       window.history.replaceState(window.history.state, '', url);
