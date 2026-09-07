@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 
 
 const OLD_COMMIT = '1111111111111111111111111111111111111111';
@@ -19,13 +20,178 @@ function shellRoutes(page, handler) {
   });
 }
 
+for (const [formFactor, viewport] of [
+  ['desktop', null],
+  ['mobile', { width: 390, height: 844 }],
+]) test(`updater crosses a stale pre-apply status response and signed restart on ${formFactor}`, async ({ page }, testInfo) => {
+  const trace = [];
+  if (viewport) await page.setViewportSize(viewport);
+  const releasedWorker = execFileSync(
+    'git', ['show', 'v1.0.20:static/sw.js'], { encoding: 'utf8' },
+  );
+  expect(releasedWorker).toContain("const CACHE_NAME = 'pandamonium-v387';");
+  let finishInitialStatus;
+  let applied = false;
+  let applyCalls = 0;
+  let navigations = 0;
+  let statusPolls = 0;
+
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame() && frame.url()) {
+      navigations += 1;
+      trace.push({ type: 'navigation', url: frame.url() });
+    }
+  });
+  page.on('console', message => trace.push({ type: 'console', text: message.text() }));
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith('/api/update/')) trace.push({ type: 'request', path });
+  });
+  page.on('requestfailed', request => trace.push({
+    type: 'requestfailed',
+    path: new URL(request.url()).pathname,
+    error: request.failure()?.errorText,
+  }));
+  page.on('response', response => {
+    const path = new URL(response.url()).pathname;
+    if (path === '/api/version' || path.startsWith('/api/update/')) {
+      trace.push({ type: 'response', path, status: response.status() });
+    }
+  });
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') {
+      return route.fulfill({ json: applied ? {
+        version: '1.0.21', commit: '1e5d2e3ab95b53d85b22bbe63a0aa8ee40f9d530',
+        release: '1.0.21-1e5d2e3a', latest_version: '1.0.21', update_available: false,
+        update_status: 'current', compatible: true, can_update: false,
+        installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+        release_check: { status: 'current', message: null },
+      } : {
+        version: '1.0.20', commit: '838fb9049aecb772b4c96e77307c65b63a4b042b',
+        release: '1.0.20-838fb904', latest_version: '1.0.20', update_available: false,
+        update_status: 'current', compatible: true, can_update: false,
+        installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+        release_check: { status: 'current', message: null },
+      } });
+    }
+    if (path === '/api/update/check') {
+      return route.fulfill({ json: {
+        version: '1.0.20', commit: '838fb9049aecb772b4c96e77307c65b63a4b042b',
+        release: '1.0.20-838fb904', latest_version: '1.0.21',
+        latest_commit: '1e5d2e3ab95b53d85b22bbe63a0aa8ee40f9d530',
+        update_available: true, update_status: 'available', compatible: true, can_update: true,
+        installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+        release_check: { status: 'available', message: null },
+      } });
+    }
+    if (path === '/api/update/apply') {
+      applyCalls += 1;
+      applied = true;
+      return route.fulfill({ json: {
+        status: 'queued', phase: 'queued', progress: 0, message: 'Update queued',
+        rollback_available: false,
+      } });
+    }
+    if (path === '/api/update/status') {
+      statusPolls += 1;
+      if (statusPolls === 1) {
+        return new Promise(resolve => {
+          finishInitialStatus = () => resolve(route.fulfill({ json: { status: 'idle' } }));
+        });
+      }
+      if (statusPolls <= 4) return route.abort('connectionrefused');
+      return route.fulfill({ json: {
+        status: 'succeeded', phase: 'complete', progress: 100,
+        message: 'Updated to v1.0.21',
+        backup_location: '/var/backups/odysseus/update-1.0.21-proof',
+        rollback_available: true,
+      } });
+    }
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await expect.poll(() => typeof finishInitialStatus).toBe('function');
+  if (viewport) await page.locator('#hamburger-btn').click();
+  await page.locator('#sidebar-update-check').click();
+  await expect(page.locator('#updater-apply')).toBeVisible();
+  await page.locator('#updater-apply').click();
+  await page.locator('#styled-confirm-ok').click();
+  await expect(page.locator('#updater-progress-title')).toHaveText('Update queued');
+  finishInitialStatus();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('offline'));
+    window.dispatchEvent(new Event('online'));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  try {
+    await expect.poll(() => navigations, { timeout: 8000 }).toBeGreaterThanOrEqual(2);
+    await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', {
+      timeout: 8000,
+    });
+    await expect(page.locator('#updater-modal')).toBeVisible();
+    await expect(page.locator('#updater-installed-version')).toHaveText('v1.0.21');
+    await expect.poll(() => page.evaluate(() => caches.keys())).toContain('pandamonium-v388');
+    expect(applyCalls).toBe(1);
+    expect(statusPolls).toBeGreaterThanOrEqual(6);
+    expect(trace.filter(item => item.type === 'requestfailed' && item.path === '/api/update/status')).toHaveLength(3);
+    expect(await page.evaluate(() => document.visibilityState)).toBe('visible');
+    expect(await page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toContain('/static/sw.js');
+  } finally {
+    trace.push({
+      type: 'snapshot',
+      statusPolls,
+      visibility: await page.evaluate(() => document.visibilityState),
+      serviceWorker: await page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || null),
+      title: await page.locator('#updater-progress-title').textContent(),
+      percent: await page.locator('#updater-progress-percent').textContent(),
+      version: await page.locator('#updater-installed-version').textContent(),
+    });
+    await testInfo.attach('mad-839-restart-trace.json', {
+      body: Buffer.from(JSON.stringify(trace, null, 2)), contentType: 'application/json',
+    });
+  }
+});
+
+for (const [status, title] of [
+  ['failed', 'Update failed safely'],
+  ['rolled_back', 'Rollback verified'],
+]) test(`updater renders the ${status} terminal state`, async ({ page }) => {
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') return route.fulfill({ json: {
+      version: '1.0.21', commit: NEW_COMMIT, release: '1.0.21-22222222',
+      latest_version: '1.0.21', update_available: false, update_status: 'current',
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'current', message: null },
+    } });
+    if (path === '/api/update/status') return route.fulfill({ json: {
+      status, phase: 'complete', progress: 100,
+      message: status === 'failed' ? 'Signature verification failed' : 'Rolled back to v1.0.20',
+      rollback_available: false,
+    } });
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await expect(page.locator('#updater-progress-title')).toHaveText(title);
+  await expect(page.locator('#updater-progress-card')).toHaveAttribute(
+    'data-state', status === 'failed' ? 'error' : 'complete',
+  );
+});
+
 test('updater dialog survives the restart gap and reconciles the installed version', async ({ page }) => {
   let checks = 0;
   let applies = 0;
   let applyAttempts = 0;
+  let authPolls = 0;
+  let navigations = 0;
   let rollbacks = 0;
   let statusPolls = 0;
   let finishCheck;
+  page.on('framenavigated', frame => {
+    if (frame === page.mainFrame() && frame.url()) navigations += 1;
+  });
   await page.addInitScript(() => {
     window.__nativeConfirmCalls = 0;
     window.confirm = () => {
@@ -85,6 +251,10 @@ test('updater dialog survives the restart gap and reconciles the installed versi
       } });
     }
     if (path === '/api/update/status') {
+      if (rollbacks) {
+        authPolls += 1;
+        return route.fulfill({ status: 401, json: { detail: 'Not authenticated' } });
+      }
       if (!applies) return route.fulfill({ json: { status: 'idle' } });
       statusPolls += 1;
       if (statusPolls === 1) {
@@ -197,6 +367,8 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   expect(checks).toBe(2);
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'reconnecting');
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', { timeout: 7000 });
+  await expect.poll(() => navigations, { timeout: 7000 }).toBeGreaterThanOrEqual(2);
+  await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-installed-version')).toHaveText('v1.0.11');
   await expect(page.locator('#sidebar-update-version')).toHaveText('Version v1.0.11');
   await expect(page.locator('#updater-backup')).toContainText('/var/backups/odysseus/update-1.0.11-proof');
@@ -212,10 +384,9 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   await page.locator('#styled-confirm-ok').click();
   expect(rollbacks).toBe(1);
   expect(await page.evaluate(() => window.__nativeConfirmCalls)).toBe(0);
-
-  await page.keyboard.press('Escape');
-  await expect(page.locator('#updater-modal')).toBeHidden();
-  await expect(page.locator('#sidebar-update-check')).toBeFocused();
+  await expect(page).toHaveURL('/login');
+  await page.waitForTimeout(1100);
+  expect(authPolls).toBe(1);
 });
 
 test('host-managed container keeps provenance and separates a GitHub outage from update mode', async ({ page }) => {

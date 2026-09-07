@@ -7,6 +7,8 @@ let initialized = false;
 
 const POLL_INTERVAL_MS = 900;
 const MODAL_ID = 'updater-modal';
+const RELOAD_REVISION_KEY = 'pandamonium:update-reload-revision';
+const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const SUCCESS_STATUSES = new Set(['succeeded', 'recovered', 'rolled_back']);
 const PHASES = ['scan', 'verify', 'preserve', 'activate', 'complete'];
@@ -333,7 +335,11 @@ async function api(url, options = {}, timeoutMs = 8000) {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail || 'Update request failed');
+    if (!response.ok) {
+      const error = new Error(data.detail || 'Update request failed');
+      error.status = response.status;
+      throw error;
+    }
     return data;
   } catch (error) {
     if (error?.name === 'AbortError') throw new Error('Update status timed out');
@@ -356,17 +362,41 @@ function schedulePoll(delay = POLL_INTERVAL_MS) {
 async function pollStatus() {
   if (pollInFlight) return schedulePoll();
   pollInFlight = true;
+  const operationAtStart = lastOperation;
   try {
     const operation = await api('/api/update/status', {}, 5000);
+    if (operationAtStart !== lastOperation && ACTIVE_STATUSES.has(lastOperation.status)) {
+      return schedulePoll();
+    }
     renderOperation(operation);
     if (ACTIVE_STATUSES.has(operation.status)) {
       schedulePoll();
     } else if (SUCCESS_STATUSES.has(operation.status)) {
       try {
+        const previousCommit = lastRelease?.commit;
         const release = await api('/api/version', {}, 5000);
         renderRelease(release, { preserveOperation: true });
         renderOperation(operation);
         stopPolling();
+        if (previousCommit && release.commit && previousCommit !== release.commit) {
+          let reload = false;
+          try {
+            reload = sessionStorage.getItem(RELOAD_REVISION_KEY) !== release.commit;
+            if (reload) {
+              sessionStorage.setItem(RELOAD_REVISION_KEY, release.commit);
+              sessionStorage.setItem(
+                REOPEN_MODAL_KEY,
+                String(!el(MODAL_ID)?.classList.contains('hidden')),
+              );
+            }
+          } catch (_) {
+            reload = false;
+          }
+          if (reload) {
+            navigator.serviceWorker?.getRegistration?.().then(registration => registration?.update()).catch(() => {});
+            window.setTimeout(() => window.location.reload(), 250);
+          }
+        }
       } catch (_) {
         setPill('connecting', 'Reconnecting');
         setState('Reconnecting after update…', 'checking');
@@ -382,7 +412,20 @@ async function pollStatus() {
     } else {
       stopPolling();
     }
-  } catch (_) {
+  } catch (error) {
+    if (error?.status === 401 || error?.status === 403) {
+      stopPolling();
+      setPill('warning', 'Sign in required');
+      setState('Updater authentication expired', 'unknown');
+      setProgress({
+        state: 'error',
+        title: 'Sign in to continue',
+        detail: 'Sign in with an administrator account, then reopen the updater to resume status checks.',
+        progress: Number(lastOperation.progress) || 0,
+        phase: operationPhase(lastOperation.phase),
+      });
+      return;
+    }
     if (ACTIVE_STATUSES.has(lastOperation.status)) {
       setPill('connecting', 'Reconnecting');
       setState('Reconnecting after restart…', 'checking');
@@ -425,7 +468,10 @@ function openModal({ checkNow = false, opener = null } = {}) {
     }
   }, 60);
   if (lastRelease) renderRelease(lastRelease, { preserveOperation: ACTIVE_STATUSES.has(lastOperation.status) });
-  if (ACTIVE_STATUSES.has(lastOperation.status)) renderOperation(lastOperation);
+  if (ACTIVE_STATUSES.has(lastOperation.status)) {
+    renderOperation(lastOperation);
+    schedulePoll(0);
+  }
   if (checkNow) check();
 }
 
@@ -521,6 +567,12 @@ async function rollback() {
 async function init() {
   if (initialized) return;
   initialized = true;
+  let reloadRevision = null;
+  let reopenModal = false;
+  try {
+    reloadRevision = sessionStorage.getItem(RELOAD_REVISION_KEY);
+    reopenModal = sessionStorage.getItem(REOPEN_MODAL_KEY) === 'true';
+  } catch (_) {}
   el('sidebar-update-check')?.addEventListener('click', event => {
     openModal({
       checkNow: !ACTIVE_STATUSES.has(lastOperation.status),
@@ -555,6 +607,13 @@ async function init() {
   try {
     renderRelease(await api('/api/version', {}, 15000));
     await pollStatus();
+    if (reloadRevision && reloadRevision === lastRelease?.commit) {
+      try {
+        sessionStorage.removeItem(RELOAD_REVISION_KEY);
+        sessionStorage.removeItem(REOPEN_MODAL_KEY);
+      } catch (_) {}
+      if (reopenModal) openModal({ checkNow: false, opener: el('sidebar-update-check') });
+    }
   } catch (_) {
     setState('Release check unavailable', 'unknown');
   }
