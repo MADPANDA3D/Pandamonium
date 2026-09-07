@@ -214,6 +214,75 @@ def _linux_kernel_probe() -> dict:
     }
 
 
+def _json_content_chars(value: str) -> int:
+    """Return the rendered size of a JSON string excluding its quote pair."""
+    return len(json.dumps(value, ensure_ascii=False)) - 2
+
+
+def _truncate_to_json_budget(value: str, budget: int) -> str:
+    """Fit one string into a serialized-content budget without breaking JSON."""
+    if budget <= 0:
+        return ""
+    if _json_content_chars(value) <= budget:
+        return value
+
+    best = ""
+    low = 1
+    high = len(value)
+    while low <= high:
+        midpoint = (low + high) // 2
+        candidate = _truncate(value, midpoint)
+        if _json_content_chars(candidate) <= budget:
+            best = candidate
+            low = midpoint + 1
+        else:
+            high = midpoint - 1
+    return best
+
+
+def _render_bounded_snapshot(snapshot: dict) -> str:
+    """Share the output budget across probes while keeping complete JSON."""
+    rendered = json.dumps(snapshot, ensure_ascii=False, indent=2)
+    if len(rendered) <= _NETWORK_SNAPSHOT_CHARS:
+        return rendered
+
+    bounded = {
+        **snapshot,
+        "probes": {
+            name: dict(result)
+            for name, result in snapshot.get("probes", {}).items()
+        },
+    }
+    slots: list[tuple[dict, str, str, int]] = []
+    for result in bounded["probes"].values():
+        for key in ("output", "error"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                slots.append((result, key, value, _json_content_chars(value)))
+                result[key] = ""
+
+    empty_rendered = json.dumps(bounded, ensure_ascii=False, indent=2)
+    remaining_budget = max(0, _NETWORK_SNAPSHOT_CHARS - len(empty_rendered))
+    allocations = [0] * len(slots)
+    pending = set(range(len(slots)))
+    while pending:
+        fair_share = remaining_budget // len(pending)
+        satisfied = [index for index in pending if slots[index][3] <= fair_share]
+        if not satisfied:
+            for index in pending:
+                allocations[index] = fair_share
+            break
+        for index in satisfied:
+            demand = slots[index][3]
+            allocations[index] = demand
+            remaining_budget -= demand
+            pending.remove(index)
+
+    for allocation, (result, key, value, _demand) in zip(allocations, slots):
+        result[key] = _truncate_to_json_budget(value, allocation)
+    return json.dumps(bounded, ensure_ascii=False, indent=2)
+
+
 class NetworkInspectionTool:
     """Collect a bounded network snapshot without accepting commands or paths."""
 
@@ -248,10 +317,7 @@ class NetworkInspectionTool:
             snapshot["limitation"] = (
                 "No approved network probe completed successfully; report this limitation."
             )
-        rendered = _truncate(
-            json.dumps(snapshot, ensure_ascii=False, indent=2),
-            _NETWORK_SNAPSHOT_CHARS,
-        )
+        rendered = _render_bounded_snapshot(snapshot)
         # Return only the canonical formatter fields. Keeping the same snapshot
         # duplicated as additional structured keys would feed it to the model a
         # second time through format_tool_result.

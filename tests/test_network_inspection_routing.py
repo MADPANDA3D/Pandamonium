@@ -347,6 +347,7 @@ def test_combined_network_snapshot_has_one_bounded_formatter_payload(monkeypatch
             "command": " ".join(argv),
             "exit_code": 0,
             "output": "x" * 8_000,
+            "error": "e" * 8_000,
         }
 
     monkeypatch.setattr(network_tools, "_platform_family", lambda platform=None: "linux")
@@ -359,10 +360,21 @@ def test_combined_network_snapshot_has_one_bounded_formatter_payload(monkeypatch
 
     result = asyncio.run(network_tools.NetworkInspectionTool().execute("", {}))
     formatted = format_tool_result("inspect_network", result)
+    snapshot = json.loads(result["output"])
 
     assert set(result) == {"output", "exit_code"}
-    assert len(result["output"]) < 9_100
+    assert len(result["output"]) <= 9_000
     assert len(formatted) < 9_200
+    assert set(snapshot["probes"]) == {
+        "kernel_network",
+        "interfaces",
+        "ipv4_routes",
+        "ipv6_routes",
+        "neighbors",
+        "tailscale",
+    }
+    assert all(probe["output"] for probe in snapshot["probes"].values())
+    assert snapshot["probes"]["tailscale"]["error"]
     assert "**data:**" not in formatted
     assert formatted.count("```\n") == 1
 
