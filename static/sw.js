@@ -14,6 +14,7 @@ const UPDATE_RECONCILE_DELAY_MS = 650;
 const UPDATE_CLIENT_NAVIGATION_GRACE_MS = 750;
 const UPDATE_ACTIVE_STATES = new Set(['queued', 'running']);
 const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'recovered', 'rolled_back', 'failed']);
+const UPDATE_RETRYABLE_STATUS_CODES = new Set([408, 425, 429]);
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -115,7 +116,9 @@ async function waitForTerminalUpdate() {
       });
       if (response.status === 401 || response.status === 403 || response.redirected) return false;
       if (!response.ok) {
-        if (response.status >= 500) throw new Error('Update status unavailable');
+        if (response.status >= 500 || UPDATE_RETRYABLE_STATUS_CODES.has(response.status)) {
+          throw new Error('Update status unavailable');
+        }
         return false;
       }
       const operation = await response.json().catch(() => null);

@@ -245,6 +245,19 @@ for (const status of [401, 403]) {
   assert.deepEqual(authExpired.navigated, []);
 }
 
+for (const status of [408, 425, 429]) {
+  const retried = await activate(futureWorker, [
+    { status },
+    { status: 200, body: { status: 'succeeded' } },
+  ]);
+  assert.equal(retried.statusRequests, 2);
+  assert.equal(retried.navigated.length, 1);
+}
+
+const nonRetryable = await activate(futureWorker, [{ status: 400 }]);
+assert.equal(nonRetryable.statusRequests, 1);
+assert.deepEqual(nonRetryable.navigated, []);
+
 for (const terminal of ['failed', 'recovered', 'rolled_back']) {
   const result = await activate(futureWorker, [{ status: 200, body: { status: terminal } }]);
   assert.equal(result.statusRequests, 1);
