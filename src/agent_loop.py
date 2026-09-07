@@ -406,7 +406,11 @@ _DOMAIN_TOOL_MAP = {
 }
 
 
-def _clamp_network_inspection_tools(domains: set[str], tool_names: set[str]) -> set[str]:
+def _clamp_network_inspection_tools(
+    domains: set[str],
+    tool_names: set[str],
+    preserved_readers: Optional[set[str]] = None,
+) -> set[str]:
     """Limit network turns to ambient tools plus explicitly named domains."""
     if "network_inspection" not in domains:
         return set(tool_names)
@@ -415,6 +419,7 @@ def _clamp_network_inspection_tools(domains: set[str], tool_names: set[str]) -> 
     allowed = set(ALWAYS_AVAILABLE)
     for domain in domains:
         allowed.update(_DOMAIN_TOOL_MAP.get(domain, set()))
+    allowed.update(preserved_readers or set())
     return set(tool_names) & allowed
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -1257,6 +1262,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("files")
     non_host_network_patterns = (
         r"\b(?:neural|social|application|app|software|blockchain|graph|adversarial)\s+networks?\b",
+        r"\bcurrent\s+network\b.{0,40}\b(?:trends?|news|research|standards?|technolog\w*|developments?|market|landscape|best practices)\b",
         r"\bnetwork\s+(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b",
         r"\b(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b.{0,24}\bnetwork\b",
         r"\b(?:bluetooth|usb|audio|input|peripheral)\b.{0,32}\bdevices?\b",
@@ -1264,7 +1270,10 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     )
     network_subject_q = q
     for pattern in non_host_network_patterns:
-        network_subject_q = re.sub(pattern, " ", network_subject_q)
+        # A newline is a deliberate nonmatching boundary for the proximity
+        # expressions below, so removing one subject cannot join unrelated
+        # possessives and network nouns on either side.
+        network_subject_q = re.sub(pattern, "\n", network_subject_q)
 
     def has_current_network(*patterns: str) -> bool:
         return any(re.search(pattern, network_subject_q) for pattern in patterns)
@@ -3406,8 +3415,13 @@ async def stream_agent_loop(
             )
 
     if _relevant_tools is not None:
+        _network_upload_readers = (
+            {"read_file", "grep", "ls"} if uploaded_files else set()
+        )
         _network_clamped_tools = _clamp_network_inspection_tools(
-            _intent_domains, _relevant_tools
+            _intent_domains,
+            _relevant_tools,
+            preserved_readers=_network_upload_readers,
         )
         if _network_clamped_tools != _relevant_tools:
             logger.info(

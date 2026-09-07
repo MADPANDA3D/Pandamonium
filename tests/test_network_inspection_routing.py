@@ -151,9 +151,15 @@ def test_effective_current_network_tools_drop_retrieved_capabilities():
     compound = agent_loop._clamp_network_inspection_tools(
         {"network_inspection", "ui"}, retrieved
     )
+    uploaded = agent_loop._clamp_network_inspection_tools(
+        {"network_inspection"},
+        retrieved | {"grep", "ls", "read_file"},
+        preserved_readers={"grep", "ls", "read_file"},
+    )
 
     assert network_only == {"ask_user", "inspect_network"}
     assert compound == {"ask_user", "inspect_network", "ui_control"}
+    assert uploaded == {"ask_user", "grep", "inspect_network", "ls", "read_file"}
 
 
 @pytest.mark.asyncio
@@ -226,6 +232,30 @@ async def test_live_catalog_clamps_retrieved_and_admin_keyword_tools(monkeypatch
         for message in captured["messages"]
     )
 
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Compare this with my current network"}],
+        context_length=32_768,
+        max_rounds=1,
+        relevant_tools={"bash", "grep", "inspect_network", "ls", "read_file", "write_file"},
+        uploaded_files=[{
+            "id": "upload-network",
+            "name": "network.conf",
+            "path": "/tmp/network.conf",
+            "size": 12_000,
+        }],
+    ):
+        pass
+
+    upload_tool_names = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    assert {"grep", "inspect_network", "ls", "read_file"} <= upload_tool_names
+    assert upload_tool_names.isdisjoint({"bash", "write_file"})
+
 
 def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
     prompts = (
@@ -252,6 +282,24 @@ def test_mixed_network_subject_keeps_explicit_current_host_inspection():
 
     assert "network_inspection" in intent["domains"]
     assert "inspect_network" in _selected_tools(intent)
+
+
+def test_non_host_removal_does_not_join_unrelated_subject_fragments():
+    intent = agent_loop._classify_agent_request(
+        [], "Compare my neural network to a router"
+    )
+
+    assert "network_inspection" not in intent["domains"]
+    assert "inspect_network" not in _selected_tools(intent)
+
+
+def test_temporal_current_network_topic_keeps_web_routing():
+    intent = agent_loop._classify_agent_request(
+        [], "What are the current network security trends?"
+    )
+
+    assert intent["domains"] == {"web"}
+    assert "inspect_network" not in _selected_tools(intent)
 
 
 def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():
@@ -429,6 +477,17 @@ def test_fixed_linux_table_read_is_bounded(monkeypatch):
     assert rendered.endswith("... (truncated at fixed table budget)")
 
 
+def test_hostname_resolution_times_out_off_the_event_loop(monkeypatch):
+    async def never_returns(*args, **kwargs):
+        del args, kwargs
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(asyncio, "to_thread", never_returns)
+    monkeypatch.setattr(network_tools, "_HOSTNAME_LOOKUP_TIMEOUT_SECONDS", 0.01)
+
+    assert asyncio.run(network_tools._resolve_hostname_addresses()) == []
+
+
 def test_supported_native_platforms_have_fixed_read_only_probes():
     assert network_tools._platform_family("linux") == "linux"
     assert network_tools._platform_family("darwin") == "macos"
@@ -507,7 +566,11 @@ def test_combined_network_snapshot_has_one_bounded_formatter_payload(monkeypatch
     monkeypatch.setattr(
         network_tools,
         "_linux_kernel_probe",
-        lambda: {"available": True, "exit_code": 0, "output": "k" * 8_000},
+        lambda addresses=None: {
+            "available": True,
+            "exit_code": 0,
+            "output": "k" * 8_000,
+        },
     )
 
     result = asyncio.run(network_tools.NetworkInspectionTool().execute("", {}))

@@ -57,6 +57,7 @@ _POSIX_TRUSTED_EXECUTABLES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     },
 }
 _PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
+_HOSTNAME_LOOKUP_TIMEOUT_SECONDS: Final[float] = 2.0
 _PROBE_OUTPUT_CHARS: Final[int] = 1_200
 _PROBE_READ_CHUNK_BYTES: Final[int] = 4_096
 _LINUX_KERNEL_OUTPUT_CHARS: Final[int] = 2_200
@@ -215,13 +216,8 @@ def _read_linux_kernel_table(path: str) -> str:
         return ""
 
 
-def _linux_kernel_probe() -> dict:
-    """Collect the container-visible Linux network view without OS packages."""
-    try:
-        interfaces = [name for _index, name in socket.if_nameindex()]
-    except OSError:
-        interfaces = []
-
+def _lookup_hostname_addresses() -> list[str]:
+    """Resolve the local hostname in a worker; NSS may block on DNS retries."""
     addresses: set[str] = set()
     try:
         for item in socket.getaddrinfo(socket.gethostname(), None):
@@ -230,6 +226,25 @@ def _linux_kernel_probe() -> dict:
                 addresses.add(address)
     except (OSError, socket.gaierror):
         pass
+    return sorted(addresses)
+
+
+async def _resolve_hostname_addresses() -> list[str]:
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_lookup_hostname_addresses),
+            timeout=_HOSTNAME_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return []
+
+
+def _linux_kernel_probe(addresses: list[str] | None = None) -> dict:
+    """Collect the container-visible Linux network view without OS packages."""
+    try:
+        interfaces = [name for _index, name in socket.if_nameindex()]
+    except OSError:
+        interfaces = []
 
     kernel_tables = {
         name: output
@@ -239,7 +254,7 @@ def _linux_kernel_probe() -> dict:
     data = {
         "source": "python stdlib and fixed Linux kernel tables",
         "interfaces": interfaces,
-        "addresses": sorted(addresses),
+        "addresses": list(addresses or []),
         "kernel_tables": kernel_tables,
     }
     available = bool(interfaces or addresses or kernel_tables)
@@ -334,7 +349,8 @@ class NetworkInspectionTool:
         if platform == "linux":
             # python:3.x-slim does not ship iproute2. This fixed internal probe
             # keeps the official container useful without adding a dependency.
-            probes["kernel_network"] = _linux_kernel_probe()
+            addresses = await _resolve_hostname_addresses()
+            probes["kernel_network"] = _linux_kernel_probe(addresses)
         probes.update({
             name: await _run_probe(argv, platform)
             for name, argv in _platform_probes(platform)
