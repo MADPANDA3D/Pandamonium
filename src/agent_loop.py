@@ -1217,23 +1217,47 @@ def _is_contextual_retry_continuation(messages: List[Dict], text: str) -> bool:
     return bool(_COOKBOOK_CONTEXT_RE.search(recent))
 
 
-def _is_contextless_followup_reply(text: str) -> bool:
+def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
     """Return true for short answers that do not introduce a new task."""
     reply = str(text or "").strip()
     words = re.findall(r"[A-Za-z0-9_'-]+", reply)
     if not reply or len(reply) > 160 or len(words) > 16 or "?" in reply:
         return False
-    return not bool(re.match(
-        r"^(?:define|describe|explain|tell|search|write|create|map|compare|why|"
-        r"how|what|who|when|where|help|show|open|run|fix|debug|review|"
-        r"analy[sz]e)\b",
-        reply,
-        re.IGNORECASE,
-    )) and not bool(re.search(
+    if re.search(
         r"\b(?:instead|new (?:question|topic)|different topic|unrelated)\b",
         reply,
         re.IGNORECASE,
-    ))
+    ):
+        return False
+
+    leading = words[0].lower()
+    # A response may echo the action the assistant requested (for example,
+    # "Provide detailed components" after "Could you provide ...?"). Other
+    # leading commands are standalone requests and must not inherit old tool
+    # intent merely because they are short.
+    contextual_response_verbs = {
+        "choose", "clarify", "confirm", "describe", "enter", "include",
+        "name", "provide", "select", "share", "specify", "use",
+    }
+    if (
+        leading in contextual_response_verbs
+        and re.search(rf"\b{re.escape(leading)}\b", str(question or ""), re.IGNORECASE)
+    ):
+        return True
+
+    standalone_request_verbs = {
+        "add", "analyze", "analyse", "browse", "build", "calculate", "change",
+        "compare", "configure", "convert", "create", "debug", "define", "delete",
+        "describe", "draft", "edit", "explain", "find", "fix", "generate", "help",
+        "install", "list", "map", "open", "recommend", "remove", "review", "run",
+        "schedule", "search", "send", "set", "show", "summarize", "summarise",
+        "tell", "translate", "update", "upload", "visualize", "visualise", "write",
+    }
+    if leading in standalone_request_verbs:
+        return False
+    if len(words) > 1 and words[1].lower() in {"me", "us"}:
+        return False
+    return leading not in {"how", "what", "when", "where", "which", "who", "why"}
 
 
 def _assistant_requested_followup(messages: List[Dict], reply: str = "") -> bool:
@@ -1265,13 +1289,13 @@ def _assistant_requested_followup(messages: List[Dict], reply: str = "") -> bool
             text,
         )
         if specific:
-            return _is_contextless_followup_reply(reply)
+            return _is_contextless_followup_reply(reply, text)
         generic = re.search(
             r"\b(?:any specific|give me|tell me|"
             r"(?:could|can) you (?:please )?(?:provide|confirm|specify|share|describe|clarify))\b",
             text,
         )
-        return bool(generic) and _is_contextless_followup_reply(reply)
+        return bool(generic) and _is_contextless_followup_reply(reply, text)
     return False
 
 

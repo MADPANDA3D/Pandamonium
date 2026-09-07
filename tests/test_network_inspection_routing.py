@@ -86,6 +86,8 @@ def test_generic_network_followup_does_not_inherit_after_topic_switch():
         "Define a neural network",
         "Tell me about neural networks",
         "Describe a neural network",
+        "Summarize neural networks",
+        "Visualize a neural network",
     ):
         messages = [
             {"role": "user", "content": REPRO},
@@ -100,6 +102,17 @@ def test_generic_network_followup_does_not_inherit_after_topic_switch():
 
         assert intent["continuation"] is False
         assert "network_inspection" not in intent["domains"]
+
+    requested = [
+        {"role": "user", "content": REPRO},
+        {"role": "assistant", "content": "Could you provide the specific components?"},
+        {"role": "user", "content": "Provide detailed components"},
+    ]
+    requested_intent = agent_loop._classify_agent_request(
+        requested, "Provide detailed components"
+    )
+    assert requested_intent["continuation"] is True
+    assert "network_inspection" in requested_intent["domains"]
 
 
 def test_first_person_current_network_phrasing_mounts_only_inspection_tool():
