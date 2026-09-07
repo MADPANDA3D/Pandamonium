@@ -410,11 +410,13 @@ async function refreshApplicationWorker() {
     const registration = await navigator.serviceWorker?.getRegistration?.(scopeUrl);
     if (registration) {
       const previousWorker = registration.active;
-      const replacement = waitForWorkerReplacement(registration, previousWorker);
       try {
         await registration.update();
       } catch (_) {}
-      if (await replacement) return;
+      const candidate = registration.installing || registration.waiting;
+      if (candidate || registration.active !== previousWorker) {
+        if (await waitForWorkerReplacement(registration, previousWorker)) return;
+      }
     }
   } catch (_) {}
   window.location.reload();

@@ -114,8 +114,7 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     const refresh = updater.refreshApplicationWorker();
     await Promise.resolve();
     if (!discoverReplacement) {
-      assert.equal(timers.size, 1);
-      [...timers.values()][0]();
+      assert.equal(timers.size, 0, 'an unchanged worker must not wait on activation');
     }
     await refresh;
     return { registrationUrl, reloads, updateCalls: registration.updateCalls };
