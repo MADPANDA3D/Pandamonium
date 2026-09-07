@@ -425,8 +425,7 @@ _NAMED_FILE_TARGET_RE = (
 def _requests_named_file_access(text: str) -> bool:
     """Return whether an action names a disk file rather than a web URL."""
     q = str(text or "").lower()
-    if re.search(r"https?://|\bwww\.", q):
-        return False
+    q = re.sub(r"https?://\S+|\bwww\.\S+", " ", q)
     action = (
         r"(?:append|change|compare|create|delete|edit|fix|inspect|modify|open|"
         r"read|remove|rename|replace|review|save|update|write)"
@@ -441,6 +440,7 @@ def _requests_named_file_access(text: str) -> bool:
 def _requests_file_mutation(text: str) -> bool:
     """Return whether a network/file comparison explicitly asks for a write."""
     q = str(text or "").lower()
+    q = re.sub(r"https?://\S+|\bwww\.\S+", " ", q)
     mutation = (
         r"(?:append|change|create|delete|edit|fix|insert|modify|move|remove|"
         r"rename|replace|save|update|write)"
@@ -449,10 +449,17 @@ def _requests_file_mutation(text: str) -> bool:
         r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|"
         rf"{_NAMED_FILE_TARGET_RE})"
     )
-    return bool(
-        re.search(rf"\b{mutation}\b.{{0,48}}\b{target}\b", q)
-        or re.search(rf"\b{target}\b.{{0,48}}\b{mutation}\b", q)
+    action_boundary = (
+        rf"[,;!?]+|\.(?=\s|$)|\b(?:and\s+then|then|but|while)\b|"
+        rf"\band\s+(?=(?:then\s+)?(?:{mutation}|read|open|inspect|compare)\b)"
     )
+    for clause in re.split(action_boundary, q):
+        if (
+            re.search(rf"\b{mutation}\b.{{0,48}}\b{target}\b", clause)
+            or re.search(rf"\b{target}\b.{{0,48}}\b{mutation}\b", clause)
+        ):
+            return True
+    return False
 
 
 def _clamp_network_inspection_tools(
@@ -1253,10 +1260,9 @@ def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
             if word.lower() not in ignored
         }
         reply_terms = {word.lower() for word in words[1:] if word.lower() not in ignored}
-        # Very terse choices are answers by construction. Longer imperative
-        # replies must share a concrete subject with the question so an echoed
-        # verb cannot smuggle in a new task/topic.
-        return len(words) <= 3 or bool(question_terms & reply_terms)
+        # Imperative replies must share a concrete subject with the question;
+        # an echoed verb alone cannot smuggle in a new task or topic.
+        return bool(question_terms & reply_terms)
     if leading in contextual_response_verbs:
         return False
 

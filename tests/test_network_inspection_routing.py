@@ -91,6 +91,7 @@ def test_generic_network_followup_does_not_inherit_after_topic_switch():
         "Provide a summary of neural networks",
         "Use a neural network",
         "Draw a neural network",
+        "Provide weather forecast",
     ):
         messages = [
             {"role": "user", "content": REPRO},
@@ -356,6 +357,21 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     )
     assert not agent_loop._requests_named_file_access(
         "Inspect router.internal on my current network"
+    )
+    assert not agent_loop._requests_file_mutation(
+        "Remove it from my network, then read file router.conf"
+    )
+    assert agent_loop._requests_file_mutation(
+        "Edit router.conf, then inspect my current network"
+    )
+    url_compound = (
+        "Compare router.conf, https://example.com, and my current network"
+    )
+    url_intent = agent_loop._classify_agent_request([], url_compound)
+    assert {"files", "network_inspection", "web"} <= url_intent["domains"]
+    assert agent_loop._requests_named_file_access(url_compound)
+    assert not agent_loop._requests_named_file_access(
+        "Compare https://example.com/router.conf with my current network"
     )
 
     retrieved = {
