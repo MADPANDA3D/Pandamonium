@@ -129,6 +129,41 @@ def test_current_network_compound_request_keeps_explicit_extra_capability():
     assert intent["domains"] == {"network_inspection", "ui"}
 
 
+def test_effective_current_network_tools_drop_retrieved_capabilities():
+    retrieved = {
+        "ask_user",
+        "bash",
+        "inspect_network",
+        "python",
+        "ui_control",
+        "web_fetch",
+    }
+
+    network_only = agent_loop._clamp_network_inspection_tools(
+        {"network_inspection"}, retrieved
+    )
+    compound = agent_loop._clamp_network_inspection_tools(
+        {"network_inspection", "ui"}, retrieved
+    )
+
+    assert network_only == {"ask_user", "inspect_network"}
+    assert compound == {"ask_user", "inspect_network", "ui_control"}
+
+
+def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
+    prompts = (
+        "Explain this neural network topology",
+        "Show my social network connections",
+        "Describe my application network graph",
+        "Why can't my Bluetooth devices connect?",
+    )
+
+    for prompt in prompts:
+        intent = agent_loop._classify_agent_request([], prompt)
+        assert "network_inspection" not in intent["domains"]
+        assert "inspect_network" not in _selected_tools(intent)
+
+
 def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():
     schema = next(
         item["function"]

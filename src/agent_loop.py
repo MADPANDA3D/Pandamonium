@@ -405,6 +405,18 @@ _DOMAIN_TOOL_MAP = {
     "platform": {"get_runtime_status", "manage_mcp", "start_agent_task", "read_agent_task"},
 }
 
+
+def _clamp_network_inspection_tools(domains: set[str], tool_names: set[str]) -> set[str]:
+    """Limit network turns to ambient tools plus explicitly named domains."""
+    if "network_inspection" not in domains:
+        return set(tool_names)
+    from src.tool_index import ALWAYS_AVAILABLE
+
+    allowed = set(ALWAYS_AVAILABLE)
+    for domain in domains:
+        allowed.update(_DOMAIN_TOOL_MAP.get(domain, set()))
+    return set(tool_names) & allowed
+
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
     names = set(tool_names or set())
     rules = []
@@ -1243,7 +1255,12 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("sessions")
     if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b"):
         domains.add("files")
-    current_network_subject = has(
+    non_host_network_subject = has(
+        r"\b(?:neural|social|application|app|software|blockchain|graph|adversarial)\s+networks?\b",
+        r"\b(?:bluetooth|usb|audio|input|peripheral)\b.{0,32}\bdevices?\b",
+        r"\bdevices?\b.{0,32}\b(?:bluetooth|usb|audio|input|peripheral)\b",
+    )
+    current_network_subject = not non_host_network_subject and has(
         r"\b(?:my|our|this|current|local|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b",
         r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,32}\b(?:my|our|this|current|local|home)\b",
         r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
@@ -3368,6 +3385,15 @@ async def stream_agent_loop(
             )
 
     if _relevant_tools is not None:
+        _network_clamped_tools = _clamp_network_inspection_tools(
+            _intent_domains, _relevant_tools
+        )
+        if _network_clamped_tools != _relevant_tools:
+            logger.info(
+                "[agent-intent] current-network tool clamp removed=%s",
+                sorted(_relevant_tools - _network_clamped_tools),
+            )
+            _relevant_tools = _network_clamped_tools
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
     prep_timings["tool_selection"] = time.time() - _t1
