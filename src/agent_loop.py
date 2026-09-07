@@ -2963,6 +2963,11 @@ async def stream_agent_loop(
     _ody_qwen_finetune_model = (model or "").lower().startswith("odysseus-qwen3")
     _ody_memory_identity_turn = _looks_like_memory_identity_turn(_last_user)
     _intent = _classify_agent_request(messages, _last_user)
+    if set(_intent.get("domains") or set()) == {"network_inspection"}:
+        # Phrases such as "configured network" contain broad admin keywords,
+        # but a network-only turn must not re-add every management tool after
+        # the constrained retrieval clamp.
+        _needs_admin = False
     _low_signal_turn = bool(_intent.get("low_signal"))
     _casual_low_signal_turn = _is_casual_low_signal(_last_user)
     _existing_conversation = _user_turn_count(messages) > 1

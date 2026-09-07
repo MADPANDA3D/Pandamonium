@@ -3,6 +3,8 @@
 import asyncio
 import json
 
+import pytest
+
 from src import agent_loop
 from src.action_protocol import _READ_ONLY
 from src.agent_tools import TOOL_HANDLERS, TOOL_TAGS
@@ -148,6 +150,47 @@ def test_effective_current_network_tools_drop_retrieved_capabilities():
 
     assert network_only == {"ask_user", "inspect_network"}
     assert compound == {"ask_user", "inspect_network", "ui_control"}
+
+
+@pytest.mark.asyncio
+async def test_live_catalog_clamps_retrieved_and_admin_keyword_tools(monkeypatch):
+    captured = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"Inspected."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "How is my home network configured?"}],
+        context_length=32_768,
+        max_rounds=1,
+        relevant_tools={"bash", "python", "ui_control", "web_fetch"},
+    ):
+        pass
+
+    tool_names = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    assert "inspect_network" in tool_names
+    assert tool_names.isdisjoint({
+        "bash",
+        "python",
+        "ui_control",
+        "web_fetch",
+        "manage_endpoints",
+        "manage_settings",
+    })
+    assert all("manage_endpoints" not in message.get("content", "") for message in captured["messages"])
 
 
 def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
