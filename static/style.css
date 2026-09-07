@@ -9554,6 +9554,7 @@ body.fullwidth-chat .chat-history {
 
 .thinking-header {
   display: flex;
+  width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -9561,7 +9562,11 @@ body.fullwidth-chat .chat-history {
   cursor: pointer;
   user-select: none;
   background: color-mix(in srgb, var(--red) 8%, transparent);
+  border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--red) 20%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   transition: background 0.2s ease;
 }
 
@@ -9575,6 +9580,11 @@ body.fullwidth-chat .chat-history {
 
 .thinking-header:hover {
   background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.thinking-header:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: -2px;
 }
 
 .thinking-header-left {

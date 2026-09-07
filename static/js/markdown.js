@@ -395,7 +395,7 @@ function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) 
   const timeHtml = thinkingTime ? `<span style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;">${thinkingTime}s</span>` : '';
   return `
     <div class="thinking-section">
-      <div class="thinking-header" data-thinking-id="${id}">
+      <button type="button" class="thinking-header" data-thinking-id="${id}" aria-expanded="false" aria-controls="${id}">
         <div class="thinking-header-left">
           <span>View thinking process</span>
         </div>
@@ -403,7 +403,7 @@ function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) 
           ${timeHtml}
           <span class="thinking-toggle" id="${id}-toggle"></span>
         </div>
-      </div>
+      </button>
       <div class="thinking-content" id="${id}">
         <div class="thinking-content-inner">
           ${mdToHtml(thinkingContent)}
@@ -507,10 +507,10 @@ export function createCollapsible(contentMarkdown, label = 'details') {
   const safeLabel = escapeHtml(label);
   return `
     <div class="thinking-section">
-      <div class="thinking-header" data-thinking-id="${id}">
+      <button type="button" class="thinking-header" data-thinking-id="${id}" aria-expanded="false" aria-controls="${id}">
         <div class="thinking-header-left"><span data-label="${safeLabel}">View ${safeLabel}</span></div>
         <div style="display:flex;align-items:center;gap:6px;"><span class="thinking-toggle" id="${id}-toggle"></span></div>
-      </div>
+      </button>
       <div class="thinking-content" id="${id}"><div class="thinking-content-inner">${mdToHtml(contentMarkdown)}</div></div>
     </div>`;
 }
@@ -1039,6 +1039,7 @@ function _setThinkingExpanded(content, toggle, header, expanded) {
   if (!content || !toggle) return;
   content.classList.toggle('expanded', expanded);
   toggle.classList.toggle('expanded', expanded);
+  if (header) header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   const label_el = header?.querySelector('.thinking-header-left span');
   if (label_el) {
     const label = label_el.dataset.label || 'thinking process';
