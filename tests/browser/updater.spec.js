@@ -160,7 +160,7 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   await expect(page.locator('#styled-confirm-ok')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.locator('#styled-confirm-cancel')).toBeFocused();
-  await page.locator('#styled-confirm-cancel').click();
+  await page.keyboard.press('Escape');
   await expect(page.locator('#styled-confirm-overlay')).toBeHidden();
   await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-apply')).toBeFocused();
