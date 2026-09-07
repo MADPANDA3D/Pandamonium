@@ -11,6 +11,7 @@ const CACHE_NAME = 'pandamonium-v388';
 const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const UPDATE_RECONCILE_ATTEMPTS = 8;
 const UPDATE_RECONCILE_DELAY_MS = 650;
+const UPDATE_CLIENT_NAVIGATION_GRACE_MS = 750;
 const UPDATE_ACTIVE_STATES = new Set(['queued', 'running']);
 const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'recovered', 'rolled_back', 'failed']);
 
@@ -130,12 +131,17 @@ async function waitForTerminalUpdate() {
 async function reconcileUpdateClients() {
   if (!await waitForTerminalUpdate()) return;
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-  windows.forEach(client => {
+  const navigations = Promise.allSettled(windows.map(client => {
     const url = new URL(client.url);
     if (url.searchParams.get(UPDATE_RECONCILE_QUERY) === CACHE_NAME) return;
     url.searchParams.set(UPDATE_RECONCILE_QUERY, CACHE_NAME);
-    void client.navigate(url.href);
-  });
+    return client.navigate(url.href);
+  }));
+  // Chromium can keep an in-scope navigation pending until this replacement
+  // worker's activate event completes. Keep the worker alive long enough to
+  // submit and normally settle every navigation, but break that lifecycle
+  // dependency after a bounded grace period so activation cannot deadlock.
+  await Promise.race([navigations, wait(UPDATE_CLIENT_NAVIGATION_GRACE_MS)]);
 }
 
 async function activateWorker() {

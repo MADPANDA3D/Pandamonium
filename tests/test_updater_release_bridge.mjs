@@ -105,10 +105,23 @@ assert.deepEqual(
   { reloads: 1, updateCalls: 1 },
 );
 
-async function activate(workerSource, statusResponses) {
+async function activate(
+  workerSource,
+  statusResponses,
+  {
+    holdNavigation = false,
+    includeClosedClient = false,
+    manualNavigationGrace = false,
+  } = {},
+) {
   const listeners = {};
   const deleted = [];
   const navigated = [];
+  let activationPendingForNavigation = null;
+  let announceNavigation = null;
+  let releaseNavigation = null;
+  const navigationStarted = new Promise(resolve => { announceNavigation = resolve; });
+  const navigationGraceTimers = [];
   let claimed = 0;
   let statusRequests = 0;
   const responses = [...statusResponses];
@@ -118,6 +131,10 @@ async function activate(workerSource, statusResponses) {
     Promise,
     console,
     setTimeout: callback => {
+      if (manualNavigationGrace) {
+        navigationGraceTimers.push(callback);
+        return navigationGraceTimers.length;
+      }
       callback();
       return 0;
     },
@@ -147,18 +164,43 @@ async function activate(workerSource, statusResponses) {
       skipWaiting: () => {},
       clients: {
         claim: async () => { claimed += 1; },
-        matchAll: async () => [{
-          url: 'https://pandamonium.test/',
-          navigate: async url => { navigated.push(url); },
-        }],
+        matchAll: async () => [
+          ...(includeClosedClient ? [{
+            url: 'https://pandamonium.test/closed',
+            navigate: async () => { throw new Error('client closed'); },
+          }] : []),
+          {
+            url: 'https://pandamonium.test/',
+            navigate: async url => {
+              navigated.push(url);
+              announceNavigation();
+              if (holdNavigation) {
+                await new Promise(resolve => { releaseNavigation = resolve; });
+              }
+            },
+          },
+        ],
       },
     },
   };
   vm.runInNewContext(workerSource, context, { filename: 'static/sw.js' });
   let activation;
   listeners.activate({ waitUntil: promise => { activation = promise; } });
+  let activationSettled = false;
+  void activation.then(() => { activationSettled = true; });
+  if (holdNavigation) {
+    await navigationStarted;
+    assert.ok(releaseNavigation, 'replacement worker did not start client navigation');
+    activationPendingForNavigation = !activationSettled;
+    if (manualNavigationGrace) {
+      assert.equal(navigationGraceTimers.length, 1);
+      navigationGraceTimers[0]();
+      await activation;
+    }
+    releaseNavigation();
+  }
   await activation;
-  return { claimed, deleted, navigated, statusRequests };
+  return { activationPendingForNavigation, claimed, deleted, navigated, statusRequests };
 }
 
 const futureWorker = currentWorker.replace('pandamonium-v388', 'pandamonium-v389');
@@ -167,7 +209,8 @@ const recovered = await activate(futureWorker, [
   { status: 503 },
   { status: 200, body: { status: 'running' } },
   { status: 200, body: { status: 'succeeded' } },
-]);
+], { includeClosedClient: true });
+assert.equal(recovered.activationPendingForNavigation, null);
 assert.equal(recovered.claimed, 1);
 assert.deepEqual(recovered.deleted, ['pandamonium-v388']);
 assert.equal(recovered.statusRequests, 4);
@@ -176,6 +219,14 @@ assert.equal(
   new URL(recovered.navigated[0]).searchParams.get('pandamonium-update-reconcile'),
   'pandamonium-v389',
 );
+
+const boundedNavigation = await activate(
+  futureWorker,
+  [{ status: 200, body: { status: 'succeeded' } }],
+  { holdNavigation: true, manualNavigationGrace: true },
+);
+assert.equal(boundedNavigation.activationPendingForNavigation, true);
+assert.equal(boundedNavigation.navigated.length, 1);
 
 const bounded = await activate(futureWorker, Array.from({ length: 8 }, () => new Error('offline')));
 assert.equal(bounded.statusRequests, 8);
