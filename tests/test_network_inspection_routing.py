@@ -400,6 +400,27 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     assert {"files", "network_inspection"} <= mutation_intent["domains"]
     assert {"edit_file", "inspect_network", "write_file"} <= mutation
 
+    continuation_messages = [
+        {"role": "user", "content": "Edit this file to match my current network"},
+        {"role": "assistant", "content": "Should I proceed with that update?"},
+        {"role": "user", "content": "yes"},
+    ]
+    continuation_intent = agent_loop._classify_agent_request(
+        continuation_messages, "yes"
+    )
+    assert continuation_intent["continuation"] is True
+    assert agent_loop._requests_file_mutation(
+        continuation_intent["retrieval_query"]
+    )
+    continuation_tools = agent_loop._clamp_network_inspection_tools(
+        continuation_intent["domains"],
+        retrieved,
+        allow_file_mutation=agent_loop._requests_file_mutation(
+            continuation_intent["retrieval_query"]
+        ),
+    )
+    assert {"edit_file", "inspect_network", "write_file"} <= continuation_tools
+
 
 def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
     prompts = (
@@ -415,6 +436,7 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "What is a local area network?",
         "What does this network diagram mean?",
         "Explain this topology chart",
+        "What routes is my React app using?",
     )
 
     for prompt in prompts:

@@ -1432,7 +1432,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         )
         or has_current_network(
             rf"\bmy\s+{host_network_fact}\b",
-            rf"\b(?:which|what)\s+{host_network_fact}\b.{{0,24}}\b(?:am i|i(?:['’]?m| am)|using)\b",
+            rf"\b(?:which|what)\s+{host_network_fact}\b.{{0,24}}\b(?:am i|i(?:['’]?m| am))\b",
             rf"\b{host_network_fact}\b.{{0,16}}\b(?:of|for|on)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
             rf"\b{host_network_fact}\b.{{0,16}}\b(?:does|is|has|are)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
             rf"\b(?:this|my|our|local)\s+(?:computer|machine|host|system)(?:['’]s)?\b.{{0,16}}\b{host_network_fact}\b",
@@ -3566,11 +3566,16 @@ async def stream_agent_loop(
         _network_upload_readers = (
             {"read_file", "grep", "ls"} if uploaded_files else set()
         )
+        _network_file_intent_text = (
+            str(_intent.get("retrieval_query") or "")
+            if _intent.get("continuation")
+            else _last_user
+        )
         _network_clamped_tools = _clamp_network_inspection_tools(
             _intent_domains,
             _relevant_tools,
             preserved_readers=_network_upload_readers,
-            allow_file_mutation=_requests_file_mutation(_last_user),
+            allow_file_mutation=_requests_file_mutation(_network_file_intent_text),
         )
         if _network_clamped_tools != _relevant_tools:
             logger.info(
