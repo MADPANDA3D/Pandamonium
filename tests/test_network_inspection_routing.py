@@ -80,6 +80,23 @@ def test_network_scope_followups_keep_the_original_inspection_intent():
     assert "inspect_network" in _selected_tools(second_intent)
 
 
+def test_generic_network_followup_does_not_inherit_after_topic_switch():
+    switched = "Explain a neural network instead"
+    messages = [
+        {"role": "user", "content": REPRO},
+        {
+            "role": "assistant",
+            "content": "Could you provide the specific components?",
+        },
+        {"role": "user", "content": switched},
+    ]
+
+    intent = agent_loop._classify_agent_request(messages, switched)
+
+    assert intent["continuation"] is False
+    assert "network_inspection" not in intent["domains"]
+
+
 def test_first_person_current_network_phrasing_mounts_only_inspection_tool():
     prompts = (
         "Map the network I'm on",
@@ -106,6 +123,9 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         "What is my IP address?",
         "What is my default gateway?",
         "Which DNS server am I using?",
+        "What is the IP address of this computer?",
+        "What default gateway does this machine use?",
+        "What is this host's DNS server?",
         "What devices are on my home network?",
     )
 

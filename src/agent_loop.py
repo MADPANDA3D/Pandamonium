@@ -1163,7 +1163,25 @@ def _is_contextual_retry_continuation(messages: List[Dict], text: str) -> bool:
     return bool(_COOKBOOK_CONTEXT_RE.search(recent))
 
 
-def _assistant_requested_followup(messages: List[Dict]) -> bool:
+def _is_contextless_followup_reply(text: str) -> bool:
+    """Return true for short answers that do not introduce a new task."""
+    reply = str(text or "").strip()
+    words = re.findall(r"[A-Za-z0-9_'-]+", reply)
+    if not reply or len(reply) > 160 or len(words) > 16 or "?" in reply:
+        return False
+    return not bool(re.match(
+        r"^(?:explain|search|write|create|map|compare|why|how|what|who|when|"
+        r"where|help|show|open|run|fix|debug|review|analy[sz]e)\b",
+        reply,
+        re.IGNORECASE,
+    )) and not bool(re.search(
+        r"\b(?:instead|new (?:question|topic)|different topic|unrelated)\b",
+        reply,
+        re.IGNORECASE,
+    ))
+
+
+def _assistant_requested_followup(messages: List[Dict], reply: str = "") -> bool:
     """True when the previous assistant turn asked for missing task details.
 
     This allows natural replies like "buy milk" after "What would you like on
@@ -1186,13 +1204,19 @@ def _assistant_requested_followup(messages: List[Dict]) -> bool:
         text = str(content or "").lower()
         if "?" not in text:
             return False
-        return bool(re.search(
-            r"\b(what would you like|what should|what do you want|which one|which model|"
-            r"what.+(?:todo|to-do|list|document|email|model|server|item)|"
-            r"any specific|give me|tell me|"
+        specific = re.search(
+            r"\b(?:what would you like|what should|what do you want|which one|which model|"
+            r"what.+(?:todo|to-do|list|document|email|model|server|item))\b",
+            text,
+        )
+        if specific:
+            return _is_contextless_followup_reply(reply)
+        generic = re.search(
+            r"\b(?:any specific|give me|tell me|"
             r"(?:could|can) you (?:please )?(?:provide|confirm|specify|share|describe|clarify))\b",
             text,
-        ))
+        )
+        return bool(generic) and _is_contextless_followup_reply(reply)
     return False
 
 
@@ -1206,7 +1230,11 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     """
     text = str(last_user or "").strip()
     retry_continuation = _is_contextual_retry_continuation(messages, text)
-    continuation = _is_explicit_continuation(text) or _assistant_requested_followup(messages) or retry_continuation
+    continuation = (
+        _is_explicit_continuation(text)
+        or _assistant_requested_followup(messages, text)
+        or retry_continuation
+    )
     retrieval_query = _recent_context_for_retrieval(messages) if continuation else text
     q = retrieval_query.lower()
 
@@ -1290,6 +1318,9 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         or has_current_network(
             r"\bmy\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b",
             r"\b(?:which|what)\s+(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,24}\b(?:am i|i(?:['’]?m| am)|using)\b",
+            r"\b(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,16}\b(?:of|for|on)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
+            r"\b(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b.{0,16}\b(?:does|is|has)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
+            r"\b(?:this|my|our|local)\s+(?:computer|machine|host|system)(?:['’]s)?\b.{0,16}\b(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver)\b",
         )
     )
     if current_network_subject:
