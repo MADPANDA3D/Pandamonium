@@ -3909,6 +3909,7 @@ async def stream_agent_loop(
     # using tools — i.e. it was cut off, not finished. Drives a "Continue" event
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
+    _tool_budget_exceeded = None
 
     _approved_execution_pending = bool(approved_action)
     _web_synthesis_reserve = False
@@ -4856,6 +4857,7 @@ async def stream_agent_loop(
             # --- Tool budget check ---
             if max_tool_calls > 0 and total_tool_calls >= max_tool_calls:
                 yield f'data: {json.dumps({"type": "budget_exceeded", "limit": max_tool_calls, "used": total_tool_calls})}\n\n'
+                _tool_budget_exceeded = {"limit": max_tool_calls, "used": total_tool_calls}
                 budget_hit = True
                 break
 
@@ -5585,6 +5587,10 @@ async def stream_agent_loop(
         context_manifest=_final_context_manifest,
     )
     metrics["requested_model"] = requested_model
+    if _exhausted_rounds:
+        metrics["rounds_exhausted"] = max_rounds
+    if _tool_budget_exceeded:
+        metrics["tool_budget_exceeded"] = _tool_budget_exceeded
     _request_status = "succeeded"
     if _exhausted_rounds:
         _request_status = "degraded"

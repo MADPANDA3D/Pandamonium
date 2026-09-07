@@ -61,6 +61,14 @@ following maintained platform capabilities.
 - The server persists each conversation target. The left sidebar follows that
   target: conversational identities show only their dated chats, while a Codex
   worker shows its allowlisted projects with tasks loaded beneath each project.
+- Tool-using assistant turns keep visible reasoning, status, and tool activity
+  in one chronological disclosure above the final answer. The disclosure is
+  collapsed after completion and remains keyboard-accessible after reopening a
+  saved conversation.
+
+![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
+
+![Assistant turn disclosure on mobile](docs/images/chat-turn-disclosure-mobile.png)
 
 ### Governed agents, tools, and extensions
 
