@@ -109,6 +109,26 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         assert "inspect_network" in _selected_tools(intent)
 
 
+def test_current_network_only_request_discards_generic_web_and_ui_matches():
+    prompts = (
+        "Map my current network",
+        "Show the Wi-Fi I am connected to",
+    )
+
+    for prompt in prompts:
+        intent = agent_loop._classify_agent_request([], prompt)
+        assert intent["domains"] == {"network_inspection"}
+        assert _selected_tools(intent) == {"inspect_network"}
+
+
+def test_current_network_compound_request_keeps_explicit_extra_capability():
+    intent = agent_loop._classify_agent_request(
+        [], "Open the network panel and map my current network"
+    )
+
+    assert intent["domains"] == {"network_inspection", "ui"}
+
+
 def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():
     schema = next(
         item["function"]

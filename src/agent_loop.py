@@ -1251,6 +1251,18 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     )
     if current_network_subject:
         domains.add("network_inspection")
+        # "current" and "show" are generic web/UI routing terms above, but in
+        # a network-only request they describe the inspection rather than an
+        # additional capability. Keep explicit compound actions available.
+        if not has(
+            r"\b(?:search|web|google|look up|latest|news|weather|forecast|stock price|website|url)\b",
+            r"https?://|www\.",
+        ):
+            domains.discard("web")
+        if not has(
+            r"\b(?:open|toggle|turn on|turn off|disable|enable|switch model|change model|settings|theme|panel)\b"
+        ):
+            domains.discard("ui")
     if re.match(
         r"^\s*(?:(?:please|ok(?:ay)?|alright|right|sure|cool|great|thanks)[\s,.!-]+)*"
         r"(?:(?:execute|exec)\b\s+\S+|"
