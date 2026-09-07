@@ -154,6 +154,9 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         "Show my neighbor table",
         "What is the hostname of this computer?",
         "What is this machine's host name?",
+        "What is this computer's MAC address?",
+        "What physical address does this machine use?",
+        "What are your recommendations for my home network?",
         "What devices are on my home network?",
     )
 

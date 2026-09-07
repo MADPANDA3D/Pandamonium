@@ -1404,8 +1404,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         r"\b(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b.{0,24}\bnetwork\b",
         r"\b(?:bluetooth|usb|audio|input|peripheral)\b.{0,32}\bdevices?\b",
         r"\bdevices?\b.{0,32}\b(?:bluetooth|usb|audio|input|peripheral)\b",
-        r"\b(?:home\s+)?(?:network|routers?|wi[-‑–]?fi|wifi|mesh)\b.{0,24}\b(?:prices?|deals?|reviews?|recommendations?|for sale|to buy|shopping)\b",
-        r"\b(?:prices?|deals?|reviews?|recommendations?|buy|shopping)\b.{0,24}\b(?:home\s+)?(?:network|routers?|wi[-‑–]?fi|wifi|mesh)\b",
+        r"\b(?:home\s+)?(?:network|routers?|wi[-‑–]?fi|wifi|mesh)\b.{0,24}\b(?:prices?|deals?|for sale|to buy|shopping)\b",
+        r"\b(?:prices?|deals?|buy|shopping)\b.{0,24}\b(?:home\s+)?(?:network|routers?|wi[-‑–]?fi|wifi|mesh)\b",
         r"\b(?:network|topology)\s+(?:diagram|map|chart|drawing|image|figure)\b",
         r"\b(?:this|the|a|an)\s+(?:diagram|map|chart|drawing|image|figure)\s+(?:of\s+)?(?:the\s+)?(?:network|topology)\b",
     )
@@ -1420,7 +1420,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         return any(re.search(pattern, network_subject_q) for pattern in patterns)
 
     host_network_fact = (
-        r"(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver|"
+        r"(?:ip(?:v[46])?|ip address|mac(?: address)?|physical address|"
+        r"hardware address|default gateway|dns server|nameserver|"
         r"routes?|routing table|arp table|arp entries|neighbor table|"
         r"neighbor entries|network interfaces?|interface table|hostname|"
         r"host name|computer name|machine name)"
