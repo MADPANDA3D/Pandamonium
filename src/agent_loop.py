@@ -420,6 +420,15 @@ _NAMED_FILE_TARGET_RE = (
     r"htm|html|ini|java|js|json|jsx|kt|kts|lock|log|md|mjs|php|ps1|py|rb|rs|"
     r"scss|sh|sql|swift|toml|ts|tsv|tsx|txt|xml|yaml|yml|zsh)"
 )
+_PATH_FILE_TARGET_RE = (
+    r"(?<![\w])(?:"
+    r"(?:~|\.{1,2})?/(?:[\w.@+~-]+/)*[\w.@+~-]+|"
+    r"(?:[\w.@+-]+/)+[\w.@+~-]+|"
+    r"[a-z]:[\\/](?:[\w.@+ -]+[\\/])*[\w.@+ -]+|"
+    r"\.[a-z_][\w.-]*"
+    r")(?![\w])"
+)
+_FILE_TARGET_RE = rf"(?:\b{_NAMED_FILE_TARGET_RE}\b|{_PATH_FILE_TARGET_RE})"
 
 
 def _requests_named_file_access(text: str) -> bool:
@@ -430,10 +439,10 @@ def _requests_named_file_access(text: str) -> bool:
         r"(?:append|change|compare|create|delete|edit|fix|inspect|modify|open|"
         r"read|remove|rename|replace|review|save|update|write)"
     )
-    target = _NAMED_FILE_TARGET_RE
+    target = _FILE_TARGET_RE
     return bool(
-        re.search(rf"\b{action}\b.{{0,48}}\b{target}\b", q)
-        or re.search(rf"\b{target}\b.{{0,48}}\b{action}\b", q)
+        re.search(rf"\b{action}\b.{{0,48}}{target}", q)
+        or re.search(rf"{target}.{{0,48}}\b{action}\b", q)
     )
 
 
@@ -446,8 +455,8 @@ def _requests_file_mutation(text: str) -> bool:
         r"rename|replace|save|update|write)"
     )
     target = (
-        r"(?:file|folder|director(?:y|ies)|repo(?:sitory)?|"
-        rf"{_NAMED_FILE_TARGET_RE})"
+        r"(?:\b(?:file|folder|director(?:y|ies)|repo(?:sitory)?)\b|"
+        rf"{_FILE_TARGET_RE})"
     )
     action_boundary = (
         rf"[,;!?]+|\.(?=\s|$)|\b(?:and\s+also|and\s+then|after|before|then|but|while)\b|"
@@ -455,8 +464,8 @@ def _requests_file_mutation(text: str) -> bool:
     )
     for clause in re.split(action_boundary, q):
         if (
-            re.search(rf"\b{mutation}\b.{{0,48}}\b{target}\b", clause)
-            or re.search(rf"\b{target}\b.{{0,48}}\b{mutation}\b", clause)
+            re.search(rf"\b{mutation}\b.{{0,48}}{target}", clause)
+            or re.search(rf"{target}.{{0,48}}\b{mutation}\b", clause)
         ):
             return True
     return False
@@ -1428,8 +1437,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     )
     current_network_subject = (
         has_current_network(
-            r"\b(?:my|our|this|current|home)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b",
-            r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,32}\b(?:my|our|this|current|home)\b",
+            r"\b(?:my|our|this|current)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,32}\b(?:my|our|this|current)\b",
             r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
             r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
         )

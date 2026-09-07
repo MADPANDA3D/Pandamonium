@@ -342,6 +342,16 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     assert agent_loop._requests_file_mutation(
         "Update router.conf after inspecting my current network"
     )
+    extensionless_path = "Edit /etc/hosts after inspecting my current network"
+    extensionless_intent = agent_loop._classify_agent_request(
+        [], extensionless_path
+    )
+    assert {"files", "network_inspection"} <= extensionless_intent["domains"]
+    assert agent_loop._requests_named_file_access(extensionless_path)
+    assert agent_loop._requests_file_mutation(extensionless_path)
+    assert agent_loop._requests_named_file_access(
+        "Review ~/.ssh/config against my current network"
+    )
     assert not agent_loop._requests_file_mutation(
         "Read this file and compare it with my current network"
     )
@@ -437,6 +447,7 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "Help me set up my device",
         "Visualize my network graph data structure",
         "What is a local area network?",
+        "How does a home network work?",
         "What does this network diagram mean?",
         "Explain this topology chart",
         "What routes is my React app using?",
