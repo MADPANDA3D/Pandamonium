@@ -2494,6 +2494,18 @@ function initializeEventListeners() {
     const inputBottom = document.querySelector('.chat-input-bottom');
     const _isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
+    function visibleCornerControl() {
+      return [document.querySelector('.cmp-eval-wrap'), pickerWrap].find(control => {
+        if (!control) return false;
+        const style = getComputedStyle(control);
+        const rect = control.getBoundingClientRect();
+        return style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && rect.width > 0
+          && rect.height > 0;
+      });
+    }
+
     function checkPickerOverflow() {
       const w = inputTop.clientWidth;
       // Skip responsive collapse on mobile — keyboard open/close causes flicker.
@@ -2502,10 +2514,10 @@ function initializeEventListeners() {
       if (!_isMobile) {
         pickerWrap.classList.toggle('picker-auto-hidden', w < PICKER_HIDE_WIDTH);
       }
-      const pickerStyle = getComputedStyle(pickerWrap);
-      const pickerWidth = pickerStyle.display === 'none'
-        ? 0
-        : Math.ceil(pickerWrap.getBoundingClientRect().width) + 8;
+      const cornerControl = visibleCornerControl();
+      const pickerWidth = cornerControl
+        ? Math.ceil(cornerControl.getBoundingClientRect().width) + 8
+        : 0;
       inputTop.style.setProperty('--model-picker-clearance', `${pickerWidth}px`);
       if (_isMobile) return;
       // Keep a prompt inside the composer even when the picker crowds the row.
@@ -2522,6 +2534,19 @@ function initializeEventListeners() {
     const ro = new ResizeObserver(() => requestAnimationFrame(checkPickerOverflow));
     ro.observe(inputTop);
     ro.observe(pickerWrap);
+    // Compare mode replaces the model picker with an eval picker at runtime.
+    // Track that injected control and its removal without coupling the shared
+    // composer layout to compare's implementation lifecycle.
+    new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element && node.matches('.cmp-eval-wrap')) {
+            ro.observe(node);
+          }
+        }
+      }
+      requestAnimationFrame(checkPickerOverflow);
+    }).observe(inputTop, { childList: true });
     checkPickerOverflow();
   })();
 

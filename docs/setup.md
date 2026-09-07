@@ -164,8 +164,9 @@ HTML line breaks make otherwise valid flowchart source fail to parse.
 Requests to map the current network mount only a parameterless, owner-scoped
 inspection tool. On Linux, macOS, and Windows it collects the service's visible
 interfaces, routes, neighbors, and optional Tailscale status with fixed
-read-only probes; wider topology that those probes cannot observe must be
-reported as unverified.
+read-only probes. Linux containers also use Python and fixed kernel network
+tables when command-line probes are absent; wider topology that the running
+service cannot observe must be reported as unverified.
 
 ![Mermaid diagram, table, and branded links on desktop](images/chat-mermaid-rich-links-desktop.png)
 

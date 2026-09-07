@@ -94,6 +94,19 @@ def test_first_person_current_network_phrasing_mounts_only_inspection_tool():
         assert selected.isdisjoint(agent_loop._DOMAIN_TOOL_MAP["files"])
 
 
+def test_descriptive_current_network_phrasing_mounts_inspection_tool():
+    prompts = (
+        "Describe my network",
+        "How is my home network configured?",
+        "Is my network secure?",
+    )
+
+    for prompt in prompts:
+        intent = agent_loop._classify_agent_request([], prompt)
+        assert "network_inspection" in intent["domains"]
+        assert "inspect_network" in _selected_tools(intent)
+
+
 def test_inspection_tool_is_parameterless_owner_scoped_and_read_only():
     schema = next(
         item["function"]
@@ -180,6 +193,37 @@ def test_supported_native_platforms_have_fixed_read_only_probes():
         for command, paths in windows_paths.items()
         if command != "tailscale"
     )
+
+
+def test_linux_container_uses_internal_network_fallback_without_iproute2(monkeypatch):
+    async def unavailable_probe(argv, platform):
+        return {
+            "available": False,
+            "command": " ".join(argv),
+            "error": f"{argv[0]} is unavailable",
+        }
+
+    monkeypatch.setattr(network_tools, "_platform_family", lambda platform=None: "linux")
+    monkeypatch.setattr(network_tools, "_run_probe", unavailable_probe)
+    monkeypatch.setattr(network_tools.socket, "if_nameindex", lambda: [(1, "lo"), (2, "eth0")])
+    monkeypatch.setattr(
+        network_tools.socket,
+        "getaddrinfo",
+        lambda hostname, port: [(2, 1, 6, "", ("172.17.0.2", 0))],
+    )
+    monkeypatch.setattr(
+        network_tools,
+        "_read_linux_kernel_table",
+        lambda path: "Iface Destination Gateway" if path == "/proc/net/route" else "",
+    )
+
+    result = asyncio.run(network_tools.NetworkInspectionTool().execute("", {}))
+
+    assert result["inspection_available"] is True
+    assert result["successful_probes"] == ["kernel_network"]
+    assert result["probes"]["kernel_network"]["exit_code"] == 0
+    assert "eth0" in result["output"]
+    assert "172.17.0.2" in result["output"]
 
 
 def test_unavailable_inspection_requires_an_honest_limitation():

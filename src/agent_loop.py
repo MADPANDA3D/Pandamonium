@@ -1249,9 +1249,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
         r"\b(?:network|lan|wi[-‑–]?fi|wifi|topology|subnet|router|devices?)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
     )
-    if current_network_subject and has(
-        r"\b(?:make|create|draw|diagram|map|show|what|inspect|check|discover|scan|list|overview|components?)\b"
-    ):
+    if current_network_subject:
         domains.add("network_inspection")
     if re.match(
         r"^\s*(?:(?:please|ok(?:ay)?|alright|right|sure|cool|great|thanks)[\s,.!-]+)*"

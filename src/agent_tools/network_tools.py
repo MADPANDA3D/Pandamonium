@@ -56,6 +56,13 @@ _POSIX_TRUSTED_EXECUTABLES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
 }
 _PROBE_TIMEOUT_SECONDS: Final[float] = 5.0
 _PROBE_OUTPUT_CHARS: Final[int] = 8_000
+_LINUX_KERNEL_TABLE_CHARS: Final[int] = 2_000
+_LINUX_KERNEL_TABLES: Final[tuple[tuple[str, str], ...]] = (
+    ("interfaces", "/proc/net/dev"),
+    ("ipv4_routes", "/proc/net/route"),
+    ("ipv6_routes", "/proc/net/ipv6_route"),
+    ("neighbors", "/proc/net/arp"),
+)
 
 
 def _platform_family(platform: str | None = None) -> str:
@@ -154,6 +161,56 @@ async def _run_probe(argv: tuple[str, ...], platform: str) -> dict:
     return result
 
 
+def _read_linux_kernel_table(path: str) -> str:
+    """Read one fixed procfs network table with bounded output."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as table:
+            return _truncate(table.read(), _LINUX_KERNEL_TABLE_CHARS).strip()
+    except OSError:
+        return ""
+
+
+def _linux_kernel_probe() -> dict:
+    """Collect the container-visible Linux network view without OS packages."""
+    try:
+        interfaces = [
+            {"index": index, "name": name}
+            for index, name in socket.if_nameindex()
+        ]
+    except OSError:
+        interfaces = []
+
+    addresses: set[str] = set()
+    try:
+        for item in socket.getaddrinfo(socket.gethostname(), None):
+            address = item[4][0]
+            if address:
+                addresses.add(address)
+    except (OSError, socket.gaierror):
+        pass
+
+    kernel_tables = {
+        name: output
+        for name, path in _LINUX_KERNEL_TABLES
+        if (output := _read_linux_kernel_table(path))
+    }
+    data = {
+        "source": "python stdlib and fixed Linux kernel tables",
+        "interfaces": interfaces,
+        "addresses": sorted(addresses),
+        "kernel_tables": kernel_tables,
+    }
+    available = bool(interfaces or addresses or kernel_tables)
+    return {
+        "available": available,
+        "exit_code": 0 if available else 1,
+        "output": _truncate(
+            json.dumps(data, ensure_ascii=False, indent=2), _PROBE_OUTPUT_CHARS
+        ),
+        **({} if available else {"error": "Linux kernel network data is unavailable"}),
+    }
+
+
 class NetworkInspectionTool:
     """Collect a bounded network snapshot without accepting commands or paths."""
 
@@ -161,10 +218,15 @@ class NetworkInspectionTool:
         del content, ctx  # Calls are intentionally parameterless and owner-scoped upstream.
 
         platform = _platform_family()
-        probes = {
+        probes = {}
+        if platform == "linux":
+            # python:3.x-slim does not ship iproute2. This fixed internal probe
+            # keeps the official container useful without adding a dependency.
+            probes["kernel_network"] = _linux_kernel_probe()
+        probes.update({
             name: await _run_probe(argv, platform)
             for name, argv in _platform_probes(platform)
-        }
+        })
         successful = [
             name
             for name, result in probes.items()

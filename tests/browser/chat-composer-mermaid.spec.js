@@ -134,6 +134,41 @@ test('touch layout keeps picker clearance without responsive keyboard flicker', 
   await context.close();
 });
 
+test('composer reserves the injected Compare eval picker width', async ({ page }) => {
+  await mockApp(page);
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.goto('/static/index.html');
+
+  const textarea = page.locator('#message:visible');
+  await textarea.fill('Compare prompts must stay clear of the replacement picker.');
+  await page.locator('.chat-input-top:visible').evaluate(inputTop => {
+    inputTop.querySelector('#model-picker-wrap').style.display = 'none';
+    const comparePicker = document.createElement('div');
+    comparePicker.className = 'cmp-eval-wrap';
+    comparePicker.style.width = '180px';
+    comparePicker.style.height = '28px';
+    inputTop.appendChild(comparePicker);
+  });
+
+  await expect.poll(async () => page.locator('.chat-input-top:visible').evaluate(inputTop => {
+    const ta = inputTop.querySelector('#message');
+    return parseFloat(getComputedStyle(ta).paddingRight) || 0;
+  })).toBeGreaterThanOrEqual(188);
+  const clearsCompare = await page.locator('.chat-input-top:visible').evaluate(inputTop => {
+    const ta = inputTop.querySelector('#message');
+    const picker = inputTop.querySelector('.cmp-eval-wrap');
+    const paddingRight = parseFloat(getComputedStyle(ta).paddingRight) || 0;
+    return ta.getBoundingClientRect().right - paddingRight <= picker.getBoundingClientRect().left - 7;
+  });
+  expect(clearsCompare).toBe(true);
+
+  await page.locator('.chat-input-top:visible').evaluate(inputTop => {
+    inputTop.querySelector('.cmp-eval-wrap').remove();
+    inputTop.querySelector('#model-picker-wrap').style.display = '';
+  });
+  await assertComposerClearsPicker(page);
+});
+
 async function renderDiagram(page, source) {
   return page.evaluate(async definition => {
     const chatRenderer = await import('/static/js/chatRenderer.js');
