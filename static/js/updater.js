@@ -481,6 +481,10 @@ async function update() {
     renderOperation(operation);
     schedulePoll(250);
   } catch (error) {
+    if (error instanceof Error && error.message.includes('available release changed')) {
+      await check();
+      return;
+    }
     setPill('error', 'Request failed');
     setProgress({
       state: 'error',

@@ -22,6 +22,7 @@ function shellRoutes(page, handler) {
 test('updater dialog survives the restart gap and reconciles the installed version', async ({ page }) => {
   let checks = 0;
   let applies = 0;
+  let applyAttempts = 0;
   let rollbacks = 0;
   let statusPolls = 0;
   let finishCheck;
@@ -62,8 +63,15 @@ test('updater dialog survives the restart gap and reconciles the installed versi
       });
     }
     if (path === '/api/update/apply') {
-      applies += 1;
+      applyAttempts += 1;
       expect(route.request().postDataJSON()).toEqual({ version: '1.0.11', commit: NEW_COMMIT });
+      if (applyAttempts === 1) {
+        return route.fulfill({
+          status: 409,
+          json: { detail: 'available release changed; check again before approving' },
+        });
+      }
+      applies += 1;
       return route.fulfill({ json: {
         status: 'queued', phase: 'queued', progress: 0, message: 'Update queued',
         rollback_available: false,
@@ -168,6 +176,14 @@ test('updater dialog survives the restart gap and reconciles the installed versi
 
   await page.locator('#updater-apply').click();
   await page.locator('#styled-confirm-ok').click();
+  await expect(page.locator('#updater-progress-title')).toHaveText('Scanning stable releases');
+  await expect.poll(() => checks).toBe(2);
+  finishCheck();
+  await expect(page.locator('#updater-apply')).toBeVisible();
+  expect(applies).toBe(0);
+
+  await page.locator('#updater-apply').click();
+  await page.locator('#styled-confirm-ok').click();
   await expect(page.locator('#updater-progress-title')).toContainText('full data backup');
   await expect(page.locator('#updater-progress-percent')).toHaveText('40%');
   await expect(page.locator('#updater-progress-fill')).toHaveCSS('width', /.+/);
@@ -178,7 +194,7 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   await expect(page.locator('#sidebar-update-check')).toHaveText('View update progress');
   await page.locator('#sidebar-update-check').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
-  expect(checks).toBe(1);
+  expect(checks).toBe(2);
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'reconnecting');
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', { timeout: 7000 });
   await expect(page.locator('#updater-installed-version')).toHaveText('v1.0.11');
