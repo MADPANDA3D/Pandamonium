@@ -647,6 +647,71 @@ test('page polling stops after a nonretryable 400 response', async ({ page }) =>
   expect(statusPolls).toBe(2);
 });
 
+test('successful update still reloads when session storage is unavailable', async ({ page }) => {
+  let applied = false;
+  let applyCalls = 0;
+  let documentLoads = 0;
+  await page.addInitScript(() => {
+    const originalGetItem = Storage.prototype.getItem;
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.getItem = function getItem(key) {
+      if (this === sessionStorage && String(key).startsWith('pandamonium:update-')) {
+        throw new DOMException('storage blocked', 'SecurityError');
+      }
+      return originalGetItem.call(this, key);
+    };
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (this === sessionStorage && String(key).startsWith('pandamonium:update-')) {
+        throw new DOMException('storage blocked', 'SecurityError');
+      }
+      return originalSetItem.call(this, key, value);
+    };
+    navigator.serviceWorker.getRegistration = async () => null;
+  });
+  page.on('request', request => {
+    if (request.resourceType() === 'document') documentLoads += 1;
+  });
+  await shellRoutes(page, (route, path) => {
+    if (path === '/api/version') return route.fulfill({ json: {
+      version: applied ? '1.0.23' : '1.0.22',
+      commit: applied ? NEW_COMMIT : OLD_COMMIT,
+      release: applied ? '1.0.23-22222222' : '1.0.22-11111111',
+      latest_version: applied ? '1.0.23' : '1.0.22',
+      update_available: false, update_status: 'current', compatible: true, can_update: false,
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'current', message: null },
+    } });
+    if (path === '/api/update/check') return route.fulfill({ json: {
+      version: '1.0.22', commit: OLD_COMMIT, release: '1.0.22-11111111',
+      latest_version: '1.0.23', latest_commit: NEW_COMMIT,
+      update_available: true, update_status: 'available', compatible: true, can_update: true,
+      installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
+      release_check: { status: 'available', message: null },
+    } });
+    if (path === '/api/update/apply') {
+      applyCalls += 1;
+      applied = true;
+      return route.fulfill({ json: {
+        status: 'queued', phase: 'queued', progress: 0, message: 'Update queued',
+        rollback_available: false,
+      } });
+    }
+    if (path === '/api/update/status') return route.fulfill({ json: applied ? {
+      status: 'succeeded', phase: 'complete', progress: 100,
+      message: 'Updated to v1.0.23', rollback_available: true,
+    } : { status: 'idle' } });
+    return null;
+  });
+
+  await page.goto('/static/index.html');
+  await page.locator('#sidebar-update-check').click();
+  await page.locator('#updater-apply').click();
+  await page.locator('#styled-confirm-ok').click();
+  await expect.poll(() => documentLoads).toBe(2);
+  await expect(page.locator('#updater-progress-title')).toHaveText('Update installed');
+  expect(applyCalls).toBe(1);
+});
+
 test('host-managed container keeps provenance and separates a GitHub outage from update mode', async ({ page }) => {
   let checks = 0;
   const base = {

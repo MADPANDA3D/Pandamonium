@@ -191,7 +191,10 @@ async function activate(
         ok: response.status >= 200 && response.status < 300,
         status: response.status,
         redirected: Boolean(response.redirected),
-        json: async () => response.body,
+        json: async () => {
+          if (response.malformed) throw new SyntaxError('malformed JSON');
+          return response.body;
+        },
       };
     },
     self: {
@@ -273,6 +276,13 @@ const timedOut = await activate(futureWorker, [
 ]);
 assert.equal(timedOut.statusRequests, 2);
 assert.equal(timedOut.navigated.length, 1);
+
+const malformed = await activate(futureWorker, [
+  { status: 200, malformed: true },
+  { status: 200, body: { status: 'succeeded' } },
+]);
+assert.equal(malformed.statusRequests, 2);
+assert.equal(malformed.navigated.length, 1);
 
 for (const status of [401, 403]) {
   const authExpired = await activate(futureWorker, [{ status }]);

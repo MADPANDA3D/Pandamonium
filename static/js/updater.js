@@ -463,7 +463,7 @@ async function pollStatus(workerReconciled = false) {
               );
             }
           } catch (_) {
-            reload = false;
+            reload = true;
           }
           if (reload) {
             void refreshApplicationWorker();

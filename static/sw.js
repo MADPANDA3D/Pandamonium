@@ -125,8 +125,10 @@ async function waitForTerminalUpdate() {
         }
         return false;
       }
-      const operation = await response.json().catch(() => null);
-      if (!operation) return false;
+      const operation = await response.json();
+      if (!operation || typeof operation !== 'object') {
+        throw new Error('Invalid update status response');
+      }
       if (UPDATE_TERMINAL_STATES.has(operation?.status)) return true;
       if (!UPDATE_ACTIVE_STATES.has(operation?.status)) return false;
     } catch (_) {
