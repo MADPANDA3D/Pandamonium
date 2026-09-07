@@ -157,9 +157,24 @@ never disappears. Markdown tables remain horizontally scrollable on narrow
 screens, and GitHub, Instagram, and Facebook links receive recognizable service
 icons without changing their destinations.
 
+The composer reserves the visible model selector's measured width on desktop,
+split-pane, narrow, and touch layouts. Mermaid rendering also performs one
+bounded retry with quoted node labels when generated punctuation, Unicode, or
+HTML line breaks make otherwise valid flowchart source fail to parse.
+Requests to map the current network mount only a parameterless, owner-scoped
+inspection tool. On Linux, macOS, and Windows it collects the service's visible
+interfaces, routes, neighbors, and optional Tailscale status with fixed
+read-only probes. Linux containers also use Python and fixed kernel network
+tables when command-line probes are absent; wider topology that the running
+service cannot observe must be reported as unverified.
+
 ![Mermaid diagram, table, and branded links on desktop](images/chat-mermaid-rich-links-desktop.png)
 
 ![Mermaid diagram, table, and branded links on mobile](images/chat-mermaid-rich-links-mobile.png)
+
+![Verified composer and Mermaid follow-ups on desktop](images/chat-composer-mermaid-followups-desktop.png)
+
+![Verified composer and Mermaid follow-ups on mobile](images/chat-composer-mermaid-followups-mobile.png)
 
 ### Atomic native Linux updates
 

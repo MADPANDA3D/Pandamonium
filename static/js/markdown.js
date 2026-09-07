@@ -880,6 +880,24 @@ export function renderContent(content) {
   return content;
 }
 
+function quoteMermaidNodeLabels(definition) {
+  return String(definition || '').replace(
+    /(\b[A-Za-z_][\w-]*[ \t]*)\[([^\[\]]+)\]/g,
+    (match, node, label) => {
+      const trimmed = label.trim();
+      if (!trimmed || (trimmed.startsWith('"') && trimmed.endsWith('"'))) return match;
+      const first = trimmed[0];
+      const last = trimmed[trimmed.length - 1];
+      const shapedLabel = (
+        (first === '(' && last === ')')
+        || ((first === '/' || first === '\\') && (last === '/' || last === '\\'))
+      );
+      if (shapedLabel) return match;
+      return `${node}["${label.replace(/"/g, '&quot;')}"]`;
+    },
+  );
+}
+
 /**
  * Initialize any unprocessed Mermaid diagrams in a container (or whole document)
  */
@@ -898,7 +916,18 @@ async function renderMermaid(container) {
     try {
       const definition = source.textContent || '';
       const renderId = `${frame.id || 'mermaid'}-svg`;
-      const result = await window.mermaid.render(renderId, definition);
+      let result;
+      try {
+        result = await window.mermaid.render(renderId, definition);
+      } catch (originalError) {
+        const repaired = quoteMermaidNodeLabels(definition);
+        if (repaired === definition) throw originalError;
+        try {
+          result = await window.mermaid.render(`${renderId}-repaired`, repaired);
+        } catch (_) {
+          throw originalError;
+        }
+      }
       if (!result || !/^\s*<svg[\s>]/i.test(result.svg || '')) {
         throw new Error('Mermaid returned no SVG');
       }

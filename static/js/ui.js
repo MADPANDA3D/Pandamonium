@@ -526,7 +526,8 @@ export function getAutoScroll() {
  * Auto-resize textarea based on content
  */
 export function autoResize(textarea) {
-  const lineHeight = parseInt(getComputedStyle(textarea).lineHeight);
+  const textareaStyle = getComputedStyle(textarea);
+  const lineHeight = parseInt(textareaStyle.lineHeight);
   const isMobile = window.innerWidth <= 768;
   const maxHeight = isMobile ? 150 : lineHeight * 8;
 
@@ -545,6 +546,11 @@ export function autoResize(textarea) {
     textarea.parentNode.appendChild(clone);
     textarea._resizeClone = clone;
   }
+  // Computed styles copied during clone creation become fixed inline values.
+  // Refresh the dimensions that can change with responsive composer controls.
+  clone.style.paddingLeft = textareaStyle.paddingLeft;
+  clone.style.paddingRight = textareaStyle.paddingRight;
+  clone.style.boxSizing = textareaStyle.boxSizing;
   clone.style.width = textarea.offsetWidth + 'px';
   clone.value = textarea.value;
   clone.style.height = '0';

@@ -34,6 +34,7 @@ _TEXT_ARGUMENTS = {
 _READ_ONLY = frozenset(
     {
         "get_workspace",
+        "inspect_network",
         "read_file",
         "grep",
         "glob",

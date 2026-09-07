@@ -261,6 +261,7 @@ _AGENT_RULES = """\
 - Only use tools when needed. For casual messages like "test", "yo", "thanks", answer normally.
 - Treat user-owned Pandamonium state as application data: use the owner-scoped app tools and APIs exposed for the turn. Never hunt for it with filesystem tools or guess server paths.
 - Never invent Pandamonium's implementation, runtime, storage, protocols, workers, or available capabilities. Verify those claims with the runtime/catalog tools supplied for the turn; if the required evidence is unavailable, clearly say which details are unverified.
+- Claims about the user's current host or network topology require a read-only inspection tool result in this turn. If inspection is unavailable or fails, state the limitation and do not fill gaps with a typical setup or memory.
 - If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
 - After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
 - After a tool fails, retry with a concrete fix or state what is blocking you.
@@ -275,6 +276,7 @@ _API_AGENT_RULES = """\
 - You MUST use tools to take action; do not claim you did something without a tool result.
 - Treat user-owned Pandamonium state as application data: use the owner-scoped app tools and APIs exposed for the turn. Never hunt for it with filesystem tools or guess server paths.
 - Never invent Pandamonium's implementation, runtime, storage, protocols, workers, or available capabilities. Verify those claims with the runtime/catalog tools supplied for the turn; if the required evidence is unavailable, clearly say which details are unverified.
+- Claims about the user's current host or network topology require a read-only inspection tool result in this turn. If inspection is unavailable or fails, state the limitation and do not fill gaps with a typical setup or memory.
 - If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
 - Keep answers concise unless the user asks for depth.
 - After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
@@ -348,6 +350,10 @@ _DOMAIN_RULES = {
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+    "network_inspection": """\
+## Network inspection rules
+- Use `inspect_network` before making claims or diagrams about the current network. It runs only fixed, bounded, read-only probes and cannot accept commands or paths.
+- Distinguish the running service's visible network view from any wider topology that the probes cannot observe. If a probe is unavailable or incomplete, state that limitation instead of guessing.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -391,12 +397,100 @@ _DOMAIN_TOOL_MAP = {
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
+    "network_inspection": {"inspect_network"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"manage_mcp", "api_call"},
     "workers": {"get_runtime_status", "start_agent_task", "read_agent_task"},
     "platform": {"get_runtime_status", "manage_mcp", "start_agent_task", "read_agent_task"},
 }
+
+_NETWORK_FILE_MUTATION_TOOLS = {
+    "append_file",
+    "bash",
+    "edit_file",
+    "manage_bg_jobs",
+    "python",
+    "replace_file",
+    "run_shell",
+    "write_file",
+}
+_NAMED_FILE_TARGET_RE = (
+    r"[\w.-]+\.(?:bash|c|cc|cfg|cjs|conf|cpp|cs|css|csv|env|fish|go|h|hpp|"
+    r"htm|html|ini|java|js|json|jsx|kt|kts|lock|log|md|mjs|php|ps1|py|rb|rs|"
+    r"scss|sh|sql|swift|toml|ts|tsv|tsx|txt|xml|yaml|yml|zsh)"
+)
+_PATH_FILE_TARGET_RE = (
+    r"(?<![\w])(?:"
+    r"(?:~|\.{1,2})?/(?:[\w.@+~-]+/)*[\w.@+~-]+|"
+    r"(?:[\w.@+-]+/)+[\w.@+~-]+|"
+    r"[a-z]:[\\/](?:[\w.@+ -]+[\\/])*[\w.@+ -]+|"
+    r"\.[a-z_][\w.-]*"
+    r")(?![\w])"
+)
+_FILE_TARGET_RE = rf"(?:\b{_NAMED_FILE_TARGET_RE}\b|{_PATH_FILE_TARGET_RE})"
+
+
+def _requests_named_file_access(text: str) -> bool:
+    """Return whether an action names a disk file rather than a web URL."""
+    q = str(text or "").lower()
+    q = re.sub(r"https?://\S+|\bwww\.\S+", " ", q)
+    action = (
+        r"(?:append|change|compare|create|delete|edit|fix|inspect|modify|open|"
+        r"read|remove|rename|replace|review|save|update|write)"
+    )
+    target = _FILE_TARGET_RE
+    return bool(
+        re.search(rf"\b{action}\b.{{0,48}}{target}", q)
+        or re.search(rf"{target}.{{0,48}}\b{action}\b", q)
+    )
+
+
+def _requests_file_mutation(text: str) -> bool:
+    """Return whether a network/file comparison explicitly asks for a write."""
+    q = str(text or "").lower()
+    q = re.sub(r"https?://\S+|\bwww\.\S+", " ", q)
+    mutation = (
+        r"(?:append|change|create|delete|edit|fix|insert|modify|move|remove|"
+        r"rename|replace|save|update|write)"
+    )
+    target = (
+        r"(?:\b(?:file|folder|director(?:y|ies)|repo(?:sitory)?)\b|"
+        rf"{_FILE_TARGET_RE})"
+    )
+    action_boundary = (
+        rf"[,;!?]+|\.(?=\s|$)|\b(?:and\s+also|and\s+then|after|before|then|but|while)\b|"
+        rf"\band\s+(?=(?:then\s+)?(?:{mutation}|read|open|inspect|compare)\b)"
+    )
+    for clause in re.split(action_boundary, q):
+        if (
+            re.search(rf"\b{mutation}\b.{{0,48}}{target}", clause)
+            or re.search(rf"{target}.{{0,48}}\b{mutation}\b", clause)
+        ):
+            return True
+    return False
+
+
+def _clamp_network_inspection_tools(
+    domains: set[str],
+    tool_names: set[str],
+    preserved_readers: Optional[set[str]] = None,
+    *,
+    allow_file_mutation: bool = False,
+) -> set[str]:
+    """Limit network turns to ambient tools plus explicitly named domains."""
+    if "network_inspection" not in domains:
+        return set(tool_names)
+    from src.tool_index import ALWAYS_AVAILABLE
+
+    allowed = set(ALWAYS_AVAILABLE)
+    for domain in domains:
+        allowed.update(_DOMAIN_TOOL_MAP.get(domain, set()))
+    allowed.update(preserved_readers or set())
+    selected = set(tool_names) & allowed
+    if not allow_file_mutation:
+        selected.difference_update(_NETWORK_FILE_MUTATION_TOOLS)
+    return selected
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
     names = set(tool_names or set())
@@ -588,6 +682,7 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
 `calendar` accepts a name ("Main") or short-id prefix.""",
     "read_calendar": "- ```read_calendar``` — Admin-only: refresh and read the authenticated user's Calendar without event mutations. Args (JSON): {\"action\":\"list_events|list_calendars\", \"start\":\"ISO datetime\"?, \"end\":\"ISO datetime\"?, \"calendar\":\"name or id\"?, \"max_results\":50?}. `list_events` requires explicit start/end no more than 366 days apart. Results are owner-scoped and bounded; if freshness could not be confirmed, say so explicitly. This tool is unavailable in plan mode because its CalDAV pull may update the local cache.",
     "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version plus server-verified model, context, voice, and configured-worker runtime facts. Use this for claims about what is actually running; do not infer application version, provider, or architecture from a worker/model display alias.",
+    "inspect_network": "- ```inspect_network``` — Collect the network view visible to the running Pandamonium service with fixed, bounded, read-only interface, route, neighbor, and optional Tailscale probes. Takes no arguments. Use the returned evidence for current-network claims and say when the wider topology remains unobserved.",
     "start_agent_task": """\
 ```start_agent_task
 {"worker":"<runtime worker id>","workspace":"<allowed alias>","prompt":"<self-contained read-only task>"}
@@ -1138,7 +1233,67 @@ def _is_contextual_retry_continuation(messages: List[Dict], text: str) -> bool:
     return bool(_COOKBOOK_CONTEXT_RE.search(recent))
 
 
-def _assistant_requested_followup(messages: List[Dict]) -> bool:
+def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
+    """Return true for short answers that do not introduce a new task."""
+    reply = str(text or "").strip()
+    words = re.findall(r"[A-Za-z0-9_'-]+", reply)
+    if not reply or len(reply) > 160 or len(words) > 16 or "?" in reply:
+        return False
+    if re.search(
+        r"\b(?:instead|new (?:question|topic)|different topic|unrelated)\b",
+        reply,
+        re.IGNORECASE,
+    ):
+        return False
+
+    leading = words[0].lower()
+    # A response may echo the action the assistant requested (for example,
+    # "Provide detailed components" after "Could you provide ...?"). Other
+    # leading commands are standalone requests and must not inherit old tool
+    # intent merely because they are short.
+    contextual_response_verbs = {
+        "choose", "clarify", "confirm", "describe", "enter", "include",
+        "name", "provide", "select", "share", "specify", "use",
+    }
+    if (
+        leading in contextual_response_verbs
+        and re.search(rf"\b{re.escape(leading)}\b", str(question or ""), re.IGNORECASE)
+    ):
+        ignored = {
+            "a", "an", "and", "can", "could", "do", "for", "i", "in", "is",
+            "it", "me", "of", "or", "please", "the", "to", "would", "you", "your",
+        } | contextual_response_verbs
+        question_terms = {
+            word.lower()
+            for word in re.findall(r"[A-Za-z0-9_'-]+", str(question or ""))
+            if word.lower() not in ignored
+        }
+        reply_terms = {word.lower() for word in words[1:] if word.lower() not in ignored}
+        # Imperative replies must share a concrete subject with the question;
+        # an echoed verb alone cannot smuggle in a new task or topic.
+        return bool(question_terms & reply_terms)
+    if leading in contextual_response_verbs:
+        return False
+
+    standalone_request_verbs = {
+        "add", "analyze", "analyse", "answer", "audit", "browse", "build",
+        "calculate", "change", "check", "compare", "configure", "convert", "create",
+        "debug", "define", "delete", "deploy", "design", "diagram", "discuss", "draft",
+        "draw", "edit", "explain", "explore", "fetch", "find", "fix", "generate", "get",
+        "help", "implement", "inspect", "install", "investigate", "list", "make", "map",
+        "open", "outline", "publish", "query", "read", "recommend", "remove", "research",
+        "review", "run", "scan", "schedule", "search", "send", "set", "show",
+        "summarize", "summarise", "tell", "test", "translate", "update", "upload",
+        "verify", "visualize", "visualise", "write",
+    }
+    if leading in standalone_request_verbs:
+        return False
+    if len(words) > 1 and words[1].lower() in {"me", "us"}:
+        return False
+    return leading not in {"how", "what", "when", "where", "which", "who", "why"}
+
+
+def _assistant_requested_followup(messages: List[Dict], reply: str = "") -> bool:
     """True when the previous assistant turn asked for missing task details.
 
     This allows natural replies like "buy milk" after "What would you like on
@@ -1161,12 +1316,19 @@ def _assistant_requested_followup(messages: List[Dict]) -> bool:
         text = str(content or "").lower()
         if "?" not in text:
             return False
-        return bool(re.search(
-            r"\b(what would you like|what should|what do you want|which one|which model|"
-            r"what.+(?:todo|to-do|list|document|email|model|server|item)|"
-            r"any specific|give me|tell me)\b",
+        specific = re.search(
+            r"\b(?:what would you like|what should|what do you want|which one|which model|"
+            r"what.+(?:todo|to-do|list|document|email|model|server|item))\b",
             text,
-        ))
+        )
+        if specific:
+            return _is_contextless_followup_reply(reply, text)
+        generic = re.search(
+            r"\b(?:any specific|give me|tell me|"
+            r"(?:could|can) you (?:please )?(?:provide|confirm|specify|share|describe|clarify))\b",
+            text,
+        )
+        return bool(generic) and _is_contextless_followup_reply(reply, text)
     return False
 
 
@@ -1180,7 +1342,11 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     """
     text = str(last_user or "").strip()
     retry_continuation = _is_contextual_retry_continuation(messages, text)
-    continuation = _is_explicit_continuation(text) or _assistant_requested_followup(messages) or retry_continuation
+    continuation = (
+        _is_explicit_continuation(text)
+        or _assistant_requested_followup(messages, text)
+        or retry_continuation
+    )
     retrieval_query = _recent_context_for_retrieval(messages) if continuation else text
     q = retrieval_query.lower()
 
@@ -1232,8 +1398,72 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("ui")
     if has(r"\b(session|chat history|rename chat|delete chat|archive chat|fork chat|list chats)\b"):
         domains.add("sessions")
-    if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b"):
+    if (
+        has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash)\b")
+        or _requests_named_file_access(text)
+        or _requests_file_mutation(text)
+    ):
         domains.add("files")
+    non_host_network_patterns = (
+        r"\b(?:neural|social|application|app|software|blockchain|graph|adversarial)\s+networks?\b",
+        r"\bnetwork\s+graphs?\b.{0,32}\b(?:data structures?|algorithms?|software|applications?|code)\b",
+        r"\b(?:data structures?|algorithms?|software|applications?|code)\b.{0,32}\bnetwork\s+graphs?\b",
+        r"\bcurrent\s+network\b.{0,40}\b(?:trends?|news|research|standards?|technolog\w*|developments?|market|landscape|best practices)\b",
+        r"\bnetwork\s+(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b",
+        r"\b(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b.{0,24}\bnetwork\b",
+        r"\b(?:bluetooth|usb|audio|input|peripheral)\b.{0,32}\bdevices?\b",
+        r"\bdevices?\b.{0,32}\b(?:bluetooth|usb|audio|input|peripheral)\b",
+        r"\b(?:home\s+)?(?:network|routers?|wi[-‑–]?fi|wifi|mesh)\b.{0,24}\b(?:prices?|deals?|for sale|to buy|shopping)\b",
+        r"\b(?:prices?|deals?|buy|shopping)\b.{0,24}\b(?:home\s+)?(?:network|routers?|wi[-‑–]?fi|wifi|mesh)\b",
+        r"\b(?:network|topology)\s+(?:diagram|map|chart|drawing|image|figure)\b",
+        r"\b(?:this|the|a|an)\s+(?:diagram|map|chart|drawing|image|figure)\s+(?:of\s+)?(?:the\s+)?(?:network|topology)\b",
+    )
+    network_subject_q = q
+    for pattern in non_host_network_patterns:
+        # A newline is a deliberate nonmatching boundary for the proximity
+        # expressions below, so removing one subject cannot join unrelated
+        # possessives and network nouns on either side.
+        network_subject_q = re.sub(pattern, "\n", network_subject_q)
+
+    def has_current_network(*patterns: str) -> bool:
+        return any(re.search(pattern, network_subject_q) for pattern in patterns)
+
+    host_network_fact = (
+        r"(?:ip(?:v[46])?|ip address|mac(?: address)?|physical address|"
+        r"hardware address|default gateway|dns server|nameserver|"
+        r"routes?|routing table|arp table|arp entries|neighbor table|"
+        r"neighbor entries|network interfaces?|interface table|hostname|"
+        r"host name|computer name|machine name)"
+    )
+    current_network_subject = (
+        has_current_network(
+            r"\b(?:my|our|this|current)\b.{0,32}\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,32}\b(?:my|our|this|current)\b",
+            r"\bnetwork\b.{0,24}\byou(?:['’]?re| are)? (?:on|using|connected to)\b",
+            r"\b(?:network|lan|wi[-‑–]?fi|wifi|subnet|router)\b.{0,40}\b(?:i(?:['’]?m| am)|am i)\b.{0,16}\b(?:on|using|connected to)\b",
+        )
+        or has_current_network(
+            rf"\bmy\s+{host_network_fact}\b",
+            rf"\b(?:which|what)\s+{host_network_fact}\b.{{0,24}}\b(?:am i|i(?:['’]?m| am))\b",
+            rf"\b{host_network_fact}\b.{{0,16}}\b(?:of|for|on)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
+            rf"\b{host_network_fact}\b.{{0,16}}\b(?:does|is|has|are)\s+(?:this|my|our|local)\s+(?:computer|machine|host|system)\b",
+            rf"\b(?:this|my|our|local)\s+(?:computer|machine|host|system)(?:['’]s)?\b.{{0,16}}\b{host_network_fact}\b",
+        )
+    )
+    if current_network_subject:
+        domains.add("network_inspection")
+        # "current" and "show" are generic web/UI routing terms above, but in
+        # a network-only request they describe the inspection rather than an
+        # additional capability. Keep explicit compound actions available.
+        if not has(
+            r"\b(?:search|web|google|look up|latest|news|weather|forecast|stock price|website|url)\b",
+            r"https?://|www\.",
+        ):
+            domains.discard("web")
+        if not has(
+            r"\b(?:open|toggle|turn on|turn off|disable|enable|switch model|change model|settings|theme|panel)\b"
+        ):
+            domains.discard("ui")
     if re.match(
         r"^\s*(?:(?:please|ok(?:ay)?|alright|right|sure|cool|great|thanks)[\s,.!-]+)*"
         r"(?:(?:execute|exec)\b\s+\S+|"
@@ -2917,6 +3147,12 @@ async def stream_agent_loop(
     _ody_qwen_finetune_model = (model or "").lower().startswith("odysseus-qwen3")
     _ody_memory_identity_turn = _looks_like_memory_identity_turn(_last_user)
     _intent = _classify_agent_request(messages, _last_user)
+    if "network_inspection" in set(_intent.get("domains") or set()):
+        # Phrases such as "configured network" contain broad admin keywords,
+        # but a network turn must not re-add every management tool after the
+        # constrained retrieval clamp. Explicit compound domains keep their
+        # own mapped capabilities below.
+        _needs_admin = False
     _low_signal_turn = bool(_intent.get("low_signal"))
     _casual_low_signal_turn = _is_casual_low_signal(_last_user)
     _existing_conversation = _user_turn_count(messages) > 1
@@ -3339,6 +3575,26 @@ async def stream_agent_loop(
             )
 
     if _relevant_tools is not None:
+        _network_upload_readers = (
+            {"read_file", "grep", "ls"} if uploaded_files else set()
+        )
+        _network_file_intent_text = (
+            str(_intent.get("retrieval_query") or "")
+            if _intent.get("continuation")
+            else _last_user
+        )
+        _network_clamped_tools = _clamp_network_inspection_tools(
+            _intent_domains,
+            _relevant_tools,
+            preserved_readers=_network_upload_readers,
+            allow_file_mutation=_requests_file_mutation(_network_file_intent_text),
+        )
+        if _network_clamped_tools != _relevant_tools:
+            logger.info(
+                "[agent-intent] current-network tool clamp removed=%s",
+                sorted(_relevant_tools - _network_clamped_tools),
+            )
+            _relevant_tools = _network_clamped_tools
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
     prep_timings["tool_selection"] = time.time() - _t1

@@ -1261,6 +1261,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "inspect_network",
+            "description": "Collect a bounded, read-only snapshot of the current host network view using fixed platform-specific interface, route, neighbor, and optional Tailscale probes on Linux, macOS, or Windows. Takes no commands, paths, or arguments.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_runtime_status",
             "description": "Return the running Pandamonium application version and server-verified runtime facts including the actual brain model, architecture, quantization, context allocation, reported cache evidence, TTS provider, and worker availability. Use this whenever the operator asks what version, model, or runtime is active.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
