@@ -450,7 +450,7 @@ def _requests_file_mutation(text: str) -> bool:
         rf"{_NAMED_FILE_TARGET_RE})"
     )
     action_boundary = (
-        rf"[,;!?]+|\.(?=\s|$)|\b(?:and\s+then|then|but|while)\b|"
+        rf"[,;!?]+|\.(?=\s|$)|\b(?:and\s+also|and\s+then|after|before|then|but|while)\b|"
         rf"\band\s+(?=(?:then\s+)?(?:{mutation}|read|open|inspect|compare)\b)"
     )
     for clause in re.split(action_boundary, q):
@@ -1404,6 +1404,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         r"\b(?:requests?|responses?|calls?|clients?|libraries?|apis?|errors?|exceptions?)\b.{0,24}\bnetwork\b",
         r"\b(?:bluetooth|usb|audio|input|peripheral)\b.{0,32}\bdevices?\b",
         r"\bdevices?\b.{0,32}\b(?:bluetooth|usb|audio|input|peripheral)\b",
+        r"\b(?:network|topology)\s+(?:diagram|map|chart|drawing|image|figure)\b",
+        r"\b(?:this|the|a|an)\s+(?:diagram|map|chart|drawing|image|figure)\s+(?:of\s+)?(?:the\s+)?(?:network|topology)\b",
     )
     network_subject_q = q
     for pattern in non_host_network_patterns:
@@ -1418,7 +1420,8 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     host_network_fact = (
         r"(?:ip(?:v[46])?|ip address|default gateway|dns server|nameserver|"
         r"routes?|routing table|arp table|arp entries|neighbor table|"
-        r"neighbor entries|network interfaces?|interface table)"
+        r"neighbor entries|network interfaces?|interface table|hostname|"
+        r"host name|computer name|machine name)"
     )
     current_network_subject = (
         has_current_network(

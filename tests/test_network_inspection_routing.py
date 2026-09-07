@@ -152,6 +152,8 @@ def test_descriptive_current_network_phrasing_mounts_inspection_tool():
         "What routes does this host use?",
         "Which network interfaces are on this machine?",
         "Show my neighbor table",
+        "What is the hostname of this computer?",
+        "What is this machine's host name?",
         "What devices are on my home network?",
     )
 
@@ -361,6 +363,12 @@ def test_network_file_mutation_requires_an_explicit_file_target():
     assert not agent_loop._requests_file_mutation(
         "Remove it from my network, then read file router.conf"
     )
+    assert not agent_loop._requests_file_mutation(
+        "Remove it from my network after reading router.conf"
+    )
+    assert not agent_loop._requests_file_mutation(
+        "Remove it from my network and also read router.conf"
+    )
     assert agent_loop._requests_file_mutation(
         "Edit router.conf, then inspect my current network"
     )
@@ -405,6 +413,8 @@ def test_non_host_network_and_peripheral_questions_do_not_mount_inspection():
         "Help me set up my device",
         "Visualize my network graph data structure",
         "What is a local area network?",
+        "What does this network diagram mean?",
+        "Explain this topology chart",
     )
 
     for prompt in prompts:
