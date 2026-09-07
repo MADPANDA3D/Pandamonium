@@ -17,6 +17,7 @@ const MODAL_ID = 'updater-modal';
 const RELOAD_REVISION_KEY = 'pandamonium:update-reload-revision';
 const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
 const WORKER_RECONCILE_QUERY = 'pandamonium-update-reconcile';
+const WORKER_UPDATE_PENDING = 'pending-worker-update';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const SUCCESS_STATUSES = new Set(['succeeded', 'recovered', 'rolled_back']);
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429]);
@@ -420,6 +421,12 @@ async function waitForRegistrationUpdate(registration) {
   }
 }
 
+function navigateWithPendingWorkerUpdate() {
+  const url = new URL(window.location.href);
+  url.searchParams.set(WORKER_RECONCILE_QUERY, WORKER_UPDATE_PENDING);
+  window.location.replace(url.href);
+}
+
 async function refreshApplicationWorker() {
   try {
     const scopeUrl = new URL('/static/', window.location.href).href;
@@ -427,7 +434,10 @@ async function refreshApplicationWorker() {
     if (registration) {
       const previousWorker = registration.active;
       if (!await waitForRegistrationUpdate(registration)) {
-        window.location.reload();
+        // registration.update() cannot be aborted. Mark this fallback load so
+        // a replacement that activates later can acknowledge, rather than
+        // navigate, the already-refreshed client.
+        navigateWithPendingWorkerUpdate();
         return;
       }
       const candidate = registration.installing || registration.waiting;
@@ -699,14 +709,24 @@ async function init() {
   let workerReconcile = false;
   try {
     const url = new URL(window.location.href);
-    workerReconcile = url.searchParams.has(WORKER_RECONCILE_QUERY);
-    if (workerReconcile) {
+    const workerReconcileMarker = url.searchParams.get(WORKER_RECONCILE_QUERY);
+    workerReconcile = workerReconcileMarker !== null;
+    if (workerReconcile && workerReconcileMarker !== WORKER_UPDATE_PENDING) {
       url.searchParams.delete(WORKER_RECONCILE_QUERY);
       window.history.replaceState(window.history.state, '', url);
     }
     reloadRevision = sessionStorage.getItem(RELOAD_REVISION_KEY);
     reopenModal = workerReconcile || sessionStorage.getItem(REOPEN_MODAL_KEY) === 'true';
   } catch (_) {}
+  navigator.serviceWorker?.addEventListener?.('message', event => {
+    if (event.data?.type !== 'pandamonium-update-reconciled') return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get(WORKER_RECONCILE_QUERY) !== WORKER_UPDATE_PENDING) return;
+      url.searchParams.delete(WORKER_RECONCILE_QUERY);
+      window.history.replaceState(window.history.state, '', url);
+    } catch (_) {}
+  });
   el('sidebar-update-check')?.addEventListener('click', event => {
     openModal({
       checkNow: !ACTIVE_STATUSES.has(lastOperation.status),

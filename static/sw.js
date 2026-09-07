@@ -9,6 +9,7 @@
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
 const CACHE_NAME = 'pandamonium-v388';
 const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
+const UPDATE_WORKER_PENDING = 'pending-worker-update';
 const UPDATE_RECONCILE_ATTEMPTS = 8;
 const UPDATE_RECONCILE_DELAY_MS = 650;
 const UPDATE_STATUS_TIMEOUT_MS = 5000;
@@ -145,7 +146,12 @@ async function reconcileUpdateClients() {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   const navigations = Promise.allSettled(windows.map(client => {
     const url = new URL(client.url);
-    if (url.searchParams.get(UPDATE_RECONCILE_QUERY) === CACHE_NAME) return;
+    const marker = url.searchParams.get(UPDATE_RECONCILE_QUERY);
+    if (marker === UPDATE_WORKER_PENDING) {
+      client.postMessage?.({ type: 'pandamonium-update-reconciled' });
+      return;
+    }
+    if (marker === CACHE_NAME) return;
     url.searchParams.set(UPDATE_RECONCILE_QUERY, CACHE_NAME);
     return client.navigate(url.href);
   }));

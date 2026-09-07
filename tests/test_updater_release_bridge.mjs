@@ -61,6 +61,7 @@ async function exerciseWorkerRefresh({ discoverReplacement, stallUpdate = false 
     },
   });
   let registrationUrl = null;
+  let replacedUrl = null;
   const serviceWorker = Object.assign(new FakeEventTarget(), {
     getRegistration: async url => {
       registrationUrl = url;
@@ -74,7 +75,11 @@ async function exerciseWorkerRefresh({ discoverReplacement, stallUpdate = false 
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: {
-    location: { href: 'https://pandamonium.test/', reload: () => { reloads += 1; } },
+    location: {
+      href: 'https://pandamonium.test/',
+      reload: () => { reloads += 1; },
+      replace: url => { replacedUrl = url; },
+    },
     setTimeout: callback => {
       const id = nextTimer;
       nextTimer += 1;
@@ -138,7 +143,7 @@ async function exerciseWorkerRefresh({ discoverReplacement, stallUpdate = false 
     if (!stallUpdate && !discoverReplacement) {
       assert.equal(timers.size, 0, 'an unchanged worker must not wait on activation');
     }
-    return { registrationUrl, reloads, updateCalls: registration.updateCalls };
+    return { registrationUrl, reloads, replacedUrl, updateCalls: registration.updateCalls };
   } finally {
     if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
     else delete globalThis.navigator;
@@ -149,21 +154,26 @@ async function exerciseWorkerRefresh({ discoverReplacement, stallUpdate = false 
 
 assert.deepEqual(
   await exerciseWorkerRefresh({ discoverReplacement: true }),
-  { registrationUrl: 'https://pandamonium.test/static/', reloads: 0, updateCalls: 1 },
+  { registrationUrl: 'https://pandamonium.test/static/', reloads: 0, replacedUrl: null, updateCalls: 1 },
 );
 assert.deepEqual(
   await exerciseWorkerRefresh({ discoverReplacement: false }),
-  { registrationUrl: 'https://pandamonium.test/static/', reloads: 1, updateCalls: 1 },
+  { registrationUrl: 'https://pandamonium.test/static/', reloads: 1, replacedUrl: null, updateCalls: 1 },
 );
-assert.deepEqual(
-  await exerciseWorkerRefresh({ discoverReplacement: false, stallUpdate: true }),
-  { registrationUrl: 'https://pandamonium.test/static/', reloads: 1, updateCalls: 1 },
+const stalledRefresh = await exerciseWorkerRefresh({ discoverReplacement: false, stallUpdate: true });
+assert.equal(stalledRefresh.registrationUrl, 'https://pandamonium.test/static/');
+assert.equal(stalledRefresh.reloads, 0);
+assert.equal(stalledRefresh.updateCalls, 1);
+assert.equal(
+  new URL(stalledRefresh.replacedUrl).searchParams.get('pandamonium-update-reconcile'),
+  'pending-worker-update',
 );
 
 async function activate(
   workerSource,
   statusResponses,
   {
+    clientUrl = 'https://pandamonium.test/',
     holdNavigation = false,
     includeClosedClient = false,
     manualNavigationGrace = false,
@@ -172,6 +182,7 @@ async function activate(
   const listeners = {};
   const deleted = [];
   const navigated = [];
+  const messages = [];
   let activationPendingForNavigation = null;
   let announceNavigation = null;
   let releaseNavigation = null;
@@ -237,7 +248,8 @@ async function activate(
             navigate: async () => { throw new Error('client closed'); },
           }] : []),
           {
-            url: 'https://pandamonium.test/',
+            url: clientUrl,
+            postMessage: message => { messages.push(message); },
             navigate: async url => {
               navigated.push(url);
               announceNavigation();
@@ -267,7 +279,7 @@ async function activate(
     releaseNavigation();
   }
   await activation;
-  return { activationPendingForNavigation, claimed, deleted, navigated, statusRequests };
+  return { activationPendingForNavigation, claimed, deleted, messages, navigated, statusRequests };
 }
 
 const futureWorker = currentWorker.replace('pandamonium-v388', 'pandamonium-v389');
@@ -286,6 +298,15 @@ assert.equal(
   new URL(recovered.navigated[0]).searchParams.get('pandamonium-update-reconcile'),
   'pandamonium-v389',
 );
+
+const lateReplacement = await activate(
+  futureWorker,
+  [{ status: 200, body: { status: 'succeeded' } }],
+  { clientUrl: stalledRefresh.replacedUrl },
+);
+assert.deepEqual(lateReplacement.navigated, []);
+assert.equal(lateReplacement.messages.length, 1);
+assert.equal(lateReplacement.messages[0].type, 'pandamonium-update-reconciled');
 
 const boundedNavigation = await activate(
   futureWorker,
