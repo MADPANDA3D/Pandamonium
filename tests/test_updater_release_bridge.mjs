@@ -82,8 +82,12 @@ async function exerciseWorkerRefresh({ discoverReplacement }) {
     },
   } });
   try {
-    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh, waitForWorkerReplacement };`;
+    const moduleSource = `${currentUpdater}\nexport { refreshApplicationWorker, needsWorkerRefresh, waitForWorkerReplacement, WORKER_ACTIVATION_TIMEOUT_MS };`;
     const updater = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}#${discoverReplacement}`);
+    assert.ok(
+      updater.WORKER_ACTIVATION_TIMEOUT_MS >= ((8 * 5000) + (7 * 650) + 750),
+      'the page must outwait the worker reconciliation budget',
+    );
     const activatingWorker = Object.assign(new FakeEventTarget(), { state: 'activating' });
     const activatingRegistration = Object.assign(new FakeEventTarget(), {
       active: activatingWorker,

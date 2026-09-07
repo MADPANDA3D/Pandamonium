@@ -289,6 +289,7 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   });
   await page.addInitScript(() => {
     window.__nativeConfirmCalls = 0;
+    navigator.serviceWorker.getRegistration = async () => null;
     window.confirm = () => {
       window.__nativeConfirmCalls += 1;
       return false;

@@ -9,7 +9,9 @@ let startupReconcileNeeded = false;
 
 const POLL_INTERVAL_MS = 900;
 const STARTUP_RECONCILE_ATTEMPTS = 8;
-const WORKER_ACTIVATION_TIMEOUT_MS = 6000;
+// Covers the worker's eight bounded 5s status attempts, retry delays,
+// navigation grace, and normal install/activation overhead.
+const WORKER_ACTIVATION_TIMEOUT_MS = 60000;
 const MODAL_ID = 'updater-modal';
 const RELOAD_REVISION_KEY = 'pandamonium:update-reload-revision';
 const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
