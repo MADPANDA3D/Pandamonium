@@ -135,6 +135,8 @@ jobs:
           for f in static/app.js static/js/**/*.js; do
             node --check "$f"
           done
+      - name: Verify staged updater release bridge
+        run: node tests/test_updater_release_bridge.mjs
 
   python-tests:
     name: Python tests (pytest)

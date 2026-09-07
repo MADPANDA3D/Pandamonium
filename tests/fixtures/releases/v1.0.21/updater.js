@@ -4,16 +4,9 @@ let lastRelease = null;
 let lastOperation = {};
 let modalOpener = null;
 let initialized = false;
-let startupReconcileAttempts = 0;
-let startupReconcileNeeded = false;
 
 const POLL_INTERVAL_MS = 900;
-const STARTUP_RECONCILE_ATTEMPTS = 8;
-const WORKER_ACTIVATION_TIMEOUT_MS = 6000;
 const MODAL_ID = 'updater-modal';
-const RELOAD_REVISION_KEY = 'pandamonium:update-reload-revision';
-const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
-const WORKER_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const SUCCESS_STATUSES = new Set(['succeeded', 'recovered', 'rolled_back']);
 const PHASES = ['scan', 'verify', 'preserve', 'activate', 'complete'];
@@ -340,11 +333,7 @@ async function api(url, options = {}, timeoutMs = 8000) {
       signal: controller.signal,
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(data.detail || 'Update request failed');
-      error.status = response.status;
-      throw error;
-    }
+    if (!response.ok) throw new Error(data.detail || 'Update request failed');
     return data;
   } catch (error) {
     if (error?.name === 'AbortError') throw new Error('Update status timed out');
@@ -364,81 +353,20 @@ function schedulePoll(delay = POLL_INTERVAL_MS) {
   pollTimer = window.setTimeout(pollStatus, delay);
 }
 
-function waitForWorkerActivation(worker) {
-  if (!worker || worker.state === 'activated') return Promise.resolve(Boolean(worker));
-  return new Promise(resolve => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      worker.removeEventListener?.('statechange', onStateChange);
-      resolve(worker.state === 'activated');
-    };
-    const onStateChange = () => {
-      if (worker.state === 'activated' || worker.state === 'redundant') finish();
-    };
-    const timer = window.setTimeout(finish, WORKER_ACTIVATION_TIMEOUT_MS);
-    worker.addEventListener?.('statechange', onStateChange);
-  });
-}
-
-async function refreshApplicationWorker() {
-  try {
-    const registration = await navigator.serviceWorker?.getRegistration?.();
-    if (registration) {
-      const previousWorker = registration.active;
-      await registration.update();
-      const replacement = registration.installing || registration.waiting;
-      if (replacement || registration.active !== previousWorker) {
-        const activated = await waitForWorkerActivation(replacement);
-        if (activated || registration.active !== previousWorker) return;
-      }
-    }
-  } catch (_) {}
-  window.location.reload();
-}
-
 async function pollStatus() {
   if (pollInFlight) return schedulePoll();
   pollInFlight = true;
-  const operationAtStart = lastOperation;
   try {
     const operation = await api('/api/update/status', {}, 5000);
-    if (operationAtStart !== lastOperation && ACTIVE_STATUSES.has(lastOperation.status)) {
-      return schedulePoll();
-    }
     renderOperation(operation);
-    startupReconcileAttempts = 0;
     if (ACTIVE_STATUSES.has(operation.status)) {
       schedulePoll();
     } else if (SUCCESS_STATUSES.has(operation.status)) {
       try {
-        const previousCommit = lastRelease?.commit;
         const release = await api('/api/version', {}, 5000);
         renderRelease(release, { preserveOperation: true });
         renderOperation(operation);
         stopPolling();
-        if (release.commit && (
-          (previousCommit && previousCommit !== release.commit) || startupReconcileNeeded
-        )) {
-          let reload = false;
-          try {
-            reload = sessionStorage.getItem(RELOAD_REVISION_KEY) !== release.commit;
-            if (reload) {
-              sessionStorage.setItem(RELOAD_REVISION_KEY, release.commit);
-              sessionStorage.setItem(
-                REOPEN_MODAL_KEY,
-                String(!el(MODAL_ID)?.classList.contains('hidden')),
-              );
-            }
-          } catch (_) {
-            reload = false;
-          }
-          if (reload) {
-            void refreshApplicationWorker();
-          }
-        }
       } catch (_) {
         setPill('connecting', 'Reconnecting');
         setState('Reconnecting after update…', 'checking');
@@ -454,24 +382,7 @@ async function pollStatus() {
     } else {
       stopPolling();
     }
-  } catch (error) {
-    if (error?.status === 401 || error?.status === 403) {
-      stopPolling();
-      setPill('warning', 'Sign in required');
-      setState('Updater authentication expired', 'unknown');
-      setProgress({
-        state: 'error',
-        title: 'Sign in to continue',
-        detail: 'Sign in with an administrator account, then reopen the updater to resume status checks.',
-        progress: Number(lastOperation.progress) || 0,
-        phase: operationPhase(lastOperation.phase),
-      });
-      return;
-    }
-    if (error?.status >= 400 && error?.status < 500) {
-      startupReconcileAttempts = 0;
-      return;
-    }
+  } catch (_) {
     if (ACTIVE_STATUSES.has(lastOperation.status)) {
       setPill('connecting', 'Reconnecting');
       setState('Reconnecting after restart…', 'checking');
@@ -482,12 +393,6 @@ async function pollStatus() {
         progress: Number(lastOperation.progress) || 80,
         phase: operationPhase(lastOperation.phase),
       });
-      schedulePoll(650);
-    } else if (startupReconcileAttempts > 1) {
-      startupReconcileAttempts -= 1;
-      startupReconcileNeeded = true;
-      setPill('connecting', 'Reconnecting');
-      setState('Checking durable update status…', 'checking');
       schedulePoll(650);
     }
   } finally {
@@ -519,14 +424,8 @@ function openModal({ checkNow = false, opener = null } = {}) {
       el('close-updater-modal')?.focus();
     }
   }, 60);
-  const showOperation = ACTIVE_STATUSES.has(lastOperation.status)
-    || SUCCESS_STATUSES.has(lastOperation.status)
-    || lastOperation.status === 'failed';
-  if (lastRelease) renderRelease(lastRelease, { preserveOperation: showOperation });
-  if (showOperation) renderOperation(lastOperation);
-  if (ACTIVE_STATUSES.has(lastOperation.status)) {
-    schedulePoll(0);
-  }
+  if (lastRelease) renderRelease(lastRelease, { preserveOperation: ACTIVE_STATUSES.has(lastOperation.status) });
+  if (ACTIVE_STATUSES.has(lastOperation.status)) renderOperation(lastOperation);
   if (checkNow) check();
 }
 
@@ -622,19 +521,6 @@ async function rollback() {
 async function init() {
   if (initialized) return;
   initialized = true;
-  let reloadRevision = null;
-  let reopenModal = false;
-  let workerReconcile = false;
-  try {
-    const url = new URL(window.location.href);
-    workerReconcile = url.searchParams.has(WORKER_RECONCILE_QUERY);
-    if (workerReconcile) {
-      url.searchParams.delete(WORKER_RECONCILE_QUERY);
-      window.history.replaceState(window.history.state, '', url);
-    }
-    reloadRevision = sessionStorage.getItem(RELOAD_REVISION_KEY);
-    reopenModal = workerReconcile || sessionStorage.getItem(REOPEN_MODAL_KEY) === 'true';
-  } catch (_) {}
   el('sidebar-update-check')?.addEventListener('click', event => {
     openModal({
       checkNow: !ACTIVE_STATUSES.has(lastOperation.status),
@@ -668,18 +554,7 @@ async function init() {
   });
   try {
     renderRelease(await api('/api/version', {}, 15000));
-    startupReconcileAttempts = STARTUP_RECONCILE_ATTEMPTS;
     await pollStatus();
-    const revisionReconciled = reloadRevision && reloadRevision === lastRelease?.commit;
-    if (revisionReconciled) {
-      try {
-        sessionStorage.removeItem(RELOAD_REVISION_KEY);
-        sessionStorage.removeItem(REOPEN_MODAL_KEY);
-      } catch (_) {}
-    }
-    if ((revisionReconciled || workerReconcile) && reopenModal) {
-      openModal({ checkNow: false, opener: el('sidebar-update-check') });
-    }
   } catch (_) {
     setState('Release check unavailable', 'unknown');
   }

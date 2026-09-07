@@ -5,10 +5,12 @@ import { readFileSync } from 'node:fs';
 
 const OLD_COMMIT = '1111111111111111111111111111111111111111';
 const NEW_COMMIT = '2222222222222222222222222222222222222222';
-const RELEASED_UPDATER = readFileSync('tests/fixtures/releases/v1.0.20/updater.js', 'utf8');
+const RELEASED_V1020_UPDATER = readFileSync('tests/fixtures/releases/v1.0.20/updater.js', 'utf8');
+const RELEASED_V1021_UPDATER = readFileSync('tests/fixtures/releases/v1.0.21/updater.js', 'utf8');
 const RELEASED_WORKER = readFileSync('tests/fixtures/releases/v1.0.20/sw.js', 'utf8');
 const CURRENT_UPDATER = readFileSync('static/js/updater.js', 'utf8');
 const CURRENT_WORKER = readFileSync('static/sw.js', 'utf8');
+const FUTURE_WORKER = CURRENT_WORKER.replace('pandamonium-v388', 'pandamonium-v389');
 
 function shellRoutes(page, handler) {
   return page.route('**/api/**', route => {
@@ -25,36 +27,66 @@ function shellRoutes(page, handler) {
   });
 }
 
-for (const [formFactor, viewport] of [
+for (const [scenario, bridgeReload] of [
+  ['released v1.0.21 bridge', true],
+  ['v1.0.22 future recovery', false],
+]) for (const [formFactor, viewport] of [
   ['desktop', null],
   ['mobile', { width: 390, height: 844 }],
-]) test(`updater crosses a stale pre-apply status response and signed restart on ${formFactor}`, async ({ page }, testInfo) => {
+]) test(`${scenario} crosses a stale response and signed restart on ${formFactor}`, async ({ page }, testInfo) => {
   const trace = [];
   if (viewport) await page.setViewportSize(viewport);
-  expect(createHash('sha256').update(RELEASED_UPDATER).digest('hex'))
+  expect(createHash('sha256').update(RELEASED_V1020_UPDATER).digest('hex'))
     .toBe('2d34087cb28abc846791352a9fb0f39f65bd87d24cf466684366dd0e2c1838ca');
+  expect(createHash('sha256').update(RELEASED_V1021_UPDATER).digest('hex'))
+    .toBe('894dbf8c356b2274a5c9af249c74a535879610fabcf4a45401a3e16da4568782');
   expect(createHash('sha256').update(RELEASED_WORKER).digest('hex'))
     .toBe('d8eb76b8e6e038aa38d07416933f01a1a3b457b8dac1d1fd6e059e500d379f84');
   expect(RELEASED_WORKER).toContain("const CACHE_NAME = 'pandamonium-v387';");
+  expect(RELEASED_V1021_UPDATER).not.toContain('registration.update()');
+  expect(FUTURE_WORKER).toContain("const CACHE_NAME = 'pandamonium-v389';");
+  const sourceVersion = bridgeReload ? '1.0.21' : '1.0.22';
+  const sourceCommit = bridgeReload
+    ? '1e5d2e3ab95b53d85b22bbe63a0aa8ee40f9d530'
+    : '3'.repeat(40);
+  const targetVersion = bridgeReload ? '1.0.22' : '1.0.23';
+  const targetCommit = bridgeReload ? '3'.repeat(40) : '4'.repeat(40);
+  const sourceUpdater = bridgeReload ? RELEASED_V1021_UPDATER : CURRENT_UPDATER;
+  const sourceWorker = bridgeReload ? RELEASED_WORKER : CURRENT_WORKER;
+  const targetWorker = bridgeReload ? CURRENT_WORKER : FUTURE_WORKER;
+  const sourceCache = bridgeReload ? 'pandamonium-v387' : 'pandamonium-v388';
+  const targetCache = bridgeReload ? 'pandamonium-v388' : 'pandamonium-v389';
   let finishInitialStatus;
   let applied = false;
   let applyCalls = 0;
   let failedStatusPolls = 0;
+  let manualReloads = 0;
   let documentLoads = 0;
   let navigations = 0;
   let statusPolls = 0;
+  let serviceWorkerStarts = 0;
+  let workerScriptRequests = 0;
   const context = page.context();
 
   await context.route('**/static/js/updater.js', route => route.fulfill({
-    body: applied ? CURRENT_UPDATER : RELEASED_UPDATER,
+    body: applied ? CURRENT_UPDATER : sourceUpdater,
     contentType: 'text/javascript',
   }));
   await context.route('**/static/sw.js', route => route.fulfill({
-    body: applied ? CURRENT_WORKER : RELEASED_WORKER,
+    body: applied ? targetWorker : sourceWorker,
     contentType: 'text/javascript',
     headers: { 'Cache-Control': 'no-cache' },
   }));
-  context.on('serviceworker', worker => trace.push({ type: 'serviceworker', url: worker.url() }));
+  context.on('serviceworker', worker => {
+    serviceWorkerStarts += 1;
+    trace.push({ type: 'serviceworker', url: worker.url(), serviceWorkerStarts });
+  });
+  context.on('request', request => {
+    if (new URL(request.url()).pathname === '/static/sw.js') {
+      workerScriptRequests += 1;
+      trace.push({ type: 'worker-script-request', workerScriptRequests });
+    }
+  });
 
   page.on('framenavigated', frame => {
     if (frame === page.mainFrame() && frame.url()) {
@@ -82,14 +114,16 @@ for (const [formFactor, viewport] of [
   await shellRoutes(context, (route, path) => {
     if (path === '/api/version') {
       return route.fulfill({ json: applied ? {
-        version: '1.0.21', commit: '1e5d2e3ab95b53d85b22bbe63a0aa8ee40f9d530',
-        release: '1.0.21-1e5d2e3a', latest_version: '1.0.21', update_available: false,
+        version: targetVersion, commit: targetCommit,
+        release: `${targetVersion}-${targetCommit.slice(0, 8)}`,
+        latest_version: targetVersion, update_available: false,
         update_status: 'current', compatible: true, can_update: false,
         installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
         release_check: { status: 'current', message: null },
       } : {
-        version: '1.0.20', commit: '838fb9049aecb772b4c96e77307c65b63a4b042b',
-        release: '1.0.20-838fb904', latest_version: '1.0.20', update_available: false,
+        version: sourceVersion, commit: sourceCommit,
+        release: `${sourceVersion}-${sourceCommit.slice(0, 8)}`,
+        latest_version: sourceVersion, update_available: false,
         update_status: 'current', compatible: true, can_update: false,
         installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
         release_check: { status: 'current', message: null },
@@ -97,9 +131,9 @@ for (const [formFactor, viewport] of [
     }
     if (path === '/api/update/check') {
       return route.fulfill({ json: {
-        version: '1.0.20', commit: '838fb9049aecb772b4c96e77307c65b63a4b042b',
-        release: '1.0.20-838fb904', latest_version: '1.0.21',
-        latest_commit: '1e5d2e3ab95b53d85b22bbe63a0aa8ee40f9d530',
+        version: sourceVersion, commit: sourceCommit,
+        release: `${sourceVersion}-${sourceCommit.slice(0, 8)}`,
+        latest_version: targetVersion, latest_commit: targetCommit,
         update_available: true, update_status: 'available', compatible: true, can_update: true,
         installation: { supported: true, kind: 'managed-native', trigger: 'systemd-path' },
         release_check: { status: 'available', message: null },
@@ -107,6 +141,10 @@ for (const [formFactor, viewport] of [
     }
     if (path === '/api/update/apply') {
       applyCalls += 1;
+      expect(route.request().postDataJSON()).toEqual({
+        version: targetVersion,
+        commit: targetCommit,
+      });
       applied = true;
       return route.fulfill({ json: {
         status: 'queued', phase: 'queued', progress: 0, message: 'Update queued',
@@ -127,8 +165,8 @@ for (const [formFactor, viewport] of [
       }
       return route.fulfill({ json: {
         status: 'succeeded', phase: 'complete', progress: 100,
-        message: 'Updated to v1.0.21',
-        backup_location: '/var/backups/odysseus/update-1.0.21-proof',
+        message: `Updated to v${targetVersion}`,
+        backup_location: `/var/backups/odysseus/update-${targetVersion}-proof`,
         rollback_available: true,
       } });
     }
@@ -137,51 +175,68 @@ for (const [formFactor, viewport] of [
 
   await page.goto('/static/index.html');
   await expect.poll(() => typeof finishInitialStatus).toBe('function');
-  await expect.poll(() => page.evaluate(() => caches.keys())).toContain('pandamonium-v387');
+  await expect.poll(() => page.evaluate(() => caches.keys())).toContain(sourceCache);
   if (viewport) await page.locator('#hamburger-btn').click();
   await page.locator('#sidebar-update-check').click();
   await expect(page.locator('#updater-apply')).toBeVisible();
-  page.once('dialog', dialog => dialog.accept());
   await page.locator('#updater-apply').click();
+  await page.locator('#styled-confirm-ok').click();
   await expect(page.locator('#updater-progress-title')).toHaveText('Update queued');
+  if (!bridgeReload) {
+    await context.addCookies([{
+      name: 'pandamonium-test-sw',
+      value: 'future',
+      url: 'http://127.0.0.1:4173',
+    }]);
+  }
   finishInitialStatus();
-  await expect.poll(() => statusPolls, { timeout: 1800 }).toBe(1);
-  await expect(page.locator('#updater-progress-title')).toHaveText('Update queued');
-  // Model the browser-owned worker update check once the replacement server is reachable.
-  await page.evaluate(() => {
-    void navigator.serviceWorker.getRegistration().then(registration => registration?.update());
-  });
-  await page.evaluate(() => {
-    window.dispatchEvent(new Event('offline'));
-    window.dispatchEvent(new Event('online'));
-    document.dispatchEvent(new Event('visibilitychange'));
-  });
+  if (bridgeReload) {
+    await expect.poll(() => statusPolls, { timeout: 1800 }).toBe(1);
+    await expect(page.locator('#updater-progress-title')).toHaveText('Update queued');
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('offline'));
+      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event('pageshow'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.waitForTimeout(500);
+    expect(statusPolls).toBe(1);
+    trace.push({ type: 'released-trigger-audit', statusPolls });
+    manualReloads += 1;
+    await page.reload();
+  }
 
   try {
-    await expect.poll(() => navigations, { timeout: 8000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => navigations, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => statusPolls, { timeout: 15000 }).toBeGreaterThanOrEqual(6);
     await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', {
       timeout: 8000,
     });
     await expect(page.locator('#updater-progress-title')).toHaveText('Update installed');
     await expect(page.locator('#updater-modal')).toBeVisible();
-    await expect(page.locator('#updater-installed-version')).toHaveText('v1.0.21');
-    await expect.poll(() => page.evaluate(() => caches.keys())).toContain('pandamonium-v388');
+    await expect(page.locator('#updater-installed-version')).toHaveText(`v${targetVersion}`);
+    await expect.poll(() => page.evaluate(() => caches.keys())).toContain(targetCache);
     const cacheKeys = await page.evaluate(() => caches.keys());
-    expect(cacheKeys).not.toContain('pandamonium-v387');
+    expect(cacheKeys).not.toContain(sourceCache);
     expect(applyCalls).toBe(1);
-    expect(statusPolls).toBeGreaterThanOrEqual(6);
     expect(failedStatusPolls).toBe(3);
+    expect(serviceWorkerStarts).toBeGreaterThanOrEqual(2);
+    expect(manualReloads).toBe(bridgeReload ? 1 : 0);
     expect(await page.evaluate(() => document.visibilityState)).toBe('visible');
     expect(await page.evaluate(() => navigator.serviceWorker.controller?.scriptURL)).toContain('/static/sw.js');
     await page.waitForTimeout(350);
-    expect(documentLoads).toBe(2);
-    expect(navigations).toBeLessThanOrEqual(3);
+    expect(documentLoads).toBeGreaterThanOrEqual(bridgeReload ? 3 : 2);
+    expect(documentLoads).toBeLessThanOrEqual(bridgeReload ? 4 : 3);
+    expect(navigations).toBeLessThanOrEqual(bridgeReload ? 4 : 3);
     expect(new URL(page.url()).searchParams.has('pandamonium-update-reconcile')).toBe(false);
   } finally {
     trace.push({
       type: 'snapshot',
       statusPolls,
       failedStatusPolls,
+      serviceWorkerStarts,
+      workerScriptRequests,
+      manualReloads,
       documentLoads,
       visibility: await page.evaluate(() => document.visibilityState),
       serviceWorker: await page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || null),
@@ -189,7 +244,7 @@ for (const [formFactor, viewport] of [
       percent: await page.locator('#updater-progress-percent').textContent(),
       version: await page.locator('#updater-installed-version').textContent(),
     });
-    await testInfo.attach('mad-839-restart-trace.json', {
+    await testInfo.attach(`mad-839-${bridgeReload ? 'bridge' : 'future'}-restart-trace.json`, {
       body: Buffer.from(JSON.stringify(trace, null, 2)), contentType: 'application/json',
     });
   }
