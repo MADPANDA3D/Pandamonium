@@ -19,6 +19,7 @@ from src.external_agent_bridge import (
     ExternalAgentBridgeError,
     ExternalAgentReadOnlyAdapter,
     configured_external_agent_connections,
+    external_agent_adapters,
 )
 
 
@@ -83,9 +84,19 @@ def _scope(request):
 
 
 class ActionSidecar:
-    def __init__(self, *, effect="reversible_write", version="2.0.0"):
+    def __init__(
+        self,
+        *,
+        effect="reversible_write",
+        version="2.0.0",
+        empty_event_polls=0,
+        event_text="Completed the bounded task.",
+    ):
         self.effect = effect
         self.version = version
+        self.empty_event_polls = empty_event_polls
+        self.event_text = event_text
+        self.event_polls = 0
         self.calls = []
         self.counter = 0
         self.fail_actions = False
@@ -145,21 +156,24 @@ class ActionSidecar:
             result = {"status": "running"}
         elif body["capability"] == "task.events":
             task_ref = body["arguments"]["task_ref"]
-            event = {
-                "protocol_version": EXTERNAL_AGENT_PROTOCOL,
-                "envelope": "event",
-                "message_id": self._message_id(),
-                "request_id": body["request_id"],
-                "issued_at": NOW_TEXT,
-                **_scope(body),
-                "task_ref": task_ref,
-                "event_id": "event:fixture-0001",
-                "sequence": 1,
-                "event_type": "result",
-                "text": "Completed the bounded task.",
-                "metadata": {},
-            }
-            result = {"items": [event], "next_cursor": None}
+            self.event_polls += 1
+            items = []
+            if self.event_polls > self.empty_event_polls:
+                items.append({
+                    "protocol_version": EXTERNAL_AGENT_PROTOCOL,
+                    "envelope": "event",
+                    "message_id": self._message_id(),
+                    "request_id": body["request_id"],
+                    "issued_at": NOW_TEXT,
+                    **_scope(body),
+                    "task_ref": task_ref,
+                    "event_id": "event:fixture-0001",
+                    "sequence": 1,
+                    "event_type": "result",
+                    "text": self.event_text,
+                    "metadata": {},
+                })
+            result = {"items": items, "next_cursor": None}
         else:
             task_ref = body["task_ref"]
             result = {"status": "accepted"}
@@ -176,12 +190,13 @@ class ActionSidecar:
         })
 
 
-def _adapter(configuration, sidecar):
+def _adapter(configuration, sidecar, **kwargs):
     return ExternalAgentReadOnlyAdapter(
         configuration,
         requester=sidecar,
         resolver=lambda _host: ["93.184.216.34"],
         clock=lambda: NOW,
+        **kwargs,
     )
 
 
@@ -286,10 +301,81 @@ async def test_changed_replayed_and_unsafe_arguments_fail_before_duplicate_dispa
     for prompt, error in (
         ("Read /home/operator/private.txt", "path_escape"),
         ("Use token=fixture-secret", "unauthorized"),
+        ("Use Bearer abcdefgh12345", "unauthorized"),
+        ("Use sk-abcdefghijklmnop", "unauthorized"),
+        ("Use ghp_abcdefghijklmnop", "unauthorized"),
+        ("Use xoxb-abcdefghijklmnop", "unauthorized"),
     ):
         with pytest.raises(ExternalAgentBridgeError, match=error):
             await adapter.start({**task, "call_id": f"call-{error}", "prompt": prompt})
     assert len([call for call in sidecar.calls if call["url"].endswith("/actions")]) == action_count
+
+
+@pytest.mark.asyncio
+async def test_event_stream_polls_after_an_empty_nonterminal_snapshot(tmp_path):
+    sidecar = ActionSidecar(empty_event_polls=1)
+    adapter = _adapter(
+        _configuration(tmp_path), sidecar, event_poll_seconds=0
+    )
+    task = await _bound_task(adapter)
+    task.update(await adapter.start(task))
+
+    events = [event async for event in adapter.events(task)]
+
+    assert sidecar.event_polls == 2
+    assert [event["type"] for event in events] == ["result"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_event_snapshot_is_idempotent(tmp_path):
+    sidecar = ActionSidecar()
+    adapter = _adapter(_configuration(tmp_path), sidecar)
+    task = await _bound_task(adapter)
+    task.update(await adapter.start(task))
+
+    first = await adapter.task_events(
+        task["remote_task_id"], owner="alice", workspace="sample-project"
+    )
+    repeated = await adapter.task_events(
+        task["remote_task_id"], owner="alice", workspace="sample-project"
+    )
+
+    assert len(first["items"]) == 1
+    assert repeated["items"] == []
+
+    sidecar.event_text = "Conflicting replay content."
+    with pytest.raises(ExternalAgentBridgeError, match="replay_detected"):
+        await adapter.task_events(
+            task["remote_task_id"], owner="alice", workspace="sample-project"
+        )
+
+
+def test_adapter_registry_reuses_state_until_configuration_changes(tmp_path, monkeypatch):
+    configuration = _configuration(tmp_path)
+    wire_configuration = {
+        **configuration,
+        "capabilities": [
+            name if name == "task.events" else {"name": name, "effect": effect}
+            for name, effect in configuration["capabilities"].items()
+        ],
+    }
+    monkeypatch.setenv(
+        "PANDAMONIUM_EXTERNAL_AGENT_CONNECTIONS_JSON",
+        json.dumps([wire_configuration]),
+    )
+    monkeypatch.delenv("ODYSSEUS_EXTERNAL_AGENT_CONNECTIONS_JSON", raising=False)
+
+    first = external_agent_adapters()[configuration["id"]]
+    repeated = external_agent_adapters()[configuration["id"]]
+    assert first is repeated
+
+    changed = dict(wire_configuration, endpoint="https://replacement.example/v1")
+    monkeypatch.setenv(
+        "PANDAMONIUM_EXTERNAL_AGENT_CONNECTIONS_JSON",
+        json.dumps([changed]),
+    )
+    replacement = external_agent_adapters()[configuration["id"]]
+    assert replacement is not first
 
 
 @pytest.mark.asyncio

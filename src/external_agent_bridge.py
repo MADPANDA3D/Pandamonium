@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import stat
+import threading
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime, timedelta, timezone
@@ -80,6 +81,11 @@ _SECRET_KEY = re.compile(
 )
 _SECRET_VALUE = re.compile(
     r"(?i)\b(?:token|secret|password|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+"
+)
+_RAW_SECRET_VALUE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:Bearer\s+[A-Za-z0-9._~+/=-]{8,}|"
+    r"sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{8,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{8,})(?![A-Za-z0-9])"
 )
 _ABSOLUTE_PATH = re.compile(r"(?<![\w])(?:/[A-Za-z0-9._~@+-]+){2,}")
 _WINDOWS_PATH = re.compile(r"(?i)\b[A-Z]:\\(?:[^\s\\]+\\)*[^\s\\]+")
@@ -190,7 +196,7 @@ def _validate_action_arguments(capability: str, arguments: dict[str, Any]) -> No
         elif isinstance(value, str):
             if "\x00" in value or _ABSOLUTE_PATH.search(value) or _WINDOWS_PATH.search(value):
                 raise ExternalAgentBridgeError("path_escape")
-            if _SECRET_VALUE.search(value):
+            if _SECRET_VALUE.search(value) or _RAW_SECRET_VALUE.search(value):
                 raise ExternalAgentBridgeError("unauthorized")
 
     visit(arguments)
@@ -221,6 +227,7 @@ def _validate_action_arguments(capability: str, arguments: dict[str, Any]) -> No
 def _safe_text(value: object, *, maximum: int = _MAX_STRING) -> str:
     text = " ".join(str(value or "").split())[:maximum]
     text = _SECRET_VALUE.sub("[redacted]", text)
+    text = _RAW_SECRET_VALUE.sub("[redacted]", text)
     text = _ABSOLUTE_PATH.sub("[redacted]", text)
     return _WINDOWS_PATH.sub("[redacted]", text)
 
@@ -633,6 +640,7 @@ class ExternalAgentReadOnlyAdapter:
         requester: Requester = _default_requester,
         resolver: Callable[[str], Iterable[str | ipaddress._BaseAddress]] = _default_resolver,
         clock: Callable[[], datetime] = _utcnow,
+        event_poll_seconds: float = 1.0,
     ):
         self.worker = configuration["id"]
         self.label = configuration["label"]
@@ -654,10 +662,11 @@ class ExternalAgentReadOnlyAdapter:
         self._requester = requester
         self._resolver = resolver
         self._clock = clock
+        self._event_poll_seconds = max(0.0, float(event_poll_seconds))
         self._seen_messages: set[str] = set()
         self._live_capabilities: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
         self._sidecar_versions: dict[tuple[str, str], str] = {}
-        self._event_ids: set[str] = set()
+        self._event_records: dict[str, str] = {}
         self._event_sequences: dict[str, int] = {}
         self._action_results: dict[str, tuple[str, dict[str, Any]]] = {}
         if set(self._configured_capabilities) & set(EXTERNAL_ACTION_CAPABILITIES):
@@ -1192,34 +1201,64 @@ class ExternalAgentReadOnlyAdapter:
             or str(task.get("external_connection_version") or "") != policy["connection_version"]
         ):
             raise ExternalAgentBridgeError("stale_request")
-        cursor: str | None = None
-        for _page_number in range(_MAX_COLLECTION):
-            page = await self.task_events(
-                str(task.get("remote_task_id") or ""),
-                owner=owner,
-                workspace=workspace,
-                cursor=cursor,
-                limit=_MAX_COLLECTION,
-            )
-            for event in page["items"]:
-                metadata = dict(event.get("metadata") or {})
-                metadata.update(
-                    remote_event_id=event["event_id"],
-                    remote_sequence=event["sequence"],
+        remote_task_id = str(task.get("remote_task_id") or "")
+        while True:
+            cursor: str | None = None
+            seen_cursors: set[str] = set()
+            terminal_event = False
+            for _page_number in range(_MAX_COLLECTION):
+                page = await self.task_events(
+                    remote_task_id,
+                    owner=owner,
+                    workspace=workspace,
+                    cursor=cursor,
+                    limit=_MAX_COLLECTION,
                 )
+                for event in page["items"]:
+                    metadata = dict(event.get("metadata") or {})
+                    metadata.update(
+                        remote_event_id=event["event_id"],
+                        remote_sequence=event["sequence"],
+                    )
+                    terminal_event = event["event_type"] in {"result", "error", "cancelled"}
+                    yield {
+                        "event_id": event["event_id"],
+                        "type": event["event_type"],
+                        "text": event["text"],
+                        "metadata": metadata,
+                    }
+                    if terminal_event:
+                        return
+                next_cursor = page.get("next_cursor")
+                if next_cursor is None:
+                    break
+                if next_cursor == cursor or next_cursor in seen_cursors:
+                    raise ExternalAgentBridgeError("replay_detected")
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
+            else:
+                raise ExternalAgentBridgeError("rate_limited")
+
+            status = await self.status(task)
+            state = str(status.get("status") or "")
+            if state in {"completed", "failed", "cancelled"}:
+                event_type = {
+                    "completed": "result",
+                    "failed": "error",
+                    "cancelled": "cancelled",
+                }[state]
+                detail = status.get("result") or status.get("error") or state
                 yield {
-                    "event_id": event["event_id"],
-                    "type": event["event_type"],
-                    "text": event["text"],
-                    "metadata": metadata,
+                    "event_id": _stable_wire_id(
+                        "event", f"{remote_task_id}:terminal:{state}"
+                    ),
+                    "type": event_type,
+                    "text": _safe_text(detail),
+                    "metadata": {"remote_status": state, "reconciled": True},
                 }
-            next_cursor = page.get("next_cursor")
-            if next_cursor is None:
                 return
-            if next_cursor == cursor:
-                raise ExternalAgentBridgeError("replay_detected")
-            cursor = next_cursor
-        raise ExternalAgentBridgeError("rate_limited")
+            if self._event_poll_seconds:
+                await asyncio.sleep(self._event_poll_seconds)
 
     async def steer(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         return await self._action_request(
@@ -1326,6 +1365,7 @@ class ExternalAgentReadOnlyAdapter:
             events = result.get("items")
             if not isinstance(events, list):
                 raise ExternalAgentBridgeError("malformed_envelope")
+            fresh_events = []
             for event in events:
                 if not isinstance(event, dict):
                     raise ExternalAgentBridgeError("malformed_envelope")
@@ -1351,10 +1391,32 @@ class ExternalAgentReadOnlyAdapter:
                     or not isinstance(event.get("metadata"), dict)
                 ):
                     raise ExternalAgentBridgeError("malformed_envelope")
-                if event_id in self._event_ids or sequence <= self._event_sequences.get(task_ref, -1):
+                fingerprint = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "task_ref": task_ref,
+                            "event_id": event_id,
+                            "sequence": sequence,
+                            "event_type": event["event_type"],
+                            "text": event["text"],
+                            "metadata": event["metadata"],
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                previous = self._event_records.get(event_id)
+                if previous is not None:
+                    if previous != fingerprint:
+                        raise ExternalAgentBridgeError("replay_detected")
+                    continue
+                if sequence <= self._event_sequences.get(task_ref, -1):
                     raise ExternalAgentBridgeError("replay_detected")
-                self._event_ids.add(event_id)
+                self._event_records[event_id] = fingerprint
                 self._event_sequences[task_ref] = sequence
+                fresh_events.append(event)
+            result = dict(result)
+            result["items"] = fresh_events
         return result
 
     async def health(self, owner: str | None = None) -> dict[str, Any]:
@@ -1623,8 +1685,24 @@ def _catalog_arguments(query: str, cursor: str | None, limit: int) -> dict[str, 
     return {"query": query, "cursor": _bounded_cursor(cursor), "limit": limit}
 
 
+_EXTERNAL_ADAPTERS_LOCK = threading.RLock()
+_EXTERNAL_ADAPTER_CACHE: dict[
+    str, tuple[str, ExternalAgentReadOnlyAdapter]
+] = {}
+
+
 def external_agent_adapters() -> dict[str, ExternalAgentReadOnlyAdapter]:
-    return {
-        configuration["id"]: ExternalAgentReadOnlyAdapter(configuration)
-        for configuration in configured_external_agent_connections()
-    }
+    configurations = configured_external_agent_connections()
+    configured_ids = {configuration["id"] for configuration in configurations}
+    with _EXTERNAL_ADAPTERS_LOCK:
+        for worker in set(_EXTERNAL_ADAPTER_CACHE) - configured_ids:
+            _EXTERNAL_ADAPTER_CACHE.pop(worker, None)
+        registry = {}
+        for configuration in configurations:
+            candidate = ExternalAgentReadOnlyAdapter(configuration)
+            cached = _EXTERNAL_ADAPTER_CACHE.get(candidate.worker)
+            if cached is None or cached[0] != candidate.connection_version:
+                cached = (candidate.connection_version, candidate)
+                _EXTERNAL_ADAPTER_CACHE[candidate.worker] = cached
+            registry[candidate.worker] = cached[1]
+        return registry
