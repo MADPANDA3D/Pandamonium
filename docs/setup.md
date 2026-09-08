@@ -234,6 +234,13 @@ PANDAMONIUM_UPDATE_CHANNEL=stable
 APP_PORT=7000
 ```
 
+An immutable release refuses to fall back to a writable `data/` directory
+inside its signed application tree. Direct diagnostics or installed-test
+commands must therefore inherit the same `PANDAMONIUM_DATA_DIR` value (and a
+separate temporary data directory when the check must not touch production
+state). A missing value fails before application data or model-cache locks can
+be created in the active release.
+
 Copy those non-secret values into the app service environment too, then add an
 app-service ordering drop-in so boot recovery completes first:
 

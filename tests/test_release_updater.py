@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -386,9 +387,43 @@ def test_root_updater_rejects_writable_runtime(tmp_path, monkeypatch):
     runtime.mkdir()
     runtime.chmod(0o775)
     monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+    real_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path,
+        "lstat",
+        lambda path: SimpleNamespace(st_uid=0, st_mode=real_lstat(path).st_mode),
+    )
 
-    with pytest.raises(release_updater.UpdateError, match="root-owned and immutable"):
+    with pytest.raises(
+        release_updater.UpdateError,
+        match=r"root-owned and immutable \(\.: group/other writable\)",
+    ):
         release_updater.assert_immutable_tree(runtime, "release runtime")
+
+
+def test_root_updater_identifies_nested_immutable_tree_violation(tmp_path, monkeypatch):
+    release = tmp_path / "release"
+    cache = release / "data" / "fastembed_cache" / ".locks"
+    cache.mkdir(parents=True)
+    lock = cache / "model.lock"
+    lock.write_text("", encoding="utf-8")
+    release.chmod(0o755)
+    for directory in (release / "data", release / "data" / "fastembed_cache", cache):
+        directory.chmod(0o755)
+    lock.chmod(0o664)
+    monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+    real_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path,
+        "lstat",
+        lambda path: SimpleNamespace(st_uid=0, st_mode=real_lstat(path).st_mode),
+    )
+
+    with pytest.raises(
+        release_updater.UpdateError,
+        match=r"data/fastembed_cache/\.locks/model\.lock: group/other writable",
+    ):
+        release_updater.assert_immutable_tree(release, "current release")
 
 
 def test_environment_config_requires_root(monkeypatch):

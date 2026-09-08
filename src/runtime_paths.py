@@ -27,7 +27,12 @@ def get_default_data_dir() -> str:
     """
     if getattr(sys, "frozen", False):
         return os.path.join(os.path.expanduser("~"), ".odysseus", "data")
-    return os.path.join(get_app_root(), "data")
+    app_root = get_app_root()
+    if os.path.isfile(os.path.join(app_root, "SOURCE_REVISION")):
+        raise RuntimeError(
+            "PANDAMONIUM_DATA_DIR is required when running an immutable release"
+        )
+    return os.path.join(app_root, "data")
 
 
 def get_default_extensions_dir(data_dir: str) -> str:

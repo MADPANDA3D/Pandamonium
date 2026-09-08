@@ -100,7 +100,19 @@ def assert_immutable_tree(path: Path, label: str) -> None:
                 and stat.S_IMODE(metadata.st_mode) & 0o022
             )
             if metadata.st_uid != 0 or writable:
-                raise UpdateError(f"{label} is not root-owned and immutable")
+                try:
+                    relative = "." if entry == path else entry.relative_to(path).as_posix()
+                except ValueError:
+                    relative = "unknown entry"
+                reason = (
+                    "not root-owned"
+                    if metadata.st_uid != 0
+                    else "group/other writable"
+                )
+                raise UpdateError(
+                    f"{label} is not root-owned and immutable "
+                    f"({relative}: {reason})"
+                )
     except OSError as exc:
         raise UpdateError(f"{label} ownership could not be verified") from exc
 
