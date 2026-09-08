@@ -336,6 +336,19 @@ def test_initialize_read_flow_is_authoritative_with_named_supplements():
         f"mcp__broker-fixture__broker.{name}"
         for name in ["start", "discover", "read", "check_connection"]
     }
+    assert manager.native_tool_names_for_request(
+        "Using Acme Broker, use broker.start but do not use "
+        "broker.list_releases."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read"]
+    }
+    assert manager.native_tool_names_for_request(
+        "Using Acme Broker, you must not use broker.list_releases."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read"]
+    }
 
 
 def test_native_tool_failure_is_bounded_redacted_and_not_retried():

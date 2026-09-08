@@ -111,23 +111,27 @@ def _tool_name_is_negated(query: str, name: str) -> bool:
         clause_prefix = re.split(
             r"(?:[!?;\n]|\.(?=\s|$))", query_text[:match.start()]
         )[-1]
-        reset_action = (
-            r"(?:use|call|invoke|select|include|expose|admit|run|execute|choose)"
-        )
-        if re.search(
+        negations = list(re.finditer(
+            r"\b(?:do\s+not|don['’ ]?t|never|avoid|exclude|without|cannot|"
+            r"(?:must|should|can|could|would|may|might)\s+not|"
+            r"can['’ ]?t|(?:mustn|shouldn|couldn|wouldn)['’ ]?t)\b",
+            clause_prefix,
+        ))
+        if not negations:
+            continue
+        reset_action = r"(?:use|call|invoke|select|include|expose|admit|run|execute|choose)"
+        resets = list(re.finditer(
             rf"(?:,\s*(?:(?:instead|rather)\s+)?|"
             rf"\b(?:but|however)\s+(?:(?:instead|rather)\s+)?|"
             rf"\b(?:instead|rather)\s+){reset_action}\b",
             clause_prefix,
-        ):
-            continue
-        prefix_tokens = re.findall(r"[a-z0-9][a-z0-9_-]*", clause_prefix)[-8:]
-        prefix = " ".join(prefix_tokens)
-        if re.search(
-            r"(?:^| )(?:do not|don t|never|avoid|exclude|without)"
-            r"(?: [a-z0-9][a-z0-9_-]*){0,6}$",
-            prefix,
-        ):
+        ))
+        latest_negation = negations[-1]
+        latest_reset_start = resets[-1].start() if resets else -1
+        trailing_tokens = re.findall(
+            r"[a-z0-9][a-z0-9_-]*", clause_prefix[latest_negation.end():]
+        )
+        if latest_negation.start() > latest_reset_start and len(trailing_tokens) <= 6:
             return True
     return False
 
