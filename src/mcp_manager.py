@@ -98,6 +98,61 @@ def _routing_tokens(value: Any) -> Set[str]:
     }
 
 
+def _tool_name_is_negated(
+    query: str, name: str, *, allow_intervening: bool = False
+) -> bool:
+    """Return whether a named tool appears in a nearby negative clause."""
+    query_text = str(query or "").lower().replace("\r\n", "\n").replace("\r", "\n")
+    query_text = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]+", " ", query_text)
+    name_parts = re.findall(r"[a-z0-9][a-z0-9_-]*", str(name or "").lower())
+    if not query_text or not name_parts:
+        return False
+    separator = (
+        r"(?:[ \t_-]+(?:[a-z0-9][a-z0-9_-]*[ \t_-]+){0,6})"
+        if allow_intervening
+        else r"[.\s]+"
+    )
+    name_pattern = (
+        r"(?<![a-z0-9_-])"
+        + separator.join(re.escape(part) for part in name_parts)
+        + r"(?![a-z0-9_-])"
+    )
+    negated: bool | None = None
+    for match in re.finditer(name_pattern, query_text):
+        clause_prefix = re.split(
+            r"(?:[!?;\n]|\.(?=\s|$))", query_text[:match.start()]
+        )[-1]
+        negations = list(re.finditer(
+            r"\b(?:do\s+not|don['’ ]?t|never|avoid|exclude|without|cannot|"
+            r"rather\s+than|not(?!\s+only\b)|"
+            r"(?:must|should|can|could|would|may|might)\s+not|"
+            r"can['’ ]?t|won['’ ]?t|"
+            r"(?:mustn|shouldn|couldn|wouldn)['’ ]?t)\b",
+            clause_prefix,
+        ))
+        if not negations:
+            negated = False
+            continue
+        reset_action = (
+            r"(?:use|using|call|calling|invoke|invoking|select|selecting|"
+            r"include|including|expose|exposing|admit|admitting|run|running|"
+            r"execute|executing|choose|choosing)"
+        )
+        resets = list(re.finditer(
+            rf"(?:"
+            rf"(?:,\s*|\b(?:and|but|however|instead|rather|then|yet)\s+)"
+            rf"(?:(?:actually|please|instead|rather)\s+)?{reset_action}\b|"
+            rf"\b(?:do\s+not|don['’ ]?t|never)\s+(?:"
+            rf"(?:forget|fail)\s+to\s+{reset_action}|omit|exclude|avoid"
+            rf")\b|\b(?:except|other\s+than)\b)",
+            clause_prefix,
+        ))
+        latest_negation = negations[-1]
+        latest_reset_end = resets[-1].end() if resets else -1
+        negated = latest_negation.start() >= latest_reset_end
+    return bool(negated)
+
+
 # Caps for rendering untrusted MCP tool schemas into the agent prompt (issue #2660).
 # MCP servers are third-party/user-added, so field names and parameter counts are
 # untrusted input — bound them so an odd or hostile schema cannot distort the prompt.
@@ -892,12 +947,19 @@ class McpManager:
                     normalized_query,
                 ))
                 action_name = name.split(".", 1)[-1]
+                action_words = re.findall(r"[a-z0-9]+", action_name.lower())
                 name_tokens = {
-                    token for token in re.findall(r"[a-z0-9]+", action_name.lower())
+                    token for token in action_words
                     if token not in _ROUTING_STOPWORDS
                 }
-                if referenced and not directly_named and (
-                    len(name_tokens) < 2 or not name_tokens <= query_name_tokens
+                fully_name_matched = (
+                    len(name_tokens) >= 2 and name_tokens <= query_name_tokens
+                )
+                if referenced and not directly_named and not fully_name_matched:
+                    continue
+                negation_name = name if directly_named else " ".join(action_words)
+                if (directly_named or fully_name_matched) and _tool_name_is_negated(
+                    query, negation_name, allow_intervening=not directly_named
                 ):
                     continue
                 scored.append((not directly_named, -overlap, index, name))
