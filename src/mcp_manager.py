@@ -111,6 +111,16 @@ def _tool_name_is_negated(query: str, name: str) -> bool:
         clause_prefix = re.split(
             r"(?:[!?;\n]|\.(?=\s|$))", query_text[:match.start()]
         )[-1]
+        reset_action = (
+            r"(?:use|call|invoke|select|include|expose|admit|run|execute|choose)"
+        )
+        if re.search(
+            rf"(?:,\s*(?:(?:instead|rather)\s+)?|"
+            rf"\b(?:but|however)\s+(?:(?:instead|rather)\s+)?|"
+            rf"\b(?:instead|rather)\s+){reset_action}\b",
+            clause_prefix,
+        ):
+            continue
         prefix_tokens = re.findall(r"[a-z0-9][a-z0-9_-]*", clause_prefix)[-8:]
         prefix = " ".join(prefix_tokens)
         if re.search(
