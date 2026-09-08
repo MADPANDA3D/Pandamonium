@@ -64,7 +64,14 @@ test('Plugins → Add Plugins previews and executes the approved lifecycle', asy
   await mockApp(page);
   await page.goto('/static/index.html');
 
-  await page.locator('#add-plugins-btn').focus();
+  const launcher = page.getByRole('button', { name: 'Browse plugins' });
+  await expect(launcher).toHaveCount(1);
+  await expect(launcher.locator('xpath=..')).toHaveClass(/section-header-flex/);
+  await expect(page.locator('#plugins-list #add-plugins-btn')).toHaveCount(0);
+  const launcherBox = await launcher.boundingBox();
+  expect(launcherBox.width).toBeGreaterThanOrEqual(24);
+  expect(launcherBox.height).toBeGreaterThanOrEqual(24);
+  await launcher.focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#marketplace-modal')).toBeVisible();
   await expect(page.locator('#marketplace-search')).toBeFocused();
@@ -72,8 +79,10 @@ test('Plugins → Add Plugins previews and executes the approved lifecycle', asy
   await expect(page.getByRole('button', { name: /Atlas/ })).toContainText('Update available');
   await expect(page.getByRole('button', { name: /Robin/ })).toContainText('Revoked');
 
+  await expect(page.locator('#marketplace-modal')).toHaveClass(/modal-right-docked/);
   const dialog = await page.locator('.marketplace-modal-content').boundingBox();
-  expect(dialog.width).toBeGreaterThan(900);
+  expect(dialog.width).toBeGreaterThanOrEqual(320);
+  expect(dialog.width).toBeLessThanOrEqual(640);
 
   await page.getByRole('button', { name: /Atlas/ }).click();
   const detail = page.locator('#marketplace-detail');
@@ -127,7 +136,12 @@ test('marketplace renders loading, offline, empty, and mobile detail navigation'
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/static/index.html');
   await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-  await page.locator('#add-plugins-btn').click();
+  const launcher = page.getByRole('button', { name: 'Browse plugins' });
+  const launcherBox = await launcher.boundingBox();
+  expect(launcherBox.width).toBeGreaterThanOrEqual(44);
+  expect(launcherBox.height).toBeGreaterThanOrEqual(44);
+  await launcher.focus();
+  await page.keyboard.press('Space');
   await expect(page.locator('#marketplace-results')).toContainText('Loading plugins');
   resolveCatalog();
   await expect(page.getByRole('button', { name: /Atlas/ })).toBeVisible();

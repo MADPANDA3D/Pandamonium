@@ -977,13 +977,12 @@
       <div class="section" id="plugins-section">
         <div class="section-header-flex">
           <span class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/></svg>Plugins</span>
+          <button type="button" class="section-header-btn list-item-plus-btn marketplace-launcher" id="add-plugins-btn" title="Browse plugins" aria-label="Browse plugins" aria-haspopup="dialog" aria-controls="marketplace-modal">
+            <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span class="list-item-plus-label" aria-hidden="true">browse</span>
+          </button>
         </div>
         <div id="plugins-list" aria-live="polite">
-          <button type="button" class="list-item marketplace-launcher" id="add-plugins-btn" aria-haspopup="dialog" aria-controls="marketplace-modal">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></svg>
-            <span class="grow">Add Plugins</span>
-            <span class="marketplace-launcher-meta">Browse</span>
-          </button>
           <div class="list-item" aria-disabled="true"><span class="grow">Loading plugins…</span></div>
         </div>
       </div>

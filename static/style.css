@@ -43002,10 +43002,17 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 }
 .marketplace-launcher {
   color: var(--accent, var(--red));
-  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 28%, transparent);
-  background: color-mix(in srgb, var(--accent, var(--red)) 7%, transparent);
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
 }
-.marketplace-launcher-meta { font-size: 9px; opacity: .68; text-transform: uppercase; letter-spacing: .08em; }
+@media (max-width: 768px) {
+  .marketplace-launcher {
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
 .modal-content.marketplace-modal-content {
   width: min(1180px, calc(100vw - 32px));
   height: min(760px, calc(100dvh - 32px));
