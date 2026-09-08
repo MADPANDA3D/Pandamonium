@@ -3248,6 +3248,14 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
         // Attach variant navigation if this was a regeneration
         _attachVariantNav(footerTarget);
 
+        if (_authorityControl) {
+          chatRenderer.mergeAuthorityContinuationDisplay(footerTarget, {
+            decisionId: _authorityControl.decisionId,
+            choice: _authorityControl.choice,
+            scope: _authorityControl.scope,
+          });
+        }
+
         // Merge with previous stopped message if this was a continue
         if (_pendingContinue) {
           const prevEl = _pendingContinue;

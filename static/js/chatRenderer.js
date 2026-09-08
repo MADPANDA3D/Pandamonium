@@ -2124,7 +2124,59 @@ export function removeAskUserCards(root) {
     .forEach((node) => node.remove());
 }
 
-export function renderAuthorityApprovalCard(payload) {
+function _authorityAnchor(decisionId, fallbackToLatest = false) {
+  const chatBox = document.getElementById('chat-history');
+  if (!chatBox) return null;
+  const id = String(decisionId || '');
+  if (id) {
+    const anchorNode = chatBox.querySelector(
+      `.agent-thread-node[data-authority-decision-id="${CSS.escape(id)}"], `
+        + `.authority-approval-card[data-decision-id="${CSS.escape(id)}"], `
+        + `.authority-receipt-card[data-decision-id="${CSS.escape(id)}"]`,
+    );
+    const anchoredMessage = anchorNode?.closest('.msg-ai');
+    if (anchoredMessage) return anchoredMessage;
+    if (!fallbackToLatest) return null;
+  }
+  const messages = chatBox.querySelectorAll(':scope > .msg-ai');
+  return messages.length ? messages[messages.length - 1] : null;
+}
+
+function _insertAuthorityCard(message, card) {
+  if (!message || !card) return null;
+  const footer = message.querySelector(':scope > .msg-footer');
+  message.insertBefore(card, footer || null);
+  return card;
+}
+
+function _appendAuthorityRevoke(card, receipt) {
+  const receiptId = String(receipt?.receipt_id || '');
+  if (!card || !receiptId) return null;
+  card.dataset.receiptId = receiptId;
+  let revoke = card.querySelector('.authority-revoke');
+  if (revoke) return revoke;
+  revoke = document.createElement('button');
+  revoke.type = 'button';
+  revoke.className = 'ask-user-option authority-revoke';
+  revoke.textContent = 'Revoke';
+  revoke.addEventListener('click', async () => {
+    revoke.disabled = true;
+    try {
+      const response = await fetch(`/api/authority/receipts/${encodeURIComponent(receiptId)}`, {
+        method: 'DELETE', credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+      card.remove();
+    } catch (error) {
+      revoke.disabled = false;
+      uiModule.showError(`Revocation failed: ${error.message || error}`);
+    }
+  });
+  card.appendChild(revoke);
+  return revoke;
+}
+
+export function renderAuthorityApprovalCard(payload, options = {}) {
   const decisionId = String(payload?.decision_id || '');
   const capability = String(payload?.capability?.name || 'requested action');
   const target = String(payload?.capability?.target || 'tool');
@@ -2139,6 +2191,7 @@ export function renderAuthorityApprovalCard(payload) {
   const card = document.createElement('div');
   card.className = 'ask-user-card authority-approval-card';
   card.dataset.decisionId = decisionId;
+  card.title = `Approval ${decisionId}`;
   card.setAttribute('role', 'group');
   card.setAttribute('aria-label', `Approval required for ${capability}`);
 
@@ -2152,12 +2205,16 @@ export function renderAuthorityApprovalCard(payload) {
   const executionIdentity = executionHost
     ? `${executionHost}${executionUser ? ` as ${executionUser}` : ''}`
     : '';
-  context.textContent = [effect, target, workspace, executionIdentity, decisionId].filter(Boolean).join(' · ');
+  context.textContent = [effect, target, workspace, executionIdentity].filter(Boolean).join(' · ');
   card.appendChild(context);
 
-  const preview = document.createElement('pre');
+  const preview = document.createElement('details');
   preview.className = 'authority-approval-preview';
-  preview.textContent = JSON.stringify(payload?.preview || {}, null, 2);
+  const previewSummary = document.createElement('summary');
+  previewSummary.textContent = 'Review exact action';
+  const previewBody = document.createElement('pre');
+  previewBody.textContent = JSON.stringify(payload?.preview || {}, null, 2);
+  preview.append(previewSummary, previewBody);
   card.appendChild(preview);
 
   const actions = document.createElement('div');
@@ -2184,7 +2241,9 @@ export function renderAuthorityApprovalCard(payload) {
     actions.appendChild(button);
   }
   card.appendChild(actions);
-  chatBox.appendChild(card);
+  const anchor = _authorityAnchor(decisionId, options.fallbackToLatest !== false);
+  if (!anchor) return null;
+  _insertAuthorityCard(anchor, card);
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   return card;
 }
@@ -2197,6 +2256,7 @@ export function renderAuthorityDecisionResolved(payload) {
     ? document.querySelector(`.authority-approval-card[data-decision-id="${CSS.escape(decisionId)}"]`)
     : null;
   if (card) {
+    card.classList.add('authority-approval-resolved');
     const question = card.querySelector('.ask-user-question');
     const preview = card.querySelector('.authority-approval-preview');
     const actions = card.querySelector('.authority-approval-actions');
@@ -2209,8 +2269,11 @@ export function renderAuthorityDecisionResolved(payload) {
     }
     preview?.remove();
     actions?.remove();
+    if (payload?.choice === 'approve' && payload?.receipt?.scope === 'persistent') {
+      _appendAuthorityRevoke(card, payload.receipt);
+    }
   }
-  if (payload?.choice === 'approve' && payload?.receipt?.scope === 'persistent') {
+  if (!card && payload?.choice === 'approve' && payload?.receipt?.scope === 'persistent') {
     renderAuthorityReceiptCard(payload.receipt);
   }
 }
@@ -2232,12 +2295,16 @@ export function resetAuthorityApprovalCard(decisionId) {
 
 export function renderAuthorityReceiptCard(receipt) {
   const receiptId = String(receipt?.receipt_id || '');
+  const decisionId = String(receipt?.decision_id || '');
   const chatBox = document.getElementById('chat-history');
   if (!receiptId || !chatBox || receipt?.status !== 'active' || receipt?.scope !== 'persistent') return null;
   if (chatBox.querySelector(`.authority-receipt-card[data-receipt-id="${CSS.escape(receiptId)}"]`)) return null;
+  const anchor = _authorityAnchor(decisionId);
+  if (!anchor) return null;
   const card = document.createElement('div');
-  card.className = 'ask-user-card authority-receipt-card';
+  card.className = 'ask-user-card authority-receipt-card authority-approval-resolved';
   card.dataset.receiptId = receiptId;
+  if (decisionId) card.dataset.decisionId = decisionId;
   card.setAttribute('role', 'status');
   const title = document.createElement('div');
   title.className = 'ask-user-question';
@@ -2250,28 +2317,9 @@ export function renderAuthorityReceiptCard(receipt) {
     receipt?.workspace,
     receiptId,
   ].filter(Boolean).join(' · ');
-  const preview = document.createElement('pre');
-  preview.className = 'authority-approval-preview';
-  preview.textContent = JSON.stringify(receipt?.preview || {}, null, 2);
-  const revoke = document.createElement('button');
-  revoke.type = 'button';
-  revoke.className = 'ask-user-option';
-  revoke.textContent = 'Revoke';
-  revoke.addEventListener('click', async () => {
-    revoke.disabled = true;
-    try {
-      const response = await fetch(`/api/authority/receipts/${encodeURIComponent(receiptId)}`, {
-        method: 'DELETE', credentials: 'same-origin',
-      });
-      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
-      card.remove();
-    } catch (error) {
-      revoke.disabled = false;
-      uiModule.showError(`Revocation failed: ${error.message || error}`);
-    }
-  });
-  card.append(title, context, preview, revoke);
-  chatBox.appendChild(card);
+  card.append(title, context);
+  _appendAuthorityRevoke(card, receipt);
+  _insertAuthorityCard(anchor, card);
   return card;
 }
 
@@ -2282,8 +2330,11 @@ export async function restorePendingAuthorityDecision(sessionId) {
   const state = await response.json();
   const now = Date.now();
   (state?.receipts || [])
-    .filter(row => row?.scope === 'persistent' && row?.status === 'active')
-    .slice(-5)
+    .filter(row => (
+      row?.session_id === sessionId
+      && row?.scope === 'persistent'
+      && row?.status === 'active'
+    ))
     .forEach(renderAuthorityReceiptCard);
   const pending = (state?.decisions || [])
     .filter(row => (
@@ -2294,7 +2345,32 @@ export async function restorePendingAuthorityDecision(sessionId) {
       && Date.parse(row?.expires_at || '') > now
     ))
     .sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')))[0];
-  return pending ? renderAuthorityApprovalCard(pending) : null;
+  return pending ? renderAuthorityApprovalCard(pending, { fallbackToLatest: false }) : null;
+}
+
+/** Keep an approval-button continuation inside the response that requested it. */
+export function mergeAuthorityContinuationDisplay(message, continuation) {
+  if (!message || !continuation || !message.classList?.contains('msg-ai')) return message;
+  const decisionId = String(continuation?.decision_id || continuation?.decisionId || '');
+  const origin = _authorityAnchor(decisionId);
+  if (!origin || origin === message) return message;
+
+  const sourceBody = message.querySelector(':scope > .body');
+  const targetBody = origin.querySelector(':scope > .body');
+  const raw = String(message.dataset.raw || sourceBody?.textContent || '').trim();
+  const redundant = /^(?:Approval is required before I can run that exact action\.?|Denied:\s+.+?I will not run it\.?|That approval for .+ was (?:already handled|stale)\.)$/i.test(raw);
+  if (sourceBody && targetBody && !redundant && sourceBody.childNodes.length) {
+    const segment = document.createElement('div');
+    segment.className = 'authority-continuation-segment';
+    while (sourceBody.firstChild) segment.appendChild(sourceBody.firstChild);
+    targetBody.appendChild(segment);
+  }
+  message.querySelectorAll(':scope > .authority-approval-card, :scope > .authority-receipt-card')
+    .forEach(card => _insertAuthorityCard(origin, card));
+  const combinedRaw = [origin.dataset.raw, redundant ? '' : raw].filter(Boolean).join('\n\n');
+  if (combinedRaw) origin.dataset.raw = combinedRaw;
+  message.remove();
+  return origin;
 }
 
 /**
@@ -2470,11 +2546,24 @@ function _buildPersistedToolNode(event) {
   const ev = event || {};
   const esc = uiModule.esc;
   const actionStatus = ev.action_result?.status || '';
-  const approvalRequired = ev.authority_decision?.decision === 'approval_required';
-  const ok = !approvalRequired
+  const authorityResolution = ev.authority_resolution || null;
+  const resolutionChoice = String(authorityResolution?.choice || '');
+  const approvalRequired = ev.authority_decision?.decision === 'approval_required'
+    && !['resolved', 'expired'].includes(String(ev.authority_decision?.status || ''));
+  const resolvedApproved = resolutionChoice === 'approve'
+    && authorityResolution?.status === 'resolved';
+  const ok = resolvedApproved || (!approvalRequired
+    && !authorityResolution
     && (ev.exit_code === 0 || ev.exit_code == null)
-    && !['failed', 'denied', 'timed_out', 'cancelled'].includes(actionStatus);
-  const status = approvalRequired ? 'approval required' : (ok ? 'done' : (actionStatus || 'failed'));
+    && !['failed', 'denied', 'timed_out', 'cancelled'].includes(actionStatus));
+  const resolutionStatus = resolutionChoice === 'approve'
+    ? `approved ${authorityResolution?.scope === 'persistent' ? 'always' : 'once'}`
+    : resolutionChoice === 'deny'
+      ? 'denied'
+      : authorityResolution?.status === 'expired' ? 'expired' : 'resolved';
+  const status = approvalRequired
+    ? 'approval required'
+    : authorityResolution ? resolutionStatus : (ok ? 'done' : (actionStatus || 'failed'));
   let outputHtml = '';
   if (ev.output && ev.output.trim()) {
     outputHtml += `<details class="agent-tool-output"><summary>Output</summary><pre>${esc(ev.output)}</pre></details>`;
@@ -2511,6 +2600,8 @@ function _buildPersistedToolNode(event) {
 
   const node = document.createElement('div');
   node.className = 'agent-thread-node' + (ok ? '' : ' error');
+  const authorityDecisionId = String(ev.authority_decision?.decision_id || '');
+  if (authorityDecisionId) node.dataset.authorityDecisionId = authorityDecisionId;
   const commandHtml = (ev.command && !(ev.diff && ev.diff.text))
     ? `<pre class="agent-thread-cmd">${esc(ev.command)}</pre>`
     : '';
@@ -3004,6 +3095,7 @@ const chatRenderer = {
   renderAuthorityReceiptCard,
   resetAuthorityApprovalCard,
   restorePendingAuthorityDecision,
+  mergeAuthorityContinuationDisplay,
   renderAskUserCard,
   buildSourcesBox,
   buildFindingsBox,
