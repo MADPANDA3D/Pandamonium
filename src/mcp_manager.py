@@ -126,7 +126,8 @@ def _tool_name_is_negated(
             r"\b(?:do\s+not|don['’ ]?t|never|avoid|exclude|without|cannot|"
             r"rather\s+than|not(?!\s+only\b)|"
             r"(?:must|should|can|could|would|may|might)\s+not|"
-            r"can['’ ]?t|(?:mustn|shouldn|couldn|wouldn)['’ ]?t)\b",
+            r"can['’ ]?t|won['’ ]?t|"
+            r"(?:mustn|shouldn|couldn|wouldn)['’ ]?t)\b",
             clause_prefix,
         ))
         if not negations:
@@ -143,7 +144,7 @@ def _tool_name_is_negated(
             rf"(?:(?:actually|please|instead|rather)\s+)?{reset_action}\b|"
             rf"\b(?:do\s+not|don['’ ]?t|never)\s+(?:"
             rf"(?:forget|fail)\s+to\s+{reset_action}|omit|exclude|avoid"
-            rf")\b)",
+            rf")\b|\b(?:except|other\s+than)\b)",
             clause_prefix,
         ))
         latest_negation = negations[-1]
