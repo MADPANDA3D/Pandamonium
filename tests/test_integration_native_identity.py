@@ -82,6 +82,69 @@ def test_identity_match_fails_closed_for_invalid_ports(monkeypatch):
     }]) == {}
 
 
+def test_explicit_native_link_is_authoritative_across_different_origins(monkeypatch):
+    server = SimpleNamespace(
+        id="native-relay",
+        name="Acme Relay",
+        url="https://mcp.example.test/transport",
+        is_enabled=True,
+    )
+    monkeypatch.setattr(core.database, "SessionLocal", lambda: _Db([server]))
+    api = {
+        "id": "legacy-api",
+        "name": "Acme Relay API",
+        "base_url": "https://api.example.test/v1",
+        "native_mcp_server_id": "native-relay",
+    }
+
+    assert integrations.native_mcp_companions([api]) == {
+        "legacy-api": {
+            "id": "native-relay",
+            "name": "Acme Relay",
+            "is_enabled": True,
+        }
+    }
+
+
+def test_missing_explicit_native_target_does_not_rebind_by_name(monkeypatch):
+    server = SimpleNamespace(
+        id="replacement",
+        name="Acme Relay",
+        url="https://api.example.test/mcp",
+        is_enabled=True,
+    )
+    monkeypatch.setattr(core.database, "SessionLocal", lambda: _Db([server]))
+
+    assert integrations.native_mcp_companions([{
+        "id": "legacy-api",
+        "name": "Acme Relay API",
+        "base_url": "https://api.example.test/v1",
+        "native_mcp_server_id": "deleted-server",
+    }]) == {}
+
+
+def test_reconcile_persists_only_unique_identity_links(monkeypatch):
+    servers = [
+        SimpleNamespace(id="native-relay", name="Acme Relay MCP", url="https://mcp.example.test", is_enabled=True),
+        SimpleNamespace(id="native-other", name="Other MCP", url="https://other.example.test", is_enabled=True),
+    ]
+    rows = [
+        {"id": "legacy-relay", "name": "Acme Relay API", "base_url": "https://api.example.test"},
+        {"id": "legacy-other-one", "name": "Other API", "base_url": "https://one.example.test"},
+        {"id": "legacy-other-two", "name": "Other Integration", "base_url": "https://two.example.test"},
+    ]
+    saved = []
+    monkeypatch.setattr(core.database, "SessionLocal", lambda: _Db(servers))
+    monkeypatch.setattr(integrations, "load_integrations", lambda: rows)
+    monkeypatch.setattr(integrations, "save_integrations", lambda value: saved.append(value))
+
+    assert integrations.reconcile_native_mcp_companion_links() == 1
+    assert rows[0]["native_mcp_server_id"] == "native-relay"
+    assert "native_mcp_server_id" not in rows[1]
+    assert "native_mcp_server_id" not in rows[2]
+    assert saved == [rows]
+
+
 def test_native_companion_is_omitted_from_generic_prompt_and_api_execution(monkeypatch):
     api = {
         "id": "legacy-api",

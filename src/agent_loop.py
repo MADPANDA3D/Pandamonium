@@ -1327,6 +1327,14 @@ _RETRY_CONTINUATION_RE = re.compile(
     r"start it again|failed|fails?|died|crashed|broke|insta|instantly)\b",
     re.IGNORECASE,
 )
+_TOOL_STATUS_CONTINUATION_RE = re.compile(
+    r"(?:"
+    r"\b(?:did|have)\s+you\s+(?:actually\s+)?(?:run|call|use|execute|finish)\b.{0,48}\b(?:it|that|the\s+(?:tool|call|action|task))\b|"
+    r"\bwhat\s+(?:was|is)\s+the\s+(?:tool|call|action|task)\s+i\s+asked\b|"
+    r"\b(?:what(?:'s|\s+is)\s+)?(?:the\s+)?(?:status|result)\b.{0,32}\b(?:of\s+)?(?:that|the)\s+(?:tool|call|action|task)\b"
+    r")",
+    re.IGNORECASE,
+)
 _COOKBOOK_CONTEXT_RE = re.compile(
     r"\b(?:cookbook|serve|serving|served|launch|start|preset|vllm|sglang|"
     r"llama\.?cpp|ollama|download|cached models?|model servers?|running models?|"
@@ -1369,6 +1377,41 @@ def _is_contextual_retry_continuation(messages: List[Dict], text: str) -> bool:
         return False
     recent = _recent_context_for_retrieval(messages, max_user=5, max_chars=1200)
     return bool(_COOKBOOK_CONTEXT_RE.search(recent))
+
+
+def _is_contextual_tool_status_continuation(messages: List[Dict], text: str) -> bool:
+    """Recognize a bounded follow-up about the immediately active tool task.
+
+    A user should not have to repeat a connection or capability name just to
+    ask whether the action ran.  Keep this narrower than general pronoun
+    resolution: the latest turn must explicitly ask about a tool/call/action,
+    and an earlier human turn must exist in the recent conversation.  The
+    reconstructed retrieval query then carries the named target back into
+    normal tool and native-MCP selection without hard-coding any provider.
+    """
+    latest = str(text or "").strip()
+    if not latest or not _TOOL_STATUS_CONTINUATION_RE.search(latest):
+        return False
+    seen_latest = False
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict)
+            )
+        content = str(content or "").strip()
+        metadata = message.get("metadata") or {}
+        if not content or metadata.get("trusted") is False or content.startswith("[Tool execution results]"):
+            continue
+        if not seen_latest:
+            seen_latest = True
+            continue
+        return True
+    return False
 
 
 def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
@@ -1484,6 +1527,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         _is_explicit_continuation(text)
         or _assistant_requested_followup(messages, text)
         or retry_continuation
+        or _is_contextual_tool_status_continuation(messages, text)
     )
     retrieval_query = _recent_context_for_retrieval(messages) if continuation else text
     q = retrieval_query.lower()
@@ -1641,8 +1685,12 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
            r"\b(?:home ?assistant|miniflux|gitea|linkding|jellyfin)\b"):
         domains.add("integrations")
     if (
-        has(r"\b(?:tools?|integrations?|plugins?|capabilities)\b")
+        has(r"\b(?:integrations?|plugins?|capabilities)\b")
         and has(r"\b(?:what|which|list|show|see|visible|available|access|have|connected|installed)\b")
+    ) or has(
+        r"\bwhat\s+(?:tools?|capabilities)\b",
+        r"\b(?:which|list|show|see|visible|available|access|have|connected|installed)\b.{0,32}\btools?\b",
+        r"\btools?\b.{0,32}\b(?:which|list|show|see|visible|available|access|have|connected|installed)\b",
     ):
         domains.add("integrations")
     if has(
@@ -3170,6 +3218,47 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
+def _record_repeated_api_failure(
+    failure_freq: collections.Counter,
+    tool_type: str,
+    content: str,
+    result: Mapping[str, Any],
+    *,
+    threshold: int = 3,
+) -> Optional[str]:
+    """Count equivalent failed generic API outcomes across changing paths.
+
+    Exact-call repetition cannot catch endpoint guessing because every path is
+    a different argument signature.  For the generic ``api_call`` bridge,
+    collapse only final HTTP failures by integration, method, and status.  The
+    requested path is deliberately omitted; three redirects/errors from the
+    same configured API are no more evidence than one.  Other tools and
+    non-HTTP failures retain the existing exact-call semantics.
+    """
+    if tool_type != "api_call" or result.get("exit_code") in (None, 0, "0"):
+        return None
+    error = str(result.get("error") or "")
+    status_match = re.match(r"^HTTP\s+(\d{3})\b", error)
+    if not status_match:
+        return None
+    try:
+        arguments = json.loads(str(content or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        arguments = {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    integration_id = str(
+        arguments.get("integration_id")
+        or arguments.get("integration")
+        or arguments.get("id")
+        or ""
+    ).strip().lower()
+    method = str(arguments.get("method") or "GET").strip().upper()
+    fingerprint = f"api_call:{integration_id}:{method}:HTTP {status_match.group(1)}"
+    failure_freq[fingerprint] += 1
+    return fingerprint if failure_freq[fingerprint] >= threshold else None
+
+
 async def stream_agent_loop(
     endpoint_url: str,
     model: str,
@@ -3581,7 +3670,12 @@ async def stream_agent_loop(
     _native_mcp_tools: Set[str] = set()
     if not guide_only and mcp_mgr and not _is_native_mcp_management_request(_last_user):
         try:
-            _native_mcp_tools = mcp_mgr.native_tool_names_for_request(_last_user)
+            # Contextual status/follow-up turns carry the named connection in
+            # the reconstructed retrieval query, not necessarily in the final
+            # sentence (for example, "did you run the tool?").  Use the same
+            # bounded query as ordinary tool retrieval so the native route does
+            # not disappear and expose a generic API fallback mid-task.
+            _native_mcp_tools = mcp_mgr.native_tool_names_for_request(_retrieval_query)
         except Exception as _native_route_error:
             logger.warning("[tool-rag] native MCP route selection failed: %s", _native_route_error)
         if _native_mcp_tools:
@@ -4037,6 +4131,8 @@ async def stream_agent_loop(
     # backstop. Counting identical repeats — not distinct same-tool calls —
     # lets a legit batch (e.g. 18 calendar events at once) through.
     _call_freq: collections.Counter = collections.Counter()
+    _failed_outcome_freq: collections.Counter = collections.Counter()
+    _repeated_failed_outcome: Optional[str] = None
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
     _terminal_native_mcp_error: Optional[Dict[str, str]] = None
     # Supervisor: how many times we've nudged the model after it announced
@@ -4158,7 +4254,7 @@ async def stream_agent_loop(
                 ]
         else:
             # Local: only MCP schemas when message suggests MCP tool usage
-            _last_content = _last_user.lower()
+            _last_content = _retrieval_query.lower()
             _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
             all_tool_schemas = (
                 [
@@ -5662,6 +5758,12 @@ async def stream_agent_loop(
                 # message removes it as answered.
                 tool_event["ask_user"] = _pending_ask_user_event
             tool_events.append(tool_event)
+            _repeated_failed_outcome = _record_repeated_api_failure(
+                _failed_outcome_freq,
+                block.tool_type,
+                block.content,
+                result,
+            )
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
 
@@ -5692,6 +5794,8 @@ async def stream_agent_loop(
                 _ody_doc_tool_completed = True
 
             if _terminal_native_mcp_error:
+                break
+            if _repeated_failed_outcome:
                 break
 
         if _terminal_native_mcp_error:
@@ -5771,6 +5875,35 @@ async def stream_agent_loop(
         _append_tool_results(messages, round_response, converted_calls,
                              tool_results, tool_result_texts, used_native, round_num,
                              round_reasoning=round_reasoning)
+
+        if _repeated_failed_outcome:
+            logger.warning(
+                "[agent] repeated failed API outcome; forcing final answer: %s",
+                _repeated_failed_outcome,
+            )
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "loop_breaker_triggered",
+                    "reason": "repeated_failed_outcome",
+                    "message": (
+                        "The same API failure continued across different paths, "
+                        "so the agent stopped guessing and will report the blocker."
+                    ),
+                    "round": round_num,
+                })
+                + "\n\n"
+            )
+            _force_answer = True
+            messages.append({
+                "role": "system",
+                "content": (
+                    "Different API paths produced the same failed HTTP outcome. "
+                    "STOP guessing endpoints. Do not call more tools; state the "
+                    "configuration or routing blocker plainly and concisely."
+                ),
+            })
+            _repeated_failed_outcome = None
 
         if (
             not _resume_approved_this_round

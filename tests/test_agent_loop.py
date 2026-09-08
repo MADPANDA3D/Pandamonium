@@ -91,6 +91,37 @@ def test_explanatory_run_command_question_does_not_classify_as_files():
     assert "files" not in intent["domains"]
 
 
+def test_tool_status_followup_inherits_recent_named_native_request():
+    messages = [
+        {"role": "user", "content": "Use Acme Relay MCP to retrieve the latest five records."},
+        {"role": "assistant", "content": "Approval is required before I can run that exact action."},
+        {"role": "user", "content": "Did you run the tool? What was the task I asked you to do?"},
+    ]
+
+    intent = _classify_agent_request(messages, messages[-1]["content"])
+
+    assert intent["continuation"] is True
+    assert "Acme Relay MCP" in intent["retrieval_query"]
+    assert "integrations" not in intent["domains"]
+
+
+def test_tool_status_question_without_prior_turn_does_not_inherit_context():
+    prompt = "Did you run the tool?"
+
+    intent = _classify_agent_request([{"role": "user", "content": prompt}], prompt)
+
+    assert intent["continuation"] is False
+    assert intent["retrieval_query"] == prompt
+
+
+def test_explicit_tool_catalog_question_still_classifies_as_integrations():
+    prompt = "What tools are available?"
+
+    intent = _classify_agent_request([{"role": "user", "content": prompt}], prompt)
+
+    assert "integrations" in intent["domains"]
+
+
 def test_insert_before_latest_user_places_context_before_last_user_turn():
     messages = [
         {"role": "user", "content": "first"},
