@@ -28,6 +28,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from core.atomic_io import atomic_write_json
 from core.constants import APP_VERSION, DATA_DIR
+from src.backup_archive import (
+    BACKUP_SCHEMA_V2,
+    BackupArchiveError,
+    read_backup_manifest,
+    validate_backup_members,
+    verify_backup_inventory,
+)
 from src.runtime_paths import get_app_root
 
 ROOT = Path(get_app_root()).resolve()
@@ -818,7 +825,9 @@ class UpdateExecutor:
         if (current / ".env").is_file():
             shutil.copy2(current / ".env", candidate / ".env")
 
-    def _backup(self, previous: Path, manifest: dict[str, Any]) -> tuple[Path, Path]:
+    def _backup(
+        self, previous: Path, candidate: Path, manifest: dict[str, Any]
+    ) -> tuple[Path, Path]:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup_dir = (
             self.config.backup_root
@@ -831,33 +840,56 @@ class UpdateExecutor:
             "PANDAMONIUM_DATA_DIR": str(self.config.data_dir),
             "ODYSSEUS_DATA_DIR": str(self.config.data_dir),
         }
+        backup_cli = candidate / "scripts" / "pandamonium-backup"
+        if not backup_cli.is_file() or backup_cli.is_symlink():
+            raise UpdateError("candidate release has no safe data backup command")
         result = self._run(
             [
                 sys.executable,
-                str(previous / "scripts" / "pandamonium-backup"),
+                str(backup_cli),
                 "snapshot",
                 "--out",
                 str(archive),
                 "--include-research",
                 "--include-attachments",
             ],
-            cwd=previous,
+            cwd=candidate,
             env=env,
         )
-        snapshot = json.loads(result.stdout)
-        if not snapshot.get("ok"):
+        try:
+            snapshot = json.loads(result.stdout)
+        except (TypeError, ValueError) as exc:
+            raise UpdateError("data backup returned invalid evidence") from exc
+        if (
+            not snapshot.get("ok")
+            or snapshot.get("schema") != BACKUP_SCHEMA_V2
+            or not isinstance(snapshot.get("inventory"), dict)
+            or not snapshot["inventory"].get("digest")
+        ):
             raise UpdateError("data backup did not complete")
         verified = self._run(
             [
                 sys.executable,
-                str(previous / "scripts" / "pandamonium-backup"),
+                str(backup_cli),
                 "verify",
                 str(archive),
             ],
-            cwd=previous,
+            cwd=candidate,
             env=env,
         )
-        if not json.loads(verified.stdout).get("ok"):
+        try:
+            verification = json.loads(verified.stdout)
+        except (TypeError, ValueError) as exc:
+            raise UpdateError(
+                "data backup verification returned invalid evidence"
+            ) from exc
+        if (
+            not verification.get("ok")
+            or not isinstance(verification.get("inventory"), dict)
+            or verification["inventory"].get("verified") is not True
+            or verification["inventory"].get("digest")
+            != snapshot["inventory"].get("digest")
+        ):
             raise UpdateError("data backup verification failed")
         config_dir = backup_dir / "config"
         for source in (previous / ".env", *self.config.config_files):
@@ -872,6 +904,9 @@ class UpdateExecutor:
             "target_commit": manifest["commit"],
             "data_archive": str(archive),
             "data_sha256": sha256_file(archive),
+            "data_manifest_schema": snapshot["schema"],
+            "data_inventory_digest": snapshot["inventory"]["digest"],
+            "data_inventory_files": snapshot["inventory"].get("file_count"),
             "config_files": sorted(item.name for item in config_dir.iterdir())
             if config_dir.exists()
             else [],
@@ -892,7 +927,12 @@ class UpdateExecutor:
             owner = (data_stat.st_uid, data_stat.st_gid)
             root_mode = data_stat.st_mode
         with tarfile.open(archive, "r:gz") as tar:
-            members = tar.getmembers()
+            try:
+                members = validate_backup_members(tar.getmembers())
+                backup_manifest = read_backup_manifest(tar, members)
+                verify_backup_inventory(tar, members, backup_manifest)
+            except BackupArchiveError as exc:
+                raise UpdateError(f"data backup integrity check failed: {exc}") from exc
             directories: list[tuple[Path, tarfile.TarInfo]] = []
             for member in members:
                 rel = PurePosixPath(member.name)
@@ -1106,7 +1146,7 @@ class UpdateExecutor:
             self._prepare_runtime(release, manifest)
             self._state("backup", 40, "Creating and verifying full data backup")
             self._backup_dir, data_archive = self._backup(
-                self._previous_release, manifest
+                self._previous_release, release, manifest
             )
             self._state(
                 "rehearsal",

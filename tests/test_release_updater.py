@@ -125,7 +125,7 @@ def _stub_runtime(executor, monkeypatch, *, healthy=True, migration_error=False)
         lambda version, **_kwargs: healthy or version == "1.0.10",
     )
 
-    def backup(_previous, manifest):
+    def backup(_previous, _candidate, manifest):
         directory = executor.config.backup_root / f"update-{manifest['version']}"
         directory.mkdir(parents=True)
         archive = directory / "data.tar.gz"
@@ -150,6 +150,51 @@ def _stub_runtime(executor, monkeypatch, *, healthy=True, migration_error=False)
     monkeypatch.setattr(executor, "_backup", backup)
     monkeypatch.setattr(executor, "_migrate", migrate)
     return events
+
+
+def test_update_backup_uses_candidate_cli_and_materializes_internal_symlinks(
+    tmp_path, monkeypatch
+):
+    executor, manifest, _archive, previous = _layout(tmp_path, monkeypatch)
+    candidate = Path(release_updater.__file__).resolve().parents[1]
+    blob = executor.config.data_dir / "fastembed_cache" / "blobs" / "model.bin"
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"protected-model-weights")
+    snapshot = (
+        executor.config.data_dir
+        / "fastembed_cache"
+        / "snapshots"
+        / "revision"
+        / "model.bin"
+    )
+    snapshot.parent.mkdir(parents=True)
+    snapshot.symlink_to("../../blobs/model.bin")
+    assert not (previous / "scripts" / "pandamonium-backup").exists()
+
+    backup_dir, data_archive = executor._backup(previous, candidate, manifest)
+
+    with tarfile.open(data_archive, "r:gz") as tar:
+        materialized = tar.getmember(
+            "data/fastembed_cache/snapshots/revision/model.bin"
+        )
+        assert materialized.isfile()
+        assert not materialized.issym()
+        assert tar.extractfile(materialized).read() == b"protected-model-weights"
+        backup_manifest = json.loads(
+            tar.extractfile("data/.pandamonium-backup-manifest.json").read()
+        )
+    assert backup_manifest["schema"] == "jos-p7.backup.v2"
+    metadata = json.loads((backup_dir / "update-backup.json").read_text())
+    assert metadata["data_manifest_schema"] == "jos-p7.backup.v2"
+    assert metadata["data_inventory_digest"] == backup_manifest["inventory"]["digest"]
+
+    restored = executor._extract_data_backup(data_archive, tmp_path / "restored")
+    restored_snapshot = (
+        restored / "fastembed_cache" / "snapshots" / "revision" / "model.bin"
+    )
+    assert restored_snapshot.is_file()
+    assert not restored_snapshot.is_symlink()
+    assert restored_snapshot.read_bytes() == b"protected-model-weights"
 
 
 def test_release_manifest_signature_and_asset_binding_fail_closed(tmp_path):

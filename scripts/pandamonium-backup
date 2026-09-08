@@ -25,9 +25,33 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_lib"))
 from cli import quiet_logs, emit, fail, common_parser, run, REPO_ROOT as _REPO_ROOT
 quiet_logs()
 
-import argparse, hashlib, io, json, logging, os, shutil, sqlite3, subprocess, sys, tarfile, tempfile
+import argparse
+import hashlib
+import io
+import json
+import logging
+import os
+import shutil
+import sqlite3
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+
+from src.backup_archive import (
+    BACKUP_MANIFEST_NAME,
+    BACKUP_MANIFEST_NAMES,
+    BACKUP_SCHEMA_V2,
+    BackupArchiveError,
+    backup_inventory_summary,
+    build_backup_inventory,
+    read_backup_manifest,
+    validate_backup_members,
+    verify_backup_inventory,
+)
 
 _DATA_DIR = Path(
     os.getenv("PANDAMONIUM_DATA_DIR")
@@ -35,8 +59,7 @@ _DATA_DIR = Path(
     or (_REPO_ROOT / "data")
 ).resolve()
 _BACKUP_DIR = _REPO_ROOT / "backups"
-_MANIFEST_NAME = "data/.pandamonium-backup-manifest.json"
-_LEGACY_MANIFEST_NAME = "data/.odysseus-backup-manifest.json"
+_MANIFEST_NAME = BACKUP_MANIFEST_NAME
 
 # Stuff inside data/ that we explicitly skip — anything we can re-derive
 # from the SQLite DB + JSON state. Keeps the tarball small.
@@ -99,48 +122,163 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _backup_manifest(args) -> dict:
+def _backup_manifest(args, inventory: dict) -> dict:
     exclusions = []
     if not args.include_research:
         exclusions.append("data/deep_research")
     if not args.include_attachments:
         exclusions.append("data/mail-attachments")
     return {
-        "schema": "jos-p7.backup.v1",
+        "schema": BACKUP_SCHEMA_V2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_version": _source_version(),
         "scope": "pandamonium canonical data directory",
         "exclusions": exclusions,
         "external_vectors": {
-            "docker_chromadb": "separate volume; back up separately or rebuild from canonical sources",
-            "qdrant": "external projection; back up separately or rebuild from canonical memories/documents",
+            "docker_chromadb": (
+                "separate volume; back up separately or rebuild from canonical sources"
+            ),
+            "qdrant": (
+                "external projection; back up separately or rebuild from canonical "
+                "memories/documents"
+            ),
         },
         "integrity": {"algorithm": "sha256", "verified": False},
+        "inventory": inventory,
         "restoration_procedure": "scripts/pandamonium-backup restore <archive> --yes",
     }
 
 
 def _read_manifest(tar, members) -> dict:
-    member = next(
-        (
-            item
-            for item in members
-            if item.name in {_MANIFEST_NAME, _LEGACY_MANIFEST_NAME}
-        ),
-        None,
-    )
-    if not member:
-        return {"schema": "legacy", "scope": "data", "exclusions": "unknown"}
-    source = tar.extractfile(member)
-    if source is None or member.size > 1024 * 1024:
-        fail("backup manifest is unreadable or oversized")
     try:
-        value = json.loads(source.read().decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
-        fail(f"backup manifest is invalid: {exc}")
-    if not isinstance(value, dict):
-        fail("backup manifest must be a JSON object")
-    return value
+        return read_backup_manifest(tar, members)
+    except BackupArchiveError as exc:
+        fail(str(exc))
+
+
+def _verify_manifest_inventory(tar, members, manifest) -> dict:
+    try:
+        return verify_backup_inventory(tar, members, manifest)
+    except BackupArchiveError as exc:
+        fail(str(exc))
+
+
+def _public_manifest(manifest: dict) -> dict:
+    """Do not print protected archive paths while reporting proof."""
+    public = dict(manifest)
+    if "inventory" in public:
+        public["inventory"] = backup_inventory_summary(public["inventory"])
+    return public
+
+
+class _DigestingReader:
+    def __init__(self, source):
+        self.source = source
+        self.digest = hashlib.sha256()
+        self.bytes_read = 0
+
+    def read(self, size=-1):
+        chunk = self.source.read(size)
+        self.digest.update(chunk)
+        self.bytes_read += len(chunk)
+        return chunk
+
+
+def _archive_path(path: Path) -> str:
+    return (Path("data") / path.relative_to(_DATA_DIR)).as_posix()
+
+
+def _materialized_symlink_target(path: Path) -> tuple[Path, os.stat_result]:
+    """Resolve one non-chained symlink to a regular file strictly in data/."""
+    archive_path = _archive_path(path)
+    try:
+        data_root = _DATA_DIR.resolve(strict=True)
+        link_value = path.readlink()
+    except OSError:
+        fail(f"refusing dangling data symlink: {archive_path!r}")
+    candidate = link_value if link_value.is_absolute() else path.parent / link_value
+    lexical_target = Path(os.path.abspath(candidate))
+    try:
+        relative = lexical_target.relative_to(data_root)
+    except ValueError:
+        fail(f"refusing data symlink outside data/: {archive_path!r}")
+    if not relative.parts:
+        fail(f"refusing data symlink to a directory: {archive_path!r}")
+
+    current = data_root
+    metadata = None
+    for index, part in enumerate(relative.parts):
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except OSError:
+            fail(f"refusing dangling data symlink: {archive_path!r}")
+        if stat.S_ISLNK(metadata.st_mode):
+            fail(f"refusing chained data symlink: {archive_path!r}")
+        if index < len(relative.parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+            fail(f"refusing dangling data symlink: {archive_path!r}")
+
+    if metadata is None or stat.S_ISDIR(metadata.st_mode):
+        fail(f"refusing data symlink to a directory: {archive_path!r}")
+    if not stat.S_ISREG(metadata.st_mode):
+        fail(f"refusing data symlink to a special file: {archive_path!r}")
+    try:
+        resolved = lexical_target.resolve(strict=True)
+        resolved.relative_to(data_root)
+    except (OSError, ValueError):
+        fail(f"refusing data symlink outside data/: {archive_path!r}")
+    if resolved != lexical_target:
+        fail(f"refusing chained data symlink: {archive_path!r}")
+    return resolved, metadata
+
+
+def _add_regular_member(
+    tar: tarfile.TarFile,
+    source: Path,
+    archive_path: str,
+    *,
+    source_kind: str,
+    expected: os.stat_result | None = None,
+) -> dict:
+    """Add one stable regular-file descriptor and return its exact digest."""
+    try:
+        expected = expected or source.lstat()
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(source, flags)
+    except OSError as exc:
+        fail(f"could not read backup member {archive_path!r}: {exc}")
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino)
+        ):
+            fail(f"backup member changed while opening: {archive_path!r}")
+        info = tarfile.TarInfo(archive_path)
+        info.size = opened.st_size
+        info.mode = stat.S_IMODE(opened.st_mode)
+        info.mtime = int(opened.st_mtime)
+        info.uid = opened.st_uid
+        info.gid = opened.st_gid
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
+            reader = _DigestingReader(handle)
+            tar.addfile(info, reader)
+        if reader.bytes_read != info.size:
+            fail(f"backup member changed while reading: {archive_path!r}")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return {
+        "path": archive_path,
+        "size": info.size,
+        "sha256": reader.digest.hexdigest(),
+        "source": source_kind,
+    }
 
 
 def _write_verification_sidecar(path: Path, proof: dict) -> bool:
@@ -173,11 +311,12 @@ def cmd_snapshot(args):
     _reject_output_inside_data(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    sqlite_dbs = [p for p in _DATA_DIR.rglob("*.db") if p.is_file() and not p.is_symlink()]
-    files_added = 0
-    total_bytes = 0
-
-    manifest = _backup_manifest(args)
+    sqlite_dbs = [
+        p
+        for p in _DATA_DIR.rglob("*.db")
+        if p.is_file() and not p.is_symlink()
+    ]
+    inventory_entries = []
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         # Snapshot SQLite DBs to the temp dir first.
@@ -189,41 +328,69 @@ def cmd_snapshot(args):
             _sqlite_safe_copy(db, staged)
             db_map[db] = staged
 
-        with tarfile.open(out_path, "w:gz") as tar:
-            tar.add(_DATA_DIR, arcname="data", recursive=False)
-            manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
-            manifest_info = tarfile.TarInfo(_MANIFEST_NAME)
-            manifest_info.size = len(manifest_bytes)
-            manifest_info.mtime = int(datetime.now(timezone.utc).timestamp())
-            tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
-            files_added += 1
-            total_bytes += len(manifest_bytes)
-            for p in sorted(_DATA_DIR.rglob("*")):
-                if p.is_symlink():
-                    continue
-                rel = Path("data") / p.relative_to(_DATA_DIR)
-                if str(rel) == _MANIFEST_NAME:
-                    continue
-                # Skip user-asked-to-skip categories
-                if not args.include_research and "deep_research" in rel.parts:
-                    continue
-                if not args.include_attachments and "mail-attachments" in rel.parts:
-                    continue
-                if p.is_dir():
-                    tar.add(p, arcname=str(rel), recursive=False)
-                    continue
-                if not p.is_file():
-                    continue
-                # Substitute SQLite snapshots for the live files
-                source = db_map.get(p, p)
-                tar.add(source, arcname=str(rel))
-                files_added += 1
-                try:
-                    total_bytes += source.stat().st_size
-                except Exception:
-                    pass
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=out_path.parent, prefix=f".{out_path.name}.tmp-"
+        )
+        os.close(descriptor)
+        temporary_archive = Path(temporary_name)
+        try:
+            with tarfile.open(temporary_archive, "w:gz") as tar:
+                tar.add(_DATA_DIR, arcname="data", recursive=False)
+                for p in sorted(_DATA_DIR.rglob("*")):
+                    rel = Path("data") / p.relative_to(_DATA_DIR)
+                    archive_path = rel.as_posix()
+                    if archive_path in BACKUP_MANIFEST_NAMES:
+                        continue
+                    # Skip user-asked-to-skip categories.
+                    if not args.include_research and "deep_research" in rel.parts:
+                        continue
+                    if not args.include_attachments and "mail-attachments" in rel.parts:
+                        continue
+                    if p.is_symlink():
+                        target, target_metadata = _materialized_symlink_target(p)
+                        source = db_map.get(target, target)
+                        expected = (
+                            source.lstat() if source != target else target_metadata
+                        )
+                        inventory_entries.append(
+                            _add_regular_member(
+                                tar,
+                                source,
+                                archive_path,
+                                source_kind="materialized_internal_file_symlink",
+                                expected=expected,
+                            )
+                        )
+                        continue
+                    if p.is_dir():
+                        tar.add(p, arcname=archive_path, recursive=False)
+                        continue
+                    if not p.is_file():
+                        continue
+                    # Substitute SQLite snapshots for the live files.
+                    source = db_map.get(p, p)
+                    inventory_entries.append(
+                        _add_regular_member(
+                            tar, source, archive_path, source_kind="file"
+                        )
+                    )
+
+                inventory = build_backup_inventory(inventory_entries)
+                manifest = _backup_manifest(args, inventory)
+                manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+                manifest_info = tarfile.TarInfo(_MANIFEST_NAME)
+                manifest_info.size = len(manifest_bytes)
+                manifest_info.mode = 0o600
+                manifest_info.mtime = int(datetime.now(timezone.utc).timestamp())
+                tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
+            temporary_archive.chmod(0o600)
+            os.replace(temporary_archive, out_path)
+        finally:
+            temporary_archive.unlink(missing_ok=True)
 
     digest = _sha256(out_path)
+    files_added = len(inventory_entries) + 1
+    total_bytes = inventory["total_bytes"] + len(manifest_bytes)
     emit({
         "ok": True,
         "schema": manifest["schema"],
@@ -239,6 +406,7 @@ def cmd_snapshot(args):
         "included_research": bool(args.include_research),
         "included_attachments": bool(args.include_attachments),
         "integrity": {"algorithm": "sha256", "sha256": digest, "verified": False},
+        "inventory": backup_inventory_summary(inventory),
         "restoration_procedure": manifest["restoration_procedure"],
     }, args)
 
@@ -286,6 +454,7 @@ def cmd_verify(args):
             members = tar.getmembers()
             _validate_restore_members(members)
             manifest = _read_manifest(tar, members)
+            inventory = _verify_manifest_inventory(tar, members, manifest)
     except (tarfile.TarError, OSError) as e:
         fail(f"tarball is corrupt: {e}")
     proof = {
@@ -296,7 +465,8 @@ def cmd_verify(args):
         "members": len(members),
         "first": members[0].name if members else None,
         "last": members[-1].name if members else None,
-        "manifest": manifest,
+        "manifest": _public_manifest(manifest),
+        "inventory": inventory,
     }
     proof["proof_recorded"] = _write_verification_sidecar(path, proof)
     emit(proof, args)
@@ -304,16 +474,10 @@ def cmd_verify(args):
 
 def _validate_restore_members(members):
     """Reject archive entries that can escape data/ during restore."""
-    for m in members:
-        rel = PurePosixPath(m.name)
-        if rel.is_absolute() or ".." in rel.parts:
-            fail(f"refusing tarball with absolute/parent path: {m.name!r}")
-        if not rel.parts or rel.parts[0] != "data":
-            fail(f"refusing tarball with entry outside data/: {m.name!r}")
-        if m.issym() or m.islnk():
-            fail(f"refusing tarball with link entry: {m.name!r}")
-        if not (m.isdir() or m.isfile()):
-            fail(f"refusing tarball with special file entry: {m.name!r}")
+    try:
+        validate_backup_members(members)
+    except BackupArchiveError as exc:
+        fail(f"refusing tarball: {exc}")
 
 
 def _extract_restore_members(
@@ -379,6 +543,7 @@ def cmd_restore(args):
         members = tar.getmembers()
         _validate_restore_members(members)
         manifest = _read_manifest(tar, members)
+        inventory = _verify_manifest_inventory(tar, members, manifest)
         # Extract beside the configured data directory, then swap on the same
         # filesystem. This preserves external native-install data roots too.
         with tempfile.TemporaryDirectory(dir=_DATA_DIR.parent) as tmp:
@@ -400,10 +565,12 @@ def cmd_restore(args):
         "ok": True,
         "restored_from": str(path),
         "previous_data_stashed_at": str(stash) if stash else None,
-        "manifest": manifest,
+        "manifest": _public_manifest(manifest),
+        "inventory": inventory,
         "acceptance": {
             "data_directory_present": _DATA_DIR.is_dir(),
             "manifest_readable": bool(manifest),
+            "inventory_verified": bool(inventory.get("verified")),
             "previous_state_recoverable": bool(stash),
         },
     }, args)
