@@ -7,12 +7,12 @@ from src.runtime_paths import get_app_root, get_default_data_dir, get_default_ex
 
 apply_legacy_env_aliases()
 
-APP_VERSION = "1.0.28"
+APP_VERSION = "1.0.29"
 
 # Base paths
 BASE_DIR = os.path.join(get_app_root(), "")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-DATA_DIR = os.getenv("ODYSSEUS_DATA_DIR", get_default_data_dir())
+DATA_DIR = os.getenv("ODYSSEUS_DATA_DIR") or get_default_data_dir()
 EXTENSIONS_DIR = os.getenv("ODYSSEUS_EXTENSIONS_DIR") or get_default_extensions_dir(DATA_DIR)
 
 # Data file paths

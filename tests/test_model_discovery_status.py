@@ -47,3 +47,9 @@ def test_installation_capabilities_accept_only_supported_health_claims():
     assert model_discovery.installation_capabilities({
         "connection": {"protocol": "hermes-runs"},
     }) == ["hermes"]
+    assert model_discovery.installation_capabilities({
+        "installation_capabilities": [
+            "task.steer", "governed_task_actions", "external_agent", "filesystem",
+            "task.start",
+        ],
+    }) == ["external_agent", "governed_task_actions", "task.start", "task.steer"]

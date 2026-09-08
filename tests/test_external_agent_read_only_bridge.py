@@ -482,6 +482,24 @@ async def test_disconnect_then_reconnect_is_explicit(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_health_exposes_exact_configured_start_and_steer_actions(tmp_path):
+    fixture = SidecarFixture()
+    capabilities = [
+        "task.events",
+        {"name": "task.start", "effect": "reversible_write"},
+        {"name": "task.status.read", "effect": "read"},
+    ]
+    adapter = _adapter(tmp_path, fixture, capabilities=capabilities)
+
+    health = await adapter.health(owner=None)
+
+    assert health["installation_capabilities"] == [
+        "external_agent", "governed_task_actions", "task.start",
+    ]
+    assert "task.steer" not in health["installation_capabilities"]
+
+
+@pytest.mark.asyncio
 async def test_unavailable_discovery_is_canonical_and_does_not_continue(tmp_path):
     fixture = SidecarFixture()
     fixture.failures = [httpx.ConnectError("offline")]

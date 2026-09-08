@@ -42,6 +42,15 @@ def test_get_default_data_dir_normal():
         assert res == os.path.join(get_app_root(), "data")
 
 
+def test_immutable_release_requires_external_data_directory(monkeypatch, tmp_path):
+    """A diagnostic import must never create writable state in a signed tree."""
+    (tmp_path / "SOURCE_REVISION").write_text("a" * 40 + "\n", encoding="utf-8")
+    monkeypatch.setattr("src.runtime_paths.get_app_root", lambda: str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="PANDAMONIUM_DATA_DIR is required"):
+        get_default_data_dir()
+
+
 def test_get_default_data_dir_frozen():
     """Verify that get_default_data_dir resolves to a persistent user path under ~ when frozen."""
     with mock.patch.object(sys, "frozen", True, create=True):

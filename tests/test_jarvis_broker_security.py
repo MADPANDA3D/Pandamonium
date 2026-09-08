@@ -18,6 +18,7 @@ from src.agent_worker_adapters import (
     _last_remote_event_id,
 )
 from src.agent_tools import ToolBlock
+from src.external_agent_bridge import ExternalAgentBridgeError
 
 
 def _route_endpoint(path: str, method: str):
@@ -223,6 +224,66 @@ async def test_worker_status_omits_unconfigured_compatibility_slots():
     assert list(statuses) == ["pc-codex"]
     assert friday.calls == 1
     assert absent_vps.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_selector_optional_external_configuration_cannot_hide_builtin_workers(monkeypatch):
+    class Adapter:
+        enabled = True
+
+        async def health(self):
+            return {
+                "state": "connected",
+                "protocol": "codex-bridge",
+                "protocol_ready": True,
+                "display_name": "Friday",
+                "installation_capabilities": ["codex"],
+            }
+
+    builtin = Adapter()
+
+    def registries(*, include_external=False):
+        if include_external:
+            raise ExternalAgentBridgeError("connection_configuration_invalid")
+        return {"pc-codex": builtin}
+
+    monkeypatch.setattr(jarvis_agent, "adapters", registries)
+    monkeypatch.setattr(
+        jarvis_agent,
+        "worker_catalog",
+        lambda registry: {
+            "pc-codex": {
+                "id": "pc-codex",
+                "label": "Friday",
+                "enabled": True,
+                "configured": True,
+                "ready": False,
+                "adapter": "codex-bridge",
+                "capabilities": ["code"],
+                "workspaces": ["home-lab"],
+            }
+        },
+    )
+
+    with pytest.raises(ExternalAgentBridgeError, match="connection_configuration_invalid"):
+        await jarvis_agent.worker_statuses(owner="alice", include_external=True)
+
+    statuses = await jarvis_agent.selector_worker_statuses(owner="alice")
+
+    assert list(statuses) == ["pc-codex"]
+    assert statuses["pc-codex"]["ready"] is True
+    assert statuses["pc-codex"]["connection"]["state"] == "connected"
+
+
+def test_optional_worker_lookup_fails_closed_on_malformed_external_configuration(monkeypatch):
+    def registries(*, include_external=False):
+        if include_external:
+            raise ExternalAgentBridgeError("connection_configuration_invalid")
+        return {"pc-codex": SimpleNamespace(enabled=True)}
+
+    monkeypatch.setattr(agent_worker_adapters, "adapters", registries)
+
+    assert agent_worker_adapters.configured_worker("malformed-sidecar") == {}
 
 
 @pytest.mark.asyncio

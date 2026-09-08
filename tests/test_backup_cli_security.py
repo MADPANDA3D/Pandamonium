@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +25,15 @@ def _restore_args(path: Path):
 
 def _verify_args(path: Path):
     return SimpleNamespace(path=str(path), pretty=False)
+
+
+def _snapshot_args(path: Path):
+    return SimpleNamespace(
+        out=str(path),
+        include_research=True,
+        include_attachments=True,
+        pretty=False,
+    )
 
 
 def test_backup_entry_skips_files_that_disappear():
@@ -196,7 +206,7 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(
 
     backup.cmd_snapshot(args)
     snapshot = emitted.pop()
-    assert snapshot["schema"] == "jos-p7.backup.v1"
+    assert snapshot["schema"] == "jos-p7.backup.v2"
     assert snapshot["integrity"]["verified"] is False
     assert snapshot["integrity"]["sha256"]
     with tarfile.open(archive, "r:gz") as tar:
@@ -206,10 +216,13 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(
     assert manifest["scope"] == "pandamonium canonical data directory"
     assert "data/deep_research" in manifest["exclusions"]
     assert "qdrant" in manifest["external_vectors"]
+    assert manifest["inventory"]["schema"] == "pandamonium.backup-inventory.v1"
+    assert manifest["inventory"]["file_count"] == 1
 
     backup.cmd_verify(_verify_args(archive))
     proof = emitted.pop()
     assert proof["ok"] is True
+    assert proof["inventory"]["verified"] is True
     assert proof["proof_recorded"] is True
     assert Path(str(archive) + ".verified.json").exists()
 
@@ -243,3 +256,171 @@ def test_external_data_root_round_trips_without_restoring_into_source(
     assert (data / "owner.txt").read_text(encoding="utf-8") == "before"
     assert not (repo / "data").exists()
     assert list(data.parent.glob("data.before-restore-*"))
+
+
+def test_internal_file_symlink_is_materialized_and_verified_on_restore(
+    tmp_path, monkeypatch
+):
+    backup = _load_backup_cli()
+    repo = tmp_path / "repo"
+    data = repo / "data"
+    blob = data / "fastembed_cache" / "models" / "blobs" / "model.bin"
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"protected-model-weights")
+    snapshot_file = (
+        data / "fastembed_cache" / "models" / "snapshots" / "revision" / "model.bin"
+    )
+    snapshot_file.parent.mkdir(parents=True)
+    snapshot_file.symlink_to("../../blobs/model.bin")
+    _patch_repo(backup, monkeypatch, repo)
+    archive = tmp_path / "snapshot.tar.gz"
+    emitted = []
+    monkeypatch.setattr(backup, "emit", lambda payload, args: emitted.append(payload))
+
+    backup.cmd_snapshot(_snapshot_args(archive))
+
+    with tarfile.open(archive, "r:gz") as tar:
+        archived_link = tar.getmember(
+            "data/fastembed_cache/models/snapshots/revision/model.bin"
+        )
+        assert archived_link.isfile()
+        assert not archived_link.issym()
+        assert tar.extractfile(archived_link).read() == b"protected-model-weights"
+        manifest = json.loads(tar.extractfile(backup._MANIFEST_NAME).read())
+    inventory = {item["path"]: item for item in manifest["inventory"]["files"]}
+    link_entry = inventory[
+        "data/fastembed_cache/models/snapshots/revision/model.bin"
+    ]
+    assert link_entry["source"] == "materialized_internal_file_symlink"
+    assert link_entry["sha256"]
+
+    backup.cmd_verify(_verify_args(archive))
+    assert emitted[-1]["inventory"]["verified"] is True
+    blob.write_bytes(b"changed")
+    snapshot_file.unlink()
+    backup.cmd_restore(_restore_args(archive))
+
+    restored = (
+        data
+        / "fastembed_cache"
+        / "models"
+        / "snapshots"
+        / "revision"
+        / "model.bin"
+    )
+    assert restored.is_file()
+    assert not restored.is_symlink()
+    assert restored.read_bytes() == b"protected-model-weights"
+
+
+@pytest.mark.parametrize(
+    "unsafe_kind",
+    [
+        "dangling",
+        "external_absolute",
+        "external_escape",
+        "directory",
+        "chained",
+        "special",
+    ],
+)
+def test_snapshot_fails_closed_for_unsafe_data_symlinks(
+    tmp_path, monkeypatch, unsafe_kind
+):
+    backup = _load_backup_cli()
+    repo = tmp_path / "repo"
+    data = repo / "data"
+    data.mkdir(parents=True)
+    internal = data / "target.bin"
+    internal.write_bytes(b"safe")
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"outside")
+    link = data / "model.bin"
+    if unsafe_kind == "dangling":
+        link.symlink_to("missing.bin")
+    elif unsafe_kind == "external_absolute":
+        link.symlink_to(outside)
+    elif unsafe_kind == "external_escape":
+        link.symlink_to(os.path.relpath(outside, link.parent))
+    elif unsafe_kind == "directory":
+        directory = data / "models"
+        directory.mkdir()
+        link.symlink_to(directory)
+    elif unsafe_kind == "chained":
+        chained = data / "current.bin"
+        chained.symlink_to(internal.name)
+        link.symlink_to(chained.name)
+    else:
+        special = data / "pipe"
+        os.mkfifo(special)
+        link.symlink_to(special.name)
+    _patch_repo(backup, monkeypatch, repo)
+    archive = tmp_path / f"{unsafe_kind}.tar.gz"
+
+    with pytest.raises(SystemExit):
+        backup.cmd_snapshot(_snapshot_args(archive))
+
+    assert not archive.exists()
+
+
+def test_inventory_digest_blocks_corrupt_restore_before_live_data_swap(
+    tmp_path, monkeypatch
+):
+    backup = _load_backup_cli()
+    repo = tmp_path / "repo"
+    data = repo / "data"
+    data.mkdir(parents=True)
+    state = data / "state.bin"
+    state.write_bytes(b"good")
+    _patch_repo(backup, monkeypatch, repo)
+    archive = tmp_path / "snapshot.tar.gz"
+    corrupt = tmp_path / "corrupt.tar.gz"
+    backup.cmd_snapshot(_snapshot_args(archive))
+
+    with tarfile.open(archive, "r:gz") as source, tarfile.open(
+        corrupt, "w:gz"
+    ) as target:
+        for member in source.getmembers():
+            if member.name == "data/state.bin":
+                target.addfile(member, io.BytesIO(b"evil"))
+            elif member.isfile():
+                target.addfile(member, source.extractfile(member))
+            else:
+                target.addfile(member)
+
+    with pytest.raises(SystemExit):
+        backup.cmd_verify(_verify_args(corrupt))
+
+    state.write_bytes(b"live")
+    with pytest.raises(SystemExit):
+        backup.cmd_restore(_restore_args(corrupt))
+    assert state.read_bytes() == b"live"
+    assert not list(repo.glob("data.before-restore-*"))
+
+
+def test_inventory_rejects_an_unrecorded_archive_member(tmp_path, monkeypatch):
+    backup = _load_backup_cli()
+    repo = tmp_path / "repo"
+    data = repo / "data"
+    data.mkdir(parents=True)
+    (data / "state.bin").write_bytes(b"good")
+    _patch_repo(backup, monkeypatch, repo)
+    archive = tmp_path / "snapshot.tar.gz"
+    expanded = tmp_path / "expanded.tar.gz"
+    backup.cmd_snapshot(_snapshot_args(archive))
+
+    with tarfile.open(archive, "r:gz") as source, tarfile.open(
+        expanded, "w:gz"
+    ) as target:
+        for member in source.getmembers():
+            if member.isfile():
+                target.addfile(member, source.extractfile(member))
+            else:
+                target.addfile(member)
+        payload = b"not-in-inventory"
+        extra = tarfile.TarInfo("data/unrecorded.bin")
+        extra.size = len(payload)
+        target.addfile(extra, io.BytesIO(payload))
+
+    with pytest.raises(SystemExit):
+        backup.cmd_verify(_verify_args(expanded))

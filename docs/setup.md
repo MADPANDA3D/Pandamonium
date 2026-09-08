@@ -209,6 +209,11 @@ The authenticated admin UI writes only a request under the external data
 directory. Install the root-owned units so systemd performs the privileged
 work. Review and adjust every path before enabling them:
 
+The updater preserves the owner and mode of its durable state file when the
+root oneshot replaces it. This keeps the redacted admin status API readable
+after restart without making the root-only environment, backups, or release
+store available to the application service.
+
 ```bash
 sudo install -m 0644 pandamonium-updater.service /etc/systemd/system/
 sudo install -m 0644 pandamonium-updater.path /etc/systemd/system/
@@ -233,6 +238,13 @@ PANDAMONIUM_UPDATE_CONFIG_FILES=/etc/pandamonium/update.env
 PANDAMONIUM_UPDATE_CHANNEL=stable
 APP_PORT=7000
 ```
+
+An immutable release refuses to fall back to a writable `data/` directory
+inside its signed application tree. Direct diagnostics or installed-test
+commands must therefore inherit the same `PANDAMONIUM_DATA_DIR` value (and a
+separate temporary data directory when the check must not touch production
+state). A missing value fails before application data or model-cache locks can
+be created in the active release.
 
 Copy those non-secret values into the app service environment too, then add an
 app-service ordering drop-in so boot recovery completes first:

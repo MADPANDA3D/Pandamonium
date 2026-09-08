@@ -19,7 +19,7 @@ _MOCKED = [
 for _m in _MOCKED:
     sys.modules.setdefault(_m, MagicMock())
 
-from src.agent_loop import _detect_runaway_call
+from src.agent_loop import _detect_runaway_call, _record_repeated_api_failure
 
 
 def _freq(sigs):
@@ -59,3 +59,50 @@ def test_threshold_is_configurable():
 
 def test_empty_is_not_runaway():
     assert _detect_runaway_call(collections.Counter()) is None
+
+
+def test_distinct_api_paths_with_same_http_failure_are_bounded():
+    failures = collections.Counter()
+    result = {"error": "HTTP 302\nMoved", "exit_code": 1}
+
+    first = _record_repeated_api_failure(
+        failures,
+        "api_call",
+        '{"integration_id":"relay","method":"POST","path":"/one"}',
+        result,
+    )
+    second = _record_repeated_api_failure(
+        failures,
+        "api_call",
+        '{"integration_id":"relay","method":"POST","path":"/two"}',
+        result,
+    )
+    third = _record_repeated_api_failure(
+        failures,
+        "api_call",
+        '{"integration_id":"relay","method":"POST","path":"/three"}',
+        result,
+    )
+
+    assert first is None
+    assert second is None
+    assert third == "api_call:relay:POST:HTTP 302"
+
+
+def test_api_failure_bound_does_not_collapse_different_integrations_or_statuses():
+    failures = collections.Counter()
+    calls = [
+        ('{"integration_id":"one","method":"GET","path":"/a"}', "HTTP 302\nMoved"),
+        ('{"integration_id":"two","method":"GET","path":"/b"}', "HTTP 302\nMoved"),
+        ('{"integration_id":"one","method":"GET","path":"/c"}', "HTTP 404\nMissing"),
+    ]
+
+    assert all(
+        _record_repeated_api_failure(
+            failures,
+            "api_call",
+            content,
+            {"error": error, "exit_code": 1},
+        ) is None
+        for content, error in calls
+    )

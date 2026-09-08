@@ -1063,6 +1063,24 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 srv.oauth_tokens = json.dumps({"static_bearer_token": token})
                 write_db.commit()
 
+                try:
+                    from src.integrations import link_native_mcp_companion
+
+                    linked = link_native_mcp_companion(
+                        MAD_MCP_PORTAL_ID,
+                        MAD_MCP_PORTAL_NAME,
+                        token,
+                    )
+                    if linked:
+                        logger.info(
+                            "Grouped one proven legacy API connection with native MCP"
+                        )
+                except Exception:
+                    logger.warning(
+                        "Could not group the proven native MCP companion",
+                        exc_info=True,
+                    )
+
                 status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID)
                 return {
                     "configured": True,
@@ -1093,11 +1111,11 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 ).first()
                 if srv:
                     try:
-                        from src.integrations import delete_native_companion_for_server
+                        from src.integrations import unlink_native_mcp_companions
 
-                        delete_native_companion_for_server(srv.name, srv.url)
+                        unlink_native_mcp_companions(srv.id)
                     except Exception:
-                        logger.warning("Could not remove grouped API companion", exc_info=True)
+                        logger.warning("Could not unlink grouped API companion", exc_info=True)
                     db.delete(srv)
                     db.commit()
                 return {"configured": False, "status": "disconnected"}
@@ -1295,11 +1313,11 @@ def setup_mcp_routes(mcp_manager: McpManager):
             await mcp_manager.disconnect_server(server_id)
 
             try:
-                from src.integrations import delete_native_companion_for_server
+                from src.integrations import unlink_native_mcp_companions
 
-                delete_native_companion_for_server(srv.name, srv.url)
+                unlink_native_mcp_companions(srv.id)
             except Exception:
-                logger.warning("Could not remove grouped API companion", exc_info=True)
+                logger.warning("Could not unlink grouped API companion", exc_info=True)
 
             db.delete(srv)
             db.commit()

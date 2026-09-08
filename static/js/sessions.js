@@ -341,7 +341,12 @@ export function initDependencies() {}
 // ── Folder state persistence ──
 const FOLDER_STATE_KEY = 'odysseus-folder-state';
 const FOLDER_ORDER_KEY = 'odysseus-folder-order';
+const FOLDER_ORDER_PREF_KEY = 'sidebar-project-order';
 const _folderAnimationGeneration = new Map();
+let _folderOrder = _sanitizeFolderOrder(Storage.getJSON(FOLDER_ORDER_KEY, []));
+let _folderOrderRevision = 0;
+let _folderOrderPreferencePromise = null;
+let _folderOrderPersistChain = Promise.resolve();
 
 function loadFolderState() {
   return Storage.getJSON(FOLDER_STATE_KEY, {});
@@ -349,11 +354,69 @@ function loadFolderState() {
 function saveFolderState(state) {
   Storage.setJSON(FOLDER_STATE_KEY, state);
 }
-function loadFolderOrder() {
-  return Storage.getJSON(FOLDER_ORDER_KEY, []);
+
+function _sanitizeFolderOrder(value) {
+  if (!Array.isArray(value)) return [];
+  const clean = [];
+  const seen = new Set();
+  for (const candidate of value.slice(0, 512)) {
+    if (typeof candidate !== 'string') continue;
+    const name = candidate.trim();
+    if (!name || name.length > 512 || seen.has(name)) continue;
+    seen.add(name);
+    clean.push(name);
+  }
+  return clean;
 }
+
+function loadFolderOrder() {
+  return [..._folderOrder];
+}
+
 function saveFolderOrder(order) {
-  Storage.setJSON(FOLDER_ORDER_KEY, order);
+  const clean = _sanitizeFolderOrder(order);
+  _folderOrder = clean;
+  _folderOrderRevision += 1;
+  Storage.setJSON(FOLDER_ORDER_KEY, clean);
+
+  // Serialize writes so a quick series of reorders cannot let an older
+  // request arrive last and replace the owner's newest project order.
+  _folderOrderPersistChain = _folderOrderPersistChain.then(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/prefs/${FOLDER_ORDER_PREF_KEY}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: clean }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      // The local copy is intentionally retained as an offline/single-device
+      // fallback when authenticated preference storage is unavailable.
+      console.warn('Failed to persist project order preference:', error);
+    }
+  });
+}
+
+function _loadFolderOrderPreference() {
+  if (_folderOrderPreferencePromise) return _folderOrderPreferencePromise;
+  const startingRevision = _folderOrderRevision;
+  _folderOrderPreferencePromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/prefs/${FOLDER_ORDER_PREF_KEY}`, {
+        credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (!Array.isArray(payload?.value) || startingRevision !== _folderOrderRevision) return;
+      _folderOrder = _sanitizeFolderOrder(payload.value);
+      Storage.setJSON(FOLDER_ORDER_KEY, _folderOrder);
+    } catch (error) {
+      // Rendering continues from the sanitized localStorage fallback.
+      console.warn('Failed to load project order preference:', error);
+    }
+  })();
+  return _folderOrderPreferencePromise;
 }
 
 function _nextFolderAnimation(folderName) {
@@ -1129,6 +1192,7 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
+  let restoredSessionOrder = false;
   const currentTarget = getSelectedAgentTarget()
     || sessions.find(session => session.id === currentSessionId)?.agent_target
     || 'jarvis';
@@ -1144,9 +1208,10 @@ function _renderSessionListImpl() {
   if (savedOrder) {
     try {
       const orderIds = JSON.parse(savedOrder);
-      const sessionMap = new Map(orderedSessions.map(s => [s.id, s]));
+      const sessionMap = new Map(orderedSessions.map(s => [String(s.id), s]));
       const ordered = [];
       orderIds.forEach(id => {
+        id = String(id);
         if (sessionMap.has(id)) {
           ordered.push(sessionMap.get(id));
           sessionMap.delete(id);
@@ -1155,6 +1220,7 @@ function _renderSessionListImpl() {
       // Append any new sessions not in saved order
       sessionMap.forEach(s => ordered.push(s));
       orderedSessions = ordered;
+      restoredSessionOrder = Array.isArray(orderIds) && orderIds.length > 0;
     } catch (e) {
       console.warn('Failed to restore session order:', e);
     }
@@ -1167,7 +1233,8 @@ function _renderSessionListImpl() {
 
   // Favorites are real pinned chats. Keep them in one predictable place
   // instead of burying them inside date buckets or project folders.
-  const pinnedSessions = orderedSessions.filter(s => s.is_important).sort(_compareSessionsByActivity);
+  const pinnedSessions = orderedSessions.filter(s => s.is_important);
+  if (!restoredSessionOrder) pinnedSessions.sort(_compareSessionsByActivity);
   orderedSessions = orderedSessions.filter(s => !s.is_important);
   if (pinnedSessions.length) {
     _frag.appendChild(_createSidebarNavLabel('Pinned'));
@@ -1190,7 +1257,47 @@ function _renderSessionListImpl() {
     }
   });
 
-  // Render folders first (above unfiled sessions)
+  // Keep recent/unfiled chats directly under the Chats heading. The bounded
+  // region prevents a long chat history from pushing Projects out of reach,
+  // while leaving every chat accessible without inventing a destructive
+  // synthetic "Chats" folder.
+  if (unfiled.length) {
+    const activeInUnfiled = unfiled.findIndex(s => s.id === currentSessionId);
+    const limit = _showAllSessions ? unfiled.length : SIDEBAR_MAX_VISIBLE;
+    const visibleUnfiled = unfiled.slice(0, limit);
+    if (!_showAllSessions && activeInUnfiled >= limit) {
+      visibleUnfiled.push(unfiled[activeInUnfiled]);
+    }
+
+    const unfiledRegion = document.createElement('div');
+    unfiledRegion.className = 'session-unfiled-region';
+    unfiledRegion.dataset.sidebarRegion = 'unfiled-chats';
+    unfiledRegion.setAttribute('role', 'group');
+    unfiledRegion.setAttribute('aria-label', 'Recent chats');
+    unfiledRegion.tabIndex = 0;
+    unfiledRegion.style.maxHeight = 'clamp(132px, 34vh, 320px)';
+    unfiledRegion.style.overflowY = 'auto';
+    unfiledRegion.style.overflowX = 'hidden';
+    unfiledRegion.style.overscrollBehavior = 'contain';
+    unfiledRegion.style.scrollbarWidth = 'thin';
+
+    _appendSessionItemsWithDateHeaders(unfiledRegion, visibleUnfiled);
+    if (unfiled.length > SIDEBAR_MAX_VISIBLE) {
+      const remaining = unfiled.length - SIDEBAR_MAX_VISIBLE;
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'session-show-more-btn';
+      toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _showAllSessions = !_showAllSessions;
+        renderSessionList();
+      });
+      unfiledRegion.appendChild(toggleBtn);
+    }
+    _frag.appendChild(unfiledRegion);
+  }
+
+  // Real project folders follow the bounded recent-chat region.
   const savedFolderOrder = loadFolderOrder();
   const allFolderNames = Object.keys(folders);
   const orderedFolderNames = [];
@@ -1218,7 +1325,11 @@ function _renderSessionListImpl() {
     const dragHandle = document.createElement('span');
     dragHandle.className = 'folder-drag-handle';
     dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
-    dragHandle.title = 'Drag to reorder folder';
+    dragHandle.title = 'Drag to reorder project; Alt+Arrow keys also reorder';
+    dragHandle.tabIndex = 0;
+    dragHandle.setAttribute('role', 'button');
+    dragHandle.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+    dragHandle.setAttribute('aria-label', `Reorder ${folderName} project. Use Alt plus Arrow Up or Arrow Down.`);
     header.appendChild(dragHandle);
 
     const toggle = document.createElement('span');
@@ -1270,7 +1381,7 @@ function _renderSessionListImpl() {
     // Allow renaming folder via double-click
     header.addEventListener('dblclick', async (e) => {
       e.stopPropagation();
-      if (e.target.closest('.folder-delete-btn')) return;
+      if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
       const newName = await styledPrompt('Rename folder:', {
         title: 'Rename folder',
         defaultValue: folderName,
@@ -1317,101 +1428,6 @@ function _renderSessionListImpl() {
 
     _frag.appendChild(folderDiv);
   });
-
-  // Render unfiled sessions below folders (capped unless expanded)
-  const hasFolders = orderedFolderNames.length > 0;
-  const activeInUnfiled = unfiled.findIndex(s => s.id === currentSessionId);
-  const limit = _showAllSessions ? unfiled.length : SIDEBAR_MAX_VISIBLE;
-  const visibleUnfiled = unfiled.slice(0, limit);
-
-  // If active session is beyond the limit, include it
-  if (!_showAllSessions && activeInUnfiled >= limit) {
-    visibleUnfiled.push(unfiled[activeInUnfiled]);
-  }
-
-  // Wrap in "Unsorted" folder if real folders exist
-  let unfiledTarget = _frag;
-  if (hasFolders && unfiled.length > 0) {
-    const unsortedDiv = document.createElement('div');
-    unsortedDiv.className = 'session-folder unsorted-folder';
-    unsortedDiv.dataset.folderKey = '__unsorted__';
-    const unsortedHeader = document.createElement('div');
-    unsortedHeader.className = 'session-folder-header';
-    const unsortedCollapsed = loadFolderState()['__unsorted__'] === false;
-
-    const dragHandle = document.createElement('span');
-    dragHandle.className = 'folder-drag-handle';
-    dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
-    dragHandle.title = 'Drag to reorder folder';
-    unsortedHeader.appendChild(dragHandle);
-
-    const toggle = document.createElement('span');
-    toggle.className = 'folder-toggle';
-    toggle.textContent = unsortedCollapsed ? '\u25B6' : '\u25BC';
-    unsortedHeader.appendChild(toggle);
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'folder-name';
-    nameSpan.textContent = 'Chats';
-    unsortedHeader.appendChild(nameSpan);
-    const countSpan = document.createElement('span');
-    countSpan.className = 'folder-count';
-    countSpan.textContent = `(${unfiled.length})`;
-    unsortedHeader.appendChild(countSpan);
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'folder-delete-btn';
-    deleteBtn.textContent = '\u00d7';
-    deleteBtn.title = 'Delete all unsorted sessions';
-    deleteBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (!await uiModule.styledConfirm(`Delete all ${unfiled.length} unsorted session(s)?`, { confirmText: 'Delete', danger: true })) return;
-      for (const s of unfiled) {
-        try {
-          await fetch(`${API_BASE}/api/session/${s.id}`, { method: 'DELETE' });
-          _deselectCurrentSession(s.id);
-        } catch (err) {
-          console.error('Failed to delete session:', s.id, err);
-        }
-      }
-      await loadSessions();
-    });
-    unsortedHeader.appendChild(deleteBtn);
-
-    unsortedHeader.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
-      _toggleSessionFolder('__unsorted__', unsortedDiv);
-    });
-    unsortedDiv.appendChild(unsortedHeader);
-    if (!unsortedCollapsed) {
-      const content = document.createElement('div');
-      content.className = 'session-folder-content';
-      unfiledTarget = content;
-      unsortedDiv.appendChild(content);
-    }
-    _frag.appendChild(unsortedDiv);
-    if (unsortedCollapsed) {
-      unfiledTarget = null;
-    }
-  }
-
-  if (unfiledTarget) {
-    _appendSessionItemsWithDateHeaders(unfiledTarget, visibleUnfiled);
-  }
-
-  // "Show more" / "Show less" toggle
-  if (unfiledTarget && unfiled.length > SIDEBAR_MAX_VISIBLE) {
-    const remaining = unfiled.length - SIDEBAR_MAX_VISIBLE;
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'session-show-more-btn';
-    toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
-    toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _showAllSessions = !_showAllSessions;
-      renderSessionList();
-    });
-    unfiledTarget.appendChild(toggleBtn);
-  }
 
   _stampSessionFolderRippleRows(_frag);
 
@@ -1674,6 +1690,10 @@ function _animateSessionRowsRemoving(ids, selector) {
 
 export async function loadSessions() {
   try {
+    // Resolve the owner-scoped project order before the first sidebar render.
+    // A failed preference read is absorbed and leaves the local fallback live.
+    await _loadFolderOrderPreference();
+
     // Delete incognito sessions left over from a previous page load
     await _cleanupIncognitoSessions();
 
@@ -2367,7 +2387,44 @@ export function setCurrentSessionId(id) {
 }
 
 // Session list keyboard navigation: arrows to move, Delete to delete
+function _moveProjectFolderByKeyboard(handle, direction) {
+  const list = uiModule.el('session-list');
+  const folder = handle.closest('.session-folder[data-folder-name]');
+  if (!list || !folder) return;
+
+  const orderedFolders = Array.from(list.querySelectorAll(':scope > .session-folder[data-folder-name]'));
+  const currentIndex = orderedFolders.indexOf(folder);
+  const targetIndex = currentIndex + direction;
+  const folderName = folder.dataset.folderName;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedFolders.length) {
+    uiModule.showToast(`${folderName} is already the ${direction < 0 ? 'first' : 'last'} project`);
+    return;
+  }
+
+  const order = orderedFolders.map(item => item.dataset.folderName).filter(Boolean);
+  [order[currentIndex], order[targetIndex]] = [order[targetIndex], order[currentIndex]];
+  saveFolderOrder(order);
+  renderSessionList();
+  uiModule.showToast(`${folderName} moved ${direction < 0 ? 'up' : 'down'}`);
+
+  // The render replaces the old handle; return focus to the same project so
+  // repeated keyboard moves remain predictable.
+  requestAnimationFrame(() => {
+    const nextHandle = Array.from(list.querySelectorAll(':scope > .session-folder .folder-drag-handle'))
+      .find(candidate => candidate.closest('.session-folder')?.dataset.folderName === folderName);
+    if (nextHandle) nextHandle.focus();
+  });
+}
+
 async function _onSessionListKeydown(e) {
+  const folderHandle = e.target.closest('.folder-drag-handle');
+  if (folderHandle && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    e.stopPropagation();
+    _moveProjectFolderByKeyboard(folderHandle, e.key === 'ArrowUp' ? -1 : 1);
+    return;
+  }
+
   const item = e.target.closest('.list-item[data-session-id]');
   if (!item) return;
 
@@ -2421,13 +2478,44 @@ export function initDragSort() {
   const list = uiModule.el('session-list');
   if (!list) return;
 
-  // Unfiled sessions (exclude items nested inside folders)
+  // Direct root sessions are pinned rows. Exclude chats nested in the bounded
+  // recent region and project folders so dragSort always moves siblings.
+  const persistSessionOrder = (items) => {
+    const movedIds = items.map(item => String(item.dataset.sessionId || '')).filter(Boolean);
+    if (!movedIds.length) return;
+    const moved = new Set(movedIds);
+    const sessionIds = sessions.map(session => String(session.id));
+    const existing = Storage.getJSON('session-order', []);
+    const seen = new Set();
+    const baseline = [...(Array.isArray(existing) ? existing : []), ...sessionIds]
+      .map(String)
+      .filter(id => {
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+    let index = 0;
+    const order = baseline.map(id => moved.has(id) ? movedIds[index++] : id);
+    order.push(...movedIds.slice(index));
+    Storage.setJSON('session-order', order);
+  };
+
   window.dragSortModule.enable('session-list', '.list-item', {
     instanceKey: 'session-items',
     handleSelector: '.item-drag-handle',
-    excludeSelector: '.session-folder-content .list-item',
-    storageKey: 'session-order',
+    excludeSelector: '.session-unfiled-region .list-item, .session-folder-content .list-item',
+    onReorder: persistSessionOrder,
   });
+
+  const unfiledRegion = list.querySelector('.session-unfiled-region');
+  if (unfiledRegion) {
+    unfiledRegion.id = 'session-unfiled-region';
+    window.dragSortModule.enable(unfiledRegion.id, '.list-item', {
+      instanceKey: 'session-unfiled-items',
+      handleSelector: '.item-drag-handle',
+      onReorder: persistSessionOrder,
+    });
+  }
 
   // Folder reordering
   window.dragSortModule.enable('session-list', '.session-folder', {

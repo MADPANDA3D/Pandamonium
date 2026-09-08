@@ -2,6 +2,7 @@
 """Routes for personal documents management."""
 import os
 import json
+import hashlib
 import logging
 import shutil
 import uuid
@@ -84,7 +85,7 @@ def _public_book(book: Dict[str, Any]) -> Dict[str, Any]:
         for key in (
             "id", "title", "filename", "size_bytes", "page_count", "status",
             "chunk_count", "indexed_chunks", "ocr_status", "needs_attention",
-            "attention_reason", "created_at", "updated_at",
+            "attention_reason", "retryable", "created_at", "updated_at",
         )
     }
 
@@ -101,6 +102,31 @@ def _book_source(owner: str, book: Dict[str, Any]) -> str:
     return source
 
 
+def _book_with_same_content(
+    owner: str,
+    books: List[Dict[str, Any]],
+    content_bytes: bytes,
+) -> Tuple[Dict[str, Any] | None, str]:
+    """Find the owner's existing durable copy, including pre-digest catalog rows."""
+    digest = hashlib.sha256(content_bytes).hexdigest()
+    for book in books:
+        if book.get("size_bytes") != len(content_bytes):
+            continue
+        known_digest = book.get("content_sha256")
+        if known_digest and known_digest != digest:
+            continue
+        try:
+            source = _book_source(owner, book)
+            with open(source, "rb") as existing_file:
+                existing_digest = hashlib.sha256(existing_file.read()).hexdigest()
+        except (HTTPException, OSError):
+            continue
+        if existing_digest == digest:
+            book["content_sha256"] = digest
+            return book, digest
+    return None, digest
+
+
 def _has_indexable_pdf_text(pages: List[str]) -> bool:
     """Reject sparse PDF metadata/OCR crumbs that do not represent book text."""
     text_chars = sum(len(page.strip()) for page in pages)
@@ -108,7 +134,21 @@ def _has_indexable_pdf_text(pages: List[str]) -> bool:
     return text_chars >= required_chars
 
 
+def _queue_book(book: Dict[str, Any], reason: str = "embedding_unavailable") -> Dict[str, Any]:
+    book.update(
+        status="queued",
+        needs_attention=True,
+        attention_reason=reason,
+        retryable=True,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return book
+
+
 def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = False) -> Dict[str, Any]:
+    if not rag:
+        return _queue_book(book)
+
     source = _book_source(owner, book)
     pages = extract_pdf_pages(source)
     ocr_status = "not_needed"
@@ -131,6 +171,7 @@ def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = F
             indexed_chunks=0,
             needs_attention=True,
             attention_reason="needs_ocr" if ocr_status == "unavailable" else "ocr_failed",
+            retryable=True,
         )
         return book
 
@@ -161,15 +202,11 @@ def _index_book(rag: Any, owner: str, book: Dict[str, Any], *, replace: bool = F
             indexed_chunks=result.get("added_count", len(documents)),
             needs_attention=False,
             attention_reason=None,
+            retryable=False,
         )
     else:
-        book.update(
-            status="failed",
-            chunk_count=len(documents),
-            indexed_chunks=0,
-            needs_attention=True,
-            attention_reason="indexing_failed",
-        )
+        book.update(chunk_count=len(documents), indexed_chunks=0)
+        _queue_book(book, "indexing_unavailable")
     return book
 
 
@@ -188,6 +225,7 @@ def _index_catalog_books(rag: Any, owner: str, book_ids: List[str], *, replace: 
                 status="failed",
                 needs_attention=True,
                 attention_reason="processing_failed",
+                retryable=True,
                 updated_at=datetime.now(timezone.utc).isoformat(),
             )
         latest = _load_book_catalog(owner)
@@ -463,14 +501,15 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
     ):
         """Upload files directly into RAG. Supports text and PDF."""
         user = require_privilege(request, "can_use_documents")
-        rag = _rag()
-        if not rag:
-            raise HTTPException(503, "RAG system is not available — is the embedding service running?")
-
         collection = str(getattr(request, "query_params", {}).get("collection", "documents")).strip().lower()
         if collection not in {"documents", "books"}:
             raise HTTPException(400, "Unknown personal upload collection")
         is_books = collection == "books"
+        rag = None
+        if not is_books:
+            rag = _rag()
+            if not rag:
+                raise HTTPException(503, "RAG system is not available — is the embedding service running?")
         upload_dir = _books_dir_for_owner(user) if is_books else _personal_upload_dir_for_owner(user)
         books = _load_book_catalog(user) if is_books else []
 
@@ -479,6 +518,10 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         needs_attention = 0
         uploaded_files = []
         book_ids = []
+        pending_book_ids = []
+        queued_books = 0
+        created_books = 0
+        reused_books = 0
 
         for upload in files:
             book = None
@@ -493,8 +536,24 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 if is_books and (ext != ".pdf" or not content_bytes.startswith(b"%PDF-")):
                     total_failed += 1
                     continue
+                if is_books:
+                    existing, content_sha256 = _book_with_same_content(user, books, content_bytes)
+                    if existing is not None:
+                        _save_book_catalog(user, books)
+                        uploaded_files.append(existing.get("filename") or safe_name)
+                        if existing["id"] not in book_ids:
+                            book_ids.append(existing["id"])
+                        reused_books += 1
+                        if (
+                            (existing.get("status") != "ready" or not existing.get("indexed_chunks"))
+                            and existing["id"] not in pending_book_ids
+                        ):
+                            pending_book_ids.append(existing["id"])
+                        continue
                 with open(file_path, "wb") as f:
                     f.write(content_bytes)
+                    f.flush()
+                    os.fsync(f.fileno())
 
                 if is_books:
                     now = datetime.now(timezone.utc).isoformat()
@@ -504,13 +563,15 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                         "filename": safe_name,
                         "source": file_path,
                         "size_bytes": len(content_bytes),
+                        "content_sha256": content_sha256,
                         "page_count": 0,
-                        "status": "indexing",
+                        "status": "queued",
                         "chunk_count": 0,
                         "indexed_chunks": 0,
                         "ocr_status": "pending",
-                        "needs_attention": False,
-                        "attention_reason": None,
+                        "needs_attention": True,
+                        "attention_reason": "embedding_unavailable",
+                        "retryable": True,
                         "created_at": now,
                         "updated_at": now,
                     }
@@ -518,6 +579,8 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     _save_book_catalog(user, books)
                     uploaded_files.append(safe_name)
                     book_ids.append(book["id"])
+                    pending_book_ids.append(book["id"])
+                    created_books += 1
                     continue
 
                 if ext == ".pdf":
@@ -556,6 +619,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                         status="failed",
                         needs_attention=True,
                         attention_reason="processing_failed",
+                        retryable=True,
                         updated_at=datetime.now(timezone.utc).isoformat(),
                     )
                     _save_book_catalog(user, books)
@@ -564,8 +628,27 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         # Track uploads directory
         if uploaded_files and not is_books and hasattr(personal_docs_manager, "add_directory"):
             personal_docs_manager.add_directory(upload_dir, index=False)
-        if book_ids:
-            background_tasks.add_task(_index_catalog_books, rag, user, book_ids)
+        if pending_book_ids:
+            try:
+                rag = _rag()
+            except Exception as error:
+                logger.error("RAG initialization failed after safely saving books for %s: %s", user, error)
+                rag = None
+            if rag:
+                latest = _load_book_catalog(user)
+                for current in latest:
+                    if current.get("id") in pending_book_ids:
+                        current.update(
+                            status="indexing",
+                            needs_attention=False,
+                            attention_reason=None,
+                            retryable=False,
+                            updated_at=datetime.now(timezone.utc).isoformat(),
+                        )
+                _save_book_catalog(user, latest)
+                background_tasks.add_task(_index_catalog_books, rag, user, pending_book_ids)
+            else:
+                queued_books = len(pending_book_ids)
 
         return {
             "success": True,
@@ -573,8 +656,11 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             "book_ids": book_ids,
             "indexed_count": total_indexed,
             "failed_count": total_failed,
-            "needs_attention": needs_attention,
-            "indexing_count": len(book_ids),
+            "needs_attention": needs_attention + queued_books,
+            "indexing_count": len(pending_book_ids) - queued_books,
+            "queued_count": queued_books,
+            "created_count": created_books,
+            "reused_count": reused_books,
         }
 
     @router.get("/books")
@@ -599,14 +685,19 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         if not os.path.isfile(_book_source(owner, book)):
             raise HTTPException(404, "Book file not found")
         rag = _rag()
-        if not rag:
-            raise HTTPException(503, "RAG system is not available")
-        book["status"] = "indexing"
-        book["needs_attention"] = False
-        book["attention_reason"] = None
-        book["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if rag:
+            book.update(
+                status="indexing",
+                needs_attention=False,
+                attention_reason=None,
+                retryable=False,
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+        else:
+            _queue_book(book)
         _save_book_catalog(owner, books)
-        background_tasks.add_task(_index_catalog_books, rag, owner, [book_id], replace=True)
+        if rag:
+            background_tasks.add_task(_index_catalog_books, rag, owner, [book_id], replace=True)
         return _public_book(book)
 
     @router.delete("/books/{book_id}")

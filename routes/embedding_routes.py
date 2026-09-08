@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Form, Depends
 from core.constants import EMBEDDING_ENDPOINT_FILE, FASTEMBED_CACHE_DIR
 from core.middleware import require_admin
 from src.runtime_paths import get_app_root
+from src.embeddings import fastembed_cache_usable
 
 logger = logging.getLogger(__name__)
 
@@ -59,20 +60,12 @@ def _model_cache_path(hf_source: str) -> Path:
 
 
 def _is_downloaded(hf_source: str) -> bool:
-    """Check if a model is already cached."""
+    """Check if a model has a usable ONNX snapshot, not only retained blobs."""
     try:
         model_dir = _model_cache_path(hf_source)
     except ValueError:
         return False
-    if not model_dir.is_dir():
-        return False
-    # Check for actual model files (not just empty dir)
-    snapshots = model_dir / "snapshots"
-    if snapshots.is_dir():
-        return any(snapshots.iterdir())
-    # Also check for blobs (older cache format)
-    blobs = model_dir / "blobs"
-    return blobs.is_dir() and any(blobs.iterdir())
+    return fastembed_cache_usable(model_dir)
 
 
 def _active_model() -> str:

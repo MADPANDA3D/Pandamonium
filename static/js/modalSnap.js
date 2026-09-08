@@ -20,6 +20,7 @@
 const SNAP_PX = 60;
 const UNSNAP_PX = 80;
 const MIN_CHAT_WIDTH = 380;
+export const EDGE_DOCK_BREAKPOINT = 768;
 const EMAIL_DOC_SPLIT_WIDTH_KEY = 'odysseus-email-doc-split-width';
 const EDGE_DOCK_WIDTH_KEY_PREFIX = 'odysseus-edge-dock-width';
 const MIN_EDGE_DOCK_WIDTH = 320;
@@ -34,14 +35,73 @@ function _dockClassForSide(side) {
   return side === 'left' ? 'modal-left-docked' : 'modal-right-docked';
 }
 
+export function edgeDockAvailable() {
+  return window.innerWidth > EDGE_DOCK_BREAKPOINT;
+}
+
+export function dockViewportGeometry() {
+  const viewport = window.visualViewport;
+  const height = viewport?.height
+    || document.documentElement?.clientHeight
+    || window.innerHeight
+    || 0;
+  const top = viewport?.offsetTop || 0;
+  return {
+    top: Math.max(0, Math.round(top)),
+    height: Math.max(1, Math.round(height)),
+  };
+}
+
+function _applyDockViewportGeometry(content) {
+  if (!content) return;
+  const viewport = dockViewportGeometry();
+  content.style.top = viewport.top + 'px';
+  content.style.bottom = 'auto';
+  content.style.height = viewport.height + 'px';
+  content.style.maxHeight = viewport.height + 'px';
+}
+
+function _isVisibleDockOwner(owner) {
+  if (!owner || !owner.isConnected) return false;
+  if (owner.classList?.contains('hidden') || owner.classList?.contains('modal-minimized')) return false;
+  if (owner.style?.display === 'none') return false;
+  const content = _resolveDockNodes(owner)?.content;
+  if (!content || !content.isConnected || content.classList?.contains('hidden')) return false;
+  return content.style?.display !== 'none';
+}
+
 function _hasOtherDockedWindow(side, owner) {
   const cls = _dockClassForSide(side);
   return Array.from(document.querySelectorAll(`.${cls}`)).some((el) => {
     if (!el || el === owner) return false;
     if (owner && el.contains && el.contains(owner)) return false;
     if (owner && owner.contains && owner.contains(el)) return false;
-    return true;
+    return _isVisibleDockOwner(el);
   });
+}
+
+function _requestDockOwnership(side, incoming) {
+  const cls = _dockClassForSide(side);
+  const peers = Array.from(document.querySelectorAll(`.${cls}`));
+  for (const owner of peers) {
+    if (!owner || owner === incoming || !_isVisibleDockOwner(owner)) continue;
+    const request = {
+      side,
+      incoming,
+      owner,
+      handled: false,
+      markHandled() { this.handled = true; },
+    };
+    try {
+      window.dispatchEvent(new CustomEvent('odysseus:dock-owner-requested', { detail: request }));
+    } catch (_) {}
+    // Registered tool windows are synchronously minimized by modalManager.
+    // A legacy/unregistered peer still yields the edge, but remains open as a
+    // normal floating window instead of being torn down.
+    if (_isVisibleDockOwner(owner) && !request.handled) {
+      clearRightDock(owner, undefined, undefined, cls);
+    }
+  }
 }
 
 function _hasAnyOtherDockedWindow(owner) {
@@ -224,6 +284,7 @@ function _disconnectLeftDockObservers(content) {
 
 function _applyEmailDocSplitGeometry(left, emailWidth) {
   const x = left + emailWidth;
+  const viewport = dockViewportGeometry();
   document.documentElement.style.setProperty('--email-doc-split-left-x', `${left}px`);
   document.documentElement.style.setProperty('--email-doc-split-email-w', `${emailWidth}px`);
   document.documentElement.style.setProperty('--email-doc-split-right-x', `${x}px`);
@@ -236,11 +297,11 @@ function _applyEmailDocSplitGeometry(left, emailWidth) {
   docPane.style.setProperty('position', 'fixed', 'important');
   docPane.style.setProperty('left', `${x}px`, 'important');
   docPane.style.setProperty('right', 'var(--right-dock-w, 0px)', 'important');
-  docPane.style.setProperty('top', '0px', 'important');
-  docPane.style.setProperty('bottom', '0px', 'important');
+  docPane.style.setProperty('top', `${viewport.top}px`, 'important');
+  docPane.style.setProperty('bottom', 'auto', 'important');
   docPane.style.setProperty('width', 'auto', 'important');
   docPane.style.setProperty('max-width', 'none', 'important');
-  docPane.style.setProperty('height', '100vh', 'important');
+  docPane.style.setProperty('height', `${viewport.height}px`, 'important');
   docPane.style.setProperty('z-index', '260', 'important');
   docPane.style.setProperty('transform', 'none', 'important');
 }
@@ -347,6 +408,8 @@ function _applyDockInternal(modal, side, dockClass) {
   if (!nodes) return 0;
   const content = nodes.content;
   if (!content) return 0;
+  if (!edgeDockAvailable()) return 0;
+  _requestDockOwnership(side, modal);
   // If the modal is currently docked on the OTHER side (e.g. the user
   // manually docked it right, then a reply re-docks it left), clear that
   // side's class + body push first. Otherwise both sides' state coexist —
@@ -394,10 +457,7 @@ function _applyDockInternal(modal, side, dockClass) {
   }
   modal.classList.add(dockClass);
   content.style.position = 'fixed';
-  content.style.top = '0';
-  content.style.bottom = '0';
-  content.style.height = '100vh';
-  content.style.maxHeight = '100vh';
+  _applyDockViewportGeometry(content);
   content.style.borderRadius = '0';
   content.style.transform = 'none';
   content.style.margin = '0';
@@ -632,7 +692,8 @@ export function clearRightDock(modal, cx, cy, dockClass) {
   // from the inline style attribute, letting CSS rules take back over.
   const r = snap && snap.rect;
   const sty = (snap && snap.style) || {};
-  content.style.position = sty.position || 'fixed';
+  const mobileLayout = !edgeDockAvailable();
+  content.style.position = sty.position || (mobileLayout ? '' : 'fixed');
   content.style.right = sty.right || '';
   content.style.bottom = sty.bottom || '';
   // Inline width/height may have been empty on the original (CSS-driven)
@@ -642,9 +703,9 @@ export function clearRightDock(modal, cx, cy, dockClass) {
   // content's min-width and the user sees a tiny pane after undock.
   // Use the captured rendered rect as a backup so the floating window
   // returns at roughly the same dimensions it had before docking.
-  content.style.width = sty.width || (r && r.width ? r.width + 'px' : '');
+  content.style.width = sty.width || (!mobileLayout && r && r.width ? r.width + 'px' : '');
   content.style.maxWidth = sty.maxWidth || '';
-  content.style.height = sty.height || (r && r.height ? r.height + 'px' : '');
+  content.style.height = sty.height || (!mobileLayout && r && r.height ? r.height + 'px' : '');
   content.style.maxHeight = sty.maxHeight || '';
   content.style.borderRadius = sty.borderRadius || '';
   content.style.transform = sty.transform || '';
@@ -655,10 +716,10 @@ export function clearRightDock(modal, cx, cy, dockClass) {
   // the original captured left/top when no cursor coords are passed.
   const refW = (r && r.width) || content.offsetWidth || 720;
   const refH = (r && r.height) || content.offsetHeight || (window.innerHeight * 0.7);
-  const targetLeft = (typeof cx === 'number')
+  const targetLeft = mobileLayout ? (sty.left || '') : (typeof cx === 'number')
     ? Math.max(8, cx - refW / 2)
     : (sty.left || (r ? r.left + 'px' : Math.max(8, (window.innerWidth - refW) / 2) + 'px'));
-  const targetTop = (typeof cy === 'number')
+  const targetTop = mobileLayout ? (sty.top || '') : (typeof cy === 'number')
     ? Math.max(8, cy - 20)
     : (sty.top || (r ? r.top + 'px' : Math.max(8, (window.innerHeight - refH) / 3) + 'px'));
   content.style.left = (typeof targetLeft === 'number') ? targetLeft + 'px' : targetLeft;
@@ -725,6 +786,11 @@ export function resumeDock(modal) {
   const side = content._dockSuspended;
   if (!side) return false;
   delete content._dockSuspended;
+  if (!edgeDockAvailable()) {
+    const dockClass = _dockClassForSide(side);
+    clearRightDock(modal, undefined, undefined, dockClass);
+    return false;
+  }
   try { applyEdgeDock(modal, side); } catch (_) {}
   return true;
 }
@@ -783,6 +849,34 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
       _hoveringSnap = false;
     },
   };
+}
+
+export function refreshDockGeometry() {
+  const owners = Array.from(document.querySelectorAll('.modal-left-docked, .modal-right-docked'));
+  if (!edgeDockAvailable()) {
+    for (const owner of owners) {
+      const side = owner.classList.contains('modal-left-docked') ? 'left' : 'right';
+      clearRightDock(owner, undefined, undefined, _dockClassForSide(side));
+    }
+    return;
+  }
+  for (const owner of owners) {
+    if (!_isVisibleDockOwner(owner)) continue;
+    const content = _resolveDockNodes(owner)?.content;
+    if (!content) continue;
+    _applyDockViewportGeometry(content);
+    if (owner.classList.contains('modal-left-docked')) {
+      _anchorLeftDock(content);
+      continue;
+    }
+    const width = _resolveRightDockWidth(owner, content);
+    content.style.left = 'auto';
+    content.style.right = '0';
+    content.style.width = width + 'px';
+    content.style.maxWidth = width + 'px';
+    document.documentElement.style.setProperty('--right-dock-w', width + 'px');
+  }
+  _positionEdgeDockResizeHandles();
 }
 
 (function _initEdgeDockResizeHandles() {
@@ -984,7 +1078,11 @@ export function makeEdgeDockController(modal, side = 'right', dockClass) {
     });
   };
   new MutationObserver(schedulePosition).observe(document.body, { childList: true });
-  window.addEventListener('resize', _positionEdgeDockResizeHandles);
+  window.addEventListener('resize', refreshDockGeometry);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', refreshDockGeometry);
+    window.visualViewport.addEventListener('scroll', refreshDockGeometry);
+  }
   window.addEventListener('odysseus:modal-opened', _positionEdgeDockResizeHandles);
   _positionEdgeDockResizeHandles();
 })();

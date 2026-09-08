@@ -207,7 +207,7 @@ async function activate(
       return 0;
     },
     caches: {
-      keys: async () => ['pandamonium-v390'],
+      keys: async () => ['pandamonium-v392'],
       delete: async key => {
         deleted.push(key);
         return true;
@@ -282,7 +282,7 @@ async function activate(
   return { activationPendingForNavigation, claimed, deleted, messages, navigated, statusRequests };
 }
 
-const futureWorker = currentWorker.replace('pandamonium-v390', 'pandamonium-v391');
+const futureWorker = currentWorker.replace('pandamonium-v392', 'pandamonium-v393');
 const recovered = await activate(futureWorker, [
   new Error('restart gap'),
   { status: 503 },
@@ -291,12 +291,12 @@ const recovered = await activate(futureWorker, [
 ], { includeClosedClient: true });
 assert.equal(recovered.activationPendingForNavigation, null);
 assert.equal(recovered.claimed, 1);
-assert.deepEqual(recovered.deleted, ['pandamonium-v390']);
+assert.deepEqual(recovered.deleted, ['pandamonium-v392']);
 assert.equal(recovered.statusRequests, 4);
 assert.equal(recovered.navigated.length, 1);
 assert.equal(
   new URL(recovered.navigated[0]).searchParams.get('pandamonium-update-reconcile'),
-  'pandamonium-v391',
+  'pandamonium-v393',
 );
 
 const lateReplacement = await activate(
@@ -353,7 +353,7 @@ const nonRetryable = await activate(futureWorker, [{ status: 400 }]);
 assert.equal(nonRetryable.statusRequests, 1);
 assert.deepEqual(nonRetryable.navigated, []);
 
-for (const terminal of ['failed', 'recovered', 'rolled_back']) {
+for (const terminal of ['failed', 'release_active', 'recovered', 'rolled_back']) {
   const result = await activate(futureWorker, [{ status: 200, body: { status: terminal } }]);
   assert.equal(result.statusRequests, 1);
   assert.equal(result.navigated.length, 1);

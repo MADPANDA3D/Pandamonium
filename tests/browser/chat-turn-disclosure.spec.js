@@ -28,7 +28,7 @@ const toolEvents = [
     output: 'approval required',
     exit_code: 1,
     action_result: { status: 'denied' },
-    authority_decision: { decision: 'approval_required' },
+    authority_decision: { decision_id: 'approval-one', decision: 'approval_required' },
   },
 ];
 
@@ -38,7 +38,11 @@ const roundTexts = [
   'The response is consolidated.',
 ];
 
-async function installRoutes(page, { stream = false, authorityRequests = [] } = {}) {
+async function installRoutes(page, {
+  stream = false,
+  authorityRequests = [],
+  authorityState = { decisions: [], receipts: [] },
+} = {}) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/sessions') {
@@ -186,7 +190,7 @@ async function installRoutes(page, { stream = false, authorityRequests = [] } = 
       });
     }
     if (url.pathname === '/api/model-endpoints' || url.pathname === '/api/models') return route.fulfill({ json: [] });
-    if (url.pathname === '/api/authority') return route.fulfill({ json: { decisions: [] } });
+    if (url.pathname === '/api/authority') return route.fulfill({ json: authorityState });
     if (url.pathname === '/api/authority/receipts/receipt-one' && route.request().method() === 'DELETE') {
       return route.fulfill({ json: { receipt_id: 'receipt-one', status: 'revoked' } });
     }
@@ -301,6 +305,8 @@ for (const [viewportName, viewport] of VIEWPORTS) {
     await expect(page.locator('.authority-approval-card').getByRole('button', { name: 'Approve once' })).toBeVisible();
     await expect(page.locator('.authority-approval-card').getByRole('button', { name: 'Approve always' })).toBeVisible();
     await expect(page.locator('.authority-approval-card').getByRole('button', { name: 'Deny' })).toBeVisible();
+    await expect(page.locator('#chat-history > .authority-approval-card, #chat-history > .authority-receipt-card')).toHaveCount(0);
+    await expect(assistant.locator(':scope > .authority-approval-card')).toHaveCount(1);
     const approvalLayout = await page.locator('.authority-approval-card').evaluate(node => {
       const rect = node.getBoundingClientRect();
       const container = document.getElementById('chat-container');
@@ -356,12 +362,83 @@ for (const [label, choice, scope] of [
     await expect(page.locator('.authority-approval-card')).toContainText(
       choice === 'deny' ? 'Denied: manage_mcp' : `Approved ${scope === 'persistent' ? 'always' : 'once'}: manage_mcp`,
     );
+    await expect(page.locator('#chat-history > .msg-ai')).toHaveCount(1);
+    await expect(page.locator('#chat-history > .authority-approval-card, #chat-history > .authority-receipt-card')).toHaveCount(0);
+    await expect(page.locator('#chat-history > .msg-ai > .authority-approval-card')).toHaveCount(1);
+    if (choice === 'approve') {
+      await expect(page.locator('#chat-history > .msg-ai .authority-continuation-segment')).toContainText(
+        'The exact pending action completed.',
+      );
+    } else {
+      await expect(page.locator('#chat-history > .msg-ai .authority-continuation-segment')).toHaveCount(0);
+    }
     if (scope === 'persistent') {
-      const receipt = page.locator('.authority-receipt-card');
-      await expect(receipt).toContainText('Always approved: manage_mcp');
-      await expect(receipt.getByRole('button', { name: 'Revoke' })).toBeVisible();
-      await receipt.getByRole('button', { name: 'Revoke' }).click();
-      await expect(receipt).toHaveCount(0);
+      const approval = page.locator('.authority-approval-card');
+      await expect(approval.getByRole('button', { name: 'Revoke' })).toBeVisible();
+      await approval.getByRole('button', { name: 'Revoke' }).click();
+      await expect(approval).toHaveCount(0);
     }
   });
 }
+
+test('reload anchors only this session pending approval inside its assistant response', async ({ page }) => {
+  await installRoutes(page, {
+    authorityState: {
+      decisions: [{
+        decision_id: 'approval-one',
+        session_id: 'session-one',
+        decision: 'approval_required',
+        status: 'pending',
+        created_at: '2026-09-08T12:00:00Z',
+        expires_at: '2099-09-08T12:00:00Z',
+        capability: { name: 'manage_mcp', target: 'portal' },
+        action_effect: 'external_publication_or_communication',
+        workspace: 'workspace-one',
+        preview: { action: 'call' },
+      }],
+      receipts: [{
+        receipt_id: 'receipt-other', decision_id: 'approval-other',
+        session_id: 'session-two', scope: 'persistent', status: 'active',
+        capability: { name: 'other_action', target: 'other' },
+      }],
+    },
+  });
+  await page.goto('/static/index.html#session-one');
+  await waitForSession(page);
+
+  const assistant = page.locator('#chat-history > .msg-ai');
+  await expect(assistant).toHaveCount(1);
+  await expect(assistant.locator(':scope > .authority-approval-card')).toHaveCount(1);
+  await expect(assistant.locator('.authority-approval-card')).toContainText('Approval required: manage_mcp');
+  await expect(page.locator('#chat-history > .authority-approval-card, #chat-history > .authority-receipt-card')).toHaveCount(0);
+  await expect(page.locator('.authority-receipt-card')).toHaveCount(0);
+});
+
+test('reload keeps persistent approval with its origin and excludes other sessions', async ({ page }) => {
+  await installRoutes(page, {
+    authorityState: {
+      decisions: [],
+      receipts: [
+        {
+          receipt_id: 'receipt-one', decision_id: 'approval-one', session_id: 'session-one',
+          scope: 'persistent', status: 'active', action_effect: 'external_publication_or_communication',
+          workspace: 'workspace-one', capability: { name: 'manage_mcp', target: 'portal' },
+        },
+        {
+          receipt_id: 'receipt-other', decision_id: 'approval-other', session_id: 'session-two',
+          scope: 'persistent', status: 'active', capability: { name: 'other_action', target: 'other' },
+        },
+      ],
+    },
+  });
+  await page.goto('/static/index.html#session-one');
+  await waitForSession(page);
+
+  const receipt = page.locator('#chat-history > .msg-ai > .authority-receipt-card');
+  await expect(receipt).toHaveCount(1);
+  await expect(receipt).toContainText('Always approved: manage_mcp');
+  await expect(page.locator('text=other_action')).toHaveCount(0);
+  await expect(page.locator('#chat-history > .authority-receipt-card')).toHaveCount(0);
+  await receipt.getByRole('button', { name: 'Revoke' }).click();
+  await expect(receipt).toHaveCount(0);
+});

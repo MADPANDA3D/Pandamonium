@@ -188,6 +188,14 @@ async def test_small_json_list_not_truncated():
 
 
 @pytest.mark.asyncio
+async def test_redirect_is_a_failed_api_execution():
+    result = await _call({"detail": "moved"}, status=302)
+
+    assert result["exit_code"] == 1
+    assert result["error"].startswith("HTTP 302\n")
+
+
+@pytest.mark.asyncio
 async def test_large_json_dict_actually_truncated():
     """A JSON dict response that exceeds 12000 chars must be truncated to fit,
     with _truncated: true marking presence — not just marked without removal."""

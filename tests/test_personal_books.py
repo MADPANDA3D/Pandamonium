@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -43,6 +44,12 @@ class _RAG:
         return sum(len(batch) for batch in self.batches)
 
 
+class _FailingRAG(_RAG):
+    def add_documents_batch(self, docs):
+        self.batches.append(list(docs))
+        return {"success": False, "message": "No embedding lane accepted the batch"}
+
+
 class _Upload:
     filename = "field-manual.pdf"
 
@@ -50,15 +57,15 @@ class _Upload:
         return b"%PDF-1.7\nfixture"
 
 
-def _request(collection="books"):
+def _request(collection="books", owner="alice"):
     class _AuthManager:
         def get_privileges(self, user):
-            assert user == "alice"
+            assert user == owner
             return {"can_use_documents": True}
 
     return SimpleNamespace(
         query_params={"collection": collection},
-        state=SimpleNamespace(current_user="alice"),
+        state=SimpleNamespace(current_user=owner),
         app=SimpleNamespace(state=SimpleNamespace(auth_manager=_AuthManager())),
         client=SimpleNamespace(host="203.0.113.10"),
     )
@@ -232,6 +239,136 @@ def test_book_upload_returns_before_background_indexing(tmp_path, monkeypatch):
     assert len(rag.batches) == 1
 
 
+def test_book_upload_is_durable_and_retryable_while_embeddings_are_unavailable(tmp_path, monkeypatch):
+    docs = _PersonalDocs()
+    rag = _RAG()
+    current_rag = {"value": None}
+    monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
+
+    def rag_after_persist():
+        assert len(list((tmp_path / "alice" / "books").glob("*.pdf"))) == 1
+        assert (tmp_path / "alice" / "books" / "catalog.json").is_file()
+        return current_rag["value"]
+
+    monkeypatch.setattr(personal_routes, "get_rag_manager", rag_after_persist)
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["full page text " * 20])
+    router = personal_routes.setup_personal_routes(docs, None, True)
+    upload = _endpoint(router, "/api/personal/upload", "POST")
+
+    result = asyncio.run(_upload_books(upload, _request(), [_Upload()]))
+    book = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
+
+    assert result["success"] is True
+    assert result["queued_count"] == 1
+    assert result["indexing_count"] == 0
+    assert book["status"] == "queued"
+    assert book["retryable"] is True
+    assert book["attention_reason"] == "embedding_unavailable"
+    books_dir = tmp_path / "alice" / "books"
+    assert len(list(books_dir.glob("*.pdf"))) == 1
+    assert books_dir.joinpath("catalog.json").is_file()
+
+    background_tasks = BackgroundTasks()
+    still_queued = _endpoint(router, "/api/personal/books/{book_id}/reindex", "POST")(
+        book_id=book["id"], background_tasks=background_tasks, owner="alice"
+    )
+    assert still_queued["status"] == "queued"
+
+    current_rag["value"] = rag
+    background_tasks = BackgroundTasks()
+    retry = _endpoint(router, "/api/personal/books/{book_id}/reindex", "POST")(
+        book_id=book["id"], background_tasks=background_tasks, owner="alice"
+    )
+    assert retry["status"] == "indexing"
+    asyncio.run(background_tasks())
+    ready = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
+    assert ready["status"] == "ready"
+    assert ready["retryable"] is False
+
+
+def test_book_indexing_keeps_every_pdf_page_and_page_aware_chunk(tmp_path, monkeypatch):
+    docs = _PersonalDocs()
+    rag = _RAG()
+    pages = [f"page {number} full text " * 10 for number in range(1, 158)]
+    monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
+    monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: rag)
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: pages)
+    router = personal_routes.setup_personal_routes(docs, None, True)
+
+    asyncio.run(_upload_books(
+        _endpoint(router, "/api/personal/upload", "POST"),
+        _request(),
+        [_Upload()],
+    ))
+
+    assert len(rag.batches) == 1
+    assert len(rag.batches[0]) == len(pages)
+    assert rag.batches[0][-1][1]["page"] == 157
+    assert ":page:157:chunk:1" in rag.batches[0][-1][1]["source_id"]
+
+
+def test_repeat_book_upload_reuses_owner_copy_and_legacy_catalog_without_digest(tmp_path, monkeypatch):
+    docs = _PersonalDocs()
+    rag = _RAG()
+    current_rag = {"value": None}
+    monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
+    monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: current_rag["value"])
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["full page text " * 20])
+    router = personal_routes.setup_personal_routes(docs, None, True)
+    upload = _endpoint(router, "/api/personal/upload", "POST")
+
+    first = asyncio.run(_upload_books(upload, _request(), [_Upload()]))
+    catalog = personal_routes._load_book_catalog("alice")
+    original_id = catalog[0]["id"]
+    catalog[0].pop("content_sha256")
+    personal_routes._save_book_catalog("alice", catalog)
+
+    current_rag["value"] = rag
+    repeated = asyncio.run(_upload_books(upload, _request(), [_Upload()]))
+    ready_repeat = asyncio.run(_upload_books(upload, _request(), [_Upload()]))
+    books = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"]
+    internal = personal_routes._load_book_catalog("alice")
+
+    assert first["created_count"] == 1 and first["reused_count"] == 0
+    assert repeated["created_count"] == 0 and repeated["reused_count"] == 1
+    assert repeated["book_ids"] == [original_id]
+    assert repeated["indexing_count"] == 1
+    assert ready_repeat["created_count"] == 0 and ready_repeat["reused_count"] == 1
+    assert ready_repeat["indexing_count"] == 0
+    assert len(books) == 1
+    assert "content_sha256" not in books[0]
+    assert internal[0]["content_sha256"] == hashlib.sha256(b"%PDF-1.7\nfixture").hexdigest()
+    assert len(list((tmp_path / "alice" / "books").glob("*.pdf"))) == 1
+    assert len(rag.batches) == 1
+
+    bob = asyncio.run(_upload_books(upload, _request(owner="bob"), [_Upload()]))
+    assert bob["created_count"] == 1 and bob["reused_count"] == 0
+    assert len(personal_routes._load_book_catalog("bob")) == 1
+    assert len(list((tmp_path / "bob" / "books").glob("*.pdf"))) == 1
+
+
+def test_book_batch_failure_keeps_saved_book_queued_for_retry(tmp_path, monkeypatch):
+    docs = _PersonalDocs()
+    rag = _FailingRAG()
+    monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path))
+    monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: rag)
+    monkeypatch.setattr(personal_routes, "extract_pdf_pages", lambda _path: ["full page text " * 20])
+    router = personal_routes.setup_personal_routes(docs, None, True)
+
+    asyncio.run(_upload_books(
+        _endpoint(router, "/api/personal/upload", "POST"),
+        _request(),
+        [_Upload()],
+    ))
+    book = _endpoint(router, "/api/personal/books", "GET")(owner="alice")["books"][0]
+
+    assert book["status"] == "queued"
+    assert book["retryable"] is True
+    assert book["attention_reason"] == "indexing_unavailable"
+    assert len(list((tmp_path / "alice" / "books").glob("*.pdf"))) == 1
+    assert (tmp_path / "alice" / "books" / "catalog.json").is_file()
+
+
 def test_books_reindex_and_delete_are_scoped_to_catalog_source(tmp_path, monkeypatch):
     docs = _PersonalDocs()
     rag = _RAG()
@@ -273,6 +410,8 @@ def test_books_ui_and_responsive_root_rules_are_present():
     assert 'data-doclib-panel="books"' in library_js
     assert "/api/personal/books" in library_js
     assert "/api/personal/upload?collection=books" in library_js
+    assert "Saved safely. Embeddings are unavailable; use Reindex to retry." in library_js
+    assert "data.queued_count" in library_js
     assert 'role="tab"' in library_js
     assert "ArrowRight" in library_js and "ArrowLeft" in library_js
     assert ".first-run-step-state" in style and "white-space:normal" in style

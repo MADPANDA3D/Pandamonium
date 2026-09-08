@@ -48,6 +48,16 @@ def _workers():
             "workspaces": ["test-project"],
             "connection": {"state": "connected"},
         },
+        "configured-sidecar": {
+            "label": "Installation supplied worker",
+            "configured": True,
+            "ready": True,
+            "installation_capabilities": [
+                "external_agent", "governed_task_actions", "task.start", "task.steer",
+            ],
+            "workspaces": ["sample-project"],
+            "connection": {"state": "connected"},
+        },
         "vps-codex": {
             "label": "Private installation label",
             "configured": False,
@@ -75,6 +85,7 @@ def test_selector_catalog_preserves_taxonomy_and_same_health(monkeypatch):
     assert entities["Jarvis"]["kind"] == "agent"
     assert entities["Friday"]["kind"] == "worker"
     assert entities["Scribe"]["kind"] == "agent"
+    assert entities["Installation supplied worker"]["kind"] == "worker"
     assert entities["Gordon"]["kind"] == "agent"
     assert entities["Gordon"]["availability"] == "unavailable"
     assert entities["Gordon"]["health"]["reason"] == "connection_failed"
@@ -90,6 +101,12 @@ def test_selector_catalog_preserves_taxonomy_and_same_health(monkeypatch):
         "reason": None,
     }
     assert selections[entities["Friday"]["id"]]["capabilities"] == ["codex"]
+    assert selections[entities["Installation supplied worker"]["id"]]["capabilities"] == [
+        "external_agent", "governed_task_actions", "task.start", "task.steer",
+    ]
+    assert entities["Installation supplied worker"]["permissions"]["configured_scopes"] == [
+        "workspace:sample-project",
+    ]
     assert selections[entities["Alpha"]["id"]]["capabilities"] == ["model"]
     assert "Private installation label" not in entities
 

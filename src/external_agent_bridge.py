@@ -670,7 +670,15 @@ class ExternalAgentReadOnlyAdapter:
         self._event_sequences: dict[str, int] = {}
         self._action_results: dict[str, tuple[str, dict[str, Any]]] = {}
         if set(self._configured_capabilities) & set(EXTERNAL_ACTION_CAPABILITIES):
-            self.catalog_capabilities = ["read_only_inspection", "governed_task_actions"]
+            self.catalog_capabilities = [
+                "read_only_inspection",
+                "governed_task_actions",
+                *(
+                    capability
+                    for capability in ("task.start", "task.steer")
+                    if capability in self._configured_capabilities
+                ),
+            ]
 
     @property
     def connection_ref(self) -> str:
@@ -1450,6 +1458,11 @@ class ExternalAgentReadOnlyAdapter:
                     "governed_task_actions"
                     if set(self._configured_capabilities) & set(EXTERNAL_ACTION_CAPABILITIES)
                     else "read_only",
+                    *(
+                        capability
+                        for capability in ("task.start", "task.steer")
+                        if capability in self._configured_capabilities
+                    ),
                 ],
             }
         except ExternalAgentBridgeError as exc:

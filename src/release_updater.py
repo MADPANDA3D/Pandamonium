@@ -28,6 +28,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from core.atomic_io import atomic_write_json
 from core.constants import APP_VERSION, DATA_DIR
+from src.backup_archive import (
+    BACKUP_SCHEMA_V2,
+    BackupArchiveError,
+    read_backup_manifest,
+    validate_backup_members,
+    verify_backup_inventory,
+)
 from src.runtime_paths import get_app_root
 
 ROOT = Path(get_app_root()).resolve()
@@ -100,7 +107,19 @@ def assert_immutable_tree(path: Path, label: str) -> None:
                 and stat.S_IMODE(metadata.st_mode) & 0o022
             )
             if metadata.st_uid != 0 or writable:
-                raise UpdateError(f"{label} is not root-owned and immutable")
+                try:
+                    relative = "." if entry == path else entry.relative_to(path).as_posix()
+                except ValueError:
+                    relative = "unknown entry"
+                reason = (
+                    "not root-owned"
+                    if metadata.st_uid != 0
+                    else "group/other writable"
+                )
+                raise UpdateError(
+                    f"{label} is not root-owned and immutable "
+                    f"({relative}: {reason})"
+                )
     except OSError as exc:
         raise UpdateError(f"{label} ownership could not be verified") from exc
 
@@ -395,13 +414,22 @@ def installation_status(root: Path = ROOT) -> dict[str, Any]:
     }
 
 
-def read_update_state(path: Path | None = None) -> dict[str, Any]:
-    path = path or STATE_PATH
+def _read_update_state(
+    path: Path,
+) -> tuple[dict[str, Any], bool]:
+    """Return the durable updater state and whether permissions hid it."""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
+        return (value if isinstance(value, dict) else {}), False
+    except PermissionError:
+        return {}, True
     except (OSError, ValueError):
-        return {}
+        return {}, False
+
+
+def read_update_state(path: Path | None = None) -> dict[str, Any]:
+    state, _permission_denied = _read_update_state(path or STATE_PATH)
+    return state
 
 
 def write_update_state(
@@ -409,12 +437,64 @@ def write_update_state(
 ) -> dict[str, Any]:
     path = path or STATE_PATH
     state = {**state, "schema_version": STATE_SCHEMA, "updated_at": utc_now()}
+    owner: tuple[int, int] | None = None
+    try:
+        metadata = path.lstat()
+        if stat.S_ISREG(metadata.st_mode):
+            owner = (metadata.st_uid, metadata.st_gid)
+    except OSError:
+        try:
+            parent = path.parent.lstat()
+            if stat.S_ISDIR(parent.st_mode):
+                owner = (parent.st_uid, parent.st_gid)
+        except OSError:
+            pass
     atomic_write_json(str(path), state, indent=2)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        # The web process creates the queued state. Preserve that exact owner
+        # when the root oneshot atomically replaces the file, rather than
+        # leaving an otherwise harmless terminal receipt unreadable after the
+        # application restarts.
+        if os.geteuid() == 0 and owner is not None:
+            os.fchown(descriptor, *owner)
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
     return state
 
 
 def public_update_state() -> dict[str, Any]:
-    state = read_update_state()
+    state, permission_denied = _read_update_state(STATE_PATH)
+    if permission_denied:
+        revision = current_revision(ROOT)
+        install = installation_status(ROOT)
+        if install.get("supported") and revision:
+            # A pre-fix root updater can leave its final receipt mode 0600.
+            # The replacement application cannot reconstruct backup details,
+            # but its own managed release identity and healthy API process are
+            # sufficient to reconcile the owner-visible terminal display.
+            return {
+                "schema_version": STATE_SCHEMA,
+                "status": "release_active",
+                "phase": "complete",
+                "progress": 100,
+                "message": (
+                    f"Installed release v{APP_VERSION} is active; "
+                    "the privileged updater receipt is unavailable"
+                ),
+                "target_version": APP_VERSION,
+                "target_commit": revision,
+                "previous_release": None,
+                "backup_location": None,
+                "rollback_available": False,
+                "auto_rolled_back": False,
+                "rollback_error": None,
+                "history": [],
+                "updated_at": None,
+            }
     return {
         "schema_version": STATE_SCHEMA,
         "status": state.get("status", "idle"),
@@ -806,7 +886,9 @@ class UpdateExecutor:
         if (current / ".env").is_file():
             shutil.copy2(current / ".env", candidate / ".env")
 
-    def _backup(self, previous: Path, manifest: dict[str, Any]) -> tuple[Path, Path]:
+    def _backup(
+        self, previous: Path, candidate: Path, manifest: dict[str, Any]
+    ) -> tuple[Path, Path]:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         backup_dir = (
             self.config.backup_root
@@ -819,33 +901,56 @@ class UpdateExecutor:
             "PANDAMONIUM_DATA_DIR": str(self.config.data_dir),
             "ODYSSEUS_DATA_DIR": str(self.config.data_dir),
         }
+        backup_cli = candidate / "scripts" / "pandamonium-backup"
+        if not backup_cli.is_file() or backup_cli.is_symlink():
+            raise UpdateError("candidate release has no safe data backup command")
         result = self._run(
             [
                 sys.executable,
-                str(previous / "scripts" / "pandamonium-backup"),
+                str(backup_cli),
                 "snapshot",
                 "--out",
                 str(archive),
                 "--include-research",
                 "--include-attachments",
             ],
-            cwd=previous,
+            cwd=candidate,
             env=env,
         )
-        snapshot = json.loads(result.stdout)
-        if not snapshot.get("ok"):
+        try:
+            snapshot = json.loads(result.stdout)
+        except (TypeError, ValueError) as exc:
+            raise UpdateError("data backup returned invalid evidence") from exc
+        if (
+            not snapshot.get("ok")
+            or snapshot.get("schema") != BACKUP_SCHEMA_V2
+            or not isinstance(snapshot.get("inventory"), dict)
+            or not snapshot["inventory"].get("digest")
+        ):
             raise UpdateError("data backup did not complete")
         verified = self._run(
             [
                 sys.executable,
-                str(previous / "scripts" / "pandamonium-backup"),
+                str(backup_cli),
                 "verify",
                 str(archive),
             ],
-            cwd=previous,
+            cwd=candidate,
             env=env,
         )
-        if not json.loads(verified.stdout).get("ok"):
+        try:
+            verification = json.loads(verified.stdout)
+        except (TypeError, ValueError) as exc:
+            raise UpdateError(
+                "data backup verification returned invalid evidence"
+            ) from exc
+        if (
+            not verification.get("ok")
+            or not isinstance(verification.get("inventory"), dict)
+            or verification["inventory"].get("verified") is not True
+            or verification["inventory"].get("digest")
+            != snapshot["inventory"].get("digest")
+        ):
             raise UpdateError("data backup verification failed")
         config_dir = backup_dir / "config"
         for source in (previous / ".env", *self.config.config_files):
@@ -860,6 +965,9 @@ class UpdateExecutor:
             "target_commit": manifest["commit"],
             "data_archive": str(archive),
             "data_sha256": sha256_file(archive),
+            "data_manifest_schema": snapshot["schema"],
+            "data_inventory_digest": snapshot["inventory"]["digest"],
+            "data_inventory_files": snapshot["inventory"].get("file_count"),
             "config_files": sorted(item.name for item in config_dir.iterdir())
             if config_dir.exists()
             else [],
@@ -880,7 +988,12 @@ class UpdateExecutor:
             owner = (data_stat.st_uid, data_stat.st_gid)
             root_mode = data_stat.st_mode
         with tarfile.open(archive, "r:gz") as tar:
-            members = tar.getmembers()
+            try:
+                members = validate_backup_members(tar.getmembers())
+                backup_manifest = read_backup_manifest(tar, members)
+                verify_backup_inventory(tar, members, backup_manifest)
+            except BackupArchiveError as exc:
+                raise UpdateError(f"data backup integrity check failed: {exc}") from exc
             directories: list[tuple[Path, tarfile.TarInfo]] = []
             for member in members:
                 rel = PurePosixPath(member.name)
@@ -1094,7 +1207,7 @@ class UpdateExecutor:
             self._prepare_runtime(release, manifest)
             self._state("backup", 40, "Creating and verifying full data backup")
             self._backup_dir, data_archive = self._backup(
-                self._previous_release, manifest
+                self._previous_release, release, manifest
             )
             self._state(
                 "rehearsal",

@@ -885,16 +885,21 @@ def setup_chat_routes(
             selected_agent_workspace = None
             selected_agent_worker = ""
             if agent_target:
-                from src.agent_worker_adapters import worker_catalog
+                from src.agent_worker_adapters import configured_worker
                 from src.agent_identity import configured_agent_name
 
-                details = worker_catalog().get(agent_target)
+                details = configured_worker(agent_target)
                 if agent_target == "jarvis":
                     selected_agent_label = configured_agent_name()
                     selected_agent_worker = "jarvis"
                 elif not details or not details.get("configured"):
                     raise HTTPException(400, "Selected agent is not configured")
                 else:
+                    if details.get("adapter") == "external-agent-sidecar":
+                        raise HTTPException(
+                            409,
+                            "Selected external worker uses the governed task route. The request was not rerouted.",
+                        )
                     selected_agent_label = str(details.get("label") or agent_target)[:80]
                     selected_agent_worker = agent_target
                     selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
@@ -1022,6 +1027,16 @@ def setup_chat_routes(
             if _approval_reply and _approval_reply.get("choice") == "approve"
             else None
         )
+        _authority_continuation = None
+        if _authority_control and _approval_reply:
+            _authority_decision = _approval_reply.get("decision") or {}
+            _authority_receipt = _approval_reply.get("receipt") or {}
+            _authority_continuation = {
+                "decision_id": str(_authority_decision.get("decision_id") or authority_decision_id or ""),
+                "choice": str(_approval_reply.get("choice") or authority_choice or ""),
+                "scope": str(_authority_receipt.get("scope") or authority_scope or ""),
+                "receipt": dict(_authority_receipt) if isinstance(_authority_receipt, dict) else None,
+            }
 
         # Query active document — prefer explicit ID from frontend, fall back to session lookup
         active_doc = None
@@ -1333,6 +1348,7 @@ def setup_chat_routes(
                     reply,
                     metrics,
                     character_name=active_character_name,
+                    authority_continuation=_authority_continuation,
                     incognito=incognito,
                 )
                 if _saved_id:
@@ -1380,6 +1396,7 @@ def setup_chat_routes(
                             reply,
                             metrics,
                             character_name=selected_agent_label,
+                            authority_continuation=_authority_continuation,
                             incognito=incognito,
                         )
                         if saved_id:
@@ -1407,6 +1424,7 @@ def setup_chat_routes(
                                 reply,
                                 metrics,
                                 character_name=selected_agent_label,
+                                authority_continuation=_authority_continuation,
                                 incognito=incognito,
                             )
                             if saved_id:
@@ -1422,6 +1440,7 @@ def setup_chat_routes(
                         reply,
                         metrics,
                         character_name=selected_agent_label,
+                        authority_continuation=_authority_continuation,
                         incognito=incognito,
                     )
                     if saved_id:
@@ -1783,6 +1802,7 @@ def setup_chat_routes(
                                     research_sources=research_sources,
                                     used_memories=ctx.used_memories,
                                     do_research=effective_do_research,
+                                    authority_continuation=_authority_continuation,
                                     incognito=incognito,
                                 )
                                 if _saved_id:
@@ -2007,6 +2027,7 @@ def setup_chat_routes(
                                     web_sources=web_sources,
                                     rag_sources=ctx.rag_sources,
                                     used_memories=ctx.used_memories,
+                                    authority_continuation=_authority_continuation,
                                     incognito=incognito,
                                 )
                                 if _saved_id:

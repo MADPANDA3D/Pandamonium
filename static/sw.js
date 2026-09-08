@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v390';
+const CACHE_NAME = 'pandamonium-v392';
 const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const UPDATE_WORKER_PENDING = 'pending-worker-update';
 const UPDATE_RECONCILE_ATTEMPTS = 8;
@@ -15,7 +15,7 @@ const UPDATE_RECONCILE_DELAY_MS = 650;
 const UPDATE_STATUS_TIMEOUT_MS = 5000;
 const UPDATE_CLIENT_NAVIGATION_GRACE_MS = 750;
 const UPDATE_ACTIVE_STATES = new Set(['queued', 'running']);
-const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'recovered', 'rolled_back', 'failed']);
+const UPDATE_TERMINAL_STATES = new Set(['succeeded', 'release_active', 'recovered', 'rolled_back', 'failed']);
 const UPDATE_RETRYABLE_STATUS_CODES = new Set([408, 425, 429]);
 
 // Core shell precached on install so repeat opens are instant without any

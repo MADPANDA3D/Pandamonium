@@ -41746,14 +41746,24 @@ body.theme-frosted .modal {
   .ask-user-other-send { min-width:64px; padding-inline:10px; }
 }
 .authority-approval-preview {
-  max-height: 180px;
-  overflow: auto;
   margin: 0 0 10px;
-  padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
   color: color-mix(in srgb, var(--fg) 78%, transparent);
+  font-size: 11px;
+}
+.authority-approval-preview > summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-weight: 600;
+}
+.authority-approval-preview > pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
   font: 11px/1.45 var(--mono, monospace);
   white-space: pre-wrap;
 }
@@ -41761,7 +41771,67 @@ body.theme-frosted .modal {
   display: flex;
   gap: 8px;
 }
-.authority-approval-actions .ask-user-option { width: auto; flex: 1; }
+.authority-approval-actions .ask-user-option {
+  justify-content: center;
+  width: auto;
+  min-height: 36px;
+  padding: 7px 10px;
+  flex: 1;
+}
+.msg-ai > .authority-approval-card,
+.msg-ai > .authority-receipt-card {
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  margin: 10px 12px;
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 48%, var(--border));
+}
+.authority-approval-context {
+  margin: -4px 0 10px;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.authority-approval-resolved {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding-block: 8px !important;
+}
+.authority-approval-resolved .ask-user-question {
+  margin: 0;
+  font-size: 12px;
+}
+.authority-approval-resolved .authority-approval-context {
+  grid-column: 1;
+  margin: 0;
+}
+.authority-approval-resolved .authority-revoke {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: auto;
+  min-height: 34px;
+  padding: 7px 10px;
+}
+.authority-continuation-segment {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+@media (max-width: 480px) {
+  .authority-approval-actions { flex-direction: column; }
+  .authority-approval-actions .ask-user-option { min-height: 44px; }
+  .authority-approval-resolved { grid-template-columns: minmax(0, 1fr); }
+  .authority-approval-resolved .authority-revoke {
+    grid-column: 1;
+    grid-row: auto;
+    min-height: 44px;
+  }
+}
 
 /* ── Workspace picker ───────────────────────────────────────────── */
 /* Layout (width/flex column/max-height) inherited from base .modal-content. */
@@ -42932,10 +43002,17 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 }
 .marketplace-launcher {
   color: var(--accent, var(--red));
-  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 28%, transparent);
-  background: color-mix(in srgb, var(--accent, var(--red)) 7%, transparent);
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
 }
-.marketplace-launcher-meta { font-size: 9px; opacity: .68; text-transform: uppercase; letter-spacing: .08em; }
+@media (max-width: 768px) {
+  .marketplace-launcher {
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
 .modal-content.marketplace-modal-content {
   width: min(1180px, calc(100vw - 32px));
   height: min(760px, calc(100dvh - 32px));

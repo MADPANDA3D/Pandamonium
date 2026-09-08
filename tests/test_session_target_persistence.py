@@ -38,17 +38,19 @@ def test_agent_target_validation_accepts_only_configured_identities(monkeypatch)
 
     monkeypatch.setattr(
         adapters,
-        "worker_catalog",
-        lambda: {
+        "configured_worker",
+        lambda target: {
             "hermes": {"configured": True},
             "pc-codex": {"configured": True},
+            "configured-sidecar": {"configured": True},
             "offline": {"configured": False},
-        },
+        }.get(target, {}),
     )
 
     assert session_routes._validated_session_agent_target(None) == "jarvis"
     assert session_routes._validated_session_agent_target("hermes") == "hermes"
     assert session_routes._validated_session_agent_target("pc-codex") == "pc-codex"
+    assert session_routes._validated_session_agent_target("configured-sidecar") == "configured-sidecar"
     with pytest.raises(HTTPException) as invalid:
         session_routes._validated_session_agent_target("../secret")
     assert invalid.value.status_code == 400

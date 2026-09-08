@@ -5,11 +5,13 @@ import json
 import logging
 import os
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from core.models import ChatMessage
 from core.database import SessionLocal
+from core.database import ChatMessage as DBChatMessage
 from core.database import Session as DBSession, ModelEndpoint
 from src.llm_core import normalize_model_id
 from src.agent_identity import agent_system_prompt
@@ -18,7 +20,7 @@ from src.context_compactor import maybe_compact, trim_for_context
 from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
 from src.auth_helpers import effective_user
 from src.prompt_security import untrusted_context_message
-from src.attachment_refs import attachment_ref
+from src.attachment_refs import attachment_ref, persistable_message_content
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
@@ -1034,6 +1036,222 @@ def clean_thinking_for_save(content: str, metadata: dict | None = None) -> tuple
     return content, md
 
 
+def _message_value(message, key: str, default=None):
+    if isinstance(message, dict):
+        return message.get(key, default)
+    return getattr(message, key, default)
+
+
+def _authority_decision_id(event: Any) -> str:
+    if not isinstance(event, dict):
+        return ""
+    decision = event.get("authority_decision")
+    if not isinstance(decision, dict):
+        return ""
+    return str(decision.get("decision_id") or "").strip()
+
+
+def _positive_round(value: Any, default: int = 1) -> int:
+    try:
+        return max(int(value), 1)
+    except (TypeError, ValueError):
+        return default
+
+
+def _merged_authority_turn(
+    origin_content: str,
+    origin_metadata: dict,
+    continuation_content: str,
+    continuation_metadata: dict,
+    continuation: dict,
+) -> tuple[str, dict]:
+    """Combine one exact approval replay with the assistant turn that requested it."""
+    decision_id = str(continuation.get("decision_id") or "").strip()
+    choice = str(continuation.get("choice") or "").strip().lower()
+    scope = str(continuation.get("scope") or "").strip().lower()
+    receipt = continuation.get("receipt")
+    receipt = deepcopy(receipt) if isinstance(receipt, dict) else None
+
+    old_md = deepcopy(origin_metadata or {})
+    new_md = deepcopy(continuation_metadata or {})
+    old_events = list(old_md.get("tool_events") or [])
+    matching_event = next(
+        (event for event in old_events if _authority_decision_id(event) == decision_id),
+        None,
+    )
+    if matching_event is None:
+        raise ValueError("authority_continuation_origin_not_found")
+
+    resolution_status = "expired" if choice == "stale" else "resolved"
+    resolution = {
+        "decision_id": decision_id,
+        "choice": choice,
+        "scope": scope,
+        "status": resolution_status,
+    }
+    if receipt:
+        resolution["receipt"] = receipt
+        if receipt.get("receipt_id"):
+            resolution["receipt_id"] = str(receipt["receipt_id"])
+    matching_event["authority_resolution"] = resolution
+    original_decision = dict(matching_event.get("authority_decision") or {})
+    original_decision["status"] = resolution_status
+    if receipt and receipt.get("receipt_id"):
+        original_decision["receipt_id"] = str(receipt["receipt_id"])
+    matching_event["authority_decision"] = original_decision
+
+    old_rounds = [str(value or "") for value in (old_md.get("round_texts") or [])]
+    old_span = max(
+        len(old_rounds),
+        max((_positive_round(event.get("round")) for event in old_events if isinstance(event, dict)), default=0),
+    )
+    if len(old_rounds) < old_span:
+        old_rounds.extend([""] * (old_span - len(old_rounds)))
+
+    new_events = [deepcopy(event) for event in (new_md.get("tool_events") or []) if isinstance(event, dict)]
+    for event in new_events:
+        event["round"] = old_span + _positive_round(event.get("round"))
+    new_rounds = [str(value or "") for value in (new_md.get("round_texts") or [])]
+    new_span = max(
+        len(new_rounds),
+        max((_positive_round(event.get("round")) - old_span for event in new_events), default=0),
+    )
+    if len(new_rounds) < new_span:
+        new_rounds.extend([""] * (new_span - len(new_rounds)))
+
+    # Deterministic deny/stale/repeat responses have no model rounds. Preserve
+    # them as the final chronological round so replay does not keep displaying
+    # the superseded approval placeholder after reload.
+    prior_resolution = (matching_event.get("authority_resolution") or {}).get("status")
+    should_keep_repeat_text = choice != "repeat" or not prior_resolution
+    if not new_rounds and str(continuation_content or "").strip() and should_keep_repeat_text:
+        new_rounds.append(str(continuation_content).strip())
+
+    protected_keys = {
+        "_db_id", "timestamp", "tool_events", "round_texts",
+        "authority_continuation", "authority_continuations",
+    }
+    merged_md = old_md
+    for key, value in new_md.items():
+        if key not in protected_keys:
+            merged_md[key] = value
+    merged_md["tool_events"] = old_events + new_events
+    if old_rounds or new_rounds:
+        merged_md["round_texts"] = old_rounds + new_rounds
+    continuation_record = deepcopy(continuation)
+    prior_continuations = list(old_md.get("authority_continuations") or [])
+    prior_continuations.append(continuation_record)
+    merged_md["authority_continuations"] = prior_continuations
+    merged_md["authority_continuation"] = continuation_record
+    if origin_metadata.get("_db_id"):
+        merged_md["_db_id"] = origin_metadata["_db_id"]
+    if origin_metadata.get("timestamp"):
+        merged_md["timestamp"] = origin_metadata["timestamp"]
+
+    # A duplicate/replayed control must not overwrite a result that was already
+    # merged. Other terminal controls and approved executions replace the
+    # temporary approval placeholder while prior round activity remains above.
+    already_resolved = any(
+        isinstance(row, dict)
+        and str(row.get("decision_id") or "") == decision_id
+        for row in (origin_metadata.get("authority_continuations") or [])
+    )
+    merged_content = str(origin_content or "")
+    if str(continuation_content or "").strip() and not (choice == "repeat" and already_resolved):
+        merged_content = str(continuation_content).strip()
+    return merged_content, merged_md
+
+
+def _merge_authority_continuation_response(
+    sess,
+    session_id: str,
+    content: str,
+    metadata: dict,
+    continuation: dict,
+    *,
+    incognito: bool,
+) -> tuple[bool, Optional[str]]:
+    """Update only the assistant row containing the continuation's decision."""
+    decision_id = str((continuation or {}).get("decision_id") or "").strip()
+    if not decision_id:
+        return False, None
+
+    origin = None
+    for message in reversed(list(getattr(sess, "history", []) or [])):
+        if _message_value(message, "role") != "assistant":
+            continue
+        origin_md = _message_value(message, "metadata") or {}
+        if not isinstance(origin_md, dict):
+            continue
+        if any(
+            _authority_decision_id(event) == decision_id
+            for event in (origin_md.get("tool_events") or [])
+        ):
+            origin = message
+            break
+    if origin is None:
+        return False, None
+
+    origin_md = _message_value(origin, "metadata") or {}
+    merged_content, merged_md = _merged_authority_turn(
+        _message_value(origin, "content", ""),
+        origin_md,
+        content,
+        metadata,
+        continuation,
+    )
+    message_id = str(origin_md.get("_db_id") or "").strip() or None
+
+    if not incognito:
+        if not message_id:
+            logger.warning(
+                "Authority continuation %s matched an assistant turn without a DB id; appending safely",
+                decision_id,
+            )
+            return False, None
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(DBChatMessage)
+                .filter(
+                    DBChatMessage.id == message_id,
+                    DBChatMessage.session_id == session_id,
+                    DBChatMessage.role == "assistant",
+                )
+                .first()
+            )
+            if row is None:
+                logger.warning(
+                    "Authority continuation %s could not find its exact persisted assistant row %s; appending safely",
+                    decision_id,
+                    message_id,
+                )
+                return False, None
+            persisted_md = dict(merged_md)
+            persisted_md.pop("_db_id", None)
+            row.content = persistable_message_content(merged_content, persisted_md)
+            row.meta_data = json.dumps(persisted_md)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Failed to merge authority continuation %s into assistant row %s",
+                decision_id,
+                message_id,
+            )
+            return False, None
+        finally:
+            db.close()
+
+    if isinstance(origin, dict):
+        origin["content"] = merged_content
+        origin["metadata"] = merged_md
+    else:
+        origin.content = merged_content
+        origin.metadata = merged_md
+    return True, message_id
+
+
 def save_assistant_response(
     sess,
     session_manager,
@@ -1048,9 +1266,10 @@ def save_assistant_response(
     used_memories: list = None,
     do_research: bool = False,
     tool_events: list = None,
+    authority_continuation: dict = None,
     incognito: bool = False,
 ):
-    """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence."""
+    """Persist one assistant response or merge an exact authority continuation."""
     md = dict(last_metrics) if last_metrics else {}
     def _model_value(value) -> str:
         if value is None:
@@ -1079,6 +1298,8 @@ def save_assistant_response(
         md["research_clarification"] = True
     if tool_events:
         md["tool_events"] = tool_events
+    if authority_continuation:
+        md["authority_continuation"] = dict(authority_continuation)
 
     # Extract thinking into metadata (don't pollute message content with <think> tags)
     _think_info = _extract_thinking_meta(full_response)
@@ -1090,7 +1311,20 @@ def save_assistant_response(
         _content = _think_info["reply"]
     else:
         _content = full_response
-    sess.add_message(ChatMessage("assistant", _content, metadata=md))
+
+    merged = False
+    merged_message_id = None
+    if authority_continuation:
+        merged, merged_message_id = _merge_authority_continuation_response(
+            sess,
+            session_id,
+            _content,
+            md,
+            authority_continuation,
+            incognito=incognito,
+        )
+    if not merged:
+        sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:
         from core.database import update_session_last_accessed
@@ -1103,6 +1337,8 @@ def save_assistant_response(
     # so we don't hand out an edit/delete handle for them.
     if incognito:
         return None
+    if merged:
+        return merged_message_id
     try:
         _last = sess.history[-1]
         _meta = getattr(_last, "metadata", None)

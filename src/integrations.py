@@ -3,6 +3,7 @@ import os
 import uuid
 import logging
 import re
+import hmac
 from typing import Dict, List, Optional, Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -240,8 +241,22 @@ def native_mcp_companions(integrations: List[Dict[str, Any]]) -> Dict[str, Dict[
     except Exception:
         return {}
 
+    servers_by_id = {str(getattr(server, "id", "") or ""): server for server in servers}
     matches: Dict[str, Dict[str, Any]] = {}
     for integration in integrations:
+        integration_id = str(integration.get("id") or "")
+        explicit_server_id = str(integration.get("native_mcp_server_id") or "").strip()
+        if explicit_server_id:
+            server = servers_by_id.get(explicit_server_id)
+            if server is not None:
+                matches[integration_id] = {
+                    "id": server.id,
+                    "name": server.name,
+                    "is_enabled": bool(server.is_enabled),
+                }
+            # An explicit link is authoritative.  If its target is gone, fail
+            # closed instead of silently rebinding the credential by name.
+            continue
         identity = _connection_identity_tokens(integration.get("name"))
         origin = _connection_origin(integration.get("base_url"))
         if not identity or not origin:
@@ -253,7 +268,7 @@ def native_mcp_companions(integrations: List[Dict[str, Any]]) -> Dict[str, Dict[
         ]
         if len(candidates) == 1:
             server = candidates[0]
-            matches[str(integration.get("id") or "")] = {
+            matches[integration_id] = {
                 "id": server.id,
                 "name": server.name,
                 "is_enabled": bool(server.is_enabled),
@@ -261,21 +276,123 @@ def native_mcp_companions(integrations: List[Dict[str, Any]]) -> Dict[str, Dict[
     return matches
 
 
-def delete_native_companion_for_server(name: Any, url: Any) -> bool:
-    """Delete only the one legacy API row proven to be the same connection."""
-    identity = _connection_identity_tokens(name)
-    origin = _connection_origin(url)
-    if not identity or not origin:
+def _credential_matches(value: Any, proof: Any) -> bool:
+    """Compare one stored authorization value without exposing it."""
+    stored = str(value or "").strip()
+    expected = str(proof or "").strip()
+    if stored.lower().startswith("bearer "):
+        stored = stored[7:].strip()
+    if expected.lower().startswith("bearer "):
+        expected = expected[7:].strip()
+    if not stored or not expected:
         return False
+    return hmac.compare_digest(stored.encode("utf-8"), expected.encode("utf-8"))
+
+
+def link_native_mcp_companion(
+    server_id: Any,
+    server_name: Any,
+    credential_proof: Any,
+) -> int:
+    """Persist one API-to-MCP link proven by identity and a live credential.
+
+    Name similarity is never sufficient.  The caller must first prove the
+    native connection with the supplied credential, and exactly one legacy API
+    row must carry both the same bounded logical identity and credential.
+    """
+    native_id = str(server_id or "").strip()
+    identity = _connection_identity_tokens(server_name)
+    if not native_id or not identity or not str(credential_proof or "").strip():
+        return 0
     integrations = load_integrations()
-    matching = [
-        item for item in integrations
-        if _connection_identity_tokens(item.get("name")) == identity
-        and _connection_origin(item.get("base_url")) == origin
-    ]
+    matching = []
+    for item in integrations:
+        integration_id = str(item.get("id") or "").strip()
+        linked_id = str(item.get("native_mcp_server_id") or "").strip()
+        if (
+            not integration_id
+            or (linked_id and linked_id != native_id)
+            or _connection_identity_tokens(item.get("name")) != identity
+            or not _credential_matches(item.get("api_key"), credential_proof)
+        ):
+            continue
+        matching.append(item)
     if len(matching) != 1:
-        return False
-    return delete_integration(str(matching[0].get("id") or ""))
+        return 0
+    if str(matching[0].get("native_mcp_server_id") or "").strip() == native_id:
+        return 0
+    matching[0]["native_mcp_server_id"] = native_id
+    save_integrations(integrations)
+    return 1
+
+
+def reconcile_proven_native_mcp_companion_links(statuses: Any) -> int:
+    """Link legacy rows only for native servers proven connected this boot."""
+    if not isinstance(statuses, dict):
+        return 0
+    connected = {
+        str(server_id)
+        for server_id, status in statuses.items()
+        if (
+            isinstance(status, dict)
+            and status.get("status") == "connected"
+            and status.get("transport") == "http"
+        )
+    }
+    if not connected:
+        return 0
+    try:
+        from core.database import McpServer, SessionLocal
+
+        db = SessionLocal()
+        try:
+            servers = db.query(McpServer).all()
+        finally:
+            db.close()
+    except Exception:
+        return 0
+
+    changed = 0
+    for server in servers:
+        server_id = str(getattr(server, "id", "") or "").strip()
+        if server_id not in connected or getattr(server, "transport", None) != "http":
+            continue
+        try:
+            credential = json.loads(getattr(server, "oauth_tokens", None) or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(credential, dict):
+            continue
+        token = credential.get("static_bearer_token")
+        if (
+            not isinstance(token, str)
+            or not token.strip()
+            or len(token.strip()) > 4096
+            or any(ord(char) < 32 for char in token.strip())
+        ):
+            continue
+        changed += link_native_mcp_companion(
+            server_id,
+            getattr(server, "name", ""),
+            token,
+        )
+    return changed
+
+
+def unlink_native_mcp_companions(server_id: Any) -> int:
+    """Remove only server-owned links while retaining every API connection."""
+    native_id = str(server_id or "").strip()
+    if not native_id:
+        return 0
+    integrations = load_integrations()
+    changed = 0
+    for item in integrations:
+        if str(item.get("native_mcp_server_id") or "").strip() == native_id:
+            item.pop("native_mcp_server_id", None)
+            changed += 1
+    if changed:
+        save_integrations(integrations)
+    return changed
 
 
 def _normalize_integration_base_url(base_url: Any) -> str:
@@ -340,6 +457,10 @@ def get_integration(integration_id: str) -> Optional[Dict[str, Any]]:
 
 def add_integration(data: Dict[str, Any]) -> Dict[str, Any]:
     """Add a new integration. If 'preset' is given, merge preset defaults first."""
+    data = dict(data)
+    # Native links are server-owned provenance.  Admin API clients cannot
+    # create one by injecting a database identifier into ordinary CRUD.
+    data.pop("native_mcp_server_id", None)
     integration: Dict[str, Any] = {}
 
     preset_key = data.get("preset")
@@ -374,6 +495,9 @@ def add_integration(data: Dict[str, Any]) -> Dict[str, Any]:
 def update_integration(integration_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Update fields on an existing integration. Returns updated integration or None."""
     data = dict(data)
+    # Preserve any existing server-owned link, but never accept a replacement
+    # or new link through generic integration CRUD.
+    data.pop("native_mcp_server_id", None)
     if "name" in data and (not isinstance(data["name"], str) or not data["name"].strip()):
         raise HTTPException(400, "Integration name is required")
     if "base_url" in data:
@@ -630,7 +754,12 @@ async def execute_api_call(
 
         output = f"HTTP {status}\n{formatted}"
 
-        if status >= 400:
+        # Generic integrations are API calls, not browser navigation.  A 3xx
+        # response means the requested API endpoint was not actually executed
+        # (often an HTML/login redirect), so reporting it as success invites
+        # the agent to keep guessing nearby paths.  Accept only final 2xx
+        # responses; callers can then stop or surface the configuration error.
+        if not 200 <= status < 300:
             return {"error": output, "exit_code": 1}
 
         return {"output": output, "exit_code": 0}

@@ -666,6 +666,20 @@ def worker_catalog(
     return result
 
 
+def configured_worker(worker: str) -> dict[str, Any]:
+    """Resolve one configured worker, loading optional adapters only on demand."""
+    worker = str(worker or "").strip()
+    registry = adapters()
+    if worker not in registry:
+        from src.external_agent_bridge import ExternalAgentBridgeError
+
+        try:
+            registry = adapters(include_external=True)
+        except ExternalAgentBridgeError:
+            return {}
+    return worker_catalog(registry).get(worker) or {}
+
+
 async def probe_worker_statuses(
     registry: dict[str, WorkerAdapter],
     catalog: dict[str, dict[str, Any]],

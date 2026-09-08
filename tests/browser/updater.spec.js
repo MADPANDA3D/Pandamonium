@@ -10,7 +10,7 @@ const RELEASED_V1021_UPDATER = readFileSync('tests/fixtures/releases/v1.0.21/upd
 const RELEASED_WORKER = readFileSync('tests/fixtures/releases/v1.0.20/sw.js', 'utf8');
 const CURRENT_UPDATER = readFileSync('static/js/updater.js', 'utf8');
 const CURRENT_WORKER = readFileSync('static/sw.js', 'utf8');
-const FUTURE_WORKER = CURRENT_WORKER.replace('pandamonium-v390', 'pandamonium-v391');
+const FUTURE_WORKER = CURRENT_WORKER.replace('pandamonium-v392', 'pandamonium-v393');
 
 function shellRoutes(page, handler) {
   return page.route('**/api/**', route => {
@@ -44,7 +44,7 @@ for (const [scenario, bridgeReload] of [
     .toBe('d8eb76b8e6e038aa38d07416933f01a1a3b457b8dac1d1fd6e059e500d379f84');
   expect(RELEASED_WORKER).toContain("const CACHE_NAME = 'pandamonium-v387';");
   expect(RELEASED_V1021_UPDATER).not.toContain('registration.update()');
-  expect(FUTURE_WORKER).toContain("const CACHE_NAME = 'pandamonium-v391';");
+  expect(FUTURE_WORKER).toContain("const CACHE_NAME = 'pandamonium-v393';");
   const sourceVersion = bridgeReload ? '1.0.21' : '1.0.24';
   const sourceCommit = bridgeReload
     ? '1e5d2e3ab95b53d85b22bbe63a0aa8ee40f9d530'
@@ -54,8 +54,8 @@ for (const [scenario, bridgeReload] of [
   const sourceUpdater = bridgeReload ? RELEASED_V1021_UPDATER : CURRENT_UPDATER;
   const sourceWorker = bridgeReload ? RELEASED_WORKER : CURRENT_WORKER;
   const targetWorker = bridgeReload ? CURRENT_WORKER : FUTURE_WORKER;
-  const sourceCache = bridgeReload ? 'pandamonium-v387' : 'pandamonium-v390';
-  const targetCache = bridgeReload ? 'pandamonium-v390' : 'pandamonium-v391';
+  const sourceCache = bridgeReload ? 'pandamonium-v387' : 'pandamonium-v392';
+  const targetCache = bridgeReload ? 'pandamonium-v392' : 'pandamonium-v393';
   let finishInitialStatus;
   let applied = false;
   let applyCalls = 0;
@@ -251,6 +251,7 @@ for (const [scenario, bridgeReload] of [
 
 for (const [status, title] of [
   ['failed', 'Update failed safely'],
+  ['release_active', 'Installed release is active'],
   ['rolled_back', 'Rollback verified'],
 ]) test(`updater renders the ${status} terminal state`, async ({ page }) => {
   await shellRoutes(page, (route, path) => {
@@ -262,7 +263,11 @@ for (const [status, title] of [
     } });
     if (path === '/api/update/status') return route.fulfill({ json: {
       status, phase: 'complete', progress: 100,
-      message: status === 'failed' ? 'Signature verification failed' : 'Rolled back to v1.0.20',
+      message: status === 'failed'
+        ? 'Signature verification failed'
+        : status === 'release_active'
+          ? 'Installed release v1.0.21 is active; the privileged updater receipt is unavailable'
+          : 'Rolled back to v1.0.20',
       rollback_available: false,
     } });
     return null;

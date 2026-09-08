@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -124,7 +125,7 @@ def _stub_runtime(executor, monkeypatch, *, healthy=True, migration_error=False)
         lambda version, **_kwargs: healthy or version == "1.0.10",
     )
 
-    def backup(_previous, manifest):
+    def backup(_previous, _candidate, manifest):
         directory = executor.config.backup_root / f"update-{manifest['version']}"
         directory.mkdir(parents=True)
         archive = directory / "data.tar.gz"
@@ -149,6 +150,51 @@ def _stub_runtime(executor, monkeypatch, *, healthy=True, migration_error=False)
     monkeypatch.setattr(executor, "_backup", backup)
     monkeypatch.setattr(executor, "_migrate", migrate)
     return events
+
+
+def test_update_backup_uses_candidate_cli_and_materializes_internal_symlinks(
+    tmp_path, monkeypatch
+):
+    executor, manifest, _archive, previous = _layout(tmp_path, monkeypatch)
+    candidate = Path(release_updater.__file__).resolve().parents[1]
+    blob = executor.config.data_dir / "fastembed_cache" / "blobs" / "model.bin"
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"protected-model-weights")
+    snapshot = (
+        executor.config.data_dir
+        / "fastembed_cache"
+        / "snapshots"
+        / "revision"
+        / "model.bin"
+    )
+    snapshot.parent.mkdir(parents=True)
+    snapshot.symlink_to("../../blobs/model.bin")
+    assert not (previous / "scripts" / "pandamonium-backup").exists()
+
+    backup_dir, data_archive = executor._backup(previous, candidate, manifest)
+
+    with tarfile.open(data_archive, "r:gz") as tar:
+        materialized = tar.getmember(
+            "data/fastembed_cache/snapshots/revision/model.bin"
+        )
+        assert materialized.isfile()
+        assert not materialized.issym()
+        assert tar.extractfile(materialized).read() == b"protected-model-weights"
+        backup_manifest = json.loads(
+            tar.extractfile("data/.pandamonium-backup-manifest.json").read()
+        )
+    assert backup_manifest["schema"] == "jos-p7.backup.v2"
+    metadata = json.loads((backup_dir / "update-backup.json").read_text())
+    assert metadata["data_manifest_schema"] == "jos-p7.backup.v2"
+    assert metadata["data_inventory_digest"] == backup_manifest["inventory"]["digest"]
+
+    restored = executor._extract_data_backup(data_archive, tmp_path / "restored")
+    restored_snapshot = (
+        restored / "fastembed_cache" / "snapshots" / "revision" / "model.bin"
+    )
+    assert restored_snapshot.is_file()
+    assert not restored_snapshot.is_symlink()
+    assert restored_snapshot.read_bytes() == b"protected-model-weights"
 
 
 def test_release_manifest_signature_and_asset_binding_fail_closed(tmp_path):
@@ -386,9 +432,43 @@ def test_root_updater_rejects_writable_runtime(tmp_path, monkeypatch):
     runtime.mkdir()
     runtime.chmod(0o775)
     monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+    real_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path,
+        "lstat",
+        lambda path: SimpleNamespace(st_uid=0, st_mode=real_lstat(path).st_mode),
+    )
 
-    with pytest.raises(release_updater.UpdateError, match="root-owned and immutable"):
+    with pytest.raises(
+        release_updater.UpdateError,
+        match=r"root-owned and immutable \(\.: group/other writable\)",
+    ):
         release_updater.assert_immutable_tree(runtime, "release runtime")
+
+
+def test_root_updater_identifies_nested_immutable_tree_violation(tmp_path, monkeypatch):
+    release = tmp_path / "release"
+    cache = release / "data" / "fastembed_cache" / ".locks"
+    cache.mkdir(parents=True)
+    lock = cache / "model.lock"
+    lock.write_text("", encoding="utf-8")
+    release.chmod(0o755)
+    for directory in (release / "data", release / "data" / "fastembed_cache", cache):
+        directory.chmod(0o755)
+    lock.chmod(0o664)
+    monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+    real_lstat = Path.lstat
+    monkeypatch.setattr(
+        Path,
+        "lstat",
+        lambda path: SimpleNamespace(st_uid=0, st_mode=real_lstat(path).st_mode),
+    )
+
+    with pytest.raises(
+        release_updater.UpdateError,
+        match=r"data/fastembed_cache/\.locks/model\.lock: group/other writable",
+    ):
+        release_updater.assert_immutable_tree(release, "current release")
 
 
 def test_environment_config_requires_root(monkeypatch):
@@ -396,6 +476,61 @@ def test_environment_config_requires_root(monkeypatch):
 
     with pytest.raises(release_updater.UpdateError, match="must run as root"):
         release_updater.UpdateConfig.from_env()
+
+
+def test_root_state_write_preserves_queued_owner_and_private_mode(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "updates" / "state.json"
+    state_path.parent.mkdir()
+    state_path.write_text('{"status": "queued"}', encoding="utf-8")
+    expected = state_path.stat()
+    ownership = []
+    real_fchmod = os.fchmod
+
+    monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        release_updater.os,
+        "fchown",
+        lambda _fd, uid, gid: ownership.append((uid, gid)),
+    )
+    monkeypatch.setattr(release_updater.os, "fchmod", real_fchmod)
+
+    release_updater.write_update_state({"status": "succeeded"}, state_path)
+
+    assert ownership == [(expected.st_uid, expected.st_gid)]
+    assert state_path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(state_path.read_text(encoding="utf-8"))["status"] == "succeeded"
+
+
+def test_public_state_reconciles_running_release_when_legacy_receipt_is_private(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "state.json"
+    state_path.write_text('{"status": "succeeded"}', encoding="utf-8")
+    real_read_text = Path.read_text
+
+    def protected_read(path, *args, **kwargs):
+        if path == state_path:
+            raise PermissionError("legacy root-only state")
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(release_updater, "STATE_PATH", state_path)
+    monkeypatch.setattr(Path, "read_text", protected_read)
+    monkeypatch.setattr(release_updater, "current_revision", lambda _root: NEW_COMMIT)
+    monkeypatch.setattr(
+        release_updater,
+        "installation_status",
+        lambda _root: {"supported": True},
+    )
+
+    state = release_updater.public_update_state()
+
+    assert state["status"] == "release_active"
+    assert state["phase"] == "complete"
+    assert state["progress"] == 100
+    assert state["target_commit"] == NEW_COMMIT
+    assert state["rollback_available"] is False
 
 
 def test_failed_health_check_restores_release_and_backup_data(tmp_path, monkeypatch):

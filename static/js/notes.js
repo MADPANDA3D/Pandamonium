@@ -1212,6 +1212,7 @@ export function openPanel() {
   document.body.appendChild(backdrop);
   _wireNotesWindow(pane);
   _restoreNotesSidebarDock(pane);
+  _ensureNotesChipRegistered();
   _bringNotesToFront(pane);
 
   // Events
@@ -1592,6 +1593,9 @@ function _ensureNotesChipRegistered() {
   Modals.register('notes-panel', {
     railBtnId: 'rail-notes',
     sidebarBtnId: 'tool-notes-btn',
+    elementId: 'notes-pane',
+    defaultDock: 'right',
+    minimizeFn: () => closePanel('down'),
     restoreFn: () => { openPanel(); },
     closeFn: () => { _forceCloseNotesPanel(); },
   });
@@ -1644,22 +1648,29 @@ export function closePanel(direction) {
   const pane = document.getElementById('notes-pane');
   const backdrop = document.getElementById('notes-pane-backdrop');
   if (pane) {
-    // Scale-out + fade. Match the enter animation duration so close feels
-    // like the same gesture played backwards.
-    pane.classList.add('notes-pane-leaving');
     const _cleanup = () => {
       try { pane.remove(); } catch {}
       try { backdrop?.remove(); } catch {}
     };
-    pane.addEventListener('animationend', _cleanup, { once: true });
-    // Belt-and-braces: if animation is skipped (reduced motion / detached
-    // tab) the listener won't fire; remove after the expected duration.
-    setTimeout(_cleanup, 220);
+    if (_minimize) {
+      // First let modalManager synchronously suspend the dock and record the
+      // minimized state, then remove the virtual Notes surface immediately.
+      // Leaving it around for the close animation allowed a fast restore to
+      // create a second #notes-pane while the first was still pending removal.
+      try { Modals.minimize('notes-panel'); } catch {}
+      _cleanup();
+    } else {
+      // Scale-out + fade. Match the enter animation duration so close feels
+      // like the same gesture played backwards.
+      pane.classList.add('notes-pane-leaving');
+      pane.addEventListener('animationend', _cleanup, { once: true });
+      // Belt-and-braces: if animation is skipped (reduced motion / detached
+      // tab) the listener won't fire; remove after the expected duration.
+      setTimeout(_cleanup, 220);
+    }
   } else if (backdrop) {
     backdrop.remove();
   }
-  // Show the dock chip for a swipe-down minimize (tap it to reopen).
-  if (_minimize) { try { Modals.minimize('notes-panel'); } catch {} }
 }
 
 export function togglePanel() {

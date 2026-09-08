@@ -181,8 +181,8 @@ def _validated_session_agent_target(value: str | None, *, default: str = "jarvis
         raise HTTPException(400, "Invalid conversation identity")
     if target == "jarvis":
         return target
-    from src.agent_worker_adapters import worker_catalog
-    details = worker_catalog().get(target)
+    from src.agent_worker_adapters import configured_worker
+    details = configured_worker(target)
     if not details or not details.get("configured"):
         raise HTTPException(400, "Selected agent is not configured")
     return target

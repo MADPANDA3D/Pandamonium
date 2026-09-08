@@ -205,7 +205,8 @@ test('chat project folders ripple their direct rows when collapsed and expanded'
   };
 
   await assertFolderRipple('Home Lab');
-  await assertFolderRipple('__unsorted__');
+  await expect(page.locator('#session-list .unsorted-folder')).toHaveCount(0);
+  await expect(page.locator('#session-list .session-unfiled-region')).toContainText('Current unfiled chat');
 
   const homeLab = page.locator('.session-folder[data-folder-key="Home Lab"]');
   await homeLab.locator(':scope > .session-folder-header').click();
