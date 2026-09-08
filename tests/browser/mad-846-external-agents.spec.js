@@ -268,6 +268,17 @@ async function installRoutes(page, {
 
 async function openExternalWorker(page) {
   await page.goto(`/static/index.html#${SESSION_ID}`);
+  await expect.poll(
+    () => page.evaluate(expectedId => (
+      typeof window.sessionModule?.selectSession === 'function'
+      && window.sessionModule.getSessions?.().some(session => session.id === expectedId)
+    ), SESSION_ID),
+    { timeout: 15_000 },
+  ).toBe(true);
+  await page.evaluate(
+    id => window.sessionModule.selectSession(id, { showLoading: false }),
+    SESSION_ID,
+  );
   await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(SESSION_ID);
   await page.locator('#model-picker-btn').click();
   const choice = page.locator('#model-picker-list .model-switch-item')
@@ -685,6 +696,10 @@ test('ambiguous external 503 and exact resubmit retain one stable request id', a
 });
 
 test('JOS-EXT-1 canvas is bounded, focus-safe, responsive, and tears down on navigation', async ({ page }) => {
+  // This case deliberately exercises two viewport layouts, iframe messaging,
+  // focus restoration, and teardown. Keep it bounded while allowing slower
+  // single-worker CI hosts enough room after the preceding browser suite.
+  test.setTimeout(45_000);
   const requests = [];
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1280, height: 800 });
