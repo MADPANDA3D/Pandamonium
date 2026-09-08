@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 import routes.mcp_routes as mcp_routes
+import src.integrations as integrations
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -258,8 +259,16 @@ def _endpoint(manager, path, method):
 def test_portal_connect_proves_catalog_before_persisting_and_never_returns_key(monkeypatch):
     db = FakeDb()
     manager = FakeManager([True])
+    linked = []
     monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
     monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+
+    def link_after_persist(*args):
+        assert db.commits == 1
+        linked.append(args)
+        return 1
+
+    monkeypatch.setattr(integrations, "link_native_mcp_companion", link_after_persist)
     connect = _endpoint(manager, "/api/mcp/portal/connect", "POST")
     master_key = "fixture-master-key-123456789"
 
@@ -278,6 +287,43 @@ def test_portal_connect_proves_catalog_before_persisting_and_never_returns_key(m
     }
     assert manager.connect_calls[0]["url"] == PORTAL_URL
     assert db.commits == 1
+    assert linked == [(
+        mcp_routes.MAD_MCP_PORTAL_ID,
+        mcp_routes.MAD_MCP_PORTAL_NAME,
+        master_key,
+    )]
+
+
+def test_portal_disconnect_unlinks_but_does_not_delete_legacy_api_row(monkeypatch):
+    server = SimpleNamespace(
+        id=mcp_routes.MAD_MCP_PORTAL_ID,
+        name=mcp_routes.MAD_MCP_PORTAL_NAME,
+        url=PORTAL_URL,
+    )
+    db = FakeDb(server)
+    manager = FakeManager([])
+    rows = [{
+        "id": "legacy-api",
+        "name": "MAD MCP Portal API",
+        "api_key": "fixture-secret",
+        "native_mcp_server_id": mcp_routes.MAD_MCP_PORTAL_ID,
+    }]
+    monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+    monkeypatch.setattr(integrations, "load_integrations", lambda: rows)
+    monkeypatch.setattr(integrations, "save_integrations", lambda _rows: None)
+    disconnect = _endpoint(manager, "/api/mcp/portal", "DELETE")
+
+    response = asyncio.run(disconnect(FakeRequest({})))
+
+    assert response == {"configured": False, "status": "disconnected"}
+    assert manager.disconnect_calls == [mcp_routes.MAD_MCP_PORTAL_ID]
+    assert db.server is None
+    assert rows == [{
+        "id": "legacy-api",
+        "name": "MAD MCP Portal API",
+        "api_key": "fixture-secret",
+    }]
 
 
 def test_portal_connect_failure_keeps_previous_encrypted_credential(monkeypatch):
