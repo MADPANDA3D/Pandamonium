@@ -114,6 +114,7 @@ def _tool_name_is_negated(query: str, name: str) -> bool:
         )[-1]
         negations = list(re.finditer(
             r"\b(?:do\s+not|don['’ ]?t|never|avoid|exclude|without|cannot|"
+            r"rather\s+than|not(?!\s+only\b)|"
             r"(?:must|should|can|could|would|may|might)\s+not|"
             r"can['’ ]?t|(?:mustn|shouldn|couldn|wouldn)['’ ]?t)\b",
             clause_prefix,
