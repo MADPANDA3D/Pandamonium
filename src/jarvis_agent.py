@@ -47,6 +47,22 @@ _START_LOCKS: dict[str, asyncio.Lock] = {}
 _SESSION_MANAGER = None
 
 
+def _registry_for_worker(worker: str) -> dict[str, Any]:
+    """Resolve optional Workers only when the exact configured ID is requested."""
+    registry = adapters()
+    if worker in registry:
+        return registry
+    return adapters(include_external=True)
+
+
+def _catalog_for_worker(worker: str) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    registry = adapters()
+    if worker in registry:
+        return registry, worker_catalog()
+    registry = adapters(include_external=True)
+    return registry, worker_catalog(registry)
+
+
 def configure(session_manager) -> None:
     global _SESSION_MANAGER
     _SESSION_MANAGER = session_manager
@@ -193,7 +209,8 @@ def session_presenter(session: object, worker: str) -> str:
         return configured_agent_name()
     if target != worker:
         raise ValueError("conversation_target_worker_mismatch")
-    details = worker_catalog().get(worker) or {}
+    _registry, catalog = _catalog_for_worker(worker)
+    details = catalog.get(worker) or {}
     if not details.get("configured"):
         raise RuntimeError("selected_agent_not_configured")
     return str(details.get("label") or worker)[:80]
@@ -699,7 +716,7 @@ async def _mirror(task_id: str) -> None:
             task = get_task(task_id)
             if not task or task.get("status") in TERMINAL:
                 return
-            adapter = adapters()[task["worker"]]
+            adapter = _registry_for_worker(task["worker"])[task["worker"]]
             try:
                 async for event in adapter.events(task):
                     if (get_task(task_id) or {}).get("status") in TERMINAL:
@@ -843,6 +860,10 @@ async def start_task(
     request_id: str | None = None,
     call_id: str | None = None,
     authority_ref: str | None = None,
+    action_effect: str | None = None,
+    action_capability: str | None = None,
+    external_sidecar_version: str | None = None,
+    external_connection_version: str | None = None,
     presenter: str | None = None,
     persist_result: bool = True,
 ) -> dict:
@@ -852,13 +873,12 @@ async def start_task(
     require_session_owner(session_id, owner)
     if worker in {"pc-codex", "vps-codex"} and not worker_task_execution_enabled():
         raise RuntimeError("codex_task_execution_disabled")
-    catalog = worker_catalog()
+    registry, catalog = _catalog_for_worker(worker)
     if worker not in catalog:
         raise ValueError("unknown_worker")
     if workspace not in set(catalog[worker].get("workspaces") or []):
         raise ValueError("unknown_workspace")
     require_worker_task_permission(permission_mode, approved)
-    registry = adapters()
     if worker not in registry:
         raise ValueError("unknown_worker")
     adapter = registry[worker]
@@ -923,6 +943,10 @@ async def start_task(
             "request_id": str(request_id or "").strip()[:200] or None,
             "call_id": str(call_id or "").strip()[:200] or None,
             "authority_ref": str(authority_ref or "").strip()[:200] or None,
+            "action_effect": str(action_effect or "").strip() or None,
+            "action_capability": str(action_capability or "").strip() or None,
+            "external_sidecar_version": str(external_sidecar_version or "").strip()[:80] or None,
+            "external_connection_version": str(external_connection_version or "").strip()[:128] or None,
             "worker_session_key": binding.get("worker_session_key"),
             "status": "queued",
             "result": None,
@@ -954,9 +978,10 @@ async def start_task(
         _save_task(task)
         _append_event(task["task_id"], {
             "type": "accepted",
-            "text": f"{worker_catalog()[worker]['machine']} accepted the task.",
+            "text": f"{catalog[worker]['machine']} accepted the task.",
             "metadata": {
                 "remote_task_id": task.get("remote_task_id"),
+                "remote_request_id": task.get("external_start_request_id"),
                 "codex_thread_id": task.get("codex_thread_id"),
             },
         })
@@ -980,7 +1005,7 @@ async def refresh_task(
     if not task:
         raise KeyError(task_id)
     try:
-        adapter = adapters()[task["worker"]]
+        adapter = _registry_for_worker(task["worker"])[task["worker"]]
         remote = await adapter.status(task)
         remote_status = str(remote.get("status") or "")
         if remote.get("codex_thread_id"):
@@ -1013,17 +1038,59 @@ async def task_action(
     *,
     persist_user_message: bool = True,
     owner: str,
+    request_id: str | None = None,
+    call_id: str | None = None,
+    authority_ref: str | None = None,
+    action_effect: str | None = None,
+    action_capability: str | None = None,
+    external_sidecar_version: str | None = None,
+    external_connection_version: str | None = None,
 ) -> dict:
     task = require_task_owner(task_id, owner)
     if not task:
         raise KeyError(task_id)
-    adapter = adapters()[task["worker"]]
+    adapter = _registry_for_worker(task["worker"])[task["worker"]]
+    external = getattr(adapter, "adapter_name", "") == "external-agent-sidecar"
+    action_task = task
+    if external:
+        action_task = {
+            **task,
+            "_action_request_id": str(request_id or "").strip() or None,
+            "_action_call_id": str(call_id or "").strip() or None,
+            "_action_authority_ref": str(authority_ref or "").strip() or None,
+            "_action_effect": str(action_effect or "").strip() or None,
+            "_action_capability": str(action_capability or "").strip() or None,
+            "_action_sidecar_version": str(external_sidecar_version or "").strip() or None,
+            "_action_connection_version": str(external_connection_version or "").strip() or None,
+        }
     if action == "steer":
-        await adapter.steer(task, payload or {})
+        response = await adapter.steer(action_task, payload or {})
+        if external:
+            _append_event(task_id, {
+                "event_id": f"action:{response['request_id']}",
+                "type": "progress",
+                "text": f"{_task_presenter(task)} accepted the steering update.",
+                "metadata": {
+                    "source": "external_agent_action",
+                    "action": action,
+                    "remote_request_id": response["request_id"],
+                },
+            })
         if persist_user_message:
             _persist_task_user_message(task, str((payload or {}).get("prompt") or "").strip(), "agent_worker_steer")
     elif action == "reply":
-        await adapter.reply(task, payload or {})
+        response = await adapter.reply(action_task, payload or {})
+        if external:
+            _append_event(task_id, {
+                "event_id": f"action:{response['request_id']}",
+                "type": "progress",
+                "text": f"{_task_presenter(task)} accepted the reply.",
+                "metadata": {
+                    "source": "external_agent_action",
+                    "action": action,
+                    "remote_request_id": response["request_id"],
+                },
+            })
         answers = (payload or {}).get("answers") or {}
         text = " ".join(
             " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
@@ -1041,11 +1108,22 @@ async def task_action(
             raise ValueError("invalid_approval_choice")
         if str(task.get("permission_mode") or "read_only") == "read_only" and choice != "deny":
             raise PermissionError("read_only_task_approval_must_deny")
-        await adapter.approve(task, payload or {})
+        await adapter.approve(action_task, payload or {})
         if persist_user_message:
             _persist_task_user_message(task, str((payload or {}).get("spoken_text") or "").strip(), "agent_worker_approval")
     elif action == "cancel":
-        await adapter.cancel(task)
+        response = await adapter.cancel(action_task)
+        if external:
+            _append_event(task_id, {
+                "event_id": f"cancel:{response['request_id']}",
+                "type": "cancelled",
+                "text": f"{_task_presenter(task)} cancelled the task.",
+                "metadata": {
+                    "source": "external_agent_cancel",
+                    "remote_request_id": response["request_id"],
+                },
+            })
+            return get_task(task_id) or task
     else:
         raise ValueError("unknown_task_action")
     return await refresh_task(task_id, owner=owner)

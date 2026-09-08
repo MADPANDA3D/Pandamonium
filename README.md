@@ -75,9 +75,10 @@ following maintained platform capabilities.
 - Built-in tools, MCP servers, skills, files, shell, web, and browser-facing
   foreground actions behind owner, permission, approval, and evidence gates.
 - An optional backend-only external coding-agent bridge exposes authenticated,
-  owner- and Workspace-scoped catalog/event/transcript reads. It remains absent
-  until an operator configures an exact versioned endpoint, credential-file
-  reference, network policy, Workspace allowlist, and read-capability allowlist.
+  owner- and Workspace-scoped catalog/event/transcript reads plus governed task
+  start, steer, reply, status/resume, and cancellation. It remains absent until
+  an operator configures an exact versioned endpoint, credential-file reference,
+  network policy, Workspace allowlist, and per-action capability/effect allowlist.
 - Native MCP connections route through their live handshake, catalog, and exact
   typed tool schemas instead of guessed REST paths or duplicate API identities.
 - Approval cards offer deny, approve once, and explicit narrow approve-always;

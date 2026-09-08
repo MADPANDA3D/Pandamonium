@@ -9,7 +9,7 @@ import re
 import socket
 import stat
 import uuid
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,33 @@ EXTERNAL_READ_CAPABILITIES = (
     "task.events",
     "task.transcript",
 )
+EXTERNAL_ACTION_CAPABILITIES = (
+    "task.start",
+    "task.steer",
+    "task.reply",
+    "task.cancel",
+    "task.status.read",
+)
+EXTERNAL_AGENT_CAPABILITIES = EXTERNAL_READ_CAPABILITIES + EXTERNAL_ACTION_CAPABILITIES
+
+_ACTION_CAPABILITY_BY_NAME = {
+    "start": "task.start",
+    "steer": "task.steer",
+    "reply": "task.reply",
+    "cancel": "task.cancel",
+}
+_ACTION_EFFECTS = (
+    "read",
+    "reversible_write",
+    "destructive_or_difficult_to_recover",
+    "external_publication_or_communication",
+    "purchase",
+    "credential_or_auth_change",
+    "privilege_expansion",
+    "outside_workspace_boundary",
+)
+_EFFECT_RANK = {effect: rank for rank, effect in enumerate(_ACTION_EFFECTS)}
+_SEPARATE_GATE_EFFECTS = set(_ACTION_EFFECTS[2:])
 
 _CONFIG_ENV_NAMES = (
     "PANDAMONIUM_EXTERNAL_AGENT_CONNECTIONS_JSON",
@@ -56,6 +83,11 @@ _SECRET_VALUE = re.compile(
 )
 _ABSOLUTE_PATH = re.compile(r"(?<![\w])(?:/[A-Za-z0-9._~@+-]+){2,}")
 _WINDOWS_PATH = re.compile(r"(?i)\b[A-Z]:\\(?:[^\s\\]+\\)*[^\s\\]+")
+_FORBIDDEN_ACTION_KEY = re.compile(
+    r"(?:^|_)(?:endpoint|url|host|port|path|paths|cwd|directory|root|command|shell|"
+    r"auth|auth_ref|token|secret|password|credential|api_key|private_key)(?:$|_)",
+    re.IGNORECASE,
+)
 _STABLE_ERRORS = {
     "malformed_envelope",
     "incompatible_protocol",
@@ -121,6 +153,69 @@ def _owner_ref(owner: str) -> str:
 def _scoped_ref(prefix: str, value: str) -> str:
     normalized = value.lower().replace("_", "-")
     return f"{prefix}:{normalized}"
+
+
+def _stable_wire_id(prefix: str, value: object) -> str:
+    digest = hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+    return f"{prefix}:{digest}"
+
+
+def _strictest_effect(*effects: str) -> str:
+    if any(effect not in _EFFECT_RANK for effect in effects):
+        raise ExternalAgentBridgeError("capability_disabled")
+    return max(effects, key=_EFFECT_RANK.__getitem__)
+
+
+def _validate_action_arguments(capability: str, arguments: dict[str, Any]) -> None:
+    allowed = {
+        "task.start": {"prompt", "permission_mode"},
+        "task.steer": {"prompt"},
+        "task.reply": {"answers"},
+        "task.cancel": {"reason"},
+        "task.status.read": set(),
+    }
+    if capability not in allowed or set(arguments) != allowed[capability]:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    _validate_bounded_value(arguments)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if _FORBIDDEN_ACTION_KEY.search(str(key)) or _SECRET_KEY.search(str(key)):
+                    raise ExternalAgentBridgeError("malformed_envelope")
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, str):
+            if "\x00" in value or _ABSOLUTE_PATH.search(value) or _WINDOWS_PATH.search(value):
+                raise ExternalAgentBridgeError("path_escape")
+            if _SECRET_VALUE.search(value):
+                raise ExternalAgentBridgeError("unauthorized")
+
+    visit(arguments)
+    if capability in {"task.start", "task.steer"}:
+        prompt = arguments.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if capability == "task.start" and arguments.get("permission_mode") not in {
+            "read_only", "workspace_write",
+        }:
+            raise ExternalAgentBridgeError("malformed_envelope")
+    elif capability == "task.reply":
+        answers = arguments.get("answers")
+        if not isinstance(answers, dict) or not answers:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if any(
+            not isinstance(key, str)
+            or not key
+            or not (
+                isinstance(value, str)
+                or isinstance(value, list) and value and all(isinstance(item, str) for item in value)
+            )
+            for key, value in answers.items()
+        ):
+            raise ExternalAgentBridgeError("malformed_envelope")
 
 
 def _safe_text(value: object, *, maximum: int = _MAX_STRING) -> str:
@@ -363,9 +458,7 @@ def configured_external_agent_connections(raw: str | None = None) -> list[dict[s
             or len(set(workspaces)) != len(workspaces)
             or not isinstance(capabilities, list)
             or not capabilities
-            or len(capabilities) > len(EXTERNAL_READ_CAPABILITIES)
-            or any(item not in EXTERNAL_READ_CAPABILITIES for item in capabilities)
-            or len(set(capabilities)) != len(capabilities)
+            or len(capabilities) > len(EXTERNAL_AGENT_CAPABILITIES)
             or isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
             or not 0.25 <= float(timeout) <= 30
@@ -374,8 +467,33 @@ def configured_external_agent_connections(raw: str | None = None) -> list[dict[s
         if not isinstance(value.get("endpoint"), str) or not isinstance(value.get("network_policy"), str):
             raise ExternalAgentBridgeError("connection_configuration_invalid")
         normalized = dict(value)
+        normalized_capabilities: dict[str, str] = {}
+        for item in capabilities:
+            if isinstance(item, str):
+                if item not in EXTERNAL_READ_CAPABILITIES:
+                    raise ExternalAgentBridgeError("connection_configuration_invalid")
+                name, effect = item, "read"
+            elif isinstance(item, dict) and set(item) == {"name", "effect"}:
+                name, effect = item.get("name"), item.get("effect")
+                if (
+                    name not in EXTERNAL_ACTION_CAPABILITIES
+                    or effect not in _ACTION_EFFECTS
+                    or (name == "task.status.read" and effect != "read")
+                    or (name != "task.status.read" and _EFFECT_RANK[effect] < _EFFECT_RANK["reversible_write"])
+                ):
+                    raise ExternalAgentBridgeError("connection_configuration_invalid")
+            else:
+                raise ExternalAgentBridgeError("connection_configuration_invalid")
+            if name in normalized_capabilities:
+                raise ExternalAgentBridgeError("connection_configuration_invalid")
+            normalized_capabilities[name] = effect
+        if set(normalized_capabilities) & set(EXTERNAL_ACTION_CAPABILITIES) and not {
+            "task.start", "task.status.read", "task.events",
+        }.issubset(normalized_capabilities):
+            raise ExternalAgentBridgeError("connection_configuration_invalid")
         normalized["label"] = " ".join(value["label"].split())
         normalized["endpoint"] = _validate_endpoint(value.get("endpoint"), value.get("network_policy"))
+        normalized["capabilities"] = normalized_capabilities
         normalized["timeout_seconds"] = float(timeout)
         result.append(normalized)
         seen.add(connection_id)
@@ -522,15 +640,28 @@ class ExternalAgentReadOnlyAdapter:
         self._auth_ref = configuration["auth_ref"]
         self._network_policy = configuration["network_policy"]
         self.configured_workspaces = list(configuration["workspaces"])
-        self._configured_capabilities = tuple(configuration["capabilities"])
+        configured_capabilities = configuration["capabilities"]
+        if isinstance(configured_capabilities, dict):
+            self._configured_capabilities = dict(configured_capabilities)
+        else:
+            self._configured_capabilities = {
+                (item["name"] if isinstance(item, dict) else item): (
+                    item["effect"] if isinstance(item, dict) else "read"
+                )
+                for item in configured_capabilities
+            }
         self._timeout = float(configuration["timeout_seconds"])
         self._requester = requester
         self._resolver = resolver
         self._clock = clock
         self._seen_messages: set[str] = set()
-        self._live_capabilities: dict[tuple[str, str], tuple[str, ...]] = {}
+        self._live_capabilities: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+        self._sidecar_versions: dict[tuple[str, str], str] = {}
         self._event_ids: set[str] = set()
         self._event_sequences: dict[str, int] = {}
+        self._action_results: dict[str, tuple[str, dict[str, Any]]] = {}
+        if set(self._configured_capabilities) & set(EXTERNAL_ACTION_CAPABILITIES):
+            self.catalog_capabilities = ["read_only_inspection", "governed_task_actions"]
 
     @property
     def connection_ref(self) -> str:
@@ -539,6 +670,21 @@ class ExternalAgentReadOnlyAdapter:
     @property
     def worker_ref(self) -> str:
         return _scoped_ref("worker", self.worker)
+
+    @property
+    def connection_version(self) -> str:
+        material = json.dumps(
+            {
+                "endpoint": self._endpoint,
+                "auth_ref": self._auth_ref,
+                "network_policy": self._network_policy,
+                "workspaces": self.configured_workspaces,
+                "capabilities": self._configured_capabilities,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -566,12 +712,20 @@ class ExternalAgentReadOnlyAdapter:
         owner: str,
         workspace: str,
         arguments: dict[str, Any],
+        effect: str = "read",
+        task_ref: str | None = None,
+        agent_ref: str | None = None,
+        stable_id: object | None = None,
     ) -> dict[str, Any]:
         if capability not in self._configured_capabilities and capability != "capabilities.read":
             raise ExternalAgentBridgeError("capability_disabled")
         now = self._clock()
-        request_id = f"request:{uuid.uuid4()}"
-        return {
+        request_id = (
+            _stable_wire_id("request", stable_id)
+            if stable_id is not None
+            else f"request:{uuid.uuid4()}"
+        )
+        envelope = {
             "protocol_version": EXTERNAL_AGENT_PROTOCOL,
             "envelope": "request",
             "message_id": f"message:{uuid.uuid4()}",
@@ -579,10 +733,41 @@ class ExternalAgentReadOnlyAdapter:
             "issued_at": _timestamp(now),
             **self._scope(owner, workspace),
             "expires_at": _timestamp(now + timedelta(seconds=min(self._timeout, 30))),
-            "nonce": uuid.uuid4().hex,
+            "nonce": (
+                _stable_wire_id("nonce", stable_id).replace(":", "-", 1)
+                if stable_id is not None
+                else uuid.uuid4().hex
+            ),
             "capability": capability,
-            "effect": "read",
+            "effect": effect,
             "arguments": arguments,
+        }
+        if task_ref is not None:
+            envelope["task_ref"] = task_ref
+        if agent_ref is not None:
+            envelope["agent_ref"] = agent_ref
+        return envelope
+
+    def _cancel_envelope(
+        self,
+        *,
+        owner: str,
+        workspace: str,
+        task_ref: str,
+        target_request_id: str,
+        stable_id: object,
+    ) -> dict[str, Any]:
+        now = self._clock()
+        return {
+            "protocol_version": EXTERNAL_AGENT_PROTOCOL,
+            "envelope": "cancel",
+            "message_id": f"message:{uuid.uuid4()}",
+            "request_id": _stable_wire_id("request", stable_id),
+            "issued_at": _timestamp(now),
+            **self._scope(owner, workspace),
+            "task_ref": task_ref,
+            "target_request_id": target_request_id,
+            "reason": "operator_request",
         }
 
     async def _transport(
@@ -705,7 +890,7 @@ class ExternalAgentReadOnlyAdapter:
             raise ExternalAgentBridgeError("malformed_envelope")
         raise ExternalAgentBridgeError(code)
 
-    async def _capabilities(self, *, owner: str, workspace: str) -> tuple[str, ...]:
+    async def _capabilities(self, *, owner: str, workspace: str) -> dict[str, dict[str, Any]]:
         scope_key = (_owner_ref(owner), workspace)
         if scope_key in self._live_capabilities:
             return self._live_capabilities[scope_key]
@@ -730,7 +915,7 @@ class ExternalAgentReadOnlyAdapter:
             or len(declarations) > _MAX_COLLECTION
         ):
             raise ExternalAgentBridgeError("malformed_envelope")
-        live = []
+        live: dict[str, dict[str, Any]] = {}
         declared_names: set[str] = set()
         for declaration in declarations:
             if not isinstance(declaration, dict) or set(declaration) != {
@@ -756,17 +941,360 @@ class ExternalAgentReadOnlyAdapter:
             ):
                 raise ExternalAgentBridgeError("malformed_envelope")
             declared_names.add(name)
+            if name not in self._configured_capabilities or declaration.get("enabled") is not True:
+                continue
             if (
-                name in self._configured_capabilities
-                and declaration.get("effect") == "read"
-                and declaration.get("authorization") == "explicit_request"
-                and declaration.get("reversible") is True
-                and declaration.get("enabled") is True
+                name in EXTERNAL_READ_CAPABILITIES or name == "task.status.read"
+            ) and declaration.get("effect") != "read":
+                continue
+            effective_effect = _strictest_effect(
+                self._configured_capabilities[name],
+                declaration["effect"],
+                "read" if name in EXTERNAL_READ_CAPABILITIES or name == "task.status.read" else "reversible_write",
+            )
+            required_authorization = (
+                "separate_gate" if effective_effect in _SEPARATE_GATE_EFFECTS else "explicit_request"
+            )
+            if (
+                declaration.get("authorization") != required_authorization
+                or declaration.get("reversible") is not True
             ):
-                live.append(name)
-        effective = tuple(item for item in self._configured_capabilities if item in live)
+                continue
+            live[name] = {
+                "name": name,
+                "effect": effective_effect,
+                "authorization": required_authorization,
+                "reversible": True,
+            }
+        effective = {
+            name: live[name]
+            for name in self._configured_capabilities
+            if name in live
+        }
         self._live_capabilities[scope_key] = effective
+        self._sidecar_versions[scope_key] = payload["sidecar_version"]
         return effective
+
+    async def action_policy(
+        self,
+        action: str,
+        *,
+        owner: str,
+        workspace: str,
+    ) -> dict[str, Any]:
+        capability = _ACTION_CAPABILITY_BY_NAME.get(action)
+        if capability is None:
+            raise ExternalAgentBridgeError("capability_disabled")
+        return await self._capability_policy(
+            capability,
+            owner=owner,
+            workspace=workspace,
+        )
+
+    def validate_action_arguments(self, action: str, arguments: dict[str, Any]) -> None:
+        capability = _ACTION_CAPABILITY_BY_NAME.get(action)
+        if capability is None:
+            raise ExternalAgentBridgeError("capability_disabled")
+        _validate_action_arguments(capability, arguments)
+
+    async def _capability_policy(
+        self,
+        capability: str,
+        *,
+        owner: str,
+        workspace: str,
+    ) -> dict[str, Any]:
+        effective = await self._capabilities(owner=owner, workspace=workspace)
+        if capability not in effective:
+            raise ExternalAgentBridgeError("capability_disabled")
+        scope_key = (_owner_ref(owner), workspace)
+        return {
+            **effective[capability],
+            "sidecar_version": self._sidecar_versions[scope_key],
+            "connection_version": self.connection_version,
+            "connection_id": self.connection_ref,
+            "worker_ref": self.worker_ref,
+        }
+
+    async def _authorized_action(
+        self,
+        capability: str,
+        task: dict[str, Any],
+        arguments: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        _validate_action_arguments(capability, arguments)
+        owner = str(task.get("owner") or "")
+        workspace = str(task.get("workspace") or "")
+        self._scope(owner, workspace)
+        policy = await self._capability_policy(
+            capability,
+            owner=owner,
+            workspace=workspace,
+        )
+        binding = {
+            "effect": str(task.get("_action_effect") or task.get("action_effect") or ""),
+            "capability": str(
+                task.get("_action_capability") or task.get("action_capability") or ""
+            ),
+            "sidecar_version": str(
+                task.get("_action_sidecar_version")
+                or task.get("external_sidecar_version")
+                or ""
+            ),
+            "connection_version": str(
+                task.get("_action_connection_version")
+                or task.get("external_connection_version")
+                or ""
+            ),
+            "authority_ref": str(task.get("_action_authority_ref") or task.get("authority_ref") or ""),
+            "request_id": str(task.get("_action_request_id") or task.get("request_id") or ""),
+            "call_id": str(task.get("_action_call_id") or task.get("call_id") or ""),
+        }
+        if not all(binding.values()):
+            raise ExternalAgentBridgeError("unauthorized")
+        if (
+            binding["effect"] != policy["effect"]
+            or binding["capability"] != capability
+            or binding["sidecar_version"] != policy["sidecar_version"]
+            or binding["connection_version"] != policy["connection_version"]
+        ):
+            raise ExternalAgentBridgeError("stale_request")
+        return policy, binding
+
+    async def _action_request(
+        self,
+        capability: str,
+        task: dict[str, Any],
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        policy, binding = await self._authorized_action(capability, task, arguments)
+        task_ref = str(task.get("remote_task_id") or "") or None
+        if capability != "task.start" and (
+            task_ref is None
+            or not task_ref.startswith("task:")
+            or not _REFERENCE.fullmatch(task_ref)
+        ):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        request = self._request_envelope(
+            capability,
+            owner=str(task["owner"]),
+            workspace=str(task["workspace"]),
+            arguments=arguments,
+            effect=str(policy["effect"]),
+            task_ref=task_ref,
+            stable_id=f"{binding['request_id']}:{capability}:{task_ref or 'new'}",
+        )
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "request_id": request["request_id"],
+                    "owner_ref": request["owner_ref"],
+                    "connection_id": request["connection_id"],
+                    "worker_ref": request["worker_ref"],
+                    "workspace_alias": request["workspace_alias"],
+                    "capability": capability,
+                    "effect": policy["effect"],
+                    "task_ref": task_ref,
+                    "arguments": arguments,
+                    "sidecar_version": policy["sidecar_version"],
+                    "connection_version": policy["connection_version"],
+                    "authority_ref": binding["authority_ref"],
+                    "canonical_request_id": binding["request_id"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        cached = self._action_results.get(request["request_id"])
+        if cached:
+            if cached[0] != fingerprint:
+                raise ExternalAgentBridgeError("replay_detected")
+            return dict(cached[1])
+        payload = await self._transport(
+            "POST", "/actions", headers=self._headers(), body=request
+        )
+        if payload.get("envelope") == "error":
+            self._validate_error(payload, request)
+        self._validate_base(payload, "response")
+        self._validate_scope(payload, request)
+        if payload.get("status") not in {"accepted", "succeeded"}:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        response_task_ref = payload.get("task_ref")
+        if capability == "task.start":
+            if (
+                not isinstance(response_task_ref, str)
+                or not response_task_ref.startswith("task:")
+                or not _REFERENCE.fullmatch(response_task_ref)
+            ):
+                raise ExternalAgentBridgeError("malformed_envelope")
+        elif response_task_ref is not None and response_task_ref != task_ref:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        normalized = {
+            "request_id": request["request_id"],
+            "task_ref": response_task_ref or task_ref,
+            "status": payload["status"],
+            "result": _safe_value(result),
+        }
+        self._action_results[request["request_id"]] = (fingerprint, normalized)
+        return dict(normalized)
+
+    async def start(self, task: dict[str, Any]) -> dict[str, Any]:
+        response = await self._action_request(
+            "task.start",
+            task,
+            {
+                "prompt": str(task.get("prompt") or ""),
+                "permission_mode": str(task.get("permission_mode") or ""),
+            },
+        )
+        status = str(response["result"].get("status") or "queued")
+        if status not in {"queued", "running", "waiting", "waiting_approval"}:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        return {
+            "remote_task_id": response["task_ref"],
+            "external_start_request_id": response["request_id"],
+            "status": status,
+        }
+
+    async def status(self, task: dict[str, Any]) -> dict[str, Any]:
+        action_task = dict(task)
+        action_task.update(
+            _action_effect="read",
+            _action_capability="task.status.read",
+            _action_sidecar_version=task.get("external_sidecar_version"),
+            _action_connection_version=task.get("external_connection_version"),
+            _action_authority_ref=task.get("authority_ref"),
+            _action_request_id=f"status:{uuid.uuid4()}",
+            _action_call_id=_stable_wire_id(
+                "status", f"{task.get('task_id')}:{uuid.uuid4()}"
+            ),
+        )
+        response = await self._action_request("task.status.read", action_task, {})
+        result = dict(response["result"])
+        if result.get("status") not in {
+            "queued", "running", "waiting", "waiting_approval",
+            "completed", "failed", "cancelled",
+        }:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        return result
+
+    async def events(self, task: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        owner = str(task.get("owner") or "")
+        workspace = str(task.get("workspace") or "")
+        policy = await self._capability_policy(
+            "task.events", owner=owner, workspace=workspace
+        )
+        if (
+            str(task.get("external_sidecar_version") or "") != policy["sidecar_version"]
+            or str(task.get("external_connection_version") or "") != policy["connection_version"]
+        ):
+            raise ExternalAgentBridgeError("stale_request")
+        cursor: str | None = None
+        for _page_number in range(_MAX_COLLECTION):
+            page = await self.task_events(
+                str(task.get("remote_task_id") or ""),
+                owner=owner,
+                workspace=workspace,
+                cursor=cursor,
+                limit=_MAX_COLLECTION,
+            )
+            for event in page["items"]:
+                metadata = dict(event.get("metadata") or {})
+                metadata.update(
+                    remote_event_id=event["event_id"],
+                    remote_sequence=event["sequence"],
+                )
+                yield {
+                    "event_id": event["event_id"],
+                    "type": event["event_type"],
+                    "text": event["text"],
+                    "metadata": metadata,
+                }
+            next_cursor = page.get("next_cursor")
+            if next_cursor is None:
+                return
+            if next_cursor == cursor:
+                raise ExternalAgentBridgeError("replay_detected")
+            cursor = next_cursor
+        raise ExternalAgentBridgeError("rate_limited")
+
+    async def steer(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._action_request(
+            "task.steer", task, {"prompt": payload.get("prompt")}
+        )
+
+    async def reply(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._action_request(
+            "task.reply", task, {"answers": payload.get("answers")}
+        )
+
+    async def approve(self, task: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        del task, payload
+        raise ExternalAgentBridgeError("capability_disabled")
+
+    async def cancel(self, task: dict[str, Any]) -> dict[str, Any]:
+        policy, binding = await self._authorized_action("task.cancel", task, {"reason": "operator_request"})
+        task_ref = str(task.get("remote_task_id") or "")
+        target_request_id = str(task.get("external_start_request_id") or "")
+        if (
+            not task_ref.startswith("task:")
+            or not _REFERENCE.fullmatch(task_ref)
+            or not _REQUEST_ID.fullmatch(target_request_id)
+        ):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        request = self._cancel_envelope(
+            owner=str(task["owner"]),
+            workspace=str(task["workspace"]),
+            task_ref=task_ref,
+            target_request_id=target_request_id,
+            stable_id=f"{binding['request_id']}:task.cancel:{task_ref}",
+        )
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "request_id": request["request_id"],
+                    "owner_ref": request["owner_ref"],
+                    "connection_id": request["connection_id"],
+                    "worker_ref": request["worker_ref"],
+                    "workspace_alias": request["workspace_alias"],
+                    "task_ref": request["task_ref"],
+                    "target_request_id": request["target_request_id"],
+                    "reason": request["reason"],
+                    "effect": policy["effect"],
+                    "sidecar_version": policy["sidecar_version"],
+                    "connection_version": policy["connection_version"],
+                    "authority_ref": binding["authority_ref"],
+                    "canonical_request_id": binding["request_id"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        cached = self._action_results.get(request["request_id"])
+        if cached:
+            if cached[0] != fingerprint:
+                raise ExternalAgentBridgeError("replay_detected")
+            return dict(cached[1])
+        payload = await self._transport("POST", "/actions", headers=self._headers(), body=request)
+        if payload.get("envelope") == "error":
+            self._validate_error(payload, request)
+        self._validate_base(payload, "response")
+        self._validate_scope(payload, request)
+        if payload.get("status") not in {"accepted", "succeeded"}:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if payload.get("task_ref") not in {None, task_ref} or not isinstance(payload.get("result"), dict):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        normalized = {
+            "request_id": request["request_id"],
+            "task_ref": task_ref,
+            "status": payload["status"],
+            "result": _safe_value(payload["result"]),
+        }
+        self._action_results[request["request_id"]] = (fingerprint, normalized)
+        return dict(normalized)
 
     async def _read(
         self,
@@ -855,7 +1383,12 @@ class ExternalAgentReadOnlyAdapter:
                 "protocol": EXTERNAL_AGENT_PROTOCOL,
                 "protocol_ready": status == "healthy",
                 "display_name": self.label,
-                "installation_capabilities": ["external_agent", "read_only"],
+                "installation_capabilities": [
+                    "external_agent",
+                    "governed_task_actions"
+                    if set(self._configured_capabilities) & set(EXTERNAL_ACTION_CAPABILITIES)
+                    else "read_only",
+                ],
             }
         except ExternalAgentBridgeError as exc:
             if exc.code == "sidecar_unavailable":
@@ -877,7 +1410,7 @@ class ExternalAgentReadOnlyAdapter:
                 status.get("reason") or "sidecar_unavailable",
                 maximum=500,
             )
-        effective: tuple[str, ...] = ()
+        effective: dict[str, dict[str, Any]] = {}
         agents = {"items": [], "next_cursor": None}
         if state in {"connected", "degraded"}:
             effective = await self._capabilities(owner=owner, workspace=workspace)
@@ -916,12 +1449,7 @@ class ExternalAgentReadOnlyAdapter:
                 "actions": actions or [],
             }
 
-        read_actions = [{
-            "name": capability,
-            "effect": "read",
-            "authorization": "explicit_request",
-            "reversible": True,
-        } for capability in effective]
+        actions = [dict(policy) for policy in effective.values()]
         entities = [
             entity(
                 "connection", self.connection_ref, self.label,
@@ -932,7 +1460,7 @@ class ExternalAgentReadOnlyAdapter:
                 "worker", self.worker_ref, self.label,
                 ownership_scope="connection", ownership_id=self.connection_ref,
                 source_type="connection", source_ref=f"external-agent/{self.worker}",
-                actions=read_actions,
+                actions=actions,
             ),
             entity(
                 "workspace", f"workspace:{workspace}", workspace,
@@ -945,7 +1473,7 @@ class ExternalAgentReadOnlyAdapter:
                 "agent", value["agent_ref"], value["display_name"],
                 ownership_scope="worker", ownership_id=self.worker_ref,
                 source_type="runtime_discovery", source_ref=f"external-agent/{self.worker}",
-                actions=read_actions,
+                actions=actions,
             ))
         return {
             "schema_version": EXTERNAL_DISCOVERY_SCHEMA,

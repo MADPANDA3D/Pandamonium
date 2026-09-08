@@ -147,7 +147,7 @@ credit:
 - **[Twenty4SevenLabs/Pandamonium](https://github.com/Twenty4SevenLabs/Pandamonium)** —
   contributor credit for the external coding-agent adapter/product concept at
   frozen contributor branch head `7220f7cc9cbee26cd94697bd7a6a3d0ef001b66d`.
-  This repository's protocol and read-only adapter are an independent
+  This repository's protocol and governed adapter are an independent
   reconstruction; no contributor source code or Git history was imported.
 
 ---
