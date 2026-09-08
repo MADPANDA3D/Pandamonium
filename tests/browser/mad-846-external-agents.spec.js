@@ -699,7 +699,7 @@ test('JOS-EXT-1 canvas is bounded, focus-safe, responsive, and tears down on nav
   // This case deliberately exercises two viewport layouts, iframe messaging,
   // focus restoration, and teardown. Keep it bounded while allowing slower
   // single-worker CI hosts enough room after the preceding browser suite.
-  test.setTimeout(45_000);
+  test.setTimeout(90_000);
   const requests = [];
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1280, height: 800 });
