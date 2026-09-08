@@ -1,0 +1,261 @@
+{
+  "protocol_version": "pandamonium.external-agent-sidecar.v1",
+  "valid_envelopes": [
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "request",
+      "message_id": "msg-valid-request-001",
+      "request_id": "req-valid-001",
+      "issued_at": "2026-09-08T01:00:00Z",
+      "owner_ref": "owner:alice",
+      "connection_id": "connection:external-agent-a",
+      "worker_ref": "worker:external-agent-a",
+      "workspace_alias": "sample-project",
+      "expires_at": "2026-09-08T01:02:00Z",
+      "nonce": "nonce-valid-0001",
+      "capability": "task.status.read",
+      "effect": "read",
+      "task_ref": "task:sample-001",
+      "arguments": {}
+    },
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "response",
+      "message_id": "msg-valid-response-001",
+      "request_id": "req-valid-001",
+      "issued_at": "2026-09-08T01:00:01Z",
+      "owner_ref": "owner:alice",
+      "connection_id": "connection:external-agent-a",
+      "worker_ref": "worker:external-agent-a",
+      "workspace_alias": "sample-project",
+      "status": "succeeded",
+      "task_ref": "task:sample-001",
+      "result": {"state": "running"}
+    },
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "event",
+      "message_id": "msg-valid-event-001",
+      "request_id": "req-valid-001",
+      "issued_at": "2026-09-08T01:00:02Z",
+      "owner_ref": "owner:alice",
+      "connection_id": "connection:external-agent-a",
+      "worker_ref": "worker:external-agent-a",
+      "workspace_alias": "sample-project",
+      "task_ref": "task:sample-001",
+      "event_id": "evt-valid-001",
+      "sequence": 0,
+      "event_type": "progress",
+      "text": "The configured worker accepted the bounded request.",
+      "metadata": {"state": "running"}
+    },
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "health",
+      "message_id": "msg-valid-health-001",
+      "request_id": "req-health-001",
+      "issued_at": "2026-09-08T01:00:00Z",
+      "sidecar_id": "sidecar:external-agent-a",
+      "sidecar_version": "1.0.0",
+      "protocol_compatible": true,
+      "status": "healthy",
+      "checked_at": "2026-09-08T01:00:00Z"
+    },
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "capabilities",
+      "message_id": "msg-valid-capabilities-001",
+      "request_id": "req-capabilities-001",
+      "issued_at": "2026-09-08T01:00:00Z",
+      "owner_ref": "owner:alice",
+      "connection_id": "connection:external-agent-a",
+      "worker_ref": "worker:external-agent-a",
+      "workspace_alias": "sample-project",
+      "sidecar_id": "sidecar:external-agent-a",
+      "sidecar_version": "1.0.0",
+      "capabilities": [
+        {
+          "name": "task.status.read",
+          "effect": "read",
+          "authorization": "explicit_request",
+          "reversible": true,
+          "enabled": true
+        },
+        {
+          "name": "task.start",
+          "effect": "reversible_write",
+          "authorization": "explicit_request",
+          "reversible": true,
+          "enabled": false
+        }
+      ]
+    },
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "error",
+      "message_id": "msg-valid-error-001",
+      "request_id": "req-error-001",
+      "issued_at": "2026-09-08T01:00:00Z",
+      "code": "sidecar_unavailable",
+      "retryable": true,
+      "detail": "The configured sidecar is unavailable."
+    },
+    {
+      "protocol_version": "pandamonium.external-agent-sidecar.v1",
+      "envelope": "cancel",
+      "message_id": "msg-valid-cancel-001",
+      "request_id": "req-cancel-001",
+      "issued_at": "2026-09-08T01:00:03Z",
+      "owner_ref": "owner:alice",
+      "connection_id": "connection:external-agent-a",
+      "worker_ref": "worker:external-agent-a",
+      "workspace_alias": "sample-project",
+      "task_ref": "task:sample-001",
+      "target_request_id": "req-valid-001",
+      "reason": "operator_request"
+    }
+  ],
+  "cases": [
+    {
+      "name": "valid",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "wire_size": 512,
+        "authorized": true,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "sample-project",
+        "sidecar_available": true,
+        "seen_nonces": []
+      },
+      "expected": "ok"
+    },
+    {
+      "name": "stale",
+      "message": {
+        "protocol_version": "pandamonium.external-agent-sidecar.v1",
+        "envelope": "request",
+        "message_id": "msg-stale-request-001",
+        "request_id": "req-stale-001",
+        "issued_at": "2026-09-08T00:55:00Z",
+        "owner_ref": "owner:alice",
+        "connection_id": "connection:external-agent-a",
+        "worker_ref": "worker:external-agent-a",
+        "workspace_alias": "sample-project",
+        "expires_at": "2026-09-08T00:59:00Z",
+        "nonce": "nonce-stale-0001",
+        "capability": "task.status.read",
+        "effect": "read",
+        "arguments": {}
+      },
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "authorized": true,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "sample-project",
+        "sidecar_available": true,
+        "seen_nonces": []
+      },
+      "expected": "stale_request"
+    },
+    {
+      "name": "malformed",
+      "message": {
+        "protocol_version": "pandamonium.external-agent-sidecar.v1",
+        "envelope": "request",
+        "message_id": "msg-malformed-request-001",
+        "request_id": "req-malformed-001",
+        "issued_at": "2026-09-08T01:00:00Z",
+        "owner_ref": "owner:alice",
+        "connection_id": "connection:external-agent-a",
+        "worker_ref": "worker:external-agent-a",
+        "workspace_alias": "sample-project",
+        "expires_at": "2026-09-08T01:02:00Z",
+        "capability": "task.status.read",
+        "effect": "read",
+        "arguments": {}
+      },
+      "context": {"now": "2026-09-08T01:00:30Z"},
+      "expected": "malformed_envelope"
+    },
+    {
+      "name": "unauthorized",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "authorized": false,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "sample-project",
+        "sidecar_available": true,
+        "seen_nonces": []
+      },
+      "expected": "unauthorized"
+    },
+    {
+      "name": "oversized",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "wire_size": 65537,
+        "authorized": true,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "sample-project",
+        "sidecar_available": true,
+        "seen_nonces": []
+      },
+      "expected": "oversized_payload"
+    },
+    {
+      "name": "wrong-owner",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "authorized": true,
+        "owner_ref": "owner:bob",
+        "workspace_alias": "sample-project",
+        "sidecar_available": true,
+        "seen_nonces": []
+      },
+      "expected": "wrong_owner"
+    },
+    {
+      "name": "wrong-Workspace",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "authorized": true,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "other-project",
+        "sidecar_available": true,
+        "seen_nonces": []
+      },
+      "expected": "wrong_workspace"
+    },
+    {
+      "name": "unavailable-sidecar",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "authorized": true,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "sample-project",
+        "sidecar_available": false,
+        "seen_nonces": []
+      },
+      "expected": "sidecar_unavailable"
+    },
+    {
+      "name": "replay",
+      "envelope_index": 0,
+      "context": {
+        "now": "2026-09-08T01:00:30Z",
+        "authorized": true,
+        "owner_ref": "owner:alice",
+        "workspace_alias": "sample-project",
+        "sidecar_available": true,
+        "seen_nonces": ["nonce-valid-0001"]
+      },
+      "expected": "replay_detected"
+    }
+  ]
+}

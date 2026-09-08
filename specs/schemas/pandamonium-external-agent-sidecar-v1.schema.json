@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:pandamonium:schema:external-agent-sidecar:v1",
+  "title": "Pandamonium external coding-agent sidecar v1",
+  "description": "Provider-neutral, secret-free envelopes for an explicitly configured external coding-agent sidecar.",
+  "oneOf": [
+    {"$ref": "#/$defs/requestEnvelope"},
+    {"$ref": "#/$defs/responseEnvelope"},
+    {"$ref": "#/$defs/eventEnvelope"},
+    {"$ref": "#/$defs/healthEnvelope"},
+    {"$ref": "#/$defs/capabilitiesEnvelope"},
+    {"$ref": "#/$defs/errorEnvelope"},
+    {"$ref": "#/$defs/cancelEnvelope"}
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9._:-]*$"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "taskRef": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128,
+      "pattern": "^task:[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "timestamp": {"type": "string", "format": "date-time"},
+    "effect": {
+      "enum": [
+        "read",
+        "reversible_write",
+        "destructive_or_difficult_to_recover",
+        "external_publication_or_communication",
+        "purchase",
+        "credential_or_auth_change",
+        "privilege_expansion",
+        "outside_workspace_boundary"
+      ]
+    },
+    "authorization": {
+      "enum": ["explicit_request", "separate_gate", "denied"]
+    },
+    "workspaceAlias": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "boundedValue": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"},
+        {"type": "string", "maxLength": 12000},
+        {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/boundedValue"}
+        },
+        {"$ref": "#/$defs/boundedObject"}
+      ]
+    },
+    "boundedObject": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "allOf": [
+          {"minLength": 1, "maxLength": 100, "pattern": "^[a-z][a-z0-9_.:-]*$"},
+          {"not": {"pattern": "(?:token|secret|password|credential|authorization|auth_ref|api[_-]?key|private[_-]?key)"}}
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/boundedValue"}
+    },
+    "base": {
+      "type": "object",
+      "required": ["protocol_version", "envelope", "message_id", "request_id", "issued_at"],
+      "properties": {
+        "protocol_version": {"const": "pandamonium.external-agent-sidecar.v1"},
+        "envelope": {
+          "enum": ["request", "response", "event", "health", "capabilities", "error", "cancel"]
+        },
+        "message_id": {"$ref": "#/$defs/requestId"},
+        "request_id": {"$ref": "#/$defs/requestId"},
+        "issued_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "scoped": {
+      "type": "object",
+      "required": ["owner_ref", "connection_id", "worker_ref", "workspace_alias"],
+      "properties": {
+        "owner_ref": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 128,
+          "pattern": "^owner:[a-z][a-z0-9._:-]*$"
+        },
+        "connection_id": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 128,
+          "pattern": "^connection:[a-z][a-z0-9._:-]*$"
+        },
+        "worker_ref": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^worker:[a-z][a-z0-9._:-]*$"
+        },
+        "agent_ref": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 128,
+          "pattern": "^agent:[a-z][a-z0-9._:-]*$"
+        },
+        "workspace_alias": {"$ref": "#/$defs/workspaceAlias"}
+      }
+    },
+    "requestEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"$ref": "#/$defs/scoped"},
+        {
+          "type": "object",
+          "required": ["expires_at", "nonce", "capability", "effect", "arguments"],
+          "properties": {
+            "envelope": {"const": "request"},
+            "expires_at": {"$ref": "#/$defs/timestamp"},
+            "nonce": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9._~-]+$"
+            },
+            "capability": {"$ref": "#/$defs/id"},
+            "effect": {"$ref": "#/$defs/effect"},
+            "task_ref": {"$ref": "#/$defs/taskRef"},
+            "arguments": {"$ref": "#/$defs/boundedObject"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "responseEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"$ref": "#/$defs/scoped"},
+        {
+          "type": "object",
+          "required": ["status", "result"],
+          "properties": {
+            "envelope": {"const": "response"},
+            "status": {"enum": ["accepted", "succeeded"]},
+            "task_ref": {"$ref": "#/$defs/taskRef"},
+            "result": {"$ref": "#/$defs/boundedValue"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "eventEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"$ref": "#/$defs/scoped"},
+        {
+          "type": "object",
+          "required": ["task_ref", "event_id", "sequence", "event_type", "text", "metadata"],
+          "properties": {
+            "envelope": {"const": "event"},
+            "task_ref": {"$ref": "#/$defs/taskRef"},
+            "event_id": {"$ref": "#/$defs/requestId"},
+            "sequence": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+            "event_type": {
+              "enum": [
+                "accepted", "progress", "tool_activity", "question",
+                "approval_required", "result", "error", "cancelled"
+              ]
+            },
+            "text": {"type": "string", "maxLength": 12000},
+            "metadata": {"$ref": "#/$defs/boundedObject"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "healthEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "type": "object",
+          "required": ["sidecar_id", "sidecar_version", "protocol_compatible", "status", "checked_at"],
+          "properties": {
+            "envelope": {"const": "health"},
+            "sidecar_id": {"$ref": "#/$defs/id"},
+            "sidecar_version": {"type": "string", "minLength": 1, "maxLength": 80},
+            "protocol_compatible": {"type": "boolean"},
+            "status": {"enum": ["healthy", "degraded", "unavailable"]},
+            "checked_at": {"$ref": "#/$defs/timestamp"}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "effect", "authorization", "reversible", "enabled"],
+      "properties": {
+        "name": {"$ref": "#/$defs/id"},
+        "effect": {"$ref": "#/$defs/effect"},
+        "authorization": {"$ref": "#/$defs/authorization"},
+        "reversible": {"type": "boolean"},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "capabilitiesEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"$ref": "#/$defs/scoped"},
+        {
+          "type": "object",
+          "required": ["sidecar_id", "sidecar_version", "capabilities"],
+          "properties": {
+            "envelope": {"const": "capabilities"},
+            "sidecar_id": {"$ref": "#/$defs/id"},
+            "sidecar_version": {"type": "string", "minLength": 1, "maxLength": 80},
+            "capabilities": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {"$ref": "#/$defs/capability"}
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "errorEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "type": "object",
+          "required": ["code", "retryable", "detail"],
+          "properties": {
+            "envelope": {"const": "error"},
+            "code": {
+              "enum": [
+                "malformed_envelope", "incompatible_protocol", "oversized_payload",
+                "stale_request", "replay_detected", "unauthorized", "wrong_owner",
+                "wrong_workspace", "capability_disabled", "path_escape",
+                "symlink_escape", "rate_limited", "timeout",
+                "sidecar_unavailable", "internal_error"
+              ]
+            },
+            "retryable": {"type": "boolean"},
+            "detail": {"type": "string", "minLength": 1, "maxLength": 500}
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "cancelEnvelope": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"$ref": "#/$defs/scoped"},
+        {
+          "type": "object",
+          "required": ["task_ref", "target_request_id", "reason"],
+          "properties": {
+            "envelope": {"const": "cancel"},
+            "task_ref": {"$ref": "#/$defs/taskRef"},
+            "target_request_id": {"$ref": "#/$defs/requestId"},
+            "reason": {
+              "enum": ["operator_request", "timeout", "connection_disabled", "policy_revoked"]
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
