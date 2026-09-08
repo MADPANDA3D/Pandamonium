@@ -347,6 +347,243 @@ async def test_readonly_portal_health_call_reaches_executor_instead_of_unclassif
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("call_name", "arguments", "executor_error", "expected_category"),
+    [
+        ("mcp__portal-fixture__portal.unmounted", "{}", None, "unknown_capability"),
+        ("mcp__portal-fixture__portal.find_tools", "{}", None, "schema_validation"),
+        ("mcp__portal-fixture__portal.find_tools", '{"query":', None, "malformed_arguments"),
+        (
+            "mcp__portal-fixture__portal.find_tools",
+            '{"query":"recent Discord messages"}',
+            "Portal transport failed",
+            "failed",
+        ),
+    ],
+)
+async def test_native_mcp_failures_return_one_terminal_error_without_loop(
+    monkeypatch,
+    tmp_path,
+    call_name,
+    arguments,
+    executor_error,
+    expected_category,
+):
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "name": "MAD MCP Portal",
+        "status": "connected",
+        "catalog_terms": ["Discord"],
+    }
+    manager._tools["portal-fixture"] = [{
+        "name": "portal.find_tools",
+        "description": "Find a read-only provider tool for the requested Discord operation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True},
+    }]
+    provider_calls = 0
+    executions = []
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        call = {"id": "portal-call", "name": call_name, "arguments": arguments}
+        yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
+        yield "data: [DONE]\n\n"
+
+    async def fake_execute(block, **_kwargs):
+        executions.append(block.tool_type)
+        if executor_error is None:
+            raise AssertionError("JOS validation failure reached the executor")
+        return "portal", {"error": executor_error, "exit_code": 1}
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+
+    events = await _events(
+        messages=[{
+            "role": "user",
+            "content": "Use the MAD MCP Portal to pull the last five Discord messages.",
+        }],
+        owner="leo",
+        session_id="session-1",
+        max_rounds=6,
+        context_length=8208,
+        max_tokens=2048,
+    )
+
+    assert provider_calls == 1
+    assert executions == ([call_name] if executor_error else [])
+    output = next(event for event in events if event.get("type") == "tool_output")
+    assert output["status"] == ("failed" if executor_error else "denied")
+    terminal = [event["delta"] for event in events if "MCP request stopped" in event.get("delta", "")]
+    assert len(terminal) == 1
+    assert call_name in terminal[0]
+    assert expected_category in terminal[0]
+    if executor_error:
+        assert executor_error in terminal[0]
+    assert not any(event.get("type") in {
+        "agent_step", "loop_breaker_triggered", "rounds_exhausted"
+    } for event in events)
+
+
+@pytest.mark.asyncio
+async def test_terminal_native_mcp_failure_stops_a_batch_and_threads_processed_prefix(
+    monkeypatch,
+    tmp_path,
+):
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "name": "MAD MCP Portal",
+        "status": "connected",
+        "catalog_terms": ["Discord"],
+    }
+    manager._tools["portal-fixture"] = [{
+        "name": "portal.find_tools",
+        "description": "Find a read-only provider tool for the requested Discord operation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True},
+    }]
+    provider_calls = 0
+    executions = []
+    threaded = {}
+    original_append = agent_loop._append_tool_results
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        calls = [
+            {
+                "id": "bad",
+                "name": "mcp__portal-fixture__portal.find_tools",
+                "arguments": '{"query":',
+            },
+            {
+                "id": "good",
+                "name": "mcp__portal-fixture__portal.find_tools",
+                "arguments": '{"query":"recent Discord messages"}',
+            },
+        ]
+        yield f'data: {json.dumps({"type": "tool_calls", "calls": calls})}\n\n'
+        yield "data: [DONE]\n\n"
+
+    async def fake_execute(block, **_kwargs):
+        executions.append(block.tool_type)
+        return "portal", {"output": "unexpected", "exit_code": 0}
+
+    def capture_append(
+        messages,
+        round_response,
+        native_tool_calls,
+        tool_results,
+        tool_result_texts,
+        used_native,
+        round_num,
+        round_reasoning="",
+    ):
+        threaded["call_ids"] = [call.get("id") for call in native_tool_calls]
+        threaded["result_count"] = len(tool_result_texts)
+        return original_append(
+            messages,
+            round_response,
+            native_tool_calls,
+            tool_results,
+            tool_result_texts,
+            used_native,
+            round_num,
+            round_reasoning=round_reasoning,
+        )
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+    monkeypatch.setattr(agent_loop, "_append_tool_results", capture_append)
+
+    events = await _events(
+        messages=[{
+            "role": "user",
+            "content": "Use the MAD MCP Portal to pull the last five Discord messages.",
+        }],
+        owner="leo",
+        session_id="session-1",
+        max_rounds=6,
+        max_tool_calls=1,
+        context_length=8208,
+        max_tokens=2048,
+    )
+
+    assert provider_calls == 1
+    assert executions == []
+    assert threaded == {"call_ids": ["bad"], "result_count": 1}
+    outputs = [event for event in events if event.get("type") == "tool_output"]
+    assert [(event["call_id"], event["status"]) for event in outputs] == [("bad", "denied")]
+    assert len([event for event in events if "MCP request stopped" in event.get("delta", "")]) == 1
+    assert not any(event.get("type") in {
+        "budget_exceeded", "agent_step", "loop_breaker_triggered", "rounds_exhausted"
+    } for event in events)
+
+
+def test_agent_facing_mcp_guidance_omits_unmounted_same_namespace_names():
+    visible = {
+        "mcp__portal-fixture__portal.welcome",
+        "mcp__portal-fixture__portal.find_tools",
+    }
+    declared = visible | {
+        "mcp__portal-fixture__portal.call_service_tool",
+    }
+    projected = agent_loop._project_native_mcp_guidance_for_model(
+        (
+            "Run portal.welcome, then portal.find_tools. "
+            "The server-wide guide also says to call portal.call_service_tool."
+        ),
+        "mcp__portal-fixture__portal.welcome",
+        visible,
+        declared,
+    )
+
+    assert "portal.welcome" in projected
+    assert "portal.find_tools" in projected
+    assert "portal.call_service_tool" not in projected
+    assert "[unmounted MCP capability]" in projected
+
+
+def test_agent_facing_mcp_guidance_filters_one_declared_unmounted_name_only():
+    visible = {"mcp__portal-fixture__portal.welcome"}
+    declared = visible | {"mcp__portal-fixture__portal.call_service_tool"}
+
+    projected = agent_loop._project_native_mcp_guidance_for_model(
+        "Next call portal.call_service_tool.",
+        "mcp__portal-fixture__portal.welcome",
+        visible,
+        declared,
+    )
+    ordinary_data = "Observed portal.customer.one and portal.customer.two."
+
+    assert "portal.call_service_tool" not in projected
+    assert agent_loop._project_native_mcp_guidance_for_model(
+        ordinary_data,
+        "mcp__portal-fixture__portal.welcome",
+        visible,
+        declared,
+    ) == ordinary_data
+
+
+@pytest.mark.asyncio
 async def test_runtime_status_reports_running_version_and_only_reported_cache_evidence(monkeypatch):
     monkeypatch.setattr(
         jarvis_agent,

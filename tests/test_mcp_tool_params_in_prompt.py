@@ -45,6 +45,22 @@ def test_prompt_descriptions_surface_param_names_and_required():
     assert "required" in text                   # required-ness is surfaced
 
 
+def test_prompt_descriptions_include_only_request_mounted_mcp_tools():
+    mgr = _mgr_with_tool()
+    mgr._tools["srv1"].append({
+        "name": "write_doc",
+        "description": "Write a document.",
+        "input_schema": {"type": "object", "properties": {}},
+    })
+
+    text = mgr.get_tool_descriptions_for_prompt(
+        allowed_names={"mcp__srv1__fetch_doc"},
+    )
+
+    assert "mcp__srv1__fetch_doc" in text
+    assert "mcp__srv1__write_doc" not in text
+
+
 def test_format_mcp_params_handles_no_params():
     from src.mcp_manager import _format_mcp_params
 

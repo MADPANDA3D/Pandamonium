@@ -203,6 +203,40 @@ def test_named_native_connection_selects_declared_discovery_and_read_tools_only(
     assert manager.native_tool_names_for_request("Read the last five Teams messages") == set()
 
 
+def test_explicit_native_connection_name_wins_over_earlier_shared_catalog_match():
+    manager = McpManager()
+    manager._connections["discord-direct"] = {
+        "status": "connected",
+        "name": "Discord MCP",
+        "catalog_terms": ["Discord"],
+    }
+    manager._tools["discord-direct"] = [
+        {
+            "name": f"discord.read_{index}",
+            "description": "Read Discord data.",
+            "annotations": {"readOnlyHint": True},
+        }
+        for index in range(8)
+    ]
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "MAD Broker"},
+        "catalog_terms": ["Discord"],
+    }
+    manager._tools["portal-fixture"] = [{
+        "name": "portal.welcome",
+        "description": "Start the Portal flow.",
+        "annotations": {"readOnlyHint": True},
+    }]
+
+    selected = manager.native_tool_names_for_request(
+        "Use MAD MCP Portal to read the last five Discord messages."
+    )
+
+    assert selected == {"mcp__portal-fixture__portal.welcome"}
+
+
 def test_native_tool_failure_is_bounded_redacted_and_not_retried():
     class FailingSession:
         calls = 0
