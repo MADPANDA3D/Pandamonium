@@ -347,6 +347,13 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         "name": "MAD MCP Portal",
         "server_info": {"name": "Fixture Broker"},
         "catalog_terms": ["Discord"],
+        "instructions": (
+            "Start with portal.welcome, then portal.list_services. "
+            "Use portal.find_tools with a natural-language intent and "
+            "portal.get_tool_reference for the complete schema and safety rules. "
+            "Call portal.preview_tool_call before writes or destructive work. "
+            "Execute reads with portal.call_read_tool."
+        ),
     }
     chain = [
         "portal.welcome",
@@ -357,6 +364,21 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         "portal.preview_tool_call",
         "portal.call_read_tool",
     ]
+    noisy_description = (
+        "List configured services, inspect the Discord connection, discover the "
+        "catalog tool, read its reference, validate its schema and envelope, and "
+        "return five messages or a precise terminal service error."
+    )
+    distractors = [
+        "portal.list_service_tools",
+        "portal.list_releases",
+        "portal.list_skills",
+        "portal.list_tickets",
+        "portal.get_project_thread",
+        "portal.view_play",
+        "portal.export_play",
+        "portal.call_service_tool",
+    ] + [f"portal.read_catalog_artifact_{index}" for index in range(50)]
     manager._tools["portal-fixture"] = [
         {
             "name": name,
@@ -372,26 +394,14 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     ] + [
         {
             "name": name,
-            "description": description,
+            "description": noisy_description,
             "input_schema": {"type": "object", "properties": {}},
-            "annotations": {"readOnlyHint": True},
+            "annotations": {"readOnlyHint": name != "portal.call_service_tool"},
         }
-        for name, description in [
-            ("portal.list_skills", "Call portal.view_skill."),
-            ("portal.view_skill", "Call portal.export_skill."),
-            ("portal.export_skill", "Export one artifact."),
-            ("portal.view_play", "Call portal.export_play."),
-            ("portal.export_play", "Export one artifact."),
-            ("portal.view_playbook", "Call portal.export_playbook."),
-            ("portal.export_playbook", "Export one artifact."),
-            ("portal.get_project_thread", "Read project thread messages."),
-        ]
-    ] + [{
-        "name": "portal.call_service_tool",
-        "description": "Legacy server-wide fallback that is not selected.",
-        "input_schema": {"type": "object", "properties": {}},
-        "annotations": {"readOnlyHint": False},
-    }]
+        for name in distractors
+    ]
+    assert len(manager._tools["portal-fixture"]) == 65
+
     async def fake_stream(*args, **kwargs):
         captured["messages"] = args[1]
         captured["tools"] = kwargs.get("tools") or []
@@ -409,10 +419,17 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
 
     exact_request = (
-        "Run this read-only installed acceptance through the native configured "
-        "MAD MCP Portal. Use the executable Portal bootstrap, discovery, reference, "
-        "and read capabilities as needed. Discover the configured Discord general "
-        "channel and pull the last five messages."
+        "Run this read-only installed acceptance through the native configured MAD MCP Portal. "
+        "Use only the mounted Portal tools and never bypass Portal. Follow one bounded flow: "
+        "bootstrap once, list configured services once, check Discord connection once, discover "
+        "the catalog-declared read tool for the configured Discord #general channel once, read its "
+        "lossless reference once, and call the Portal read executor exactly once with a count of five. "
+        "Do not preview a read. Do not call another executor or connector. Do not retry any tool. "
+        "On any schema, permission, unsupported capability, service, authentication, or transport "
+        "failure, stop immediately with one precise terminal error and never continue to a step limit. "
+        "Never include message content, author names, identifiers, timestamps, attachments, or credentials "
+        "in the final response. If and only if the returned Portal envelope is valid and proves exactly "
+        "five messages, return exactly: MAD842_PORTAL_READ_OK count=5"
     )
     async for _chunk in agent_loop.stream_agent_loop(
         "https://api.openai.com/v1/chat/completions",
@@ -429,7 +446,8 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         if schema.get("function")
     }
     required = {f"mcp__portal-fixture__{name}" for name in chain}
-    assert required <= sent
+    assert {name for name in sent if name.startswith("mcp__portal-fixture__")} == required
+    assert "mcp__portal-fixture__portal.list_service_tools" not in sent
     assert "mcp__portal-fixture__portal.call_service_tool" not in sent
 
     visible_messages = json.dumps(captured["messages"])

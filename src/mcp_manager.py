@@ -809,6 +809,10 @@ class McpManager:
         normalized_query = " ".join(
             re.findall(r"[a-z0-9][a-z0-9_-]*", str(query or "").lower())
         )
+        query_name_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", str(query or "").lower())
+            if token not in _ROUTING_STOPWORDS
+        }
         candidates = []
         for connection_index, (server_id, tools) in enumerate(self._tools.items()):
             if self.is_extension_server(server_id) or not tools:
@@ -855,6 +859,7 @@ class McpManager:
             candidates = candidates[:1]
 
         selected: List[str] = []
+        max_selected = max(1, min(int(limit), 20))
         for _explicit, _overlap, _index, server_id, tools, conn in candidates:
             by_name = {str(tool.get("name") or ""): tool for tool in tools}
             referenced: List[str] = []
@@ -865,21 +870,42 @@ class McpManager:
                 if name in by_name and name not in referenced:
                     referenced.append(name)
 
+            for name in referenced:
+                if not mcp_tool_is_readonly(by_name[name]):
+                    continue
+                selected.append(f"mcp__{server_id}__{name}")
+                if len(selected) >= max_selected:
+                    return set(selected)
+
             scored = []
             for index, tool in enumerate(tools):
                 name = str(tool.get("name") or "")
-                if not name or not mcp_tool_is_readonly(tool):
+                if not name or name in referenced or not mcp_tool_is_readonly(tool):
                     continue
                 haystack = f"{name} {tool.get('description') or ''}"
                 overlap = len(query_tokens & _routing_tokens(haystack))
-                reference_rank = referenced.index(name) if name in referenced else len(referenced) + index
-                score = (10 if name in referenced else 0) + overlap * 4
-                scored.append((-score, reference_rank, index, name))
-            for _score, _ref_rank, _index, name in sorted(scored):
+                normalized_name = " ".join(
+                    re.findall(r"[a-z0-9][a-z0-9_-]*", name.lower())
+                )
+                directly_named = bool(normalized_name and re.search(
+                    rf"(?:^| ){re.escape(normalized_name)}(?: |$)",
+                    normalized_query,
+                ))
+                action_name = name.split(".", 1)[-1]
+                name_tokens = {
+                    token for token in re.findall(r"[a-z0-9]+", action_name.lower())
+                    if token not in _ROUTING_STOPWORDS
+                }
+                if referenced and not directly_named and (
+                    len(name_tokens) < 2 or not name_tokens <= query_name_tokens
+                ):
+                    continue
+                scored.append((not directly_named, -overlap, index, name))
+            for _implicit, _overlap, _index, name in sorted(scored):
                 qualified = f"mcp__{server_id}__{name}"
                 if qualified not in selected:
                     selected.append(qualified)
-                if len(selected) >= max(1, min(int(limit), 20)):
+                if len(selected) >= max_selected:
                     return set(selected)
         return set(selected)
 

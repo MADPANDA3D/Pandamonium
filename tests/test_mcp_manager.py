@@ -286,6 +286,44 @@ def test_tool_cross_references_do_not_replace_an_uninstructed_broker_entrypoint(
     }
 
 
+def test_initialize_read_flow_is_authoritative_with_named_supplements():
+    manager = McpManager()
+    manager._connections["broker-fixture"] = {
+        "status": "connected",
+        "name": "Acme Broker",
+        "server_info": {"name": "Fixture Broker"},
+        "instructions": "Use broker.start, broker.discover, then broker.read.",
+    }
+    manager._tools["broker-fixture"] = [
+        {
+            "name": name,
+            "description": "Read configured services and validate the catalog.",
+            "annotations": {"readOnlyHint": True},
+        }
+        for name in [
+            "broker.start",
+            "broker.discover",
+            "broker.read",
+            "broker.check_connection",
+            "broker.list_service_tools",
+            "broker.list_releases",
+        ]
+    ]
+
+    assert manager.native_tool_names_for_request(
+        "Using Acme Broker, check the connection."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read", "check_connection"]
+    }
+    assert manager.native_tool_names_for_request(
+        "Using Acme Broker, inspect broker.list_releases."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read", "list_releases"]
+    }
+
+
 def test_native_tool_failure_is_bounded_redacted_and_not_retried():
     class FailingSession:
         calls = 0
