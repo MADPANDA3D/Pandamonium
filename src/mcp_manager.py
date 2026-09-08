@@ -98,15 +98,25 @@ def _routing_tokens(value: Any) -> Set[str]:
     }
 
 
-def _tool_name_is_negated(query: str, name: str) -> bool:
-    """Return whether an exact tool name appears in a nearby negative clause."""
-    query_text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(query or "").lower())
+def _tool_name_is_negated(
+    query: str, name: str, *, allow_intervening: bool = False
+) -> bool:
+    """Return whether a named tool appears in a nearby negative clause."""
+    query_text = str(query or "").lower().replace("\r\n", "\n").replace("\r", "\n")
+    query_text = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]+", " ", query_text)
     name_parts = re.findall(r"[a-z0-9][a-z0-9_-]*", str(name or "").lower())
     if not query_text or not name_parts:
         return False
-    name_pattern = r"(?<![a-z0-9_-])" + r"[.\s]+".join(
-        re.escape(part) for part in name_parts
-    ) + r"(?![a-z0-9_-])"
+    separator = (
+        r"(?:[ \t_-]+(?:[a-z0-9][a-z0-9_-]*[ \t_-]+){0,6})"
+        if allow_intervening
+        else r"[.\s]+"
+    )
+    name_pattern = (
+        r"(?<![a-z0-9_-])"
+        + separator.join(re.escape(part) for part in name_parts)
+        + r"(?![a-z0-9_-])"
+    )
     negated: bool | None = None
     for match in re.finditer(name_pattern, query_text):
         clause_prefix = re.split(
@@ -948,7 +958,7 @@ class McpManager:
                     continue
                 negation_name = name if directly_named else " ".join(action_words)
                 if (directly_named or fully_name_matched) and _tool_name_is_negated(
-                    query, negation_name
+                    query, negation_name, allow_intervening=not directly_named
                 ):
                     continue
                 scored.append((not directly_named, -overlap, index, name))
