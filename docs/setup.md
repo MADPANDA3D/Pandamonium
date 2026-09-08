@@ -209,6 +209,11 @@ The authenticated admin UI writes only a request under the external data
 directory. Install the root-owned units so systemd performs the privileged
 work. Review and adjust every path before enabling them:
 
+The updater preserves the owner and mode of its durable state file when the
+root oneshot replaces it. This keeps the redacted admin status API readable
+after restart without making the root-only environment, backups, or release
+store available to the application service.
+
 ```bash
 sudo install -m 0644 pandamonium-updater.service /etc/systemd/system/
 sudo install -m 0644 pandamonium-updater.path /etc/systemd/system/

@@ -414,13 +414,22 @@ def installation_status(root: Path = ROOT) -> dict[str, Any]:
     }
 
 
-def read_update_state(path: Path | None = None) -> dict[str, Any]:
-    path = path or STATE_PATH
+def _read_update_state(
+    path: Path,
+) -> tuple[dict[str, Any], bool]:
+    """Return the durable updater state and whether permissions hid it."""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
+        return (value if isinstance(value, dict) else {}), False
+    except PermissionError:
+        return {}, True
     except (OSError, ValueError):
-        return {}
+        return {}, False
+
+
+def read_update_state(path: Path | None = None) -> dict[str, Any]:
+    state, _permission_denied = _read_update_state(path or STATE_PATH)
+    return state
 
 
 def write_update_state(
@@ -428,12 +437,64 @@ def write_update_state(
 ) -> dict[str, Any]:
     path = path or STATE_PATH
     state = {**state, "schema_version": STATE_SCHEMA, "updated_at": utc_now()}
+    owner: tuple[int, int] | None = None
+    try:
+        metadata = path.lstat()
+        if stat.S_ISREG(metadata.st_mode):
+            owner = (metadata.st_uid, metadata.st_gid)
+    except OSError:
+        try:
+            parent = path.parent.lstat()
+            if stat.S_ISDIR(parent.st_mode):
+                owner = (parent.st_uid, parent.st_gid)
+        except OSError:
+            pass
     atomic_write_json(str(path), state, indent=2)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        # The web process creates the queued state. Preserve that exact owner
+        # when the root oneshot atomically replaces the file, rather than
+        # leaving an otherwise harmless terminal receipt unreadable after the
+        # application restarts.
+        if os.geteuid() == 0 and owner is not None:
+            os.fchown(descriptor, *owner)
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
     return state
 
 
 def public_update_state() -> dict[str, Any]:
-    state = read_update_state()
+    state, permission_denied = _read_update_state(STATE_PATH)
+    if permission_denied:
+        revision = current_revision(ROOT)
+        install = installation_status(ROOT)
+        if install.get("supported") and revision:
+            # A pre-fix root updater can leave its final receipt mode 0600.
+            # The replacement application cannot reconstruct backup details,
+            # but its own managed release identity and healthy API process are
+            # sufficient to reconcile the owner-visible terminal display.
+            return {
+                "schema_version": STATE_SCHEMA,
+                "status": "release_active",
+                "phase": "complete",
+                "progress": 100,
+                "message": (
+                    f"Installed release v{APP_VERSION} is active; "
+                    "the privileged updater receipt is unavailable"
+                ),
+                "target_version": APP_VERSION,
+                "target_commit": revision,
+                "previous_release": None,
+                "backup_location": None,
+                "rollback_available": False,
+                "auto_rolled_back": False,
+                "rollback_error": None,
+                "history": [],
+                "updated_at": None,
+            }
     return {
         "schema_version": STATE_SCHEMA,
         "status": state.get("status", "idle"),

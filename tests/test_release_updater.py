@@ -478,6 +478,61 @@ def test_environment_config_requires_root(monkeypatch):
         release_updater.UpdateConfig.from_env()
 
 
+def test_root_state_write_preserves_queued_owner_and_private_mode(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "updates" / "state.json"
+    state_path.parent.mkdir()
+    state_path.write_text('{"status": "queued"}', encoding="utf-8")
+    expected = state_path.stat()
+    ownership = []
+    real_fchmod = os.fchmod
+
+    monkeypatch.setattr(release_updater.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        release_updater.os,
+        "fchown",
+        lambda _fd, uid, gid: ownership.append((uid, gid)),
+    )
+    monkeypatch.setattr(release_updater.os, "fchmod", real_fchmod)
+
+    release_updater.write_update_state({"status": "succeeded"}, state_path)
+
+    assert ownership == [(expected.st_uid, expected.st_gid)]
+    assert state_path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(state_path.read_text(encoding="utf-8"))["status"] == "succeeded"
+
+
+def test_public_state_reconciles_running_release_when_legacy_receipt_is_private(
+    tmp_path, monkeypatch
+):
+    state_path = tmp_path / "state.json"
+    state_path.write_text('{"status": "succeeded"}', encoding="utf-8")
+    real_read_text = Path.read_text
+
+    def protected_read(path, *args, **kwargs):
+        if path == state_path:
+            raise PermissionError("legacy root-only state")
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(release_updater, "STATE_PATH", state_path)
+    monkeypatch.setattr(Path, "read_text", protected_read)
+    monkeypatch.setattr(release_updater, "current_revision", lambda _root: NEW_COMMIT)
+    monkeypatch.setattr(
+        release_updater,
+        "installation_status",
+        lambda _root: {"supported": True},
+    )
+
+    state = release_updater.public_update_state()
+
+    assert state["status"] == "release_active"
+    assert state["phase"] == "complete"
+    assert state["progress"] == 100
+    assert state["target_commit"] == NEW_COMMIT
+    assert state["rollback_available"] is False
+
+
 def test_failed_health_check_restores_release_and_backup_data(tmp_path, monkeypatch):
     executor, manifest, archive, old = _layout(tmp_path, monkeypatch)
     _stub_runtime(executor, monkeypatch, healthy=False)

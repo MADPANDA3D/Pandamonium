@@ -19,7 +19,7 @@ const REOPEN_MODAL_KEY = 'pandamonium:update-reopen-modal';
 const WORKER_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const WORKER_UPDATE_PENDING = 'pending-worker-update';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
-const SUCCESS_STATUSES = new Set(['succeeded', 'recovered', 'rolled_back']);
+const SUCCESS_STATUSES = new Set(['succeeded', 'release_active', 'recovered', 'rolled_back']);
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429]);
 const PHASES = ['scan', 'verify', 'preserve', 'activate', 'complete'];
 
@@ -308,12 +308,13 @@ function renderOperation(operation = {}) {
       phase: operationPhase(operation.phase),
     });
   } else if (SUCCESS_STATUSES.has(operation.status)) {
-    const rolledBack = operation.status !== 'succeeded';
-    setState(rolledBack ? 'Rollback complete' : 'Update complete', 'current');
-    setPill('connected', rolledBack ? 'Rolled back' : 'Updated');
+    const rolledBack = ['recovered', 'rolled_back'].includes(operation.status);
+    const reconciled = operation.status === 'release_active';
+    setState(rolledBack ? 'Rollback complete' : (reconciled ? 'Installed release active' : 'Update complete'), 'current');
+    setPill('connected', rolledBack ? 'Rolled back' : (reconciled ? 'Active' : 'Updated'));
     setProgress({
       state: 'complete',
-      title: rolledBack ? 'Rollback verified' : 'Update installed',
+      title: rolledBack ? 'Rollback verified' : (reconciled ? 'Installed release is active' : 'Update installed'),
       detail: operation.message || (rolledBack ? 'The previous release is healthy.' : 'The new release passed its health check.'),
       progress: 100,
       phase: 'complete',
