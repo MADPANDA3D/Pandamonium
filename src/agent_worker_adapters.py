@@ -597,8 +597,8 @@ HERMES_TOKEN_FILE = Path(os.getenv("ODYSSEUS_HERMES_TOKEN_FILE", "/etc/odysseus-
 VPS_TOKEN_FILE = Path(os.getenv("ODYSSEUS_VPS_WORKER_TOKEN_FILE", "/etc/odysseus-vps-worker-token"))
 
 
-def adapters() -> dict[str, WorkerAdapter]:
-    return {
+def adapters(*, include_external: bool = False) -> dict[str, WorkerAdapter]:
+    registry: dict[str, WorkerAdapter] = {
         "pc-codex": CodexBridgeAdapter(
             "pc-codex",
             os.getenv("ODYSSEUS_PC_CODEX_URL", "http://127.0.0.1:8040"),
@@ -622,6 +622,11 @@ def adapters() -> dict[str, WorkerAdapter]:
             label=_worker_label("ODYSSEUS_VPS_CODEX_LABEL", "VPS Codex"),
         ),
     }
+    if include_external:
+        from src.external_agent_bridge import external_agent_adapters
+
+        registry.update(external_agent_adapters())
+    return registry
 
 
 def worker_catalog(
@@ -638,7 +643,11 @@ def worker_catalog(
     for worker, adapter in registry.items():
         adapter_name, machine, capabilities = metadata.get(
             worker,
-            (getattr(adapter, "adapter_name", "worker"), "Configured worker", ["read_only"]),
+            (
+                getattr(adapter, "adapter_name", "worker"),
+                getattr(adapter, "machine", "Configured worker"),
+                getattr(adapter, "catalog_capabilities", ["read_only"]),
+            ),
         )
         result[worker] = {
             "id": worker,
@@ -660,6 +669,8 @@ def worker_catalog(
 async def probe_worker_statuses(
     registry: dict[str, WorkerAdapter],
     catalog: dict[str, dict[str, Any]],
+    *,
+    owner: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Probe configured adapters and expose one redacted status contract."""
     configured = [
@@ -667,10 +678,21 @@ async def probe_worker_statuses(
         for worker, adapter in registry.items()
         if bool(adapter.enabled) and worker in catalog
     ]
-    health_rows = await asyncio.gather(*(adapter.health() for _, adapter in configured))
+    health_rows = await asyncio.gather(
+        *(
+            adapter.health(owner=owner)
+            if owner is not None and getattr(adapter, "adapter_name", "") == "external-agent-sidecar"
+            else adapter.health()
+            for _, adapter in configured
+        ),
+        return_exceptions=True,
+    )
     result: dict[str, dict[str, Any]] = {}
     for (worker, adapter), health in zip(configured, health_rows):
-        health = health if isinstance(health, dict) else {}
+        health = health if isinstance(health, dict) else {
+            "state": "unreachable",
+            "reason": str(getattr(health, "code", "connection_failed")),
+        }
         state = str(health.get("state") or "unreachable")
         connection = {"state": state}
         for key in ("reason", "protocol"):

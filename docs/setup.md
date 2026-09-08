@@ -637,6 +637,7 @@ Key settings:
 | `PANDAMONIUM_QDRANT_WIKI_COLLECTION` | `odysseus_wiki` | Generated-wiki projection; legacy `JARVIS_` name remains accepted |
 | `PANDAMONIUM_QDRANT_READS_ENABLED` | `false` | Promote Qdrant reads only after live parity checks; legacy `JARVIS_` name remains accepted |
 | `PANDAMONIUM_GRAPHIFY_ROOTS` | -- | Optional JSON map of explicit repository/output roots; no startup or workspace scan occurs |
+| `PANDAMONIUM_EXTERNAL_AGENT_CONNECTIONS_JSON` | -- | Optional JSON list of exact `pandamonium.external-agent-sidecar.v1` read-only connections. Each entry requires a versioned endpoint, `file:` credential reference, explicit `public`/`private`/`loopback` network policy, Workspace aliases, and read capabilities; unset means no registration, secret read, or probe. |
 | `PANDAMONIUM_CHAT_UPLOAD_MAX_BYTES` | `10485760` | Chat/agent attachment cap in bytes. Raise for larger local PDFs or text documents. |
 | `PANDAMONIUM_GALLERY_UPLOAD_MAX_BYTES` | `104857600` | Gallery image upload cap in bytes (100 MB). |
 | `PANDAMONIUM_GALLERY_TRANSFORM_UPLOAD_MAX_BYTES` | `26214400` | Gallery transform input cap in bytes (25 MB). |

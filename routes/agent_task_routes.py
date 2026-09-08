@@ -12,7 +12,8 @@ from core.models import ChatMessage
 from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
 from src.agent_identity import configured_agent_id
 from src.auth_helpers import require_user
-from src.agent_worker_adapters import WorkerUnavailable, adapters, require_worker_task_permission
+from src.agent_worker_adapters import WORKER_IDS, WorkerUnavailable, adapters, require_worker_task_permission
+from src.external_agent_bridge import ExternalAgentBridgeError
 from src.authority_protocol import authority_store, operator_identity
 from src.jarvis_agent import (
     configure,
@@ -234,6 +235,105 @@ def setup_agent_task_routes(session_manager):
     @router.get("/api/agent-workers")
     async def workers(_owner: str = Depends(require_user)):
         return await worker_statuses()
+
+    @router.get("/api/external-agent-workers")
+    async def external_agent_workers(owner: str = Depends(require_user)):
+        try:
+            statuses = await worker_statuses(owner=owner, include_external=True)
+            return {
+                worker: status for worker, status in statuses.items()
+                if worker not in WORKER_IDS
+            }
+        except ExternalAgentBridgeError as exc:
+            raise HTTPException(503, exc.code)
+
+    def _external_catalog_adapter(worker: str):
+        try:
+            adapter = adapters(include_external=True).get(worker)
+        except ExternalAgentBridgeError as exc:
+            raise HTTPException(503, exc.code)
+        if not adapter or getattr(adapter, "adapter_name", "") != "external-agent-sidecar":
+            raise HTTPException(404, "External agent Worker was not found")
+        return adapter
+
+    async def _external_read(operation):
+        try:
+            return await operation
+        except ExternalAgentBridgeError as exc:
+            status = 400 if exc.code in {
+                "malformed_envelope", "wrong_workspace", "capability_disabled",
+            } else 503
+            raise HTTPException(status, exc.code)
+
+    @router.get("/api/agent-workers/{worker}/discovery")
+    async def external_worker_discovery(
+        worker: str,
+        workspace: str = Query(min_length=1, max_length=64),
+        owner: str = Depends(require_user),
+    ):
+        return await _external_read(
+            _external_catalog_adapter(worker).discovery(owner=owner, workspace=workspace)
+        )
+
+    @router.get("/api/agent-workers/{worker}/agents")
+    async def external_worker_agents(
+        worker: str,
+        workspace: str = Query(min_length=1, max_length=64),
+        query: str = Query(default="", max_length=200),
+        cursor: str | None = Query(default=None, max_length=2000),
+        limit: int = Query(default=20, ge=1, le=64),
+        owner: str = Depends(require_user),
+    ):
+        return await _external_read(
+            _external_catalog_adapter(worker).catalog_agents(
+                owner=owner, workspace=workspace, query=query, cursor=cursor, limit=limit,
+            )
+        )
+
+    @router.get("/api/agent-workers/{worker}/tasks")
+    async def external_worker_tasks(
+        worker: str,
+        workspace: str = Query(min_length=1, max_length=64),
+        query: str = Query(default="", max_length=200),
+        cursor: str | None = Query(default=None, max_length=2000),
+        limit: int = Query(default=20, ge=1, le=64),
+        owner: str = Depends(require_user),
+    ):
+        return await _external_read(
+            _external_catalog_adapter(worker).catalog_tasks(
+                owner=owner, workspace=workspace, query=query, cursor=cursor, limit=limit,
+            )
+        )
+
+    @router.get("/api/agent-workers/{worker}/tasks/{task_ref}/events")
+    async def external_worker_task_events(
+        worker: str,
+        task_ref: str,
+        workspace: str = Query(min_length=1, max_length=64),
+        cursor: str | None = Query(default=None, max_length=2000),
+        limit: int = Query(default=20, ge=1, le=64),
+        owner: str = Depends(require_user),
+    ):
+        return await _external_read(
+            _external_catalog_adapter(worker).task_events(
+                task_ref, owner=owner, workspace=workspace, cursor=cursor, limit=limit,
+            )
+        )
+
+    @router.get("/api/agent-workers/{worker}/tasks/{task_ref}/transcript")
+    async def external_worker_task_transcript(
+        worker: str,
+        task_ref: str,
+        workspace: str = Query(min_length=1, max_length=64),
+        cursor: str | None = Query(default=None, max_length=2000),
+        limit: int = Query(default=20, ge=1, le=64),
+        owner: str = Depends(require_user),
+    ):
+        return await _external_read(
+            _external_catalog_adapter(worker).task_transcript(
+                task_ref, owner=owner, workspace=workspace, cursor=cursor, limit=limit,
+            )
+        )
 
     def _codex_catalog_adapter():
         adapter = adapters().get("pc-codex")

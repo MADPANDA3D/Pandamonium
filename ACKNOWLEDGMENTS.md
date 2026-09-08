@@ -142,6 +142,14 @@ credit:
 - [OpenSSH](https://www.openssh.com/) (`ssh`, `ssh-keygen`, `ssh-copy-id`) — Cookbook shells out to it to manage remote model servers and provision keys (BSD-style permissive)
 - Model/API providers: Anthropic, OpenAI, Google (Gemini), DuckDuckGo
 
+## External agent adapter concept
+
+- **[Twenty4SevenLabs/Pandamonium](https://github.com/Twenty4SevenLabs/Pandamonium)** —
+  contributor credit for the external coding-agent adapter/product concept at
+  frozen contributor branch head `7220f7cc9cbee26cd94697bd7a6a3d0ef001b66d`.
+  This repository's protocol and read-only adapter are an independent
+  reconstruction; no contributor source code or Git history was imported.
+
 ---
 
 ### License-compatibility notes (for the repo's own LICENSE choice)
