@@ -1,0 +1,1102 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import socket
+import stat
+import uuid
+from collections.abc import Awaitable, Callable, Iterable
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import httpcore
+import httpx
+
+from src.webhook_manager import _HTTPCORE_TO_HTTPX_EXC, _PinnedAsyncBackend
+
+
+EXTERNAL_AGENT_PROTOCOL = "pandamonium.external-agent-sidecar.v1"
+EXTERNAL_DISCOVERY_SCHEMA = "pandamonium.discovery.v1"
+EXTERNAL_READ_CAPABILITIES = (
+    "agent.catalog",
+    "task.catalog",
+    "task.events",
+    "task.transcript",
+)
+
+_CONFIG_ENV_NAMES = (
+    "PANDAMONIUM_EXTERNAL_AGENT_CONNECTIONS_JSON",
+    "ODYSSEUS_EXTERNAL_AGENT_CONNECTIONS_JSON",
+)
+_MAX_CONNECTIONS = 8
+_MAX_WIRE_BYTES = 65_536
+_MAX_DEPTH = 16
+_MAX_STRING = 12_000
+_MAX_COLLECTION = 64
+_MAX_CREDENTIAL_BYTES = 4_096
+_MAX_CLOCK_SKEW = timedelta(minutes=5)
+_CONNECTION_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_RESERVED_WORKERS = {"pc-codex", "hermes", "vps-codex"}
+_WORKSPACE_ALIAS = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_REFERENCE = re.compile(r"^[a-z][a-z0-9._:-]{2,127}$")
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+_CURSOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:-]{0,1999}$")
+_SECRET_KEY = re.compile(
+    r"(?:token|secret|password|credential|authorization|auth_ref|api[_-]?key|private[_-]?key)",
+    re.IGNORECASE,
+)
+_SECRET_VALUE = re.compile(
+    r"(?i)\b(?:token|secret|password|authorization|api[_-]?key)\s*[:=]\s*[^\s,;]+"
+)
+_ABSOLUTE_PATH = re.compile(r"(?<![\w])(?:/[A-Za-z0-9._~@+-]+){2,}")
+_WINDOWS_PATH = re.compile(r"(?i)\b[A-Z]:\\(?:[^\s\\]+\\)*[^\s\\]+")
+_STABLE_ERRORS = {
+    "malformed_envelope",
+    "incompatible_protocol",
+    "oversized_payload",
+    "stale_request",
+    "replay_detected",
+    "unauthorized",
+    "wrong_owner",
+    "wrong_workspace",
+    "capability_disabled",
+    "path_escape",
+    "symlink_escape",
+    "rate_limited",
+    "timeout",
+    "sidecar_unavailable",
+    "internal_error",
+}
+
+Requester = Callable[
+    [str, str, dict[str, str], dict[str, Any] | None, float, ipaddress._BaseAddress, int],
+    Awaitable[tuple[int, dict[str, str], bytes]],
+]
+
+
+class ExternalAgentBridgeError(RuntimeError):
+    """Stable, non-sensitive failure at the external-agent trust boundary."""
+
+    def __init__(self, code: str):
+        self.code = code if code in _STABLE_ERRORS or code in {
+            "connection_configuration_invalid",
+            "credential_unavailable",
+            "endpoint_invalid",
+            "endpoint_policy_rejected",
+        } else "internal_error"
+        super().__init__(self.code)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_timestamp(value: object) -> datetime:
+    if not isinstance(value, str) or len(value) > 40:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ExternalAgentBridgeError("malformed_envelope") from exc
+    if parsed.tzinfo is None:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    return parsed.astimezone(timezone.utc)
+
+
+def _owner_ref(owner: str) -> str:
+    digest = hashlib.sha256(owner.strip().encode("utf-8")).hexdigest()[:32]
+    return f"owner:o{digest}"
+
+
+def _scoped_ref(prefix: str, value: str) -> str:
+    normalized = value.lower().replace("_", "-")
+    return f"{prefix}:{normalized}"
+
+
+def _safe_text(value: object, *, maximum: int = _MAX_STRING) -> str:
+    text = " ".join(str(value or "").split())[:maximum]
+    text = _SECRET_VALUE.sub("[redacted]", text)
+    text = _ABSOLUTE_PATH.sub("[redacted]", text)
+    return _WINDOWS_PATH.sub("[redacted]", text)
+
+
+def _safe_value(value: Any, *, depth: int = 0) -> Any:
+    if depth > _MAX_DEPTH:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _safe_text(value)
+    if isinstance(value, list):
+        if len(value) > _MAX_COLLECTION:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        return [_safe_value(item, depth=depth + 1) for item in value]
+    if isinstance(value, dict):
+        if len(value) > _MAX_COLLECTION:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        result = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key or len(key) > 100 or _SECRET_KEY.search(key):
+                continue
+            result[key] = _safe_value(item, depth=depth + 1)
+        return result
+    raise ExternalAgentBridgeError("malformed_envelope")
+
+
+def _json_depth(raw: bytes) -> int:
+    depth = maximum = 0
+    quoted = escaped = False
+    for byte in raw:
+        char = chr(byte)
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+            continue
+        if char == '"':
+            quoted = True
+        elif char in "[{":
+            depth += 1
+            maximum = max(maximum, depth)
+        elif char in "]}":
+            depth -= 1
+            if depth < 0:
+                raise ExternalAgentBridgeError("malformed_envelope")
+    if quoted or depth != 0:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    return maximum
+
+
+def _bounded_json(raw: bytes) -> dict[str, Any]:
+    if len(raw) > _MAX_WIRE_BYTES:
+        raise ExternalAgentBridgeError("oversized_payload")
+    if _json_depth(raw) > _MAX_DEPTH:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    try:
+        payload = _strict_json_loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ExternalAgentBridgeError("malformed_envelope") from exc
+    if not isinstance(payload, dict):
+        raise ExternalAgentBridgeError("malformed_envelope")
+    _validate_bounded_value(payload)
+    return payload
+
+
+def _validate_bounded_value(value: Any, *, depth: int = 0) -> None:
+    if depth > _MAX_DEPTH:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    if isinstance(value, str):
+        if len(value) > _MAX_STRING:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        return
+    if isinstance(value, list):
+        if len(value) > _MAX_COLLECTION:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        for item in value:
+            _validate_bounded_value(item, depth=depth + 1)
+        return
+    if isinstance(value, dict):
+        if len(value) > _MAX_COLLECTION:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        for key, item in value.items():
+            if not isinstance(key, str) or not key or len(key) > 100:
+                raise ExternalAgentBridgeError("malformed_envelope")
+            _validate_bounded_value(item, depth=depth + 1)
+        return
+    raise ExternalAgentBridgeError("malformed_envelope")
+
+
+def _strict_json_loads(raw: str | bytes) -> Any:
+    def object_pairs(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON property")
+            value[key] = item
+        return value
+
+    def invalid_constant(_value):
+        raise ValueError("invalid JSON number")
+
+    return json.loads(
+        raw,
+        object_pairs_hook=object_pairs,
+        parse_constant=invalid_constant,
+    )
+
+
+def _default_resolver(host: str) -> list[str]:
+    try:
+        return list({row[4][0] for row in socket.getaddrinfo(host, None)})
+    except OSError:
+        return []
+
+
+def _address_class(address: ipaddress._BaseAddress) -> str:
+    if address.is_loopback:
+        return "loopback"
+    if address.is_link_local or address.is_multicast or address.is_unspecified or address.is_reserved:
+        return "rejected"
+    if address.is_private:
+        return "private"
+    if address.is_global:
+        return "public"
+    return "rejected"
+
+
+def _validate_endpoint(endpoint: object, policy: object) -> str:
+    if (
+        not isinstance(endpoint, str)
+        or not 1 <= len(endpoint) <= 2_048
+        or endpoint.strip() != endpoint
+        or any(ord(character) < 0x21 or ord(character) > 0x7E for character in endpoint)
+    ):
+        raise ExternalAgentBridgeError("endpoint_invalid")
+    if policy not in {"public", "private", "loopback"}:
+        raise ExternalAgentBridgeError("connection_configuration_invalid")
+    try:
+        parsed = urlsplit(endpoint)
+        port = parsed.port
+    except ValueError as exc:
+        raise ExternalAgentBridgeError("endpoint_invalid") from exc
+    if (
+        not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.scheme not in {"http", "https"}
+        or parsed.path.rstrip("/") == ""
+        or not parsed.path.rstrip("/").endswith("/v1")
+        or (parsed.scheme == "http" and policy != "loopback")
+        or (port is not None and not 1 <= port <= 65_535)
+    ):
+        raise ExternalAgentBridgeError("endpoint_invalid")
+    return endpoint.rstrip("/")
+
+
+def _validated_external_agent_ips(
+    endpoint: str,
+    policy: str,
+    *,
+    resolver: Callable[[str], Iterable[str | ipaddress._BaseAddress]] = _default_resolver,
+) -> list[ipaddress._BaseAddress]:
+    parsed = urlsplit(endpoint)
+    host = parsed.hostname or ""
+    try:
+        literal = ipaddress.ip_address(host)
+        values: Iterable[str | ipaddress._BaseAddress] = [literal]
+    except ValueError:
+        try:
+            values = resolver(host)
+        except Exception as exc:
+            raise ExternalAgentBridgeError("endpoint_policy_rejected") from exc
+    addresses = []
+    try:
+        for value in values:
+            address = value if isinstance(value, ipaddress._BaseAddress) else ipaddress.ip_address(value)
+            addresses.append(address)
+    except ValueError as exc:
+        raise ExternalAgentBridgeError("endpoint_policy_rejected") from exc
+    if not addresses or any(_address_class(address) != policy for address in addresses):
+        raise ExternalAgentBridgeError("endpoint_policy_rejected")
+    return list(dict.fromkeys(addresses))
+
+
+def configured_external_agent_connections(raw: str | None = None) -> list[dict[str, Any]]:
+    if raw is None:
+        raw = next((os.getenv(name, "").strip() for name in _CONFIG_ENV_NAMES if os.getenv(name, "").strip()), "")
+    if not raw:
+        return []
+    try:
+        values = _strict_json_loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ExternalAgentBridgeError("connection_configuration_invalid") from exc
+    if not isinstance(values, list) or len(values) > _MAX_CONNECTIONS:
+        raise ExternalAgentBridgeError("connection_configuration_invalid")
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    allowed = {
+        "enabled", "protocol_version", "id", "label", "endpoint", "auth_ref",
+        "network_policy", "workspaces", "capabilities", "timeout_seconds",
+    }
+    for value in values:
+        if not isinstance(value, dict) or set(value) - allowed or not isinstance(value.get("enabled"), bool):
+            raise ExternalAgentBridgeError("connection_configuration_invalid")
+        if value["enabled"] is False:
+            continue
+        connection_id = value.get("id")
+        workspaces = value.get("workspaces")
+        capabilities = value.get("capabilities")
+        timeout = value.get("timeout_seconds", 10)
+        if (
+            value.get("protocol_version") != EXTERNAL_AGENT_PROTOCOL
+            or not isinstance(connection_id, str)
+            or not _CONNECTION_ID.fullmatch(connection_id)
+            or connection_id in _RESERVED_WORKERS
+            or connection_id in seen
+            or not isinstance(value.get("label"), str)
+            or not 1 <= len(" ".join(value["label"].split())) <= 80
+            or not isinstance(value.get("auth_ref"), str)
+            or not value["auth_ref"].startswith("file:/")
+            or value["auth_ref"].startswith("file://")
+            or len(value["auth_ref"]) > 2_048
+            or any(character in value["auth_ref"] for character in "\x00\r\n")
+            or not isinstance(workspaces, list)
+            or not 1 <= len(workspaces) <= 32
+            or any(not isinstance(item, str) or not _WORKSPACE_ALIAS.fullmatch(item) for item in workspaces)
+            or len(set(workspaces)) != len(workspaces)
+            or not isinstance(capabilities, list)
+            or not capabilities
+            or len(capabilities) > len(EXTERNAL_READ_CAPABILITIES)
+            or any(item not in EXTERNAL_READ_CAPABILITIES for item in capabilities)
+            or len(set(capabilities)) != len(capabilities)
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.25 <= float(timeout) <= 30
+        ):
+            raise ExternalAgentBridgeError("connection_configuration_invalid")
+        if not isinstance(value.get("endpoint"), str) or not isinstance(value.get("network_policy"), str):
+            raise ExternalAgentBridgeError("connection_configuration_invalid")
+        normalized = dict(value)
+        normalized["label"] = " ".join(value["label"].split())
+        normalized["endpoint"] = _validate_endpoint(value.get("endpoint"), value.get("network_policy"))
+        normalized["timeout_seconds"] = float(timeout)
+        result.append(normalized)
+        seen.add(connection_id)
+    return result
+
+
+def _read_credential(reference: str) -> str:
+    path = Path(reference.removeprefix("file:"))
+    if not path.is_absolute():
+        raise ExternalAgentBridgeError("credential_unavailable")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_mode & 0o077
+                or not 0 < metadata.st_size <= _MAX_CREDENTIAL_BYTES
+            ):
+                raise ExternalAgentBridgeError("credential_unavailable")
+            token = os.read(descriptor, _MAX_CREDENTIAL_BYTES + 1).decode("utf-8").strip()
+        finally:
+            os.close(descriptor)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise ExternalAgentBridgeError("credential_unavailable") from exc
+    if (
+        not token
+        or len(token.encode("utf-8")) > _MAX_CREDENTIAL_BYTES
+        or any(ord(character) < 0x21 or ord(character) > 0x7E for character in token)
+    ):
+        raise ExternalAgentBridgeError("credential_unavailable")
+    return token
+
+
+class _CoreResponseStream(httpx.AsyncByteStream):
+    def __init__(self, response: httpcore.Response):
+        self._response = response
+
+    async def __aiter__(self):
+        async for chunk in self._response.aiter_stream():
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._response.aclose()
+
+
+class _StreamingPinnedTransport(httpx.AsyncBaseTransport):
+    def __init__(self, address: ipaddress._BaseAddress):
+        self._pool = httpcore.AsyncConnectionPool(
+            network_backend=_PinnedAsyncBackend(address),
+            http1=True,
+            http2=False,
+        )
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        core_request = httpcore.Request(
+            method=request.method,
+            url=httpcore.URL(
+                scheme=request.url.raw_scheme,
+                host=request.url.raw_host,
+                port=request.url.port,
+                target=request.url.raw_path,
+            ),
+            headers=request.headers.raw,
+            content=request.stream,
+            extensions=request.extensions,
+        )
+        try:
+            response = await self._pool.handle_async_request(core_request)
+        except Exception as exc:
+            mapped = _HTTPCORE_TO_HTTPX_EXC.get(type(exc))
+            if mapped is not None:
+                raise mapped(str(exc)) from exc
+            raise
+        return httpx.Response(
+            status_code=response.status,
+            headers=response.headers,
+            stream=_CoreResponseStream(response),
+            extensions=response.extensions,
+        )
+
+    async def aclose(self) -> None:
+        await self._pool.aclose()
+
+
+async def _default_requester(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any] | None,
+    timeout: float,
+    pinned_ip: ipaddress._BaseAddress,
+    max_bytes: int,
+) -> tuple[int, dict[str, str], bytes]:
+    transport = _StreamingPinnedTransport(pinned_ip)
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            timeout=httpx.Timeout(timeout),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            async with client.stream(method, url, headers=headers, json=body if body is not None else None) as response:
+                declared = response.headers.get("content-length")
+                if declared:
+                    try:
+                        declared_bytes = int(declared)
+                        if declared_bytes < 0:
+                            raise ExternalAgentBridgeError("malformed_envelope")
+                        if declared_bytes > max_bytes:
+                            raise ExternalAgentBridgeError("oversized_payload")
+                    except ValueError as exc:
+                        raise ExternalAgentBridgeError("malformed_envelope") from exc
+                chunks = []
+                received = 0
+                async for chunk in response.aiter_bytes():
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise ExternalAgentBridgeError("oversized_payload")
+                    chunks.append(chunk)
+                return response.status_code, dict(response.headers), b"".join(chunks)
+    finally:
+        await transport.aclose()
+
+
+class ExternalAgentReadOnlyAdapter:
+    adapter_name = "external-agent-sidecar"
+    enabled = True
+    machine = "External sidecar"
+    catalog_capabilities = ["read_only_inspection"]
+
+    def __init__(
+        self,
+        configuration: dict[str, Any],
+        *,
+        requester: Requester = _default_requester,
+        resolver: Callable[[str], Iterable[str | ipaddress._BaseAddress]] = _default_resolver,
+        clock: Callable[[], datetime] = _utcnow,
+    ):
+        self.worker = configuration["id"]
+        self.label = configuration["label"]
+        self._endpoint = configuration["endpoint"]
+        self._auth_ref = configuration["auth_ref"]
+        self._network_policy = configuration["network_policy"]
+        self.configured_workspaces = list(configuration["workspaces"])
+        self._configured_capabilities = tuple(configuration["capabilities"])
+        self._timeout = float(configuration["timeout_seconds"])
+        self._requester = requester
+        self._resolver = resolver
+        self._clock = clock
+        self._seen_messages: set[str] = set()
+        self._live_capabilities: dict[tuple[str, str], tuple[str, ...]] = {}
+        self._event_ids: set[str] = set()
+        self._event_sequences: dict[str, int] = {}
+
+    @property
+    def connection_ref(self) -> str:
+        return _scoped_ref("connection", self.worker)
+
+    @property
+    def worker_ref(self) -> str:
+        return _scoped_ref("worker", self.worker)
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {_read_credential(self._auth_ref)}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+    def _scope(self, owner: str, workspace: str) -> dict[str, str]:
+        if workspace not in self.configured_workspaces:
+            raise ExternalAgentBridgeError("wrong_workspace")
+        if not isinstance(owner, str) or not owner.strip():
+            raise ExternalAgentBridgeError("wrong_owner")
+        return {
+            "owner_ref": _owner_ref(owner),
+            "connection_id": self.connection_ref,
+            "worker_ref": self.worker_ref,
+            "workspace_alias": workspace,
+        }
+
+    def _request_envelope(
+        self,
+        capability: str,
+        *,
+        owner: str,
+        workspace: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        if capability not in self._configured_capabilities and capability != "capabilities.read":
+            raise ExternalAgentBridgeError("capability_disabled")
+        now = self._clock()
+        request_id = f"request:{uuid.uuid4()}"
+        return {
+            "protocol_version": EXTERNAL_AGENT_PROTOCOL,
+            "envelope": "request",
+            "message_id": f"message:{uuid.uuid4()}",
+            "request_id": request_id,
+            "issued_at": _timestamp(now),
+            **self._scope(owner, workspace),
+            "expires_at": _timestamp(now + timedelta(seconds=min(self._timeout, 30))),
+            "nonce": uuid.uuid4().hex,
+            "capability": capability,
+            "effect": "read",
+            "arguments": arguments,
+        }
+
+    async def _transport(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str],
+        body: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        addresses = _validated_external_agent_ips(
+            self._endpoint,
+            self._network_policy,
+            resolver=self._resolver,
+        )
+        try:
+            status, response_headers, raw = await asyncio.wait_for(
+                self._requester(
+                    method,
+                    f"{self._endpoint}{path}",
+                    headers,
+                    body,
+                    self._timeout,
+                    addresses[0],
+                    _MAX_WIRE_BYTES,
+                ),
+                timeout=self._timeout,
+            )
+        except ExternalAgentBridgeError:
+            raise
+        except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
+            raise ExternalAgentBridgeError("timeout") from exc
+        except (httpx.NetworkError, OSError) as exc:
+            raise ExternalAgentBridgeError("sidecar_unavailable") from exc
+        if 300 <= status < 400:
+            raise ExternalAgentBridgeError("sidecar_unavailable")
+        if status in {401, 403}:
+            raise ExternalAgentBridgeError("unauthorized")
+        if status == 429:
+            raise ExternalAgentBridgeError("rate_limited")
+        if status < 200 or status >= 300:
+            raise ExternalAgentBridgeError("sidecar_unavailable")
+        content_type = {
+            str(key).lower(): str(value) for key, value in response_headers.items()
+        }.get("content-type", "").lower()
+        if "application/json" not in content_type:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        return _bounded_json(raw)
+
+    def _validate_base(self, payload: dict[str, Any], expected: str) -> None:
+        if not isinstance(payload.get("protocol_version"), str):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if payload["protocol_version"] != EXTERNAL_AGENT_PROTOCOL:
+            raise ExternalAgentBridgeError("incompatible_protocol")
+        required = ("envelope", "message_id", "request_id", "issued_at")
+        if any(not isinstance(payload.get(key), str) or not payload[key] for key in required):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if not _REQUEST_ID.fullmatch(payload["message_id"]) or not _REQUEST_ID.fullmatch(payload["request_id"]):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if payload["envelope"] != expected:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        issued_at = _parse_timestamp(payload["issued_at"])
+        if abs(self._clock() - issued_at) > _MAX_CLOCK_SKEW:
+            raise ExternalAgentBridgeError("stale_request")
+        message_id = payload["message_id"]
+        if message_id in self._seen_messages:
+            raise ExternalAgentBridgeError("replay_detected")
+        self._seen_messages.add(message_id)
+
+        allowed = {
+            "health": {
+                "protocol_version", "envelope", "message_id", "request_id", "issued_at",
+                "sidecar_id", "sidecar_version", "protocol_compatible", "status", "checked_at",
+            },
+            "capabilities": {
+                "protocol_version", "envelope", "message_id", "request_id", "issued_at",
+                "owner_ref", "connection_id", "worker_ref", "workspace_alias", "agent_ref",
+                "sidecar_id", "sidecar_version", "capabilities",
+            },
+            "response": {
+                "protocol_version", "envelope", "message_id", "request_id", "issued_at",
+                "owner_ref", "connection_id", "worker_ref", "workspace_alias", "agent_ref",
+                "status", "task_ref", "result",
+            },
+            "error": {
+                "protocol_version", "envelope", "message_id", "request_id", "issued_at",
+                "code", "retryable", "detail",
+            },
+            "event": {
+                "protocol_version", "envelope", "message_id", "request_id", "issued_at",
+                "owner_ref", "connection_id", "worker_ref", "workspace_alias", "agent_ref",
+                "task_ref", "event_id", "sequence", "event_type", "text", "metadata",
+            },
+        }
+        if set(payload) - allowed[expected]:
+            raise ExternalAgentBridgeError("malformed_envelope")
+
+    def _validate_scope(self, payload: dict[str, Any], request: dict[str, Any]) -> None:
+        if payload.get("request_id") != request["request_id"]:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if payload.get("owner_ref") != request["owner_ref"]:
+            raise ExternalAgentBridgeError("wrong_owner")
+        if payload.get("workspace_alias") != request["workspace_alias"]:
+            raise ExternalAgentBridgeError("wrong_workspace")
+        if (
+            payload.get("connection_id") != request["connection_id"]
+            or payload.get("worker_ref") != request["worker_ref"]
+            or ("agent_ref" in payload and payload.get("agent_ref") != request.get("agent_ref"))
+        ):
+            raise ExternalAgentBridgeError("malformed_envelope")
+
+    def _validate_error(self, payload: dict[str, Any], request: dict[str, Any] | None) -> None:
+        self._validate_base(payload, "error")
+        if request is not None and payload.get("request_id") != request["request_id"]:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        code = payload.get("code")
+        if code not in _STABLE_ERRORS or not isinstance(payload.get("retryable"), bool):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if not isinstance(payload.get("detail"), str) or not 1 <= len(payload["detail"]) <= 500:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        raise ExternalAgentBridgeError(code)
+
+    async def _capabilities(self, *, owner: str, workspace: str) -> tuple[str, ...]:
+        scope_key = (_owner_ref(owner), workspace)
+        if scope_key in self._live_capabilities:
+            return self._live_capabilities[scope_key]
+        request = self._request_envelope(
+            "capabilities.read",
+            owner=owner,
+            workspace=workspace,
+            arguments={},
+        )
+        payload = await self._transport("POST", "/read", headers=self._headers(), body=request)
+        if payload.get("envelope") == "error":
+            self._validate_error(payload, request)
+        self._validate_base(payload, "capabilities")
+        self._validate_scope(payload, request)
+        declarations = payload.get("capabilities")
+        if (
+            not isinstance(payload.get("sidecar_id"), str)
+            or not _REFERENCE.fullmatch(payload["sidecar_id"])
+            or not isinstance(payload.get("sidecar_version"), str)
+            or not 1 <= len(payload["sidecar_version"]) <= 80
+            or not isinstance(declarations, list)
+            or len(declarations) > _MAX_COLLECTION
+        ):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        live = []
+        declared_names: set[str] = set()
+        for declaration in declarations:
+            if not isinstance(declaration, dict) or set(declaration) != {
+                "name", "effect", "authorization", "reversible", "enabled",
+            }:
+                raise ExternalAgentBridgeError("malformed_envelope")
+            name = declaration.get("name")
+            if (
+                not isinstance(name, str)
+                or not _REFERENCE.fullmatch(name)
+                or declaration.get("effect") not in {
+                    "read", "reversible_write", "destructive_or_difficult_to_recover",
+                    "external_publication_or_communication", "purchase",
+                    "credential_or_auth_change", "privilege_expansion",
+                    "outside_workspace_boundary",
+                }
+                or declaration.get("authorization") not in {
+                    "explicit_request", "separate_gate", "denied",
+                }
+                or not isinstance(declaration.get("reversible"), bool)
+                or not isinstance(declaration.get("enabled"), bool)
+                or name in declared_names
+            ):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            declared_names.add(name)
+            if (
+                name in self._configured_capabilities
+                and declaration.get("effect") == "read"
+                and declaration.get("authorization") == "explicit_request"
+                and declaration.get("reversible") is True
+                and declaration.get("enabled") is True
+            ):
+                live.append(name)
+        effective = tuple(item for item in self._configured_capabilities if item in live)
+        self._live_capabilities[scope_key] = effective
+        return effective
+
+    async def _read(
+        self,
+        capability: str,
+        *,
+        owner: str,
+        workspace: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        if capability not in await self._capabilities(owner=owner, workspace=workspace):
+            raise ExternalAgentBridgeError("capability_disabled")
+        request = self._request_envelope(
+            capability,
+            owner=owner,
+            workspace=workspace,
+            arguments=arguments,
+        )
+        payload = await self._transport("POST", "/read", headers=self._headers(), body=request)
+        if payload.get("envelope") == "error":
+            self._validate_error(payload, request)
+        self._validate_base(payload, "response")
+        self._validate_scope(payload, request)
+        if payload.get("status") != "succeeded" or "result" not in payload:
+            raise ExternalAgentBridgeError("malformed_envelope")
+        result = payload["result"]
+        if not isinstance(result, dict):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        if capability == "task.events":
+            events = result.get("items")
+            if not isinstance(events, list):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            for event in events:
+                if not isinstance(event, dict):
+                    raise ExternalAgentBridgeError("malformed_envelope")
+                self._validate_base(event, "event")
+                self._validate_scope(event, request)
+                task_ref = event.get("task_ref")
+                event_id = event.get("event_id")
+                sequence = event.get("sequence")
+                if (
+                    not isinstance(task_ref, str)
+                    or not task_ref.startswith("task:")
+                    or not _REFERENCE.fullmatch(task_ref)
+                    or not isinstance(event_id, str)
+                    or not _REQUEST_ID.fullmatch(event_id)
+                    or isinstance(sequence, bool)
+                    or not isinstance(sequence, int)
+                    or sequence < 0
+                    or event.get("event_type") not in {
+                        "accepted", "progress", "tool_activity", "question",
+                        "approval_required", "result", "error", "cancelled",
+                    }
+                    or not isinstance(event.get("text"), str)
+                    or not isinstance(event.get("metadata"), dict)
+                ):
+                    raise ExternalAgentBridgeError("malformed_envelope")
+                if event_id in self._event_ids or sequence <= self._event_sequences.get(task_ref, -1):
+                    raise ExternalAgentBridgeError("replay_detected")
+                self._event_ids.add(event_id)
+                self._event_sequences[task_ref] = sequence
+        return result
+
+    async def health(self, owner: str | None = None) -> dict[str, Any]:
+        del owner
+        try:
+            payload = await self._transport("GET", "/health", headers={"Accept": "application/json"}, body=None)
+            if payload.get("envelope") == "error":
+                self._validate_error(payload, None)
+            self._validate_base(payload, "health")
+            if (
+                not isinstance(payload.get("sidecar_id"), str)
+                or not isinstance(payload.get("sidecar_version"), str)
+                or not isinstance(payload.get("protocol_compatible"), bool)
+                or not isinstance(payload.get("checked_at"), str)
+            ):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            _parse_timestamp(payload["checked_at"])
+            if payload.get("protocol_compatible") is not True:
+                return {"state": "incompatible", "reason": "incompatible_protocol"}
+            status = payload.get("status")
+            if status not in {"healthy", "degraded", "unavailable"}:
+                raise ExternalAgentBridgeError("malformed_envelope")
+            state = "connected" if status == "healthy" else status
+            return {
+                "state": state,
+                "protocol": EXTERNAL_AGENT_PROTOCOL,
+                "protocol_ready": status == "healthy",
+                "display_name": self.label,
+                "installation_capabilities": ["external_agent", "read_only"],
+            }
+        except ExternalAgentBridgeError as exc:
+            if exc.code == "sidecar_unavailable":
+                return {"state": "unreachable", "reason": exc.code}
+            raise
+
+    async def discovery(self, *, owner: str, workspace: str) -> dict[str, Any]:
+        self._scope(owner, workspace)
+        status = await self.health(owner=owner)
+        state = str(status.get("state") or "unreachable")
+        canonical_health = {
+            "state": {
+                "connected": "healthy",
+                "degraded": "degraded",
+            }.get(state, "unavailable"),
+        }
+        if state not in {"connected", "degraded"}:
+            canonical_health["reason"] = _safe_text(
+                status.get("reason") or "sidecar_unavailable",
+                maximum=500,
+            )
+        effective: tuple[str, ...] = ()
+        agents = {"items": [], "next_cursor": None}
+        if state in {"connected", "degraded"}:
+            effective = await self._capabilities(owner=owner, workspace=workspace)
+            agents = await self.catalog_agents(
+                owner=owner,
+                workspace=workspace,
+                limit=_MAX_COLLECTION,
+            )
+        generated_at = _timestamp(self._clock())
+        canonical_health["checked_at"] = generated_at
+
+        def entity(
+            kind: str,
+            reference: str,
+            label: str,
+            *,
+            ownership_scope: str,
+            ownership_id: str,
+            source_type: str,
+            source_ref: str,
+            actions: list[dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "kind": kind,
+                "id": reference,
+                "display_name": label,
+                "availability": "available" if canonical_health["state"] != "unavailable" else "unavailable",
+                "ownership": {"scope": ownership_scope, "id": ownership_id},
+                "health": dict(canonical_health),
+                "permissions": {
+                    "requires_authenticated_request": True,
+                    "configured_scopes": [f"workspace:{workspace}"],
+                    "delegation": "narrower_only",
+                },
+                "source": {"type": source_type, "ref": source_ref},
+                "actions": actions or [],
+            }
+
+        read_actions = [{
+            "name": capability,
+            "effect": "read",
+            "authorization": "explicit_request",
+            "reversible": True,
+        } for capability in effective]
+        entities = [
+            entity(
+                "connection", self.connection_ref, self.label,
+                ownership_scope="installation", ownership_id="installation:pandamonium",
+                source_type="configuration", source_ref=f"external-agent/{self.worker}",
+            ),
+            entity(
+                "worker", self.worker_ref, self.label,
+                ownership_scope="connection", ownership_id=self.connection_ref,
+                source_type="connection", source_ref=f"external-agent/{self.worker}",
+                actions=read_actions,
+            ),
+            entity(
+                "workspace", f"workspace:{workspace}", workspace,
+                ownership_scope="worker", ownership_id=self.worker_ref,
+                source_type="configuration", source_ref=f"external-agent/{self.worker}",
+            ),
+        ]
+        for value in agents["items"]:
+            entities.append(entity(
+                "agent", value["agent_ref"], value["display_name"],
+                ownership_scope="worker", ownership_id=self.worker_ref,
+                source_type="runtime_discovery", source_ref=f"external-agent/{self.worker}",
+                actions=read_actions,
+            ))
+        return {
+            "schema_version": EXTERNAL_DISCOVERY_SCHEMA,
+            "generated_at": generated_at,
+            "entities": entities,
+        }
+
+    @staticmethod
+    def _page(result: dict[str, Any], *, limit: int, kind: str) -> dict[str, Any]:
+        items = result.get("items")
+        cursor = result.get("next_cursor")
+        if (
+            not isinstance(items, list)
+            or len(items) > min(limit, _MAX_COLLECTION)
+            or (cursor is not None and (not isinstance(cursor, str) or not _CURSOR.fullmatch(cursor)))
+        ):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        normalized = []
+        fields = {
+            "agent": ("agent_ref", "display_name", "status"),
+            "task": ("task_ref", "agent_ref", "title", "status", "updated_at"),
+            "event": ("task_ref", "event_id", "sequence", "event_type", "text", "metadata"),
+            "transcript": ("message_id", "role", "text", "created_at"),
+        }
+        for item in items:
+            if not isinstance(item, dict):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            value = _safe_value({key: item[key] for key in fields[kind] if key in item})
+            if kind == "agent":
+                required = ("agent_ref", "display_name", "status")
+            elif kind == "task":
+                required = ("task_ref", "title", "status", "updated_at")
+            elif kind == "event":
+                required = ("event_id", "sequence", "event_type", "text", "metadata")
+            else:
+                required = ("message_id", "role", "text", "created_at")
+            if any(key not in value for key in required):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            if kind == "agent" and (
+                not isinstance(value["agent_ref"], str)
+                or not value["agent_ref"].startswith("agent:")
+                or not _REFERENCE.fullmatch(value["agent_ref"])
+                or not isinstance(value["display_name"], str)
+                or not value["display_name"]
+                or not isinstance(value["status"], str)
+            ):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            if kind == "task" and (
+                not isinstance(value["task_ref"], str)
+                or not value["task_ref"].startswith("task:")
+                or not _REFERENCE.fullmatch(value["task_ref"])
+                or not isinstance(value["title"], str)
+                or not isinstance(value["status"], str)
+                or not isinstance(value["updated_at"], str)
+            ):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            if kind == "task":
+                _parse_timestamp(value["updated_at"])
+            if kind == "transcript" and (
+                not isinstance(value["message_id"], str)
+                or not _REQUEST_ID.fullmatch(value["message_id"])
+                or value["role"] not in {"system", "user", "assistant", "tool"}
+                or not isinstance(value["text"], str)
+                or not isinstance(value["created_at"], str)
+            ):
+                raise ExternalAgentBridgeError("malformed_envelope")
+            if kind == "transcript":
+                _parse_timestamp(value["created_at"])
+            normalized.append(value)
+        return {"items": normalized, "next_cursor": cursor}
+
+    async def catalog_agents(
+        self, *, owner: str, workspace: str, query: str = "", cursor: str | None = None, limit: int = 20,
+    ) -> dict[str, Any]:
+        limit = _bounded_limit(limit)
+        result = await self._read(
+            "agent.catalog", owner=owner, workspace=workspace,
+            arguments=_catalog_arguments(query, cursor, limit),
+        )
+        return self._page(result, limit=limit, kind="agent")
+
+    async def catalog_tasks(
+        self, *, owner: str, workspace: str, query: str = "", cursor: str | None = None, limit: int = 20,
+    ) -> dict[str, Any]:
+        limit = _bounded_limit(limit)
+        result = await self._read(
+            "task.catalog", owner=owner, workspace=workspace,
+            arguments=_catalog_arguments(query, cursor, limit),
+        )
+        return self._page(result, limit=limit, kind="task")
+
+    async def task_events(
+        self, task_ref: str, *, owner: str, workspace: str, cursor: str | None = None, limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._task_page(
+            "task.events", task_ref, owner=owner, workspace=workspace,
+            cursor=cursor, limit=limit, kind="event",
+        )
+
+    async def task_transcript(
+        self, task_ref: str, *, owner: str, workspace: str, cursor: str | None = None, limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._task_page(
+            "task.transcript", task_ref, owner=owner, workspace=workspace,
+            cursor=cursor, limit=limit, kind="transcript",
+        )
+
+    async def _task_page(
+        self,
+        capability: str,
+        task_ref: str,
+        *,
+        owner: str,
+        workspace: str,
+        cursor: str | None,
+        limit: int,
+        kind: str,
+    ) -> dict[str, Any]:
+        if not isinstance(task_ref, str) or not task_ref.startswith("task:") or not _REFERENCE.fullmatch(task_ref):
+            raise ExternalAgentBridgeError("malformed_envelope")
+        limit = _bounded_limit(limit)
+        arguments = {"task_ref": task_ref, "cursor": _bounded_cursor(cursor), "limit": limit}
+        result = await self._read(capability, owner=owner, workspace=workspace, arguments=arguments)
+        page = self._page(result, limit=limit, kind=kind)
+        if kind == "event":
+            for event in page["items"]:
+                if event.get("task_ref") != task_ref:
+                    raise ExternalAgentBridgeError("malformed_envelope")
+        return page
+
+
+def _bounded_limit(limit: int) -> int:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_COLLECTION:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    return limit
+
+
+def _bounded_cursor(cursor: str | None) -> str | None:
+    if cursor is not None and (not isinstance(cursor, str) or not _CURSOR.fullmatch(cursor)):
+        raise ExternalAgentBridgeError("malformed_envelope")
+    return cursor
+
+
+def _catalog_arguments(query: str, cursor: str | None, limit: int) -> dict[str, Any]:
+    if not isinstance(query, str) or len(query) > 200:
+        raise ExternalAgentBridgeError("malformed_envelope")
+    return {"query": query, "cursor": _bounded_cursor(cursor), "limit": limit}
+
+
+def external_agent_adapters() -> dict[str, ExternalAgentReadOnlyAdapter]:
+    return {
+        configuration["id"]: ExternalAgentReadOnlyAdapter(configuration)
+        for configuration in configured_external_agent_connections()
+    }

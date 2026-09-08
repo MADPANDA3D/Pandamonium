@@ -1051,10 +1051,14 @@ async def task_action(
     return await refresh_task(task_id, owner=owner)
 
 
-async def worker_statuses() -> dict[str, dict[str, Any]]:
-    registry = adapters()
+async def worker_statuses(
+    *,
+    owner: str | None = None,
+    include_external: bool = False,
+) -> dict[str, dict[str, Any]]:
+    registry = adapters(include_external=True) if include_external else adapters()
     catalog = worker_catalog(registry)
-    return await probe_worker_statuses(registry, catalog)
+    return await probe_worker_statuses(registry, catalog, owner=owner)
 
 
 async def stream_task_events(
