@@ -858,10 +858,9 @@ class McpManager:
         for _explicit, _overlap, _index, server_id, tools, conn in candidates:
             by_name = {str(tool.get("name") or ""): tool for tool in tools}
             referenced: List[str] = []
-            guidance = " ".join([
-                str(conn.get("instructions") or ""),
-                *(str(tool.get("description") or "") for tool in tools),
-            ])
+            # Only initialize instructions define the server-wide workflow.
+            # Per-tool descriptions may cross-reference unrelated local tools.
+            guidance = str(conn.get("instructions") or "")
             for name in re.findall(r"\b[a-zA-Z][\w-]*(?:\.[\w-]+)+\b", guidance):
                 if name in by_name and name not in referenced:
                     referenced.append(name)
