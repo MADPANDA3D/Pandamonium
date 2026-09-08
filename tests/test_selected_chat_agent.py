@@ -16,9 +16,10 @@ def test_only_jarvis_uses_the_configured_reasoning_model_context():
 
 
 def test_selected_friday_defaults_to_home_lab_without_inheriting_business(monkeypatch):
-    monkeypatch.setattr("src.worker_routing.worker_catalog", lambda: {
-        "pc-codex": {"workspaces": ["business", "home-lab"]},
-    })
+    monkeypatch.setattr(
+        "src.worker_routing.configured_worker",
+        lambda _worker: {"workspaces": ["business", "home-lab"]},
+    )
 
     assert selected_worker_workspace("pc-codex", "Inspect the Pandamonium source") == "home-lab"
     assert selected_worker_workspace("pc-codex", "Inspect the Business workspace") == "business"

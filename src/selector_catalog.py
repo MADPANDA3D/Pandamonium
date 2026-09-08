@@ -127,7 +127,7 @@ def build_selector_catalog(
         unavailable_reason = _bounded_reason(
             connection.get("reason") or connection.get("state"),
         )
-        kind = "worker" if "codex" in capabilities else "agent"
+        kind = "worker" if {"codex", "external_agent"} & set(capabilities) else "agent"
         entity_id = _stable_id(kind, worker_id)
         workspace_scopes = [
             f"workspace:{workspace}"

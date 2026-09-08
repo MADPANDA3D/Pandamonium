@@ -1139,6 +1139,16 @@ async def worker_statuses(
     return await probe_worker_statuses(registry, catalog, owner=owner)
 
 
+async def selector_worker_statuses(*, owner: str | None = None) -> dict[str, dict[str, Any]]:
+    """Include optional Workers without letting bad optional config hide built-ins."""
+    from src.external_agent_bridge import ExternalAgentBridgeError
+
+    try:
+        return await worker_statuses(owner=owner, include_external=True)
+    except ExternalAgentBridgeError:
+        return await worker_statuses(owner=owner)
+
+
 async def stream_task_events(
     task_id: str,
     after: int = -1,

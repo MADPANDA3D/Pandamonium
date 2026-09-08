@@ -866,6 +866,44 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       }
     }
 
+    const externalTarget = sessionModule.getChatAgentTarget() || '';
+    if (
+      !_authorityControl
+      && window.codexWorkspaceBrowser?.isExternalTarget?.(externalTarget)
+    ) {
+      if (
+        fileHandlerModule.getPendingCount()
+        || (_pendingRegenAttachments && _pendingRegenAttachments.length)
+      ) {
+        uiModule.showError('External worker tasks do not accept browser attachments.');
+        _releaseSendFlag();
+        return;
+      }
+      const messageInput = el('message');
+      const userMessage = addMessage('user', msg);
+      messageInput.value = '';
+      messageInput.style.height = '';
+      messageInput.dispatchEvent(new Event('input'));
+      updateSubmitButton('streaming', submitBtn);
+      try {
+        await window.codexWorkspaceBrowser.submitExternalPrompt({
+          target: externalTarget,
+          sessionId: sessionModule.getCurrentSessionId(),
+          prompt: msg,
+        });
+        uiModule.scrollHistory();
+      } catch (error) {
+        userMessage?.remove();
+        messageInput.value = msg;
+        messageInput.dispatchEvent(new Event('input'));
+        uiModule.showError(error?.message || 'External worker request failed.');
+      } finally {
+        updateSubmitButton('idle', submitBtn);
+        _releaseSendFlag();
+      }
+      return;
+    }
+
 
     const messageInput = el('message');
     const originalBtnText = submitBtn ? submitBtn.innerHTML : '';
@@ -5539,6 +5577,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       scope: String(detail?.scope || ''),
     };
     if (!control.decisionId || !['approve', 'deny'].includes(control.choice) || !['once', 'persistent'].includes(control.scope)) return;
+    if (await window.codexWorkspaceBrowser?.handleExternalAuthorityDecision?.(control)) return;
     for (let attempt = 0; (isStreaming || _sendInFlight) && attempt < 200; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 25));
     }

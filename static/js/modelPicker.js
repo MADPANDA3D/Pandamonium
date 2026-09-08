@@ -52,6 +52,30 @@ function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
   }
 }
 
+function _canonicalIdentityIcon(kind) {
+  const icon = document.createElement('span');
+  icon.className = 'model-picker-logo codex-browser-icon';
+  icon.dataset.canonicalIdentityIcon = ['agent', 'worker'].includes(kind) ? kind : 'model';
+  icon.setAttribute('aria-hidden', 'true');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  const paths = kind === 'worker'
+    ? ['M8 7h8v6H8z', 'M5 17h14', 'M8 13v4', 'M16 13v4', 'M12 3v4']
+    : ['M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z', 'M5 21a7 7 0 0 1 14 0'];
+  paths.forEach(value => {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', value);
+    svg.appendChild(path);
+  });
+  icon.appendChild(svg);
+  return icon;
+}
+
 // Dependencies injected via initModelPicker()
 let _deps = null;
 let _autoSelectingDefault = false;
@@ -62,6 +86,13 @@ let _selectorCatalogError = '';
 let _agentCatalogVerified = false;
 let _lastConversationTargetEvent = '';
 const _PENDING_AGENT_KEY = '__pending__';
+
+function _workspaceAliases(values) {
+  return (Array.isArray(values) ? values : [])
+    .map(value => String(value || '').replace(/^workspace:/, ''))
+    .filter(value => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value))
+    .slice(0, 32);
+}
 
 function _loadAgentSelections() {
   try {
@@ -77,6 +108,11 @@ function _loadAgentSelections() {
         kind: selection.kind === 'worker' ? 'worker' : 'agent',
         available: selection.available !== false,
         reason: String(selection.reason || '').slice(0, 120),
+        external: selection.external === true,
+        governedTaskActions: selection.governedTaskActions === true,
+        canStartTask: selection.canStartTask === true,
+        canSteerTask: selection.canSteerTask === true,
+        workspaces: _workspaceAliases(selection.workspaces),
       }]];
     }));
   } catch { return new Map(); }
@@ -111,6 +147,11 @@ function _selectedAgent() {
     kind: defaultIdentity.kind,
     available: true,
     reason: '',
+    external: defaultIdentity.external === true,
+    governedTaskActions: defaultIdentity.governedTaskActions === true,
+    canStartTask: defaultIdentity.canStartTask === true,
+    canSteerTask: defaultIdentity.canSteerTask === true,
+    workspaces: _workspaceAliases(defaultIdentity.workspaces),
   } : null;
 }
 
@@ -154,6 +195,11 @@ export function syncSessionAgentTargets(sessionItems = []) {
       kind: known?.kind === 'worker' ? 'worker' : 'agent',
       available: known ? !known.disabled : target === 'jarvis',
       reason: known?.staleReason || (target === 'jarvis' ? '' : 'not currently available'),
+      external: known?.external === true,
+      governedTaskActions: known?.governedTaskActions === true,
+      canStartTask: known?.canStartTask === true,
+      canSteerTask: known?.canSteerTask === true,
+      workspaces: _workspaceAliases(known?.workspaces),
     });
   }
   _saveAgentSelections();
@@ -167,6 +213,11 @@ function _emitConversationTarget(selectedAgent) {
     kind: selectedAgent.kind,
     available: selectedAgent.available !== false,
     reason: selectedAgent.reason || '',
+    external: selectedAgent.external === true,
+    governedTaskActions: selectedAgent.governedTaskActions === true,
+    canStartTask: selectedAgent.canStartTask === true,
+    canSteerTask: selectedAgent.canSteerTask === true,
+    workspaces: _workspaceAliases(selectedAgent.workspaces),
   };
   const signature = JSON.stringify(detail);
   if (signature === _lastConversationTargetEvent) return;
@@ -190,6 +241,7 @@ async function _refreshSelectorCatalog() {
     selections.forEach(selection => {
       const entity = entityById.get(selection.entity_id);
       if (!entity || !['model', 'agent', 'worker'].includes(entity.kind)) return;
+      const capabilities = Array.isArray(selection.capabilities) ? selection.capabilities : [];
       const item = {
         kind: entity.kind,
         target: String(selection.target || ''),
@@ -197,18 +249,25 @@ async function _refreshSelectorCatalog() {
         modelId: String(selection.model_id || ''),
         endpointId: String(selection.endpoint_id || ''),
         display: String(entity.display_name || 'Configured choice'),
-        epName: (selection.capabilities || []).includes('codex')
+        epName: capabilities.includes('codex')
           ? 'Workstation Codex'
-          : ((selection.capabilities || []).includes('hermes')
+          : (capabilities.includes('hermes')
             ? 'Hermes'
-            : ((selection.capabilities || []).includes('claude')
+            : (capabilities.includes('claude')
               ? 'Claude'
-              : ((selection.capabilities || []).includes('model') ? 'Self-hosted model' : 'Configured identity'))),
+              : (capabilities.includes('external_agent')
+                ? 'External worker'
+                : (capabilities.includes('model') ? 'Self-hosted model' : 'Configured identity')))),
         providerText: `${entity.kind} ${entity.health?.state || ''} ${selection.reason || ''}`,
         stale: selection.selectable !== true,
         disabled: selection.selectable !== true,
         staleReason: String(selection.reason || entity.health?.reason || 'unavailable').replace(/_/g, ' '),
         offline: entity.health?.state === 'unavailable',
+        external: capabilities.includes('external_agent'),
+        governedTaskActions: capabilities.includes('governed_task_actions'),
+        canStartTask: capabilities.includes('task.start'),
+        canSteerTask: capabilities.includes('task.steer'),
+        workspaces: _workspaceAliases(entity.permissions?.configured_scopes),
       };
       if (entity.kind !== 'model' && item.target) {
         _selectorItems.push(item);
@@ -226,10 +285,19 @@ async function _refreshSelectorCatalog() {
         kind: current.kind,
         available: !current.disabled,
         reason: current.staleReason || '',
+        external: current.external === true,
+        governedTaskActions: current.governedTaskActions === true,
+        canStartTask: current.canStartTask === true,
+        canSteerTask: current.canSteerTask === true,
+        workspaces: _workspaceAliases(current.workspaces),
       } : {
         ...selection,
         available: false,
         reason: 'no longer configured',
+        governedTaskActions: false,
+        canStartTask: false,
+        canSteerTask: false,
+        workspaces: [],
       });
     }
     _saveAgentSelections();
@@ -468,6 +536,11 @@ function _initModelPickerDropdown() {
         disabled: true,
         staleReason: selected.reason || 'no longer configured',
         offline: true,
+        external: selected.external === true,
+        governedTaskActions: selected.governedTaskActions === true,
+        canStartTask: selected.canStartTask === true,
+        canSteerTask: selected.canSteerTask === true,
+        workspaces: _workspaceAliases(selected.workspaces),
       });
     }
     const seen = new Set();
@@ -537,6 +610,10 @@ function _initModelPickerDropdown() {
       row.setAttribute('role', 'option');
       row.tabIndex = m.disabled === true ? -1 : 0;
       row.setAttribute('aria-disabled', m.disabled === true ? 'true' : 'false');
+      row.setAttribute(
+        'aria-label',
+        [m.display, m.epName, m.disabled === true ? m.staleReason : 'available'].filter(Boolean).join(', '),
+      );
       if (m.stale) {
         row.classList.add('model-switch-stale');
         row.title = `${m.display} is unavailable: ${m.staleReason}. Pandamonium will not reroute this choice.`;
@@ -547,7 +624,7 @@ function _initModelPickerDropdown() {
       // Long model names are clipped with ellipsis — expose the full name on
       // hover so the suffix/variant tag is still discoverable (#1982).
       nameSpan.title = m.display;
-      row.appendChild(nameSpan);
+      row.append(_canonicalIdentityIcon(m.kind), nameSpan);
       // Offline state is already conveyed by the row's reduced opacity —
       // a redundant "offline" pill on top of that just added clutter.
       // (Class kept on `row` so the opacity rule still applies; the text
@@ -630,6 +707,11 @@ function _initModelPickerDropdown() {
         kind: m.kind,
         available: true,
         reason: '',
+        external: m.external === true,
+        governedTaskActions: m.governedTaskActions === true,
+        canStartTask: m.canStartTask === true,
+        canSteerTask: m.canSteerTask === true,
+        workspaces: _workspaceAliases(m.workspaces),
       });
       _saveAgentSelections();
       updateModelPicker();

@@ -2,7 +2,7 @@
 
 import re
 
-from src.agent_worker_adapters import worker_catalog
+from src.agent_worker_adapters import configured_worker
 
 
 _PROJECT_WORK_ACTION_RE = re.compile(
@@ -70,7 +70,7 @@ def selected_worker_workspace(worker: str, message: str) -> str | None:
     otherwise belongs to Home Lab; it must not inherit a stale Business alias
     from an older conversation or let the reasoning model guess one.
     """
-    details = worker_catalog().get(str(worker or "")) or {}
+    details = configured_worker(worker)
     allowed = [str(item) for item in details.get("workspaces") or [] if str(item)]
     value = str(message or "").lower()
     for alias in allowed:

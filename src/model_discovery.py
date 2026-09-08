@@ -32,7 +32,16 @@ _TAILNET_TARGETS = (
 _OPAQUE_PEER_ID = re.compile(r"^[0-9a-f]{32}$")
 _SAFE_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/-]{0,127}$")
 _KNOWN_PEER_OS = {"android", "darwin", "freebsd", "ios", "linux", "windows"}
-_INSTALLATION_CAPABILITIES = ("codex", "claude", "hermes", "model")
+_INSTALLATION_CAPABILITIES = (
+    "codex",
+    "claude",
+    "hermes",
+    "model",
+    "external_agent",
+    "governed_task_actions",
+    "task.start",
+    "task.steer",
+)
 
 # Preserve the legacy explicit helper contract for callers that still invoke
 # ``discover_tailscale_hosts`` directly. Normal model discovery no longer uses

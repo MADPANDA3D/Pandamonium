@@ -63,6 +63,7 @@ let voiceCallGeneration = 0;
 let extensionSurfaceConfigs = new Map();
 let extensionSurfaceId = '';
 let extensionSurfaceHideTimer = null;
+let extensionSurfaceReturnFocus = null;
 let extensionSurfaceState = null;
 let extensionSurfaceReady = false;
 let extensionSurfaceCapabilities = null;
@@ -71,6 +72,7 @@ let extensionSurfacePendingCommands = [];
 const extensionSurfacePendingResults = new Map();
 let textExtensionSessionId = null;
 let textExtensionChatSessionId = null;
+let renderedTaskSessionId = '';
 
 const ICON_PHONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.72c.13.96.35 1.9.66 2.81a2 2 0 0 1-.45 2.11L8.03 9.92a16 16 0 0 0 6.05 6.05l1.28-1.28a2 2 0 0 1 2.11-.45c.91.31 1.85.53 2.81.66A2 2 0 0 1 22 16.92z"/></svg>';
 const ICON_MIC = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>';
@@ -1084,12 +1086,20 @@ function prepareExtensionSurface(extensionId) {
 
 function engageExtensionSurface(extensionId) {
   if (!prepareExtensionSurface(extensionId)) return false;
+  const sessionId = String(currentChatSessionId() || '');
+  if (sessionId) renderedTaskSessionId = sessionId;
   const panel = $('extension-surface-panel');
   if (!panel) return false;
+  const wasHidden = panel.hidden;
+  if (wasHidden) {
+    const active = document.activeElement;
+    extensionSurfaceReturnFocus = active && typeof active.focus === 'function' ? active : null;
+  }
   panel.hidden = false;
   panel.setAttribute('aria-hidden', 'false');
   document.body?.classList.add('extension-surface-active');
   document.documentElement?.classList.add('extension-surface-active');
+  if (wasHidden) $('extension-surface-close')?.focus?.({ preventScroll: true });
   window.requestAnimationFrame(() => panel.classList.add('is-open'));
   return true;
 }
@@ -1097,12 +1107,18 @@ function engageExtensionSurface(extensionId) {
 function showChatFromExtension(message = '') {
   const panel = $('extension-surface-panel');
   if (!panel || panel.hidden) return false;
+  const returnFocus = extensionSurfaceReturnFocus;
+  extensionSurfaceReturnFocus = null;
   panel.classList.remove('is-open');
   panel.hidden = true;
   panel.setAttribute('aria-hidden', 'true');
   document.body?.classList.remove('extension-surface-active');
   document.documentElement?.classList.remove('extension-surface-active');
   if (message) showToast(message);
+  window.requestAnimationFrame(() => {
+    const approval = document.querySelector?.('.authority-approval-card .authority-approval-actions button:not(:disabled)');
+    (approval || $('message') || returnFocus)?.focus?.({ preventScroll: true });
+  });
   return true;
 }
 
@@ -1111,6 +1127,8 @@ function disengageExtensionSurface(extensionId = extensionSurfaceId, immediate =
   const panel = $('extension-surface-panel');
   const frame = $('extension-surface-frame');
   if (!panel) return false;
+  const returnFocus = extensionSurfaceReturnFocus;
+  extensionSurfaceReturnFocus = null;
   if (extensionSurfaceHideTimer) window.clearTimeout(extensionSurfaceHideTimer);
   panel.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
@@ -1129,6 +1147,7 @@ function disengageExtensionSurface(extensionId = extensionSurfaceId, immediate =
   };
   if (immediate || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) finish();
   else extensionSurfaceHideTimer = window.setTimeout(finish, 200);
+  returnFocus?.focus?.({ preventScroll: true });
   return true;
 }
 
@@ -1350,6 +1369,7 @@ async function loadWorkerCatalog() {
       const entity = entityById.get(selection.entity_id);
       if (!entity || !['agent', 'worker'].includes(entity.kind) || !selection.target) return [];
       const capabilities = Array.isArray(selection.capabilities) ? selection.capabilities : [];
+      const external = capabilities.includes('external_agent');
       return [{
         kind: entity.kind,
         target: String(selection.target || ''),
@@ -1360,9 +1380,13 @@ async function loadWorkerCatalog() {
             ? 'Hermes'
             : (capabilities.includes('claude')
               ? 'Claude'
-              : (capabilities.includes('model') ? 'Self-hosted model' : 'Configured identity'))),
-        selectable: selection.selectable === true,
-        reason: String(selection.reason || entity.health?.reason || 'unavailable'),
+              : (external
+                ? 'External worker'
+                : (capabilities.includes('model') ? 'Self-hosted model' : 'Configured identity')))),
+        selectable: selection.selectable === true && !external,
+        reason: external
+          ? 'use_chat_task_surface'
+          : String(selection.reason || entity.health?.reason || 'unavailable'),
         health: String(entity.health?.state || 'unknown'),
       }];
     });
@@ -2042,6 +2066,9 @@ async function handleWorkerEvent(event) {
     events,
     updated_at: event.created_at || Date.now() / 1000,
   });
+  if (event.type === 'approval_required') {
+    showChatFromExtension('Approval required in chat.');
+  }
   const eventBelongsToActiveVoiceTask = isActive
     && taskId === activeWorkerTaskId
     && task?.session_id === chatSessionId;
@@ -3268,10 +3295,14 @@ function bind() {
     }
   });
   window.addEventListener('odysseus:session-rendered', event => {
-    restoreSessionTasks(event.detail?.sessionId).catch(error => {
+    const sessionId = String(event.detail?.sessionId || '');
+    if (!sessionId || sessionId === renderedTaskSessionId) return;
+    renderedTaskSessionId = sessionId;
+    if (extensionSurfaceId) disengageExtensionSurface(extensionSurfaceId, true);
+    restoreSessionTasks(sessionId).catch(error => {
       console.warn('Could not restore Jarvis task activity:', error);
     });
-    restorePendingAuthorityDecision(event.detail?.sessionId).catch(error => {
+    restorePendingAuthorityDecision(sessionId).catch(error => {
       console.warn('Could not restore authority decision:', error);
     });
   });

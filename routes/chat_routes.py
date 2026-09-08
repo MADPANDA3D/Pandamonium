@@ -885,16 +885,21 @@ def setup_chat_routes(
             selected_agent_workspace = None
             selected_agent_worker = ""
             if agent_target:
-                from src.agent_worker_adapters import worker_catalog
+                from src.agent_worker_adapters import configured_worker
                 from src.agent_identity import configured_agent_name
 
-                details = worker_catalog().get(agent_target)
+                details = configured_worker(agent_target)
                 if agent_target == "jarvis":
                     selected_agent_label = configured_agent_name()
                     selected_agent_worker = "jarvis"
                 elif not details or not details.get("configured"):
                     raise HTTPException(400, "Selected agent is not configured")
                 else:
+                    if details.get("adapter") == "external-agent-sidecar":
+                        raise HTTPException(
+                            409,
+                            "Selected external worker uses the governed task route. The request was not rerouted.",
+                        )
                     selected_agent_label = str(details.get("label") or agent_target)[:80]
                     selected_agent_worker = agent_target
                     selected_agent_workspace = _selected_worker_workspace(agent_target, str(message or ""))
