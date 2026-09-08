@@ -348,24 +348,19 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         "server_info": {"name": "Fixture Broker"},
         "catalog_terms": ["Discord"],
     }
-    guidance = (
-        "Start with portal.welcome, then portal.list_services. "
-        "Use portal.find_tools, portal.get_tool_reference, and portal.call_read_tool."
-    )
     chain = [
         "portal.welcome",
         "portal.list_services",
+        "portal.check_connection",
         "portal.find_tools",
         "portal.get_tool_reference",
         "portal.preview_tool_call",
         "portal.call_read_tool",
-        "portal.view_playbook",
-        "portal.view_skill",
     ]
     manager._tools["portal-fixture"] = [
         {
             "name": name,
-            "description": guidance if name == "portal.welcome" else ("Agent-ready discovery read " + name) * 5,
+            "description": ("Agent-ready broker entrypoint " + name) * 5,
             "input_schema": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -374,6 +369,23 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
             "annotations": {"readOnlyHint": True},
         }
         for name in chain
+    ] + [
+        {
+            "name": name,
+            "description": description,
+            "input_schema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": True},
+        }
+        for name, description in [
+            ("portal.list_skills", "Call portal.view_skill."),
+            ("portal.view_skill", "Call portal.export_skill."),
+            ("portal.export_skill", "Export one artifact."),
+            ("portal.view_play", "Call portal.export_play."),
+            ("portal.export_play", "Export one artifact."),
+            ("portal.view_playbook", "Call portal.export_playbook."),
+            ("portal.export_playbook", "Export one artifact."),
+            ("portal.get_project_thread", "Read project thread messages."),
+        ]
     ] + [{
         "name": "portal.call_service_tool",
         "description": "Legacy server-wide fallback that is not selected.",
@@ -397,9 +409,10 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
 
     exact_request = (
-        "I need you to pull the last 5 messages in my Discord Server MADPANDA "
-        "from the #general channel and tell who said what. Use the MAD MCP Portal "
-        "and start with portal.welcome."
+        "Run this read-only installed acceptance through the native configured "
+        "MAD MCP Portal. Use the executable Portal bootstrap, discovery, reference, "
+        "and read capabilities as needed. Discover the configured Discord general "
+        "channel and pull the last five messages."
     )
     async for _chunk in agent_loop.stream_agent_loop(
         "https://api.openai.com/v1/chat/completions",

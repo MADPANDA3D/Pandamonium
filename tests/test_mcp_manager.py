@@ -237,6 +237,55 @@ def test_explicit_native_connection_name_wins_over_earlier_shared_catalog_match(
     assert selected == {"mcp__portal-fixture__portal.welcome"}
 
 
+def test_tool_cross_references_do_not_replace_an_uninstructed_broker_entrypoint():
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "Acme MCP Portal",
+        "server_info": {"name": "Acme Broker"},
+        "catalog_terms": ["Discord"],
+    }
+    entrypoints = [
+        "portal.welcome",
+        "portal.list_services",
+        "portal.find_tools",
+        "portal.get_tool_reference",
+        "portal.call_read_tool",
+    ]
+    artifacts = [
+        ("portal.list_skills", "Call portal.view_skill."),
+        ("portal.view_skill", "Call portal.export_skill."),
+        ("portal.export_skill", "Export one artifact."),
+        ("portal.view_play", "Call portal.export_play."),
+        ("portal.export_play", "Export one artifact."),
+    ]
+    manager._tools["portal-fixture"] = [
+        {
+            "name": name,
+            "description": "Broker entrypoint.",
+            "annotations": {"readOnlyHint": True},
+        }
+        for name in entrypoints
+    ] + [
+        {
+            "name": name,
+            "description": description,
+            "annotations": {"readOnlyHint": True},
+        }
+        for name, description in artifacts
+    ]
+
+    selected = manager.native_tool_names_for_request(
+        "Using Acme MCP Portal, pull the last five Discord messages from general "
+        "starting with portal.welcome.",
+        limit=len(entrypoints),
+    )
+
+    assert selected == {
+        f"mcp__portal-fixture__{name}" for name in entrypoints
+    }
+
+
 def test_native_tool_failure_is_bounded_redacted_and_not_retried():
     class FailingSession:
         calls = 0
