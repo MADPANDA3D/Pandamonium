@@ -6,6 +6,7 @@ import pytest
 
 from src import agent_loop
 from src.llm_core import _sanitize_llm_messages
+from src.mcp_manager import McpManager
 from src.model_context import (
     annotate_context_messages,
     build_context_manifest,
@@ -335,6 +336,243 @@ async def test_current_domain_tool_is_prioritized_before_schema_cap(monkeypatch)
         pass
 
     assert "manage_books" in captured["priority_names"]
+
+
+@pytest.mark.asyncio
+async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monkeypatch):
+    captured = {}
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "Fixture Broker"},
+        "catalog_terms": ["Discord"],
+    }
+    guidance = (
+        "Start with portal.welcome, then portal.list_services. "
+        "Use portal.find_tools, portal.get_tool_reference, and portal.call_read_tool."
+    )
+    chain = [
+        "portal.welcome",
+        "portal.list_services",
+        "portal.find_tools",
+        "portal.get_tool_reference",
+        "portal.preview_tool_call",
+        "portal.call_read_tool",
+        "portal.view_playbook",
+        "portal.view_skill",
+    ]
+    manager._tools["portal-fixture"] = [
+        {
+            "name": name,
+            "description": guidance if name == "portal.welcome" else ("Agent-ready discovery read " + name) * 5,
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True},
+        }
+        for name in chain
+    ] + [{
+        "name": "portal.call_service_tool",
+        "description": "Legacy server-wide fallback that is not selected.",
+        "input_schema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": False},
+    }]
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"Ready to use the mounted Portal chain."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    def fake_setting(key, default=None):
+        if key == "agent_input_token_budget":
+            return 8208
+        return default
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "get_setting", fake_setting)
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    exact_request = (
+        "I need you to pull the last 5 messages in my Discord Server MADPANDA "
+        "from the #general channel and tell who said what. Use the MAD MCP Portal "
+        "and start with portal.welcome."
+    )
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": exact_request}],
+        context_length=8208,
+        max_tokens=2048,
+    ):
+        pass
+
+    sent = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    required = {f"mcp__portal-fixture__{name}" for name in chain}
+    assert required <= sent
+    assert "mcp__portal-fixture__portal.call_service_tool" not in sent
+
+    visible_messages = json.dumps(captured["messages"])
+    assert "mcp__portal-fixture__portal.call_service_tool" not in visible_messages
+    contract = next(
+        message["content"]
+        for message in captured["messages"]
+        if str(message.get("content") or "").startswith(
+            agent_loop._NATIVE_MCP_CONTRACT_HEADING
+        )
+    )
+    assert required == {
+        name for name in required if f"`{name}`" in contract
+    }
+
+
+@pytest.mark.asyncio
+async def test_native_mcp_contract_lists_every_mcp_schema_in_the_provider_payload(monkeypatch):
+    captured = {}
+    manager = McpManager()
+    manager._connections.update({
+        "portal-fixture": {
+            "status": "connected",
+            "name": "MAD MCP Portal",
+            "catalog_terms": ["Discord"],
+        },
+        "files-fixture": {
+            "status": "connected",
+            "name": "Files MCP",
+            "catalog_terms": ["documents"],
+        },
+    })
+    manager._tools.update({
+        "portal-fixture": [{
+            "name": "portal.welcome",
+            "description": "Start the broker flow.",
+            "input_schema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": True},
+        }],
+        "files-fixture": [{
+            "name": "files.read_document",
+            "description": "Read one selected document.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+            },
+            "annotations": {"readOnlyHint": True},
+        }],
+    })
+    separately_relevant = "mcp__files-fixture__files.read_document"
+
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"The mounted tools are ready."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Use MAD MCP Portal for Discord."}],
+        context_length=8208,
+        max_tokens=2048,
+        relevant_tools={separately_relevant},
+    ):
+        pass
+
+    sent = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function", {}).get("name", "").startswith("mcp__")
+    }
+    contract = next(
+        message["content"]
+        for message in captured["messages"]
+        if str(message.get("content") or "").startswith(
+            agent_loop._NATIVE_MCP_CONTRACT_HEADING
+        )
+    )
+
+    assert sent == {
+        "mcp__portal-fixture__portal.welcome",
+        separately_relevant,
+    }
+    assert sent == {name for name in sent if f"`{name}`" in contract}
+
+
+@pytest.mark.asyncio
+async def test_schema_cap_removes_dropped_mcp_tool_from_model_facing_prose(monkeypatch):
+    captured = {}
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "catalog_terms": ["Discord"],
+    }
+    manager._tools["portal-fixture"] = [
+        {
+            "name": "portal.welcome",
+            "description": "Start the broker flow.",
+            "input_schema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": True},
+        },
+        {
+            "name": "portal.find_tools",
+            "description": "x" * 4_000,
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "y" * 4_000},
+                },
+                "required": ["query"],
+            },
+            "annotations": {"readOnlyHint": True},
+        },
+    ]
+
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"The mounted tool is ready."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    def fake_setting(key, default=None):
+        if key == "agent_input_token_budget":
+            return 4096
+        return default
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "get_setting", fake_setting)
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{"role": "user", "content": "Use MAD MCP Portal for Discord."}],
+        context_length=4096,
+        max_tokens=512,
+    ):
+        pass
+
+    sent = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function", {}).get("name", "").startswith("mcp__")
+    }
+    visible_messages = json.dumps(captured["messages"])
+
+    assert sent == {"mcp__portal-fixture__portal.welcome"}
+    assert "mcp__portal-fixture__portal.find_tools" not in visible_messages
 
 
 @pytest.mark.asyncio

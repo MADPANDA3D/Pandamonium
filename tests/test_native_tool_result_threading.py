@@ -37,3 +37,33 @@ def test_append_threads_result_to_correct_tool_call_id():
     assert tool_msgs[0]["content"] == "RESULT"
     asst = next(m for m in messages if m.get("role") == "assistant")
     assert [tc["id"] for tc in asst["tool_calls"]] == ["B"]
+
+
+def test_malformed_native_mcp_call_survives_for_fail_closed_validation():
+    native = [{
+        "id": "portal-bad-json",
+        "name": "mcp__portal__portal.find_tools",
+        "arguments": '{"query":',
+    }]
+
+    blocks, used_native, converted = al._resolve_tool_blocks("", native, 1)
+
+    assert used_native is True
+    assert [block.tool_type for block in blocks] == ["mcp__portal__portal.find_tools"]
+    assert blocks[0].content == '{"query":'
+    assert [call["id"] for call in converted] == ["portal-bad-json"]
+
+    messages = []
+    al._append_tool_results(
+        messages,
+        "",
+        converted,
+        ["arguments must be a JSON object"],
+        ["arguments must be a JSON object"],
+        True,
+        1,
+    )
+    assistant = next(message for message in messages if message.get("role") == "assistant")
+    tool_result = next(message for message in messages if message.get("role") == "tool")
+    assert assistant["tool_calls"][0]["id"] == "portal-bad-json"
+    assert tool_result["tool_call_id"] == "portal-bad-json"

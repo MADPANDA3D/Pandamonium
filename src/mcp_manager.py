@@ -806,22 +806,56 @@ class McpManager:
         query_tokens = _routing_tokens(query)
         if not query_tokens:
             return set()
-        selected: List[str] = []
-        for server_id, tools in self._tools.items():
+        normalized_query = " ".join(
+            re.findall(r"[a-z0-9][a-z0-9_-]*", str(query or "").lower())
+        )
+        candidates = []
+        for connection_index, (server_id, tools) in enumerate(self._tools.items()):
             if self.is_extension_server(server_id) or not tools:
                 continue
             conn = self._connections.get(server_id, {})
             if conn.get("status") != "connected":
                 continue
-            identity_parts = [
+            identity_values = [
                 conn.get("name"),
                 (conn.get("server_info") or {}).get("name"),
+            ]
+            identity_parts = [
+                *identity_values,
                 *(conn.get("catalog_terms") or []),
             ]
             identity_tokens = _routing_tokens(" ".join(str(item or "") for item in identity_parts))
             if not (query_tokens & identity_tokens):
                 continue
+            explicit_identity_score = 0
+            for value in identity_values:
+                phrase = " ".join(
+                    re.findall(r"[a-z0-9][a-z0-9_-]*", str(value or "").lower())
+                )
+                if phrase and re.search(rf"(?:^| )({re.escape(phrase)})(?: |$)", normalized_query):
+                    explicit_identity_score = max(
+                        explicit_identity_score,
+                        len(phrase.split()) * 100 + len(phrase),
+                    )
+            candidates.append((
+                explicit_identity_score,
+                len(query_tokens & identity_tokens),
+                connection_index,
+                server_id,
+                tools,
+                conn,
+            ))
 
+        candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
+        if candidates and candidates[0][0] > 0:
+            # An explicitly named connection is an operator-selected boundary;
+            # do not fill the global limit from a provider that matched only a
+            # shared catalog term (for example, a direct provider beside its
+            # named broker).
+            candidates = candidates[:1]
+
+        selected: List[str] = []
+        for _explicit, _overlap, _index, server_id, tools, conn in candidates:
             by_name = {str(tool.get("name") or ""): tool for tool in tools}
             referenced: List[str] = []
             guidance = " ".join([
@@ -995,10 +1029,23 @@ class McpManager:
     _cached_prompt_desc = None
     _cached_prompt_desc_key = None
 
-    def get_tool_descriptions_for_prompt(self, disabled_map: Optional[Dict[str, set]] = None) -> str:
-        """Generate text describing MCP tools for the agent system prompt. Cached."""
+    def get_tool_descriptions_for_prompt(
+        self,
+        disabled_map: Optional[Dict[str, set]] = None,
+        allowed_names: Optional[Set[str]] = None,
+    ) -> str:
+        """Generate text describing the MCP tools mounted for this request.
+
+        ``allowed_names`` contains qualified function names selected by the
+        agent router.  Keeping the prose catalog aligned with that set prevents
+        server-wide guidance from advertising tools that are not executable in
+        the current model payload.  Callers that omit it (notably the tool
+        indexer) still receive the complete connected catalog.
+        """
+        allowed = frozenset(allowed_names) if allowed_names is not None else None
         cache_key = (
             frozenset((k, frozenset(v)) for k, v in (disabled_map or {}).items()),
+            allowed,
             len(self._tools),
             self._generation,
         )
@@ -1016,6 +1063,8 @@ class McpManager:
             if self.is_builtin(t["server_id"]) and t["server_id"] != "builtin_browser":
                 continue
             if t.get("is_disabled"):
+                continue
+            if allowed is not None and t["qualified_name"] not in allowed:
                 continue
             sn = t["server_name"]
             if sn not in by_server:
