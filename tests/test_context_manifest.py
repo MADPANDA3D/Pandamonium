@@ -402,6 +402,20 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     ]
     assert len(manager._tools["portal-fixture"]) == 65
 
+    full_smoke_request = (
+        "Use only the configured MAD MCP Portal native mounted tools to read the last five "
+        "messages from the configured Discord #general channel. Do not use a direct Discord "
+        "connector, do not guess or hardcode any provider, profile, channel ID, service URL, "
+        "or topology, and perform exactly one downstream message read. Start with portal.welcome, "
+        "then portal.list_services and portal.check_connection. Use portal.find_tools with the "
+        "natural-language intent, portal.get_tool_reference for the complete executable schema, "
+        "portal.preview_tool_call for safety, and portal.call_read_tool for the single read. "
+        "Do not use portal.list_service_tools or portal.call_service_tool."
+    )
+    assert manager.native_tool_names_for_request(full_smoke_request, limit=8) == {
+        f"mcp__portal-fixture__{name}" for name in chain
+    }
+
     async def fake_stream(*args, **kwargs):
         captured["messages"] = args[1]
         captured["tools"] = kwargs.get("tools") or []

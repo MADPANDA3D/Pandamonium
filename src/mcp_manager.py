@@ -98,6 +98,30 @@ def _routing_tokens(value: Any) -> Set[str]:
     }
 
 
+def _tool_name_is_negated(query: str, name: str) -> bool:
+    """Return whether an exact tool name appears in a nearby negative clause."""
+    query_text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(query or "").lower())
+    name_parts = re.findall(r"[a-z0-9][a-z0-9_-]*", str(name or "").lower())
+    if not query_text or not name_parts:
+        return False
+    name_pattern = r"(?<![a-z0-9_-])" + r"[.\s]+".join(
+        re.escape(part) for part in name_parts
+    ) + r"(?![a-z0-9_-])"
+    for match in re.finditer(name_pattern, query_text):
+        clause_prefix = re.split(
+            r"(?:[!?;\n]|\.(?=\s|$))", query_text[:match.start()]
+        )[-1]
+        prefix_tokens = re.findall(r"[a-z0-9][a-z0-9_-]*", clause_prefix)[-8:]
+        prefix = " ".join(prefix_tokens)
+        if re.search(
+            r"(?:^| )(?:do not|don t|never|avoid|exclude|without)"
+            r"(?: [a-z0-9][a-z0-9_-]*){0,6}$",
+            prefix,
+        ):
+            return True
+    return False
+
+
 # Caps for rendering untrusted MCP tool schemas into the agent prompt (issue #2660).
 # MCP servers are third-party/user-added, so field names and parameter counts are
 # untrusted input — bound them so an odd or hostile schema cannot distort the prompt.
@@ -891,6 +915,8 @@ class McpManager:
                     rf"(?:^| ){re.escape(normalized_name)}(?: |$)",
                     normalized_query,
                 ))
+                if directly_named and _tool_name_is_negated(query, name):
+                    continue
                 action_name = name.split(".", 1)[-1]
                 name_tokens = {
                     token for token in re.findall(r"[a-z0-9]+", action_name.lower())
