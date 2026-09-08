@@ -128,13 +128,17 @@ def _tool_name_is_negated(query: str, name: str) -> bool:
             r"execute|executing|choose|choosing)"
         )
         resets = list(re.finditer(
+            rf"(?:"
             rf"(?:,\s*|\b(?:and|but|however|instead|rather|then|yet)\s+)"
-            rf"(?:(?:actually|please|instead|rather)\s+)?{reset_action}\b",
+            rf"(?:(?:actually|please|instead|rather)\s+)?{reset_action}\b|"
+            rf"\b(?:do\s+not|don['’ ]?t|never)\s+(?:"
+            rf"(?:forget|fail)\s+to\s+{reset_action}|omit|exclude|avoid"
+            rf")\b)",
             clause_prefix,
         ))
         latest_negation = negations[-1]
-        latest_reset_start = resets[-1].start() if resets else -1
-        negated = latest_negation.start() > latest_reset_start
+        latest_reset_end = resets[-1].end() if resets else -1
+        negated = latest_negation.start() >= latest_reset_end
     return bool(negated)
 
 
@@ -931,15 +935,20 @@ class McpManager:
                     rf"(?:^| ){re.escape(normalized_name)}(?: |$)",
                     normalized_query,
                 ))
-                if directly_named and _tool_name_is_negated(query, name):
-                    continue
                 action_name = name.split(".", 1)[-1]
+                action_words = re.findall(r"[a-z0-9]+", action_name.lower())
                 name_tokens = {
-                    token for token in re.findall(r"[a-z0-9]+", action_name.lower())
+                    token for token in action_words
                     if token not in _ROUTING_STOPWORDS
                 }
-                if referenced and not directly_named and (
-                    len(name_tokens) < 2 or not name_tokens <= query_name_tokens
+                fully_name_matched = (
+                    len(name_tokens) >= 2 and name_tokens <= query_name_tokens
+                )
+                if referenced and not directly_named and not fully_name_matched:
+                    continue
+                negation_name = name if directly_named else " ".join(action_words)
+                if (directly_named or fully_name_matched) and _tool_name_is_negated(
+                    query, negation_name
                 ):
                     continue
                 scored.append((not directly_named, -overlap, index, name))
