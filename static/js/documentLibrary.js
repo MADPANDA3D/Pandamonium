@@ -1966,6 +1966,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         attention.className = 'doclib-book-attention';
         attention.textContent = book.attention_reason === 'needs_ocr'
           ? 'Needs OCR: no text was found and native OCR is unavailable.'
+          : ['embedding_unavailable', 'indexing_unavailable'].includes(book.attention_reason)
+          ? 'Saved safely. Embeddings are unavailable; use Reindex to retry.'
           : `Needs attention: ${String(book.attention_reason || 'indexing failed').replaceAll('_', ' ')}`;
         card.appendChild(attention);
       }
@@ -1981,8 +1983,10 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         reindex.disabled = true;
         reindex.textContent = 'Indexing…';
         try {
-          await _bookRequest(`/api/personal/books/${encodeURIComponent(book.id)}/reindex`, { method: 'POST' });
-          if (uiModule) uiModule.showToast('Book reindexed');
+          const result = await _bookRequest(`/api/personal/books/${encodeURIComponent(book.id)}/reindex`, { method: 'POST' });
+          if (uiModule) uiModule.showToast(result.status === 'queued'
+            ? 'Book is saved and queued; retry when embeddings are available'
+            : 'Book queued for reindexing');
           await _renderLibBooks();
         } catch (error) {
           if (uiModule) uiModule.showError(error.message || 'Reindex failed');
@@ -3403,7 +3407,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         if (!files.length) return;
         importBooksBtn.disabled = true;
         const original = importBooksBtn.innerHTML;
-        importBooksBtn.textContent = 'Indexing…';
+        importBooksBtn.textContent = 'Importing…';
         try {
           const body = new FormData();
           files.forEach(file => body.append('files', file));
@@ -3411,11 +3415,17 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
             method: 'POST',
             body,
           });
-          const imported = Array.isArray(data.book_ids) ? data.book_ids.length : 0;
+          const imported = Number(data.created_count ?? (Array.isArray(data.book_ids) ? data.book_ids.length : 0));
+          const reused = Number(data.reused_count || 0);
           const attention = Number(data.needs_attention || 0);
           const indexing = Number(data.indexing_count || 0);
-          const message = indexing
+          const queued = Number(data.queued_count || 0);
+          const message = queued
+            ? `Saved ${queued} book${queued === 1 ? '' : 's'} safely; embeddings unavailable, retry Reindex later`
+            : indexing
             ? `Queued ${indexing} book${indexing === 1 ? '' : 's'} for indexing`
+            : reused
+            ? `${reused} book${reused === 1 ? ' is' : 's are'} already in your library`
             : attention
             ? `Imported ${imported} book${imported === 1 ? '' : 's'}; ${attention} needs attention`
             : `Imported ${imported} book${imported === 1 ? '' : 's'}`;

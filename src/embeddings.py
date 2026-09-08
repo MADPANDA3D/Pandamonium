@@ -13,6 +13,9 @@ Set EMBEDDING_URL in .env, e.g.:
 """
 
 import os
+import shutil
+import uuid
+from pathlib import Path
 
 from src.constants import FASTEMBED_CACHE_DIR, EMBEDDING_ENDPOINT_FILE
 
@@ -37,6 +40,116 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "all-minilm:l6-v2"
 _DEFAULT_FASTEMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def fastembed_cache_usable(model_dir: str | Path) -> bool:
+    """Return whether a confined HF snapshot contains a loadable ONNX model."""
+    root = Path(model_dir)
+    snapshots = root / "snapshots"
+    if root.is_symlink() or snapshots.is_symlink() or not snapshots.is_dir():
+        return False
+    try:
+        resolved_root = root.resolve(strict=True)
+    except OSError:
+        return False
+
+    for current, dirs, files in os.walk(snapshots, followlinks=False):
+        dirs[:] = [name for name in dirs if not Path(current, name).is_symlink()]
+        for name in files:
+            candidate = Path(current, name)
+            if candidate.suffix.lower() != ".onnx":
+                continue
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(resolved_root)
+            except (OSError, ValueError):
+                continue
+            if resolved.is_file():
+                return True
+    return False
+
+
+def _fastembed_model_root(text_embedding_cls, model: str, cache_dir: str) -> Path | None:
+    try:
+        catalog = text_embedding_cls.list_supported_models()
+        entry = next(item for item in catalog if item.get("model") == model)
+        source = entry.get("sources", {}).get("hf", "")
+    except Exception:
+        return None
+    if not isinstance(source, str):
+        return None
+    parts = source.split("/")
+    if not parts or any(not part or part in {".", ".."} or "\\" in part for part in parts):
+        return None
+
+    cache = Path(cache_dir).expanduser()
+    if cache.is_symlink():
+        return None
+    try:
+        cache = cache.resolve(strict=True)
+        model_root = cache.joinpath("models--" + "--".join(parts))
+        if model_root.is_symlink():
+            return None
+        resolved_model_root = model_root.resolve(strict=True)
+        resolved_model_root.relative_to(cache)
+    except (OSError, ValueError):
+        return None
+    return resolved_model_root
+
+
+def _has_preserved_fastembed_blobs(model_root: Path) -> bool:
+    blobs = model_root / "blobs"
+    if blobs.is_symlink() or not blobs.is_dir():
+        return False
+    try:
+        with os.scandir(blobs) as entries:
+            return any(entry.is_file(follow_symlinks=False) for entry in entries)
+    except OSError:
+        return False
+
+
+def _quarantine_incomplete_fastembed_snapshot(text_embedding_cls, model: str, cache_dir: str) -> bool:
+    """Park broken HF snapshot metadata while preserving its downloaded blobs."""
+    model_root = _fastembed_model_root(text_embedding_cls, model, cache_dir)
+    if (
+        model_root is None
+        or fastembed_cache_usable(model_root)
+        or not _has_preserved_fastembed_blobs(model_root)
+    ):
+        return False
+
+    targets = [model_root / name for name in ("snapshots", "refs")]
+    targets = [path for path in targets if os.path.lexists(path)]
+    if not targets or any(path.is_symlink() or not path.is_dir() for path in targets):
+        return False
+
+    cache = model_root.parent
+    quarantine_root = cache / ".recovery-quarantine"
+    if quarantine_root.is_symlink():
+        return False
+    quarantine = quarantine_root / f"{model_root.name}-{uuid.uuid4().hex}"
+    moved = []
+    try:
+        quarantine.mkdir(parents=True)
+        for source in targets:
+            destination = quarantine / source.name
+            os.replace(source, destination)
+            moved.append((source, destination))
+    except OSError as error:
+        logger.warning("FastEmbed cache quarantine failed: %s", error)
+        for source, destination in reversed(moved):
+            try:
+                os.replace(destination, source)
+            except OSError:
+                pass
+        shutil.rmtree(quarantine, ignore_errors=True)
+        return False
+
+    logger.warning(
+        "FastEmbed initialization failed with an incomplete snapshot; preserved blobs and parked metadata in %s",
+        quarantine,
+    )
+    return True
 
 
 class EmbeddingClient:
@@ -148,40 +261,25 @@ class FastEmbedClient:
         # check looks (both default to this same path).
         cache_dir = FASTEMBED_CACHE_DIR
         os.makedirs(cache_dir, exist_ok=True)
-        # Windows self-heal: the HuggingFace-hub cache stores model files as
-        # symlinks (snapshots/<rev>/model.onnx -> ../../blobs/<hash>). On a
-        # network-share / UNC data dir Windows refuses to follow them
-        # ([WinError 1463] "symbolic link cannot be followed because its type is
-        # disabled"), and a cache copied between machines can carry dead symlinks
-        # too. Either way fastembed tries to load a broken symlink and fails
-        # *without* re-downloading, leaving semantic memory degraded. Detect a
-        # broken-symlink model in the cache and drop the contaminated hub dir so
-        # fastembed re-fetches (it falls back to its CDN tarball of real files,
-        # which load fine). Best-effort; only ever removes a verifiably dead link.
-        if os.name == "nt":
-            try:
-                import glob, shutil
-                for _onnx in glob.glob(os.path.join(cache_dir, "**", "*.onnx"), recursive=True):
-                    if os.path.islink(_onnx) and not os.path.exists(_onnx):
-                        _root = _onnx
-                        while os.path.basename(_root) and not os.path.basename(_root).startswith("models--"):
-                            _parent = os.path.dirname(_root)
-                            if _parent == _root:
-                                break
-                            _root = _parent
-                        if os.path.basename(_root).startswith("models--"):
-                            logger.warning(
-                                "Embedding cache has a broken symlink (%s); clearing %s "
-                                "so fastembed re-downloads real files", _onnx, _root,
-                            )
-                            shutil.rmtree(_root, ignore_errors=True)
-            except Exception as _e:
-                logger.debug("embedding cache symlink-heal skipped: %s", _e)
-        kwargs = {"model_name": self.model, "cache_dir": cache_dir}
-        self._embedding = TextEmbedding(**kwargs)
+        self._text_embedding_cls = TextEmbedding
+        self._cache_dir = cache_dir
+        self._recovery_attempted = False
+        self._embedding = self._load_embedding()
         self._dim: Optional[int] = None
         self.url = "local://fastembed"
         logger.info(f"FastEmbed loaded model={self.model}")
+
+    def _load_embedding(self):
+        kwargs = {"model_name": self.model, "cache_dir": self._cache_dir}
+        try:
+            return self._text_embedding_cls(**kwargs)
+        except Exception:
+            if self._recovery_attempted or not _quarantine_incomplete_fastembed_snapshot(
+                self._text_embedding_cls, self.model, self._cache_dir
+            ):
+                raise
+            self._recovery_attempted = True
+            return self._text_embedding_cls(**kwargs)
 
     def get_sentence_embedding_dimension(self) -> int:
         if self._dim is not None:
@@ -198,7 +296,20 @@ class FastEmbedClient:
         if not texts:
             return np.array([], dtype="float32")
 
-        vecs = np.array(list(self._embedding.embed(texts)), dtype="float32")
+        try:
+            embedded = list(self._embedding.embed(texts))
+        except Exception:
+            if self._recovery_attempted or not _quarantine_incomplete_fastembed_snapshot(
+                self._text_embedding_cls, self.model, self._cache_dir
+            ):
+                raise
+            self._recovery_attempted = True
+            self._embedding = self._text_embedding_cls(
+                model_name=self.model,
+                cache_dir=self._cache_dir,
+            )
+            embedded = list(self._embedding.embed(texts))
+        vecs = np.array(embedded, dtype="float32")
 
         if normalize_embeddings and vecs.size > 0:
             norms = np.linalg.norm(vecs, axis=1, keepdims=True)
