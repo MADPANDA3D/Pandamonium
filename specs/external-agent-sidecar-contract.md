@@ -2,7 +2,7 @@
 
 **Protocol:** `pandamonium.external-agent-sidecar.v1`
 
-**Status:** normative design contract for MAD-843; no runtime is added
+**Status:** normative contract implemented by MAD-844 and MAD-845
 
 **Schema:**
 [`pandamonium-external-agent-sidecar-v1.schema.json`](schemas/pandamonium-external-agent-sidecar-v1.schema.json)
@@ -22,8 +22,9 @@ server-side auth reference, allowed Workspace alias, and capability. Runtime
 discovery can narrow that configuration; it cannot add to it.
 
 An unconfigured sidecar emits no discovery entity and triggers no probe. The
-baseline profile is read-only; write or execution capabilities are optional
-future profiles and are never implied by protocol compatibility.
+baseline profile is read-only; task actions are individually opt-in with an
+installation-declared canonical effect and are never implied by protocol
+compatibility.
 
 No provider name is part of the protocol. Provider and installation labels are
 optional presentation metadata on canonical Agent, Worker, or Connection
@@ -70,12 +71,11 @@ as an isolated trusted service:
 | JOS-EXT-1 already requires exact origin/window/call correlation, bounded results, teardown, and capability narrowing for browser surfaces. | `specs/jarvis-os-extension-protocol.md:196-223` |
 | Network deployments require authentication and HTTPS/private access, and privileged tools and secret-bearing state remain protected. | `SECURITY.md:3-23`, `SECURITY.md:26-36` |
 
-These citations describe current controls and owners, not a claim that MAD-843
-implements the future sidecar. Gaps such as generic endpoint validation,
-sidecar nonce storage, per-stream quotas, and race-resistant file opening stay
-requirements for MAD-844/845 rather than undocumented assumptions.
-The contract does not choose or consolidate those persistence paths; a future
-adapter maps its opaque sidecar task reference into the canonical task owner.
+These citations describe the controls and owners reused by the independently
+implemented adapter. MAD-844 supplies bounded transport and authenticated read
+discovery; MAD-845 maps opaque sidecar task references into the existing
+canonical task broker and authority records. Host-path actions remain outside
+the action schemas, so this implementation adds no sidecar file-opening seam.
 
 ## Connection and transport
 
@@ -118,6 +118,16 @@ inside the sidecar and never become Pandamonium identity or authority inputs.
 | `capabilities` | Reports bounded action declarations. Declarations can only narrow the configured catalog and effect policy. |
 | `error` | Returns a stable code and bounded safe detail; it never returns raw exceptions, endpoints, paths, auth data, or another owner's identifiers. |
 | `cancel` | Targets one request and its opaque task reference, then stops future work. Cancellation is not deletion and does not erase history or artifacts. |
+
+Pandamonium sends health to `GET /health`, capability and catalog/event reads
+to `POST /read`, and task action or cancellation envelopes to `POST /actions`.
+The governed action names are `task.start`, `task.steer`, `task.reply`,
+`task.cancel`, and read-effect `task.status.read`. A configured action is usable
+only when the current sidecar declaration agrees on its authorization class;
+the stricter configured/live/canonical effect wins.
+Callers may supply a bounded canonical `request_id` on create, steer, reply, and
+cancel. Retries preserve the derived sidecar request ID; changed arguments with
+that identity fail as a replay instead of dispatching a second effect.
 
 Before JSON parsing, either peer rejects a message larger than 65,536 encoded
 bytes. A bounded parser then rejects input deeper than 16 containers before
@@ -243,21 +253,21 @@ trusted. Remote exposure exists only after explicit endpoint configuration.
 The localhost sidecar and remote sidecar cases therefore share the same
 identity, scope, envelope, and fail-closed requirements.
 
-The scenarios below are design hypotheses, not confirmed vulnerabilities in
-the unimplemented sidecar. Current controls are cited where they exist; every
-remaining control is a requirement for later implementation.
+The scenarios below are threat hypotheses, not confirmed vulnerabilities.
+Implemented controls are stated directly; deployment hardening that remains
+outside the backend adapter boundary is identified separately.
 
 | ID / priority | Hypothesis, prerequisite, and capability gain | Impact | Current control and required mitigation |
 | --- | --- | --- | --- |
 | EAS-001 / High | With a configured localhost endpoint, another local process impersonates a sidecar and gains the configured Worker's data/action channel. | Owner task disclosure or unauthorized proposals inside the allowed Workspace. | Existing bridges require server-resolved bearer material (`src/agent_worker_adapters.py:203-207`). Require explicit opt-in, auth on non-health calls, exact Connection identity, least privilege, and no ambient discovery. |
 | EAS-002 / High | With a configured remote endpoint or hostile network path, interception or endpoint compromise reads or changes owner work. | Confidentiality and task/result integrity loss. | Repository policy requires authenticated HTTPS/private access (`SECURITY.md:3-23`). Require certificate/hostname verification, exact origin, no redirects, bounded deadlines, and secret-free envelopes. |
-| EAS-003 / High | A model, sidecar, redirect, DNS rebinding, or ambiguous URL steers transport to metadata, private, or unintended services. | New network reach and possible credential/service compromise. | No generic sidecar transport exists yet. Admit only an operator-owned endpoint; validate scheme/userinfo/query/fragment and resolved addresses, pin the address set, and reject every redirect hop. |
+| EAS-003 / High | A model, sidecar, redirect, DNS rebinding, or ambiguous URL steers transport to metadata, private, or unintended services. | New network reach and possible credential/service compromise. | The adapter admits only an operator-owned endpoint, validates scheme/userinfo/query/fragment and resolved address class, pins the selected address, and rejects redirects. |
 | EAS-004 / High | An observer replays a request, nonce, authority result, cancellation, or terminal event before or after reconnect. | Duplicate effects, revived work, or falsified terminal state. | Authority decisions already expire and bind operator/session state (`src/authority_protocol.py:500-650`); broker events deduplicate IDs (`src/agent_worker_broker.py:176-229`). Add request expiry, single-use nonce, complete tuple binding, idempotent result caching, and monotonic terminal state. |
 | EAS-005 / Critical | In a confused deputy attack, a hostile sidecar supplies another owner/Workspace/Connection identity or stronger capability/effect and Pandamonium accepts it as authority. | Cross-owner or cross-Workspace access and potentially privileged action execution. | Broker ownership/session checks and tuple bindings exist (`src/agent_worker_broker.py:88-164`); authority classification uses the strictest canonical effect (`src/authority_protocol.py:310-359`). Revalidate the complete tuple, intersect capabilities, and reject sidecar-supplied authority. |
 | EAS-006 / High | A hostile stream forges, reorders, duplicates, oversizes, or emits post-terminal events that appear as trusted chat/voice results. | False operator state, unsafe follow-up decisions, storage/UI exhaustion. | Broker event types, IDs, terminal states, and text are bounded today (`src/agent_worker_broker.py:176-229`). Add remote sequence/request binding, metadata and byte/rate caps, redaction, and correlated result verification. |
 | EAS-007 / High | A sidecar or upstream error places tokens, auth references, endpoints, paths, or prompts in discovery, logs, events, errors, or browser data. | Credential theft, private topology disclosure, or owner-data exposure. | Recursive canonical redaction and safe previews exist (`src/authority_protocol.py:195-230`), and worker health maps raw failures to stable reasons (`src/agent_worker_adapters.py:75-83`). Resolve auth server-side, reject secret-bearing fields, redact recursively, and return bounded stable errors. |
 | EAS-008 / Critical | An accepted raw, absolute, traversal, alternate-syntax, device, or URI path escapes the configured Workspace. | Arbitrary host-file read/write within the Worker process privilege. | Canonical authority uses resolved containment (`src/authority_protocol.py:263-287`) and Worker configuration exposes aliases only (`src/agent_worker_adapters.py:45-65`). Accept only alias plus schema-declared relative logical paths and prove containment at use. |
-| EAS-009 / Critical | A symlink or race changes a checked in-Workspace path into an outside target. | Same host-file capability as direct path escape. | Resolved containment is established, but race-resistant open is not proven for this future adapter. Resolve parents/final target, reject escape, use no-follow/handle-relative open where supported, and recheck immediately at use. |
+| EAS-009 / Critical | A symlink or race changes a checked in-Workspace path into an outside target. | Same host-file capability as direct path escape. | The implemented task-action schemas accept no logical or host path and reject path-shaped arguments before dispatch. Any future file capability must add race-resistant containment separately. |
 | EAS-010 / Medium | Oversized/deep JSON, event floods, slow responses, or task floods cause denial of service. | Exhausted memory, sockets, CPU, disk, queues, or browser responsiveness. | Current broker caps visible task lists and event text (`src/agent_worker_broker.py:176-249`), and ordinary bridge calls use timeouts (`src/agent_worker_adapters.py:221-238`). Add pre-parse byte/depth limits, total/idle deadlines, concurrency/rate quotas, bounded queues/history, cancellation, and backpressure. |
 | EAS-011 / High | A dependency, SDK, installer, image, or sidecar update is compromised before admission. | Code execution with the sidecar's process/network/Workspace privileges and falsified results. | JOS-EXT-1 requires pinned reviewed sources for extensions (`specs/jarvis-os-extension-protocol.md:65-87`), but this sidecar is not an extension install. Add no default SDK/installer; require pinned artifacts, license/SBOM/vulnerability/signature review, isolation, least privilege, and independent rollback. |
 
@@ -293,6 +303,10 @@ contains valid envelopes plus mocked valid, stale, malformed, unauthorized,
 oversized, wrong-owner, wrong-Workspace, unavailable, and replay cases.
 `tests/test_external_agent_sidecar_contract.py` validates the schema, fixtures,
 effect parity, protocol neutrality, limits, and required threat controls.
+`tests/test_external_agent_governed_actions.py` validates stable task/action
+identities, exact owner/Connection/Worker/Workspace bindings, all six separate
+effect gates, changed-argument and replay denial, reconnect/status/event
+mapping, cancellation preservation, and durable safe failures.
 
 This design is independently reconstructed from the MAD-840 intake and current
 canonical contracts. Product-concept credit: Twenty4SevenLabs/Pandamonium,
@@ -303,6 +317,6 @@ imported.
 
 Explicit exclusions are a bundled provider SDK, key-storage implementation,
 remote installer, hardcoded node/IP/port, read-write editor-home mount,
-transcript scraping, task execution, UI, fork merge, data migration, release
-change, and CT103 action. Rollback is one PR revert; no runtime, data,
-credential, deployment, or configuration state exists to restore.
+transcript scraping, UI, fork merge, data migration, and CT103 action. Rollback
+is one PR revert; no data, credential, deployment, sidecar, or configured
+database mutation is required.

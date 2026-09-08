@@ -216,10 +216,7 @@ def test_only_complete_explicit_versioned_configuration_is_registered(tmp_path, 
 
     assert registry[config["id"]].adapter_name == "external-agent-sidecar"
     assert set(worker_adapters.adapters()) == set(worker_adapters.WORKER_IDS)
-    assert not any(
-        hasattr(registry[config["id"]], action)
-        for action in ("start", "steer", "reply", "approve", "cancel")
-    )
+    assert catalog[config["id"]]["capabilities"] == ["read_only_inspection"]
     assert catalog[config["id"]]["workspaces"] == ["sample-project"]
     assert config["endpoint"] not in json.dumps(catalog)
     assert config["auth_ref"] not in json.dumps(catalog)

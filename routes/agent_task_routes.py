@@ -53,12 +53,20 @@ class TaskSteer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt: str = Field(min_length=1, max_length=50000)
+    request_id: str | None = Field(default=None, max_length=200)
 
 
 class TaskReply(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answers: dict[str, list[str] | str]
+    request_id: str | None = Field(default=None, max_length=200)
+
+
+class TaskCancel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str | None = Field(default=None, max_length=200)
 
 
 class TaskApproval(BaseModel):
@@ -97,7 +105,7 @@ def setup_agent_task_routes(session_manager):
     configure(session_manager)
     router = APIRouter(tags=["jarvis-agent"])
 
-    def _authorize_task_control(
+    async def _authorize_task_control(
         *,
         action: str,
         session_id: str,
@@ -108,8 +116,23 @@ def setup_agent_task_routes(session_manager):
         request_id: str | None = None,
         task_id: str | None = None,
         codex_thread_id: str | None = None,
+        action_arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request_id = str(request_id or uuid.uuid4())[:200]
+        exact_action_arguments = dict(action_arguments or {})
+        external_policy: dict[str, Any] | None = None
+        if worker not in WORKER_IDS:
+            registry = adapters(include_external=True)
+            adapter = registry.get(worker)
+            if not adapter or getattr(adapter, "adapter_name", "") != "external-agent-sidecar":
+                raise ValueError("unknown_worker")
+            sidecar_action = "start" if action in {"create", "resume"} else action
+            adapter.validate_action_arguments(sidecar_action, exact_action_arguments)
+            external_policy = await adapter.action_policy(
+                sidecar_action,
+                owner=owner,
+                workspace=workspace,
+            )
         call = normalize_action_call(
             request_id=request_id,
             call_id=str(uuid.uuid4()),
@@ -122,12 +145,29 @@ def setup_agent_task_routes(session_manager):
                 "worker": worker,
                 "workspace": workspace,
                 "permission_mode": permission_mode,
+                "arguments": exact_action_arguments,
                 **({"task_id": task_id} if task_id else {}),
                 **({"codex_thread_id": codex_thread_id} if codex_thread_id else {}),
+                **(
+                    {
+                        "connection_id": external_policy["connection_id"],
+                        "worker_ref": external_policy["worker_ref"],
+                        "capability": external_policy["name"],
+                        "sidecar_version": external_policy["sidecar_version"],
+                        "connection_version": external_policy["connection_version"],
+                    }
+                    if external_policy
+                    else {}
+                ),
             },
-            target="worker",
+            target=(external_policy or {}).get("worker_ref") or "worker",
             authority_ref=None,
         )
+        if external_policy:
+            call["capability_policy"] = {
+                "action_effect": external_policy["effect"],
+                "configured_scopes": [workspace],
+            }
         call["session_id"] = session_id
         call["operator_id"] = operator_identity(owner)
         catalog = compose_capability_catalog(fallback_names={"start_agent_task"})
@@ -199,6 +239,9 @@ def setup_agent_task_routes(session_manager):
             evidence_refs=[{"decision_id": decision["decision_id"]}],
             metadata={"capability": call["name"], "action": action},
         )
+        if external_policy:
+            call["external_policy"] = external_policy
+        call["action_effect"] = decision["action_effect"]
         return call
 
     def _record_task_control_result(
@@ -264,6 +307,18 @@ def setup_agent_task_routes(session_manager):
                 "malformed_envelope", "wrong_workspace", "capability_disabled",
             } else 503
             raise HTTPException(status, exc.code)
+
+    def _external_error(exc: ExternalAgentBridgeError) -> HTTPException:
+        if exc.code in {"wrong_owner", "unauthorized"}:
+            return HTTPException(403, exc.code)
+        if exc.code in {
+            "malformed_envelope", "wrong_workspace", "capability_disabled",
+            "path_escape", "symlink_escape",
+        }:
+            return HTTPException(400, exc.code)
+        if exc.code in {"stale_request", "replay_detected"}:
+            return HTTPException(409, exc.code)
+        return HTTPException(503, exc.code)
 
     @router.get("/api/agent-workers/{worker}/discovery")
     async def external_worker_discovery(
@@ -411,7 +466,7 @@ def setup_agent_task_routes(session_manager):
         try:
             values = payload.model_dump()
             persist_prompt = bool(values.pop("persist_prompt", False))
-            trace = _authorize_task_control(
+            trace = await _authorize_task_control(
                 action="resume" if payload.codex_thread_id else "create",
                 session_id=payload.session_id,
                 owner=owner,
@@ -420,11 +475,20 @@ def setup_agent_task_routes(session_manager):
                 permission_mode=payload.permission_mode,
                 request_id=payload.request_id,
                 codex_thread_id=payload.codex_thread_id,
+                action_arguments={
+                    "prompt": payload.prompt,
+                    "permission_mode": payload.permission_mode,
+                },
             )
+            external_policy = trace.get("external_policy") or {}
             values.update(
                 request_id=trace["request_id"],
                 call_id=trace["call_id"],
                 authority_ref=trace["authority_ref"],
+                action_effect=trace["action_effect"],
+                action_capability=external_policy.get("name"),
+                external_sidecar_version=external_policy.get("sidecar_version"),
+                external_connection_version=external_policy.get("connection_version"),
                 presenter=session_presenter(session, payload.worker),
             )
             task = await start_task(**values, owner=owner)
@@ -446,6 +510,10 @@ def setup_agent_task_routes(session_manager):
             if trace:
                 _record_task_control_result(trace, status="failed", error=exc)
             raise HTTPException(400, str(exc))
+        except ExternalAgentBridgeError as exc:
+            if trace:
+                _record_task_control_result(trace, status="failed", error=exc.code)
+            raise _external_error(exc)
         except RuntimeError as exc:
             if trace:
                 _record_task_control_result(trace, status="failed", error=exc)
@@ -506,13 +574,60 @@ def setup_agent_task_routes(session_manager):
 
     @router.post("/api/agent-tasks/{task_id}/reply")
     async def reply(task_id: str, payload: TaskReply, owner: str = Depends(require_user)):
+        trace = None
         try:
-            return await task_action(task_id, "reply", payload.model_dump(), owner=owner)
+            task = require_task_owner(task_id, owner)
+            action_payload = payload.model_dump(exclude={"request_id"})
+            trace = await _authorize_task_control(
+                action="reply",
+                session_id=task["session_id"],
+                owner=owner,
+                worker=task["worker"],
+                workspace=task["workspace"],
+                permission_mode=str(task.get("permission_mode") or "read_only"),
+                task_id=task_id,
+                codex_thread_id=task.get("codex_thread_id"),
+                request_id=payload.request_id,
+                action_arguments=action_payload,
+            )
+            external_policy = trace.get("external_policy") or {}
+            result = await task_action(
+                task_id,
+                "reply",
+                action_payload,
+                owner=owner,
+                request_id=trace["request_id"],
+                call_id=trace["call_id"],
+                authority_ref=trace["authority_ref"],
+                action_effect=trace["action_effect"],
+                action_capability=external_policy.get("name"),
+                external_sidecar_version=external_policy.get("sidecar_version"),
+                external_connection_version=external_policy.get("connection_version"),
+            )
+            _record_task_control_result(trace, task=result)
+            return result
         except KeyError:
             raise HTTPException(404, "Task not found")
-        except PermissionError:
-            raise HTTPException(403, "Task does not belong to this user")
+        except PermissionError as exc:
+            if trace:
+                _record_task_control_result(trace, status="denied", error="permission_denied")
+            detail = (
+                "Task does not belong to this user"
+                if str(exc) in {"owner_required", "task_owner_mismatch"}
+                else str(exc)
+            )
+            raise HTTPException(403, detail)
+        except ValueError as exc:
+            if trace:
+                _record_task_control_result(trace, status="failed", error=exc)
+            raise HTTPException(400, str(exc))
+        except ExternalAgentBridgeError as exc:
+            if trace:
+                _record_task_control_result(trace, status="failed", error=exc.code)
+            raise _external_error(exc)
         except Exception as exc:
+            if trace:
+                _record_task_control_result(trace, status="failed", error=exc)
             raise HTTPException(502, str(exc)[:300])
 
     @router.post("/api/agent-tasks/{task_id}/steer")
@@ -520,7 +635,8 @@ def setup_agent_task_routes(session_manager):
         trace = None
         try:
             task = require_task_owner(task_id, owner)
-            trace = _authorize_task_control(
+            action_payload = payload.model_dump(exclude={"request_id"})
+            trace = await _authorize_task_control(
                 action="steer",
                 session_id=task["session_id"],
                 owner=owner,
@@ -529,8 +645,23 @@ def setup_agent_task_routes(session_manager):
                 permission_mode=str(task.get("permission_mode") or "read_only"),
                 task_id=task_id,
                 codex_thread_id=task.get("codex_thread_id"),
+                request_id=payload.request_id,
+                action_arguments=action_payload,
             )
-            result = await task_action(task_id, "steer", payload.model_dump(), owner=owner)
+            external_policy = trace.get("external_policy") or {}
+            result = await task_action(
+                task_id,
+                "steer",
+                action_payload,
+                owner=owner,
+                request_id=trace["request_id"],
+                call_id=trace["call_id"],
+                authority_ref=trace["authority_ref"],
+                action_effect=trace["action_effect"],
+                action_capability=external_policy.get("name"),
+                external_sidecar_version=external_policy.get("sidecar_version"),
+                external_connection_version=external_policy.get("connection_version"),
+            )
             _record_task_control_result(trace, task=result)
             return result
         except KeyError:
@@ -553,6 +684,10 @@ def setup_agent_task_routes(session_manager):
                 _record_task_control_result(trace, status="failed", error=exc)
             status = 409 if exc.response.status_code == 409 else 502
             raise HTTPException(status, "Task is not currently steerable")
+        except ExternalAgentBridgeError as exc:
+            if trace:
+                _record_task_control_result(trace, status="failed", error=exc.code)
+            raise _external_error(exc)
         except Exception as exc:
             if trace:
                 _record_task_control_result(trace, status="failed", error=exc)
@@ -561,11 +696,15 @@ def setup_agent_task_routes(session_manager):
             raise HTTPException(502, str(exc)[:300])
 
     @router.post("/api/agent-tasks/{task_id}/cancel")
-    async def cancel(task_id: str, owner: str = Depends(require_user)):
+    async def cancel(
+        task_id: str,
+        payload: TaskCancel | None = None,
+        owner: str = Depends(require_user),
+    ):
         trace = None
         try:
             task = require_task_owner(task_id, owner)
-            trace = _authorize_task_control(
+            trace = await _authorize_task_control(
                 action="cancel",
                 session_id=task["session_id"],
                 owner=owner,
@@ -574,8 +713,22 @@ def setup_agent_task_routes(session_manager):
                 permission_mode=str(task.get("permission_mode") or "read_only"),
                 task_id=task_id,
                 codex_thread_id=task.get("codex_thread_id"),
+                request_id=payload.request_id if payload else None,
+                action_arguments={"reason": "operator_request"},
             )
-            result = await task_action(task_id, "cancel", owner=owner)
+            external_policy = trace.get("external_policy") or {}
+            result = await task_action(
+                task_id,
+                "cancel",
+                owner=owner,
+                request_id=trace["request_id"],
+                call_id=trace["call_id"],
+                authority_ref=trace["authority_ref"],
+                action_effect=trace["action_effect"],
+                action_capability=external_policy.get("name"),
+                external_sidecar_version=external_policy.get("sidecar_version"),
+                external_connection_version=external_policy.get("connection_version"),
+            )
             _record_task_control_result(trace, task=result, status="cancelled")
             return result
         except KeyError:
@@ -589,6 +742,10 @@ def setup_agent_task_routes(session_manager):
                 else str(exc)
             )
             raise HTTPException(403, detail)
+        except ExternalAgentBridgeError as exc:
+            if trace:
+                _record_task_control_result(trace, status="failed", error=exc.code)
+            raise _external_error(exc)
         except Exception as exc:
             if trace:
                 _record_task_control_result(trace, status="failed", error=exc)
