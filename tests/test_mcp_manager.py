@@ -2,8 +2,14 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.agent_loop import _NATIVE_MCP_DIRECT_RULES
 from src.authority_protocol import action_effect_for
-from src.mcp_manager import _format_mcp_connection_error, _static_http_headers, McpManager
+from src.mcp_manager import (
+    McpManager,
+    _format_mcp_connection_error,
+    _mcp_tool_record,
+    _static_http_headers,
+)
 
 
 def test_playwright_mcp_connection_error_includes_install_hint():
@@ -131,3 +137,102 @@ def test_readonly_mcp_health_tools_receive_authority_metadata_and_unknowns_fail_
     unknown_call = {"name": "mcp__portal__post_message", "target": "mcp", "arguments": {}}
     assert action_effect_for(read_call) == "read"
     assert action_effect_for(unknown_call) == "unclassified"
+
+
+def test_http_tool_projection_preserves_readonly_annotations():
+    tool = SimpleNamespace(
+        name="portal.welcome",
+        description="Start here",
+        inputSchema={"type": "object", "properties": {}},
+        annotations={"readOnlyHint": True},
+    )
+
+    projected = _mcp_tool_record(tool)
+
+    assert projected["annotations"] == {"readOnlyHint": True}
+    assert action_effect_for({
+        "name": "mcp__portal__portal.welcome",
+        "target": "mcp",
+        "arguments": {},
+        "capability_policy": {"action_effect": "read"}
+        if projected["annotations"]["readOnlyHint"] else {},
+    }) == "read"
+
+
+def test_named_native_connection_selects_declared_discovery_and_read_tools_only():
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "Acme MCP Portal",
+        "server_info": {"name": "Acme Broker"},
+        "catalog_terms": ["Discord", "Slack"],
+    }
+    guidance = (
+        "Start with portal.welcome, then portal.list_services. "
+        "Use portal.find_tools and portal.call_read_tool for reads. "
+        "Use portal.call_write_tool for writes."
+    )
+    manager._tools["portal-fixture"] = [
+        {"name": "portal.welcome", "description": guidance, "annotations": {"readOnlyHint": True}},
+        {"name": "portal.list_services", "description": "List admitted providers", "annotations": {"readOnlyHint": True}},
+        {"name": "portal.find_tools", "description": "Find provider tools", "annotations": {"readOnlyHint": True}},
+        {"name": "portal.call_read_tool", "description": "Execute one typed read", "annotations": {"readOnlyHint": True}},
+        {"name": "portal.call_write_tool", "description": "Execute one write", "annotations": {"readOnlyHint": False}},
+    ]
+    manager._connections["slack-fixture"] = {
+        "status": "connected",
+        "name": "Slack MCP",
+        "server_info": {},
+    }
+    manager._tools["slack-fixture"] = [
+        {"name": "read_messages", "description": "Read Slack messages", "annotations": {"readOnlyHint": True}},
+    ]
+
+    selected = manager.native_tool_names_for_request(
+        "Using Acme MCP Portal, read the last five Discord messages from general"
+    )
+
+    assert selected == {
+        "mcp__portal-fixture__portal.welcome",
+        "mcp__portal-fixture__portal.list_services",
+        "mcp__portal-fixture__portal.find_tools",
+        "mcp__portal-fixture__portal.call_read_tool",
+    }
+    assert not any("write" in name for name in selected)
+    assert not any("slack-fixture" in name for name in selected)
+    assert manager.native_tool_names_for_request("Read the last five Teams messages") == set()
+
+
+def test_native_tool_failure_is_bounded_redacted_and_not_retried():
+    class FailingSession:
+        calls = 0
+
+        async def call_tool(self, _name, _arguments):
+            self.calls += 1
+            raise RuntimeError(
+                "service admission failed: Authorization: Bearer fixture-secret-token-123456789 "
+                + "schema mismatch " * 100
+            )
+
+    manager = McpManager()
+    session = FailingSession()
+    manager._sessions["portal-fixture"] = session
+
+    result = asyncio.run(manager.call_tool(
+        "mcp__portal-fixture__portal.call_read_tool",
+        {"service": "fixture"},
+    ))
+
+    assert result["exit_code"] == 1
+    assert session.calls == 1
+    assert "service admission failed" in result["error"]
+    assert "schema mismatch" in result["error"]
+    assert "fixture-secret-token" not in result["error"]
+    assert len(result["error"]) <= 500
+
+
+def test_native_mcp_prompt_forbids_provider_substitution_and_generic_fallbacks():
+    assert "Preserve the provider, profile, channel, and target" in _NATIVE_MCP_DIRECT_RULES
+    assert "Never substitute a different provider" in _NATIVE_MCP_DIRECT_RULES
+    assert "Do not use manage_mcp, api_call, app_api, pipeline, shell, or curl" in _NATIVE_MCP_DIRECT_RULES
+    assert "permission, service admission, or schema validation fails" in _NATIVE_MCP_DIRECT_RULES

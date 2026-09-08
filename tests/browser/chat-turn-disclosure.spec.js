@@ -38,7 +38,7 @@ const roundTexts = [
   'The response is consolidated.',
 ];
 
-async function installRoutes(page, { stream = false } = {}) {
+async function installRoutes(page, { stream = false, authorityRequests = [] } = {}) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/sessions') {
@@ -108,6 +108,33 @@ async function installRoutes(page, { stream = false } = {}) {
       });
     }
     if (url.pathname === '/api/chat_stream' && stream) {
+      const postData = route.request().postData() || '';
+      if (postData.includes('authority_decision_id')) {
+        authorityRequests.push(postData);
+        const persistent = postData.includes('persistent');
+        const denied = postData.includes('deny');
+        const choice = denied ? 'deny' : 'approve';
+        const receipt = {
+          receipt_id: 'receipt-one', decision_id: 'approval-one',
+          capability: { name: 'manage_mcp', target: 'portal' },
+          action_effect: 'external_publication_or_communication',
+          workspace: 'workspace-one', preview: { action: 'call' },
+          decision: denied ? 'deny' : 'allow', scope: persistent ? 'persistent' : 'once', status: 'active',
+        };
+        return route.fulfill({
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+          body: `data: ${JSON.stringify({ type: 'authority_decision_resolved', data: {
+            choice,
+            decision: { decision_id: 'approval-one', capability: { name: 'manage_mcp', target: 'portal' } },
+            receipt,
+          } })}\n\n`
+            + `data: ${JSON.stringify({ delta: denied ? 'Denied: manage_mcp. I will not run it.' : 'The exact pending action completed.' })}\n\n`
+            + `data: ${JSON.stringify({ type: 'metrics', data: { model: 'test/model', tool_events: denied ? [] : toolEvents } })}\n\n`
+            + 'data: {"type":"message_saved","id":"assistant-two"}\n\n'
+            + 'data: [DONE]\n\n',
+        });
+      }
       const metrics = {
         model: 'test/model',
         requested_model: 'test/model',
@@ -160,13 +187,20 @@ async function installRoutes(page, { stream = false } = {}) {
     }
     if (url.pathname === '/api/model-endpoints' || url.pathname === '/api/models') return route.fulfill({ json: [] });
     if (url.pathname === '/api/authority') return route.fulfill({ json: { decisions: [] } });
+    if (url.pathname === '/api/authority/receipts/receipt-one' && route.request().method() === 'DELETE') {
+      return route.fulfill({ json: { receipt_id: 'receipt-one', status: 'revoked' } });
+    }
     return route.fulfill({ json: {} });
   });
 }
 
 async function waitForSession(page, sessionId = 'session-one') {
-  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(sessionId);
   await expect.poll(() => page.evaluate(() => typeof document.querySelector('#chat-form')?.onsubmit === 'function')).toBe(true);
+  const current = await page.evaluate(() => window.sessionModule?.getCurrentSessionId());
+  if (current !== sessionId) {
+    await page.evaluate(id => window.sessionModule.selectSession(id, { showLoading: false }), sessionId);
+  }
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getCurrentSessionId())).toBe(sessionId);
 }
 
 for (const [viewportName, viewport] of VIEWPORTS) {
@@ -198,6 +232,13 @@ for (const [viewportName, viewport] of VIEWPORTS) {
     await page.keyboard.press('Enter');
     await expect(button).toHaveAttribute('aria-expanded', 'true');
     await expect(disclosure.locator('.thinking-content')).toHaveClass(/expanded/);
+    const expandedLayout = await disclosure.locator('.thinking-content').evaluate(node => ({
+      clientHeight: node.clientHeight,
+      scrollHeight: node.scrollHeight,
+      overflowY: getComputedStyle(node).overflowY,
+    }));
+    expect(expandedLayout.scrollHeight).toBeLessThanOrEqual(expandedLayout.clientHeight + 1);
+    expect(expandedLayout.overflowY).not.toMatch(/auto|scroll/);
     if (process.env.MAD841_CAPTURE_PROOF) {
       await page.screenshot({
         path: `docs/images/chat-turn-disclosure-${viewportName}.png`,
@@ -257,5 +298,70 @@ for (const [viewportName, viewport] of VIEWPORTS) {
     await expect(assistant.locator('.assistant-turn-final')).toHaveText('The response is consolidated.');
     await expect(disclosure.getByRole('button', { name: 'View thinking process' })).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('.authority-approval-card')).toContainText('Approval required: manage_mcp');
+    await expect(page.locator('.authority-approval-card').getByRole('button', { name: 'Approve once' })).toBeVisible();
+    await expect(page.locator('.authority-approval-card').getByRole('button', { name: 'Approve always' })).toBeVisible();
+    await expect(page.locator('.authority-approval-card').getByRole('button', { name: 'Deny' })).toBeVisible();
+    const approvalLayout = await page.locator('.authority-approval-card').evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      const container = document.getElementById('chat-container');
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        containerScrollLeft: container?.scrollLeft,
+        containerScrollWidth: container?.scrollWidth,
+        containerClientWidth: container?.clientWidth,
+        messageIds: document.querySelectorAll('#message').length,
+      };
+    });
+    expect(approvalLayout.left, JSON.stringify(approvalLayout)).toBeGreaterThanOrEqual(0);
+    expect(approvalLayout.right).toBeLessThanOrEqual(approvalLayout.viewportWidth);
+    expect(approvalLayout.documentWidth).toBeLessThanOrEqual(approvalLayout.viewportWidth);
+    expect(approvalLayout.containerScrollLeft).toBe(0);
+    expect(approvalLayout.containerScrollWidth).toBeLessThanOrEqual(approvalLayout.containerClientWidth);
+    expect(approvalLayout.messageIds).toBe(1);
+    if (process.env.MAD842_CAPTURE_PROOF) {
+      await page.screenshot({
+        path: `docs/images/portal-native-approval-${viewportName}.png`,
+        fullPage: false,
+      });
+    }
+  });
+}
+
+for (const [label, choice, scope] of [
+  ['Approve once', 'approve', 'once'],
+  ['Approve always', 'approve', 'persistent'],
+  ['Deny', 'deny', 'once'],
+]) {
+  test(`approval card ${label} is a dedicated exact continuation, not user chat`, async ({ page }) => {
+    const authorityRequests = [];
+    await installRoutes(page, { stream: true, authorityRequests });
+    await page.goto('/static/index.html#session-one');
+    await waitForSession(page);
+    await page.evaluate(() => window.sessionModule.selectSession('session-one', { showLoading: false }));
+    await waitForSession(page);
+    await page.locator('#message:visible').fill('Run the gated exact action');
+    await page.locator('.send-btn:visible').click();
+    await expect(page.locator('.authority-approval-card').getByRole('button', { name: label })).toBeVisible();
+    await page.locator('.authority-approval-card').getByRole('button', { name: label }).click();
+
+    await expect.poll(() => authorityRequests.length).toBe(1);
+    expect(authorityRequests[0]).toContain('approval-one');
+    expect(authorityRequests[0]).toContain(choice);
+    expect(authorityRequests[0]).toContain(scope);
+    await expect(page.locator('#chat-history > .msg-user')).toHaveCount(1);
+    await expect(page.locator('#chat-history > .msg-user')).not.toContainText('Approve');
+    await expect(page.locator('.authority-approval-card')).toContainText(
+      choice === 'deny' ? 'Denied: manage_mcp' : `Approved ${scope === 'persistent' ? 'always' : 'once'}: manage_mcp`,
+    );
+    if (scope === 'persistent') {
+      const receipt = page.locator('.authority-receipt-card');
+      await expect(receipt).toContainText('Always approved: manage_mcp');
+      await expect(receipt.getByRole('button', { name: 'Revoke' })).toBeVisible();
+      await receipt.getByRole('button', { name: 'Revoke' }).click();
+      await expect(receipt).toHaveCount(0);
+    }
   });
 }

@@ -77,6 +77,27 @@ def _mcp_server_info(initialized: Any) -> Dict[str, str]:
     return result
 
 
+def _mcp_instructions(initialized: Any) -> str:
+    """Return bounded public server guidance from the initialize result."""
+    raw = getattr(initialized, "instructions", None)
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw or ""))
+    return re.sub(r"\s+", " ", text).strip()[:4000]
+
+
+_ROUTING_STOPWORDS = frozenset({
+    "a", "an", "and", "api", "for", "from", "in", "integration", "mcp",
+    "my", "of", "on", "portal", "server", "service", "the", "to", "tool",
+    "tools", "use", "using", "with",
+})
+
+
+def _routing_tokens(value: Any) -> Set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9][a-z0-9_-]{1,}", str(value or "").lower())
+        if token not in _ROUTING_STOPWORDS
+    }
+
+
 # Caps for rendering untrusted MCP tool schemas into the agent prompt (issue #2660).
 # MCP servers are third-party/user-added, so field names and parameter counts are
 # untrusted input — bound them so an odd or hostile schema cannot distort the prompt.
@@ -134,6 +155,16 @@ def _format_mcp_params(input_schema: Any) -> str:
     if len(hint) > _MCP_HINT_MAX:
         hint = hint[:_MCP_HINT_MAX - 1].rstrip() + "…"
     return hint
+
+
+def _mcp_tool_record(tool: Any) -> Dict[str, Any]:
+    """Project one SDK tool into the shared transport-neutral catalog shape."""
+    return {
+        "name": tool.name,
+        "description": tool.description or "",
+        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+        "annotations": getattr(tool, "annotations", None),
+    }
 
 
 # Tool-name prefixes that denote a read-only/inspection operation. Used to
@@ -319,15 +350,7 @@ class McpManager:
 
             tools = []
             for tool in tools_result.tools:
-                tools.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
-                    # MCP tool annotations (readOnlyHint / destructiveHint) drive
-                    # plan-mode read-only gating. Absent on many servers, so we
-                    # fall back to a name heuristic in mcp_tool_is_readonly().
-                    "annotations": getattr(tool, 'annotations', None),
-                })
+                tools.append(_mcp_tool_record(tool))
 
             self._sessions[server_id] = session
             self._tools[server_id] = tools
@@ -383,12 +406,7 @@ class McpManager:
                 tools_result = await session.list_tools()
                 tools = []
                 for tool in tools_result.tools:
-                    tools.append({
-                        "name": tool.name,
-                        "description": tool.description or "",
-                        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
-                        "annotations": getattr(tool, "annotations", None),
-                    })
+                    tools.append(_mcp_tool_record(tool))
 
                 self._sessions[server_id] = session
                 self._stacks[server_id] = stack
@@ -491,11 +509,7 @@ class McpManager:
             tools_result = await session.list_tools()
             tools = []
             for tool in tools_result.tools:
-                tools.append({
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
-                })
+                tools.append(_mcp_tool_record(tool))
 
             self._sessions[server_id] = session
             self._stacks[server_id] = stack
@@ -504,6 +518,7 @@ class McpManager:
                 "status": "connected", "name": name, "transport": "http",
                 "tool_count": len(tools),
                 "server_info": _mcp_server_info(initialized),
+                "instructions": _mcp_instructions(initialized),
             }
             clear_auth_url(server_id)
             # Tools changed (this can complete after connect_server already
@@ -517,8 +532,11 @@ class McpManager:
             self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
             return False
         except Exception as e:
-            logger.error(f"Failed to connect HTTP MCP server {name} ({server_id}): {e}")
-            self._connections[server_id] = {"status": "error", "error": str(e), "name": name}
+            from src.authority_protocol import redact_secret_text
+
+            safe_error = redact_secret_text(str(e))[:500]
+            logger.error("Failed to connect HTTP MCP server %s (%s): %s", name, server_id, safe_error)
+            self._connections[server_id] = {"status": "error", "error": safe_error, "name": name}
             return False
 
     async def disconnect_server(self, server_id: str):
@@ -671,8 +689,11 @@ class McpManager:
                     logger.error(f"MCP reconnect failed for {server_id}")
                     return {"error": f"MCP server crashed and reconnect failed: {server_id}", "exit_code": 1}
             else:
-                logger.error(f"MCP tool call failed: {qualified_name}: {e}")
-                return {"error": str(e), "exit_code": 1}
+                from src.authority_protocol import redact_secret_text
+
+                safe_error = redact_secret_text(str(e))[:500]
+                logger.error("MCP tool call failed: %s: %s", qualified_name, safe_error)
+                return {"error": safe_error, "exit_code": 1}
 
         return result
 
@@ -759,6 +780,75 @@ class McpManager:
 
     def get_server_tools(self, server_id: str) -> List[Dict]:
         return list(self._tools.get(server_id, []))
+
+    def set_connection_catalog_terms(self, server_id: str, values: List[Any]) -> None:
+        """Attach bounded public catalog labels to a live connection identity."""
+        conn = self._connections.get(server_id)
+        if conn is None:
+            return
+        terms = []
+        for value in values[:500]:
+            text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
+            text = re.sub(r"\s+", " ", text).strip()[:160]
+            if text and text not in terms:
+                terms.append(text)
+        if conn.get("catalog_terms") != terms:
+            conn["catalog_terms"] = terms
+            self._generation += 1
+
+    def native_tool_names_for_request(self, query: str, limit: int = 8) -> Set[str]:
+        """Select a named connection's own typed discovery/read tools.
+
+        Server identities, catalog labels, tool names, and ordered entrypoint
+        references all come from the live MCP handshake/catalog.  Nothing here
+        assumes a provider, channel, profile, URL, or broker tool identity.
+        """
+        query_tokens = _routing_tokens(query)
+        if not query_tokens:
+            return set()
+        selected: List[str] = []
+        for server_id, tools in self._tools.items():
+            if self.is_extension_server(server_id) or not tools:
+                continue
+            conn = self._connections.get(server_id, {})
+            if conn.get("status") != "connected":
+                continue
+            identity_parts = [
+                conn.get("name"),
+                (conn.get("server_info") or {}).get("name"),
+                *(conn.get("catalog_terms") or []),
+            ]
+            identity_tokens = _routing_tokens(" ".join(str(item or "") for item in identity_parts))
+            if not (query_tokens & identity_tokens):
+                continue
+
+            by_name = {str(tool.get("name") or ""): tool for tool in tools}
+            referenced: List[str] = []
+            guidance = " ".join([
+                str(conn.get("instructions") or ""),
+                *(str(tool.get("description") or "") for tool in tools),
+            ])
+            for name in re.findall(r"\b[a-zA-Z][\w-]*(?:\.[\w-]+)+\b", guidance):
+                if name in by_name and name not in referenced:
+                    referenced.append(name)
+
+            scored = []
+            for index, tool in enumerate(tools):
+                name = str(tool.get("name") or "")
+                if not name or not mcp_tool_is_readonly(tool):
+                    continue
+                haystack = f"{name} {tool.get('description') or ''}"
+                overlap = len(query_tokens & _routing_tokens(haystack))
+                reference_rank = referenced.index(name) if name in referenced else len(referenced) + index
+                score = (10 if name in referenced else 0) + overlap * 4
+                scored.append((-score, reference_rank, index, name))
+            for _score, _ref_rank, _index, name in sorted(scored):
+                qualified = f"mcp__{server_id}__{name}"
+                if qualified not in selected:
+                    selected.append(qualified)
+                if len(selected) >= max(1, min(int(limit), 20)):
+                    return set(selected)
+        return set(selected)
 
     async def _reconnect_builtin(self, server_id: str) -> bool:
         """Tear down and reconnect a crashed builtin MCP server."""

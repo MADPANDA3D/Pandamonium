@@ -44,6 +44,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
   let _sendInFlight = false;   // covers the window from click → streaming start
   let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
   let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
+  let _pendingAuthorityControl = null; // Exact approval-card continuation; never user prose
 
   function _setForegroundChatBusy(active) {
     try {
@@ -734,6 +735,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
     // --- Send-path entry: block re-clicks between submit and stream start ---
     if (_sendInFlight) return;
+    const _authorityControl = _pendingAuthorityControl;
     const _sendPerf = _createChatSendPerf();
     _sendInFlight = true;
     _setForegroundChatBusy(true);
@@ -776,7 +778,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
     const msg = el('message').value;
     // Allow empty text when a regen carries over the original message's
     // attachment ids — a photo-only message still has something to send.
-    if (!msg.trim() && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
+    if (!msg.trim() && !_authorityControl && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
 
     // --- Slash commands: execute directly without AI (no session needed) ---
     if (isCommand(msg.trim())) {
@@ -961,7 +963,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
       const userDisplay = _displayOverride || msg;
       _displayOverride = null;
-      const skipBubble = _hideUserBubble;
+      const skipBubble = _hideUserBubble || !!_authorityControl;
       _hideUserBubble = false;
       // Auto-recovery counter: carries across a turn's auto-continues, but resets
       // when the user genuinely sends a new message (so each task gets a fresh cap).
@@ -1159,9 +1161,9 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
       // Apply inject prefix/suffix
       const _inject = presetsModule.getInject ? presetsModule.getInject() : { prefix: '', suffix: '' };
-      let _finalMsgWithInject = finalMsg;
-      if (_inject.prefix) _finalMsgWithInject = _inject.prefix + ' ' + _finalMsgWithInject;
-      if (_inject.suffix) _finalMsgWithInject = _finalMsgWithInject + ' ' + _inject.suffix;
+      let _finalMsgWithInject = _authorityControl ? '' : finalMsg;
+      if (!_authorityControl && _inject.prefix) _finalMsgWithInject = _inject.prefix + ' ' + _finalMsgWithInject;
+      if (!_authorityControl && _inject.suffix) _finalMsgWithInject = _finalMsgWithInject + ' ' + _inject.suffix;
 
       let _textExtensionBridge = null;
       const _oracleToolIntent = /\boracle\b/i.test(msg) && /\b(engage|activate|open|map|view|layer|cockpit|cctv|track|camera|tool|call|report|current|show|inspect)\b/i.test(msg);
@@ -1175,6 +1177,12 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
+      if (_authorityControl) {
+        fd.append('authority_decision_id', _authorityControl.decisionId);
+        fd.append('authority_choice', _authorityControl.choice);
+        fd.append('authority_scope', _authorityControl.scope);
+        _pendingAuthorityControl = null;
+      }
       if (streamAgentTarget) fd.append('agent_target', streamAgentTarget);
       if (streamAgentTarget === 'pc-codex') {
         const codexContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
@@ -2850,6 +2858,10 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                 if (_isBg) continue;
                 window.jarvisVoice?.showChatForApproval?.();
                 chatRenderer.renderAuthorityApprovalCard(json.data || {});
+
+              } else if (json.type === 'authority_decision_resolved') {
+                if (_isBg) continue;
+                chatRenderer.renderAuthorityDecisionResolved(json.data || {});
 
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;
@@ -5511,6 +5523,40 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
     _appendViewReportLink,
     hasActiveStream,
   };
+
+  async function _submitAuthorityDecision(detail) {
+    const control = {
+      decisionId: String(detail?.decisionId || ''),
+      choice: String(detail?.choice || ''),
+      scope: String(detail?.scope || ''),
+    };
+    if (!control.decisionId || !['approve', 'deny'].includes(control.choice) || !['once', 'persistent'].includes(control.scope)) return;
+    for (let attempt = 0; (isStreaming || _sendInFlight) && attempt < 200; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    if (isStreaming || _sendInFlight) {
+      chatRenderer.resetAuthorityApprovalCard(control.decisionId);
+      uiModule.showError('The approval is ready, but the current response has not finished yet.');
+      return;
+    }
+    _pendingAuthorityControl = control;
+    _hideUserBubble = true;
+    await handleChatSubmit({ preventDefault() {} });
+    const unresolved = document.querySelector(
+      `.authority-approval-card[data-decision-id="${CSS.escape(control.decisionId)}"] .authority-approval-actions button:disabled`,
+    );
+    if (unresolved) chatRenderer.resetAuthorityApprovalCard(control.decisionId);
+  }
+
+  if (!window.__odysseus_authority_decision_bound) {
+    window.addEventListener('odysseus:authority-decision', event => {
+      _submitAuthorityDecision(event.detail || {}).catch(error => {
+        chatRenderer.resetAuthorityApprovalCard(event.detail?.decisionId);
+        uiModule.showError(`Approval failed: ${error?.message || error}`);
+      });
+    });
+    window.__odysseus_authority_decision_bound = true;
+  }
 
   // Single delegated handler for tool-call fold/expand. One listener on
   // document.body covers every .agent-thread-node — running, completed,

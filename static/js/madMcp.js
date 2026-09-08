@@ -79,6 +79,8 @@ function renderStatus(payload) {
   const configured = payload.configured === true;
   const connected = payload.status === 'connected';
   const disconnect = byId('mad-mcp-disconnect-btn');
+  const urlInput = byId('mad-mcp-portal-url');
+  if (urlInput && payload.portal_url) urlInput.value = payload.portal_url;
   if (disconnect) disconnect.hidden = !configured;
 
   if (connected) {
@@ -113,12 +115,14 @@ function setBusy(busy) {
   const connect = byId('mad-mcp-connect-btn');
   const disconnect = byId('mad-mcp-disconnect-btn');
   const input = byId('mad-mcp-master-key');
+  const urlInput = byId('mad-mcp-portal-url');
   if (connect) {
     connect.disabled = busy;
     connect.textContent = busy ? 'Connecting…' : 'Connect';
   }
   if (disconnect) disconnect.disabled = busy;
   if (input) input.disabled = busy;
+  if (urlInput) urlInput.disabled = busy;
 }
 
 async function readJson(response) {
@@ -150,7 +154,18 @@ async function refreshStatus() {
 async function connectPortal(event) {
   event.preventDefault();
   const input = byId('mad-mcp-master-key');
+  const urlInput = byId('mad-mcp-portal-url');
+  const portalUrl = urlInput ? urlInput.value.trim() : '';
   let key = input ? input.value.trim() : '';
+  if (!/^https?:\/\/[^\s]+$/i.test(portalUrl)) {
+    urlInput?.focus();
+    setProgress({
+      state: 'error',
+      title: 'A Portal MCP URL is required',
+      detail: 'Enter the exact credential-free HTTP(S) endpoint supplied by your Portal.',
+    });
+    return;
+  }
   if (key.length < 20) {
     input?.focus();
     setProgress({
@@ -170,7 +185,7 @@ async function connectPortal(event) {
     detail: 'Authenticating, initializing the native MCP session, and reading the Portal catalog…',
   });
 
-  const requestBody = JSON.stringify({ master_key: key });
+  const requestBody = JSON.stringify({ master_key: key, portal_url: portalUrl });
   key = '';
   if (input) input.value = '';
 

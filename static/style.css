@@ -9635,6 +9635,13 @@ body.fullwidth-chat .chat-history {
   padding: 12px;
 }
 
+/* A full assistant-turn disclosure belongs to the page flow.  Individual
+   legacy thinking widgets retain their compact scroll region. */
+.assistant-turn-disclosure .thinking-content.expanded {
+  max-height: none;
+  overflow: visible;
+}
+
 .thinking-content-inner {
   font-size: 0.85em;
   color: var(--fg);

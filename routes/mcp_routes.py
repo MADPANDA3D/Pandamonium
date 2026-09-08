@@ -25,7 +25,28 @@ router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
 MAD_MCP_PORTAL_ID = "mad-mcp-portal"
 MAD_MCP_PORTAL_NAME = "MAD MCP Portal"
-MAD_MCP_PORTAL_URL = "https://portal.madpanda3d.com/api/mcp"
+MAD_MCP_PORTAL_URL = os.getenv("MAD_MCP_PORTAL_URL", "").strip()
+
+
+def _validate_portal_url(value) -> str:
+    """Validate an operator/config supplied MCP endpoint without guessing it."""
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(400, "A Portal MCP URL is required")
+    url = value.strip().rstrip("/")
+    if len(url) > 2048 or any(ord(char) < 32 for char in url):
+        raise HTTPException(400, "The Portal MCP URL is invalid")
+    parsed = urllib.parse.urlparse(url)
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(400, "The Portal MCP URL must be a credential-free HTTP(S) endpoint")
+    return url
 
 
 def _validate_portal_master_key(value) -> str:
@@ -542,7 +563,13 @@ def setup_mcp_routes(mcp_manager: McpManager):
         if result.get("exit_code") != 0:
             return None
         payload = _portal_catalog_payload(result)
-        return _public_portal_catalog(payload) if payload is not None else None
+        catalog = _public_portal_catalog(payload) if payload is not None else None
+        if catalog and hasattr(mcp_manager, "set_connection_catalog_terms"):
+            mcp_manager.set_connection_catalog_terms(
+                MAD_MCP_PORTAL_ID,
+                [value for item in catalog["services"] for value in (item["id"], item["name"])],
+            )
+        return catalog
 
     def _require_ready_portal():
         db = SessionLocal()
@@ -680,6 +707,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
         try:
             srv = db.query(McpServer).filter(McpServer.id == MAD_MCP_PORTAL_ID).first()
             configured = bool(srv and _static_http_headers(srv.oauth_tokens))
+            portal_url = str(getattr(srv, "url", "") or "")
         finally:
             db.close()
         status = mcp_manager.get_server_status(MAD_MCP_PORTAL_ID)
@@ -691,6 +719,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
             "service_count": 0,
             "configured_service_count": 0,
             "catalog_tool_count": 0,
+            "portal_url": portal_url,
         }
         if response["status"] == "connected":
             catalog = await _read_portal_catalog()
@@ -983,6 +1012,11 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 snapshot = _portal_server_snapshot(existing)
             finally:
                 read_db.close()
+            portal_url = _validate_portal_url(
+                (body.get("portal_url") if isinstance(body, dict) else None)
+                or (snapshot or {}).get("url")
+                or MAD_MCP_PORTAL_URL
+            )
 
             try:
                 await mcp_manager.disconnect_server(MAD_MCP_PORTAL_ID)
@@ -990,7 +1024,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
                     server_id=MAD_MCP_PORTAL_ID,
                     name=MAD_MCP_PORTAL_NAME,
                     transport="http",
-                    url=MAD_MCP_PORTAL_URL,
+                    url=portal_url,
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 catalog = await _read_portal_catalog() if connected else None
@@ -1023,7 +1057,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 srv.command = None
                 srv.args = "[]"
                 srv.env = "{}"
-                srv.url = MAD_MCP_PORTAL_URL
+                srv.url = portal_url
                 srv.is_enabled = True
                 srv.oauth_config = None
                 srv.oauth_tokens = json.dumps({"static_bearer_token": token})
@@ -1034,6 +1068,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
                     "configured": True,
                     "status": status.get("status", "connected"),
                     "tool_count": _bounded_portal_count(status.get("tool_count")),
+                    "portal_url": portal_url,
                     **catalog,
                 }
             except Exception as exc:
@@ -1057,6 +1092,12 @@ def setup_mcp_routes(mcp_manager: McpManager):
                     McpServer.id == MAD_MCP_PORTAL_ID
                 ).first()
                 if srv:
+                    try:
+                        from src.integrations import delete_native_companion_for_server
+
+                        delete_native_companion_for_server(srv.name, srv.url)
+                    except Exception:
+                        logger.warning("Could not remove grouped API companion", exc_info=True)
                     db.delete(srv)
                     db.commit()
                 return {"configured": False, "status": "disconnected"}
@@ -1252,6 +1293,13 @@ def setup_mcp_routes(mcp_manager: McpManager):
                 raise HTTPException(404, "Server not found")
 
             await mcp_manager.disconnect_server(server_id)
+
+            try:
+                from src.integrations import delete_native_companion_for_server
+
+                delete_native_companion_for_server(srv.name, srv.url)
+            except Exception:
+                logger.warning("Could not remove grouped API companion", exc_info=True)
 
             db.delete(srv)
             db.commit()

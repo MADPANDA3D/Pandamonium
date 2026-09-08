@@ -460,6 +460,7 @@ class AuthorityStore:
         session_id: str,
         request_id: str,
         fingerprint: str,
+        action_effect: str,
         now: datetime,
         execution_binding: Mapping[str, Any],
     ) -> dict[str, Any] | None:
@@ -476,6 +477,8 @@ class AuthorityStore:
             if receipt.get("operator_id") != operator_id or receipt.get("agent_id") != agent_id:
                 continue
             if receipt.get("argument_fingerprint") != fingerprint:
+                continue
+            if receipt.get("action_effect") != action_effect:
                 continue
             if not self._binding_matches(receipt.get("execution") or {}, execution_binding):
                 continue
@@ -606,6 +609,77 @@ class AuthorityStore:
             **({"pending_action": pending} if pending else {}),
         }
 
+    def resolve_explicit_reply(
+        self,
+        decision_id: str,
+        *,
+        operator_id: str,
+        session_id: str,
+        choice: str,
+        scope: str = "once",
+    ) -> dict[str, Any]:
+        """Resolve one UI-selected decision and retain its exact pending call.
+
+        Unlike natural-language approval, this path accepts an explicit scope
+        from the authenticated approval card.  The decision must belong to the
+        current session; a stale or already-resolved card can never resume a
+        different action.
+        """
+        with self._lock:
+            state = self._read()
+            decision = state["decisions"].get(str(decision_id))
+            if not decision or decision.get("operator_id") != operator_id:
+                raise KeyError("authority_decision_not_found")
+            if str(decision.get("session_id") or "") != str(session_id or ""):
+                raise KeyError("authority_decision_not_found")
+            if decision.get("status") == "resolved":
+                return {
+                    "choice": "repeat",
+                    "decision": dict(decision),
+                    "error": "authority_decision_already_resolved",
+                }
+            expires = _parse_time(decision.get("expires_at"))
+            if decision.get("status") == "expired" or not expires or expires <= _now():
+                decision["status"] = "expired"
+                self._write(state)
+                return {
+                    "choice": "stale",
+                    "decision": dict(decision),
+                    "error": "authority_decision_expired",
+                }
+            if decision.get("decision") != "approval_required":
+                return {
+                    "choice": "stale",
+                    "decision": dict(decision),
+                    "error": "authority_decision_not_pending",
+                }
+            pending = deepcopy(self._pending_actions.get(str(decision_id)))
+            try:
+                receipt = self.resolve(
+                    str(decision_id),
+                    operator_id=operator_id,
+                    choice=choice,
+                    scope=scope,
+                )
+            except ValueError as exc:
+                if str(exc) in {
+                    "authority_execution_context_unavailable",
+                    "authority_execution_context_changed",
+                    "authority_decision_expired",
+                }:
+                    return {
+                        "choice": "stale",
+                        "decision": dict(decision),
+                        "error": str(exc),
+                    }
+                raise
+        return {
+            "choice": choice,
+            "decision": dict(decision),
+            "receipt": receipt,
+            **({"pending_action": pending} if choice == "approve" and pending else {}),
+        }
+
     def decide(
         self,
         call: Mapping[str, Any],
@@ -658,6 +732,7 @@ class AuthorityStore:
                     session_id=session,
                     request_id=str(call.get("request_id") or ""),
                     fingerprint=fingerprint,
+                    action_effect=effect,
                     now=now,
                     execution_binding=self._runtime_binding(configured_workspace),
                 )
@@ -787,6 +862,9 @@ class AuthorityStore:
                 "call_id": decision.get("call_id"),
                 "capability": decision.get("capability"),
                 "argument_fingerprint": decision["argument_fingerprint"],
+                "action_effect": decision.get("action_effect"),
+                "workspace": decision.get("workspace"),
+                "preview": deepcopy(decision.get("preview") or {}),
                 "execution": deepcopy(decision.get("execution") or {}),
                 "decision": "allow" if choice == "approve" else "deny",
                 "scope": scope,

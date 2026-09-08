@@ -405,6 +405,21 @@ _DOMAIN_TOOL_MAP = {
     "platform": {"get_runtime_status", "manage_mcp", "start_agent_task", "read_agent_task"},
 }
 
+_NATIVE_MCP_DIRECT_RULES = """\
+## Native MCP routing rules
+- Use the selected connection's exact qualified function schemas directly. Follow its declared discovery order and typed arguments.
+- Preserve the provider, profile, channel, and target named by the user. Never substitute a different provider or guess a REST path, HTTP method, service id, profile id, channel id, URL, or tool name.
+- Do not use manage_mcp, api_call, app_api, pipeline, shell, or curl as a fallback for a selected native MCP connection.
+- Safe tools declared read-only run without approval. If permission, service admission, or schema validation fails, report that bounded error clearly and stop instead of entering a discovery loop."""
+
+
+def _is_native_mcp_management_request(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:add|configure|connect|delete|disable|disconnect|enable|install|reconnect|remove|rename|setup)\b",
+        str(text or ""),
+        re.IGNORECASE,
+    ))
+
 _NETWORK_FILE_MUTATION_TOOLS = {
     "append_file",
     "bash",
@@ -3437,6 +3452,21 @@ async def stream_agent_loop(
         if "ui" in (_intent.get("domains") or set()):
             _relevant_tools.add("ui_control")
 
+    _native_mcp_tools: Set[str] = set()
+    if not guide_only and mcp_mgr and not _is_native_mcp_management_request(_last_user):
+        try:
+            _native_mcp_tools = mcp_mgr.native_tool_names_for_request(_last_user)
+        except Exception as _native_route_error:
+            logger.warning("[tool-rag] native MCP route selection failed: %s", _native_route_error)
+        if _native_mcp_tools:
+            if _relevant_tools is None:
+                from src.tool_index import ALWAYS_AVAILABLE
+                _relevant_tools = set(ALWAYS_AVAILABLE)
+            _relevant_tools.update(_native_mcp_tools)
+            _relevant_tools.difference_update({"manage_mcp", "api_call", "app_api", "pipeline"})
+            _needs_admin = False
+            logger.info("[tool-rag] Selected native MCP tools: %s", sorted(_native_mcp_tools))
+
     # If this turn targets the open document, keep editing tools available
     # regardless of which selection path (RAG, keyword, caller-provided) ran.
     # Do not leak document tools into unrelated turns just because the editor
@@ -3681,6 +3711,12 @@ async def stream_agent_loop(
         suppress_skills=_low_signal_turn,
         active_email=active_email,
     )
+    if _native_mcp_tools and messages and messages[0].get("role") == "system":
+        messages[0]["content"] = (
+            str(messages[0].get("content") or "")
+            + "\n\n"
+            + _NATIVE_MCP_DIRECT_RULES
+        )
     _mcp_action_policies = (
         mcp_mgr.get_readonly_action_policies()
         if mcp_mgr and hasattr(mcp_mgr, "get_readonly_action_policies")
@@ -3895,6 +3931,7 @@ async def stream_agent_loop(
         re.IGNORECASE,
     )
     _awaiting_user = False  # set by ask_user → end the turn and wait for a choice
+    _awaiting_authority = False  # approval card owns the next exact continuation
     _last_tool_catalog: Dict[str, List[Dict]] = {}
     _tool_catalog_dropped: Set[str] = set()
 
@@ -3991,7 +4028,15 @@ async def stream_agent_loop(
             # Local: only MCP schemas when message suggests MCP tool usage
             _last_content = _last_user.lower()
             _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
-            all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
+            all_tool_schemas = (
+                [
+                    schema for schema in mcp_schemas
+                    if not _relevant_tools
+                    or schema.get("function", {}).get("name") in _relevant_tools
+                ]
+                if (_wants_mcp and mcp_schemas)
+                else []
+            )
         _mcp_names = {
             schema.get("function", {}).get("name")
             for schema in mcp_schemas
@@ -5435,6 +5480,9 @@ async def stream_agent_loop(
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
+            if _authority_decision and _authority_decision.get("decision") == "approval_required":
+                _awaiting_authority = True
+                break
             if (
                 _ody_doc_stream_create_mode
                 and block.tool_type == "create_document"
@@ -5457,6 +5505,13 @@ async def stream_agent_loop(
         # arrives as the next message and the agent resumes from there. The
         # question text is already in the streamed response, so it persists.
         if _awaiting_user:
+            break
+
+        if _awaiting_authority:
+            if not full_response.strip():
+                _approval_message = "Approval is required before I can run that exact action."
+                full_response = _approval_message
+                yield f'data: {json.dumps({"delta": _approval_message})}\n\n'
             break
 
         if _doc_stream_create_completed:

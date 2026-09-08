@@ -63,8 +63,8 @@ following maintained platform capabilities.
   worker shows its allowlisted projects with tasks loaded beneath each project.
 - Tool-using assistant turns keep visible reasoning, status, and tool activity
   in one chronological disclosure above the final answer. The disclosure is
-  collapsed after completion and remains keyboard-accessible after reopening a
-  saved conversation.
+  collapsed after completion, expands in the page flow without a nested scroll
+  region, and remains keyboard-accessible after reopening a saved conversation.
 
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
 
@@ -74,6 +74,16 @@ following maintained platform capabilities.
 
 - Built-in tools, MCP servers, skills, files, shell, web, and browser-facing
   foreground actions behind owner, permission, approval, and evidence gates.
+- Native MCP connections route through their live handshake, catalog, and exact
+  typed tool schemas instead of guessed REST paths or duplicate API identities.
+- Approval cards offer deny, approve once, and explicit narrow approve-always;
+  persistent receipts remain inspectable and revocable, while target or argument
+  changes require a new decision.
+
+![Native MCP approval controls on desktop](docs/images/portal-native-approval-desktop.png)
+
+![Native MCP approval controls on mobile](docs/images/portal-native-approval-mobile.png)
+
 - Jarvis OS protocol coverage for identity, bounded context, memory provenance,
   action envelopes, authority receipts, learning controls, and operational
   traces. See the [runtime status](docs/jos-protocol-runtime-status.md).
