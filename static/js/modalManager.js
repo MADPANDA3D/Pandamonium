@@ -1585,7 +1585,6 @@ function _scanAndWire() {
     injectMinimizeButton(modal, id);
     if (!_isVisible(modal)) continue;
     if (!_state.has(id)) _autoRegister(id);
-    _applyPreferredDock(id, modal);
   }
 }
 const _scanTimer = setInterval(_scanAndWire, 1000);

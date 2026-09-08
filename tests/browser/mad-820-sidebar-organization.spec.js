@@ -59,6 +59,22 @@ function projectOrder(page) {
   );
 }
 
+async function dragBefore(page, sourceId, targetId) {
+  await page.evaluate(({ sourceId, targetId }) => {
+    const source = document.querySelector(`.list-item[data-session-id="${sourceId}"]`);
+    const target = document.querySelector(`.list-item[data-session-id="${targetId}"]`);
+    const handle = source.querySelector('.item-drag-handle');
+    const from = handle.getBoundingClientRect();
+    const to = target.getBoundingClientRect();
+    const event = (type, clientX, clientY) => new MouseEvent(type, {
+      bubbles: true, button: 0, clientX, clientY,
+    });
+    handle.dispatchEvent(event('mousedown', from.left + from.width / 2, from.top + from.height / 2));
+    document.dispatchEvent(event('mousemove', to.left + 8, Math.max(1, to.top - 8)));
+    document.dispatchEvent(event('mouseup', to.left + 8, Math.max(1, to.top - 8)));
+  }, { sourceId, targetId });
+}
+
 test('unfiled chats stay above Projects in their own bounded region without a synthetic folder', async ({ page }) => {
   const state = {
     sessions: [
@@ -210,4 +226,50 @@ test('local project order remains usable when preference storage is unavailable'
 
   await page.reload();
   await expect.poll(() => projectOrder(page)).toEqual(['Alpha', 'Beta']);
+});
+
+test('pinned and unfiled drag sorting preserve one combined session order', async ({ page }) => {
+  const state = {
+    sessions: [
+      sessionFixture('pin-new', 'Pinned new', { pinned: true, minutes: 0 }),
+      sessionFixture('pin-old', 'Pinned old', { pinned: true, minutes: 10 }),
+      sessionFixture('loose-new', 'Loose new', { minutes: 0 }),
+      sessionFixture('loose-old', 'Loose old', { minutes: 10 }),
+    ],
+    remoteOrder: null,
+    prefStatus: 200,
+    puts: [],
+  };
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('odysseus-session-sort')) {
+      localStorage.setItem('odysseus-session-sort', 'group');
+    }
+    if (!localStorage.getItem('session-order')) {
+      localStorage.setItem('session-order', JSON.stringify([
+        'pin-old', 'loose-old', 'pin-new', 'loose-new',
+      ]));
+    }
+  });
+  await mockShell(page, state);
+  await page.goto('/static/index.html');
+  await page.evaluate(() => document.body.classList.add('rearrange-mode'));
+
+  const ids = selector => page.locator(selector).evaluateAll(
+    items => items.map(item => item.dataset.sessionId),
+  );
+  await expect.poll(() => ids('#session-list > .list-item[data-session-id]'))
+    .toEqual(['pin-old', 'pin-new']);
+  await dragBefore(page, 'pin-new', 'pin-old');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('session-order'))))
+    .toEqual(['pin-new', 'loose-old', 'pin-old', 'loose-new']);
+
+  await dragBefore(page, 'loose-new', 'loose-old');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('session-order'))))
+    .toEqual(['pin-new', 'loose-new', 'pin-old', 'loose-old']);
+
+  await page.reload();
+  await expect.poll(() => ids('#session-list > .list-item[data-session-id]'))
+    .toEqual(['pin-new', 'pin-old']);
+  await expect.poll(() => ids('#session-unfiled-region .list-item[data-session-id]'))
+    .toEqual(['loose-new', 'loose-old']);
 });

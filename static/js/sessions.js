@@ -1192,6 +1192,7 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
+  let restoredSessionOrder = false;
   const currentTarget = getSelectedAgentTarget()
     || sessions.find(session => session.id === currentSessionId)?.agent_target
     || 'jarvis';
@@ -1207,9 +1208,10 @@ function _renderSessionListImpl() {
   if (savedOrder) {
     try {
       const orderIds = JSON.parse(savedOrder);
-      const sessionMap = new Map(orderedSessions.map(s => [s.id, s]));
+      const sessionMap = new Map(orderedSessions.map(s => [String(s.id), s]));
       const ordered = [];
       orderIds.forEach(id => {
+        id = String(id);
         if (sessionMap.has(id)) {
           ordered.push(sessionMap.get(id));
           sessionMap.delete(id);
@@ -1218,6 +1220,7 @@ function _renderSessionListImpl() {
       // Append any new sessions not in saved order
       sessionMap.forEach(s => ordered.push(s));
       orderedSessions = ordered;
+      restoredSessionOrder = Array.isArray(orderIds) && orderIds.length > 0;
     } catch (e) {
       console.warn('Failed to restore session order:', e);
     }
@@ -1230,7 +1233,8 @@ function _renderSessionListImpl() {
 
   // Favorites are real pinned chats. Keep them in one predictable place
   // instead of burying them inside date buckets or project folders.
-  const pinnedSessions = orderedSessions.filter(s => s.is_important).sort(_compareSessionsByActivity);
+  const pinnedSessions = orderedSessions.filter(s => s.is_important);
+  if (!restoredSessionOrder) pinnedSessions.sort(_compareSessionsByActivity);
   orderedSessions = orderedSessions.filter(s => !s.is_important);
   if (pinnedSessions.length) {
     _frag.appendChild(_createSidebarNavLabel('Pinned'));
@@ -2476,11 +2480,31 @@ export function initDragSort() {
 
   // Direct root sessions are pinned rows. Exclude chats nested in the bounded
   // recent region and project folders so dragSort always moves siblings.
+  const persistSessionOrder = (items) => {
+    const movedIds = items.map(item => String(item.dataset.sessionId || '')).filter(Boolean);
+    if (!movedIds.length) return;
+    const moved = new Set(movedIds);
+    const sessionIds = sessions.map(session => String(session.id));
+    const existing = Storage.getJSON('session-order', []);
+    const seen = new Set();
+    const baseline = [...(Array.isArray(existing) ? existing : []), ...sessionIds]
+      .map(String)
+      .filter(id => {
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+    let index = 0;
+    const order = baseline.map(id => moved.has(id) ? movedIds[index++] : id);
+    order.push(...movedIds.slice(index));
+    Storage.setJSON('session-order', order);
+  };
+
   window.dragSortModule.enable('session-list', '.list-item', {
     instanceKey: 'session-items',
     handleSelector: '.item-drag-handle',
     excludeSelector: '.session-unfiled-region .list-item, .session-folder-content .list-item',
-    storageKey: 'session-order',
+    onReorder: persistSessionOrder,
   });
 
   const unfiledRegion = list.querySelector('.session-unfiled-region');
@@ -2489,7 +2513,7 @@ export function initDragSort() {
     window.dragSortModule.enable(unfiledRegion.id, '.list-item', {
       instanceKey: 'session-unfiled-items',
       handleSelector: '.item-drag-handle',
-      storageKey: 'session-order',
+      onReorder: persistSessionOrder,
     });
   }
 

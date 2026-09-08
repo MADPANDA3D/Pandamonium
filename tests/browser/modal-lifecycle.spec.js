@@ -117,6 +117,38 @@ test('declared tools default right and same-side switching minimizes without tea
 });
 
 
+test('declared default dock does not override a user undock or side move', async ({ page }) => {
+  await openHarness(page);
+  await page.evaluate(() => {
+    const modal = document.getElementById('mad-mcp-modal');
+    modal.classList.remove('hidden');
+    modal.style.display = '';
+    window.__modalHarness.register('mad-mcp-modal', { closeFn: () => {}, restoreFn: () => {} });
+  });
+
+  const portal = page.locator('#mad-mcp-modal');
+  await expect(portal).toHaveClass(/modal-right-docked/);
+  await page.evaluate(async () => {
+    const modal = document.getElementById('mad-mcp-modal');
+    const snap = await import('/static/js/modalSnap.js');
+    snap.clearRightDock(modal);
+    document.body.appendChild(document.createElement('i')).remove();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await expect(portal).not.toHaveClass(/modal-right-docked|modal-left-docked/);
+
+  await page.evaluate(async () => {
+    const modal = document.getElementById('mad-mcp-modal');
+    const snap = await import('/static/js/modalSnap.js');
+    snap.applyEdgeDock(modal, 'left');
+    document.body.appendChild(document.createElement('i')).remove();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  await expect(portal).toHaveClass(/modal-left-docked/);
+  await expect(portal).not.toHaveClass(/modal-right-docked/);
+});
+
+
 test('existing modal-minimize button is bound and restores through the shared lifecycle', async ({ page }) => {
   await openHarness(page);
 
