@@ -1177,18 +1177,6 @@ async def _startup_event():
         except BaseException as e:
             logger.warning(f"MCP startup failed (non-critical): {type(e).__name__}: {e}")
         try:
-            from src.integrations import reconcile_native_mcp_companion_links
-
-            linked = reconcile_native_mcp_companion_links()
-            if linked:
-                logger.info("Grouped %d legacy API connection(s) with native MCP", linked)
-        except BaseException as e:
-            logger.warning(
-                "Native MCP companion reconciliation failed (non-critical): %s: %s",
-                type(e).__name__,
-                e,
-            )
-        try:
             from src.extension_installer import default_extensions_root
             from src.extension_mcp_adapter import mcp_extension_adapter
             from src.extension_registry import ExtensionRegistry

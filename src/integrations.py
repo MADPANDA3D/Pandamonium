@@ -275,53 +275,6 @@ def native_mcp_companions(integrations: List[Dict[str, Any]]) -> Dict[str, Dict[
     return matches
 
 
-def reconcile_native_mcp_companion_links() -> int:
-    """Persist unambiguous logical API-to-MCP links without trusting origin.
-
-    Reverse proxies commonly expose a native MCP transport and its legacy REST
-    credential on different origins, so origin equality cannot prove the link.
-    A one-time migration may bind them only when the normalized identity is
-    unique on both sides.  Future reads then use the explicit server id above;
-    ambiguous or missing identities are left untouched.
-    """
-    try:
-        from core.database import McpServer, SessionLocal
-
-        db = SessionLocal()
-        try:
-            servers = db.query(McpServer).all()
-        finally:
-            db.close()
-    except Exception:
-        return 0
-
-    integrations = load_integrations()
-    server_groups: Dict[frozenset[str], list[Any]] = {}
-    integration_groups: Dict[frozenset[str], list[Dict[str, Any]]] = {}
-    for server in servers:
-        identity = _connection_identity_tokens(getattr(server, "name", ""))
-        if identity:
-            server_groups.setdefault(identity, []).append(server)
-    for integration in integrations:
-        identity = _connection_identity_tokens(integration.get("name"))
-        if identity:
-            integration_groups.setdefault(identity, []).append(integration)
-
-    changed = 0
-    for identity, rows in integration_groups.items():
-        candidates = server_groups.get(identity, [])
-        if len(rows) != 1 or len(candidates) != 1:
-            continue
-        integration = rows[0]
-        if integration.get("native_mcp_server_id"):
-            continue
-        integration["native_mcp_server_id"] = str(candidates[0].id)
-        changed += 1
-    if changed:
-        save_integrations(integrations)
-    return changed
-
-
 def delete_native_companion_for_server(name: Any, url: Any) -> bool:
     """Delete only the one legacy API row proven to be the same connection."""
     identity = _connection_identity_tokens(name)
