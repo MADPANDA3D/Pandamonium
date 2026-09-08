@@ -650,6 +650,7 @@ async def build_chat_context(
     use_enhanced_message: bool = False,
     agent_mode: bool = False,
     allow_tool_preprocessing: bool = True,
+    persist_user: bool = True,
 ) -> ChatContext:
     """Build the full context (preface + messages) for an LLM call.
 
@@ -670,12 +671,11 @@ async def build_chat_context(
         allow_tool_preprocessing=allow_tool_preprocessing,
     )
 
-    # Add user message to history
-    add_user_message(sess, chat_handler, preprocessed, incognito=incognito)
-
-    # Fire events
-    if not incognito:
-        fire_message_event(request, webhook_manager, session_id, sess, message, compare_mode)
+    # Approval-card continuations are control-plane events, not new user chat.
+    if persist_user:
+        add_user_message(sess, chat_handler, preprocessed, incognito=incognito)
+        if not incognito:
+            fire_message_event(request, webhook_manager, session_id, sess, message, compare_mode)
 
     # Resolve owner-scoped prefs/context. Browser requests keep the cookie user;
     # bearer-token chat requests use the token owner instead of the "api" sentinel.

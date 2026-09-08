@@ -535,8 +535,12 @@ export function autoResize(textarea) {
   let clone = textarea._resizeClone;
   if (!clone) {
     clone = textarea.cloneNode(false);
+    clone.removeAttribute('id');
+    clone.setAttribute('aria-hidden', 'true');
     clone.style.cssText = getComputedStyle(textarea).cssText;
     clone.style.position = 'absolute';
+    clone.style.left = '0';
+    clone.style.top = '0';
     clone.style.visibility = 'hidden';
     clone.style.height = '0';
     clone.style.transition = 'none';

@@ -401,6 +401,63 @@ def test_changed_arguments_do_not_consume_natural_approval_receipt(tmp_path):
     assert changed["decision"] == "approval_required"
 
 
+def test_explicit_ui_approval_resumes_exact_call_and_persistent_scope_is_revocable(tmp_path):
+    store = _store(tmp_path)
+    call = _call(arguments={"action": "send", "channel": "general", "content": "hello"})
+    pending = store.decide(call, operator_id="leo", session_id="session-1")
+
+    resolved = store.resolve_explicit_reply(
+        pending["decision_id"],
+        operator_id="leo",
+        session_id="session-1",
+        choice="approve",
+        scope="persistent",
+    )
+
+    assert resolved["choice"] == "approve"
+    assert resolved["receipt"]["scope"] == "persistent"
+    assert resolved["pending_action"]["call"] == call
+    assert resolved["receipt"]["preview"] == pending["preview"]
+    repeated = store.resolve_explicit_reply(
+        pending["decision_id"],
+        operator_id="leo",
+        session_id="session-1",
+        choice="approve",
+        scope="persistent",
+    )
+    assert repeated["choice"] == "repeat"
+    revoked = store.revoke(resolved["receipt"]["receipt_id"], operator_id="leo")
+    assert revoked["status"] == "revoked"
+
+
+def test_explicit_ui_approval_rejects_cross_session_and_effect_changes(tmp_path):
+    store = _store(tmp_path)
+    call = _call(name="broker_call", target="mcp", arguments={"target": "general"})
+    call["capability_policy"] = {"action_effect": "external_publication_or_communication"}
+    pending = store.decide(call, operator_id="leo", session_id="session-1")
+    with pytest.raises(KeyError):
+        store.resolve_explicit_reply(
+            pending["decision_id"],
+            operator_id="leo",
+            session_id="session-2",
+            choice="approve",
+            scope="persistent",
+        )
+    store.resolve_explicit_reply(
+        pending["decision_id"],
+        operator_id="leo",
+        session_id="session-1",
+        choice="approve",
+        scope="persistent",
+    )
+    changed = dict(call)
+    changed["request_id"] = "request-2"
+    changed["capability_policy"] = {"action_effect": "credential_or_auth_change"}
+    decision = store.decide(changed, operator_id="leo", session_id="session-1")
+    assert argument_fingerprint(changed) == argument_fingerprint(call)
+    assert decision["decision"] == "approval_required"
+
+
 def test_only_one_material_gate_can_be_pending_per_operator_session(tmp_path):
     store = _store(tmp_path)
     first = store.decide(_call(), operator_id="leo", session_id="session-1")
@@ -464,6 +521,8 @@ async def test_agent_loop_requires_then_consumes_exact_external_approval(monkeyp
     first = await run_once()
     approval = next(row["data"] for row in first if row.get("type") == "authority_approval_required")
     assert executions == []
+    assert not any(row.get("type") == "rounds_exhausted" for row in first)
+    assert any("Approval is required" in row.get("delta", "") for row in first)
     store.resolve(
         approval["decision_id"],
         operator_id="local-operator",

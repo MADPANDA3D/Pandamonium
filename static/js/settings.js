@@ -3918,8 +3918,13 @@ async function initUnifiedIntegrations() {
       fetch('/api/calendar/calendars', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { calendars: [] }).catch(() => ({ calendars: [] })),
     ]);
     const items = [];
+    const nativeApiByMcpId = new Map();
+    for (const intg of (apiRes.integrations || [])) {
+      if (intg.native_connection?.id) nativeApiByMcpId.set(String(intg.native_connection.id), intg);
+    }
     // API integrations
     for (const intg of (apiRes.integrations || [])) {
+      if (intg.native_connection?.id) continue;
       items.push({ type: 'api', id: intg.id, name: intg.name || 'Unnamed', detail: intg.base_url || '', enabled: intg.enabled !== false, data: intg });
     }
     // CalDAV — one card per account
@@ -3966,7 +3971,9 @@ async function initUnifiedIntegrations() {
     const mcpList = Array.isArray(mcpRes) ? mcpRes : (mcpRes.servers || []);
     for (const srv of mcpList) {
       const statusText = srv.needs_oauth ? 'needs auth' : srv.status === 'connected' ? `${srv.enabled_tool_count}/${srv.tool_count} tools` : srv.status === 'error' ? 'error' : 'disconnected';
-      items.push({ type: 'mcp', id: srv.id || srv.name, name: srv.name || 'MCP Server', detail: statusText, enabled: srv.is_enabled !== false, data: srv });
+      const companionApi = nativeApiByMcpId.get(String(srv.id || ''));
+      const detail = companionApi ? `${statusText} · API credential grouped` : statusText;
+      items.push({ type: 'mcp', id: srv.id || srv.name, name: srv.name || 'MCP Server', detail, enabled: srv.is_enabled !== false, data: { ...srv, companion_api: companionApi || null } });
     }
     for (const tok of (Array.isArray(tokenRes) ? tokenRes : [])) {
       const scopes = tok.scopes || [];

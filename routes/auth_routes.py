@@ -725,8 +725,17 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         if not user or not auth_manager.is_admin(user):
             raise HTTPException(403, "Admin only")
         items = load_integrations()
+        from src.integrations import native_mcp_companions
+
+        companions = native_mcp_companions(items)
         # Mask API keys for frontend display
-        safe = [mask_integration_secret(item) for item in items]
+        safe = []
+        for item in items:
+            projected = mask_integration_secret(item)
+            companion = companions.get(str(item.get("id") or ""))
+            if companion:
+                projected["native_connection"] = companion
+            safe.append(projected)
         return {"integrations": safe}
 
     @router.get("/integrations/presets")

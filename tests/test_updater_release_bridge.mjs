@@ -207,7 +207,7 @@ async function activate(
       return 0;
     },
     caches: {
-      keys: async () => ['pandamonium-v389'],
+      keys: async () => ['pandamonium-v390'],
       delete: async key => {
         deleted.push(key);
         return true;
@@ -282,7 +282,7 @@ async function activate(
   return { activationPendingForNavigation, claimed, deleted, messages, navigated, statusRequests };
 }
 
-const futureWorker = currentWorker.replace('pandamonium-v389', 'pandamonium-v390');
+const futureWorker = currentWorker.replace('pandamonium-v390', 'pandamonium-v391');
 const recovered = await activate(futureWorker, [
   new Error('restart gap'),
   { status: 503 },
@@ -291,12 +291,12 @@ const recovered = await activate(futureWorker, [
 ], { includeClosedClient: true });
 assert.equal(recovered.activationPendingForNavigation, null);
 assert.equal(recovered.claimed, 1);
-assert.deepEqual(recovered.deleted, ['pandamonium-v389']);
+assert.deepEqual(recovered.deleted, ['pandamonium-v390']);
 assert.equal(recovered.statusRequests, 4);
 assert.equal(recovered.navigated.length, 1);
 assert.equal(
   new URL(recovered.navigated[0]).searchParams.get('pandamonium-update-reconcile'),
-  'pandamonium-v390',
+  'pandamonium-v391',
 );
 
 const lateReplacement = await activate(
@@ -359,4 +359,4 @@ for (const terminal of ['failed', 'recovered', 'rolled_back']) {
   assert.equal(result.navigated.length, 1);
 }
 
-console.log('MAD-839 release bridge: PASS (v1.0.21 manual bridge; v1.0.23 future recovery bounded)');
+console.log('MAD-839 release bridge: PASS (v1.0.21 manual bridge; v1.0.24 future recovery bounded)');

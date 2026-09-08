@@ -10,6 +10,7 @@ import routes.mcp_routes as mcp_routes
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PORTAL_URL = "https://portal.example.test/api/mcp"
 
 
 class FakeRequest:
@@ -262,7 +263,10 @@ def test_portal_connect_proves_catalog_before_persisting_and_never_returns_key(m
     connect = _endpoint(manager, "/api/mcp/portal/connect", "POST")
     master_key = "fixture-master-key-123456789"
 
-    response = asyncio.run(connect(FakeRequest({"master_key": master_key})))
+    response = asyncio.run(connect(FakeRequest({
+        "master_key": master_key,
+        "portal_url": PORTAL_URL,
+    })))
 
     assert response["configured"] is True
     assert response["configured_service_count"] == 1
@@ -272,6 +276,7 @@ def test_portal_connect_proves_catalog_before_persisting_and_never_returns_key(m
     assert manager.connect_calls[0]["headers"] == {
         "Authorization": f"Bearer {master_key}"
     }
+    assert manager.connect_calls[0]["url"] == PORTAL_URL
     assert db.commits == 1
 
 
@@ -284,7 +289,7 @@ def test_portal_connect_failure_keeps_previous_encrypted_credential(monkeypatch)
         command=None,
         args="[]",
         env="{}",
-        url=mcp_routes.MAD_MCP_PORTAL_URL,
+        url=PORTAL_URL,
         is_enabled=True,
         oauth_tokens=json.dumps({"static_bearer_token": old_key}),
     )
@@ -296,7 +301,10 @@ def test_portal_connect_failure_keeps_previous_encrypted_credential(monkeypatch)
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(
-            connect(FakeRequest({"master_key": "fixture-invalid-key-123456789"}))
+                connect(FakeRequest({
+                    "master_key": "fixture-invalid-key-123456789",
+                    "portal_url": PORTAL_URL,
+                }))
         )
 
     assert exc.value.status_code == 502
@@ -528,7 +536,45 @@ def test_email_library_exposes_large_keyboard_accessible_mailbox_tabs():
     assert "height:min(820px, 88vh)" in source
     assert ".email-mailbox-tabs" in css
     assert ".portal-mailbox-grid" in css
-    assert mcp_routes.MAD_MCP_PORTAL_URL not in source
+    assert "https://portal.madpanda3d.com/api/mcp" not in source
+
+
+def test_portal_connect_is_idempotent_and_reuses_one_native_identity(monkeypatch):
+    db = FakeDb()
+    manager = FakeManager([True, True])
+    monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+    connect = _endpoint(manager, "/api/mcp/portal/connect", "POST")
+
+    for suffix in ("one", "two"):
+        response = asyncio.run(connect(FakeRequest({
+            "master_key": f"fixture-master-key-{suffix}-123456789",
+            "portal_url": PORTAL_URL,
+        })))
+        assert response["configured"] is True
+
+    assert db.server.id == mcp_routes.MAD_MCP_PORTAL_ID
+    assert db.server.url == PORTAL_URL
+    assert db.commits == 2
+    assert len(manager.connect_calls) == 2
+
+
+@pytest.mark.parametrize("portal_url", ["", "ftp://portal.example.test/mcp", "https://user:pass@portal.example.test/mcp", "https://portal.example.test/mcp?token=nope"])
+def test_portal_connect_rejects_missing_or_credential_bearing_urls(monkeypatch, portal_url):
+    db = FakeDb()
+    manager = FakeManager([True])
+    monkeypatch.setattr(mcp_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(mcp_routes, "require_admin", lambda _request: None)
+    connect = _endpoint(manager, "/api/mcp/portal/connect", "POST")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(connect(FakeRequest({
+            "master_key": "fixture-master-key-url-123456789",
+            "portal_url": portal_url,
+        })))
+
+    assert exc.value.status_code == 400
+    assert manager.connect_calls == []
 
 
 def test_email_library_selects_portal_google_profiles_and_keeps_reader_read_only():

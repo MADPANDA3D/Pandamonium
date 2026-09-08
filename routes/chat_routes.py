@@ -712,6 +712,9 @@ def setup_chat_routes(
         agent_target = str(form_data.get("agent_target") or "").strip()
         worker_workspace = str(form_data.get("worker_workspace") or "").strip()
         worker_thread_id = str(form_data.get("worker_thread_id") or "").strip()
+        authority_decision_id = str(form_data.get("authority_decision_id") or "").strip()
+        authority_choice = str(form_data.get("authority_choice") or "").strip().lower()
+        authority_scope = str(form_data.get("authority_scope") or "").strip().lower()
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
@@ -728,6 +731,20 @@ def setup_chat_routes(
                 worker_workspace = str(body.get("worker_workspace") or "").strip()
             if not worker_thread_id:
                 worker_thread_id = str(body.get("worker_thread_id") or "").strip()
+            if not authority_decision_id:
+                authority_decision_id = str(body.get("authority_decision_id") or "").strip()
+            if not authority_choice:
+                authority_choice = str(body.get("authority_choice") or "").strip().lower()
+            if not authority_scope:
+                authority_scope = str(body.get("authority_scope") or "").strip().lower()
+        _authority_control = bool(authority_decision_id or authority_choice or authority_scope)
+        if _authority_control and not (
+            authority_decision_id
+            and authority_choice in {"approve", "deny"}
+            and authority_scope in {"once", "persistent"}
+            and (authority_choice == "approve" or authority_scope == "once")
+        ):
+            raise HTTPException(400, "Invalid authority decision control")
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -853,7 +870,8 @@ def setup_chat_routes(
                 or bool(form_data.get("attachments"))
             )
             message, session = coerce_message_and_session(
-                body, message, session, session_manager, allow_empty=_has_atts,
+                body, message, session, session_manager,
+                allow_empty=(_has_atts or _authority_control),
             )
             # Verify ownership AFTER coerce (which may resolve a default session)
             # but BEFORE loading. Prevents cross-user session hijack.
@@ -909,13 +927,24 @@ def setup_chat_routes(
                     _tool_intent.category,
                     _tool_intent.reason,
                 )
-            _approval_reply = authority_store.resolve_natural_reply(
-                message,
-                operator_id=str(operator_identity(owner) or ""),
-                session_id=session,
-            )
+            if _authority_control:
+                _approval_reply = authority_store.resolve_explicit_reply(
+                    authority_decision_id,
+                    operator_id=str(operator_identity(owner) or ""),
+                    session_id=session,
+                    choice=authority_choice,
+                    scope=authority_scope,
+                )
+            else:
+                _approval_reply = authority_store.resolve_natural_reply(
+                    message,
+                    operator_id=str(operator_identity(owner) or ""),
+                    session_id=session,
+                )
         except SessionNotFoundError as e:
             raise HTTPException(404, str(e))
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
         except (ValueError, ValidationError):
             raise HTTPException(400, "Invalid request parameters")
 
@@ -982,6 +1011,7 @@ def setup_chat_routes(
             # manage_skills. Incognito still strips it.
             agent_mode=(chat_mode == "agent" and not hermes_agent_api),
             allow_tool_preprocessing=allow_tool_preprocessing,
+            persist_user=not _authority_control,
         )
         active_character_name = selected_agent_label or ctx.preset.character_name
 
@@ -1272,6 +1302,9 @@ def setup_chat_routes(
             # Emit which memories were injected into context (captured before stream)
             if ctx.used_memories:
                 yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
+
+            if _authority_control and _approval_reply:
+                yield f'data: {json.dumps({"type": "authority_decision_resolved", "data": {"choice": _approval_reply.get("choice"), "decision": _approval_reply.get("decision"), "receipt": _approval_reply.get("receipt")}})}\n\n'
 
             if _approval_reply and _approval_reply["choice"] in {"deny", "stale", "repeat"}:
                 _capability = str((_approval_reply["decision"].get("capability") or {}).get("name") or "action")
@@ -1754,14 +1787,15 @@ def setup_chat_routes(
                                 )
                                 if _saved_id:
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
-                                run_post_response_tasks(
-                                    sess, session_manager, session, message, full_response,
-                                    _metrics_to_save, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
-                                    incognito=incognito, compare_mode=compare_mode,
-                                    character_name=active_character_name,
-                                    owner=_user,
-                                    allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
-                                )
+                                if not _authority_control:
+                                    run_post_response_tasks(
+                                        sess, session_manager, session, message, full_response,
+                                        _metrics_to_save, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
+                                        incognito=incognito, compare_mode=compare_mode,
+                                        character_name=active_character_name,
+                                        owner=_user,
+                                        allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
+                                    )
                             _stream_set(session, status="done")
                             record_operational_event(
                                 request_id=_chat_request_id,
@@ -1979,18 +2013,19 @@ def setup_chat_routes(
                                     if full_response:
                                         _retire_synthesized_worker_results(_metrics_to_save, _user, session)
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
-                                run_post_response_tasks(
-                                    sess, session_manager, session, message, _response_to_save,
-                                    _metrics_to_save, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
-                                    incognito=incognito, compare_mode=compare_mode,
-                                    character_name=active_character_name,
-                                                            agent_rounds=_agent_rounds,
-                                    agent_tool_calls=_agent_tool_calls,
-                                    skills_manager=skills_manager,
-                                    owner=_user,
-                                    extract_skills=user_requested_agent,
-                                    allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
-                                )
+                                if not _authority_control:
+                                    run_post_response_tasks(
+                                        sess, session_manager, session, message, _response_to_save,
+                                        _metrics_to_save, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
+                                        incognito=incognito, compare_mode=compare_mode,
+                                        character_name=active_character_name,
+                                        agent_rounds=_agent_rounds,
+                                        agent_tool_calls=_agent_tool_calls,
+                                        skills_manager=skills_manager,
+                                        owner=_user,
+                                        extract_skills=user_requested_agent,
+                                        allow_background_extraction=(not hermes_agent_api and not tool_policy.block_all_tool_calls),
+                                    )
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):

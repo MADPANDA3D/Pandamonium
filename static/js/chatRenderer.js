@@ -2120,28 +2120,8 @@ export function displayMetrics(messageElement, metrics) {
 /** Remove any unanswered multiple-choice cards currently in the chat. */
 export function removeAskUserCards(root) {
   const scope = root || document.getElementById('chat-history') || document;
-  scope.querySelectorAll('.ask-user-card').forEach((node) => node.remove());
-}
-
-function _resumeApprovedAction(attempt = 0) {
-  const input = uiModule.el('message');
-  const sendButton = document.querySelector('.send-btn');
-  const busy = sendButton && (
-    sendButton.disabled
-    || sendButton.dataset.mode === 'streaming'
-    || sendButton.classList.contains('send-pending')
-  );
-  if ((!input || !sendButton || busy) && attempt < 100) {
-    setTimeout(() => _resumeApprovedAction(attempt + 1), 50);
-    return;
-  }
-  if (!input || !sendButton || busy) {
-    uiModule.showError('Approved, but automatic continuation could not start. Send “Approve” once to resume.');
-    return;
-  }
-  input.value = 'Approve';
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  sendButton.click();
+  scope.querySelectorAll('.ask-user-card:not(.authority-approval-card):not(.authority-receipt-card)')
+    .forEach((node) => node.remove());
 }
 
 export function renderAuthorityApprovalCard(payload) {
@@ -2182,40 +2162,116 @@ export function renderAuthorityApprovalCard(payload) {
 
   const actions = document.createElement('div');
   actions.className = 'authority-approval-actions';
-  const resolve = async (choice) => {
+  const resolve = (choice, scope) => {
     actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
-    try {
-      const response = await fetch(`/api/authority/decisions/${encodeURIComponent(decisionId)}`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ choice, scope: 'once' }),
-      });
-      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
-      question.textContent = choice === 'approve'
-        ? `Approved once: ${capability}. Running the exact pending action now.`
-        : `Denied: ${capability}`;
-      preview.remove();
-      actions.remove();
-      if (choice === 'approve') {
-        _resumeApprovedAction();
-      }
-    } catch (error) {
-      actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
-      uiModule.showError(`Approval failed: ${error.message || error}`);
-    }
+    question.textContent = choice === 'approve'
+      ? `${scope === 'persistent' ? 'Approving always' : 'Approving once'}: ${capability}…`
+      : `Denying: ${capability}…`;
+    window.dispatchEvent(new CustomEvent('odysseus:authority-decision', {
+      detail: { decisionId, choice, scope },
+    }));
   };
-  for (const [choice, label] of [['approve', 'Approve once'], ['deny', 'Deny']]) {
+  for (const [choice, scope, label] of [
+    ['approve', 'once', 'Approve once'],
+    ['approve', 'persistent', 'Approve always'],
+    ['deny', 'once', 'Deny'],
+  ]) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ask-user-option';
     button.textContent = label;
-    button.addEventListener('click', () => resolve(choice));
+    button.addEventListener('click', () => resolve(choice, scope));
     actions.appendChild(button);
   }
   card.appendChild(actions);
   chatBox.appendChild(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  return card;
+}
+
+export function renderAuthorityDecisionResolved(payload) {
+  const decision = payload?.decision || {};
+  const decisionId = String(decision.decision_id || '');
+  const capability = String(decision?.capability?.name || 'requested action');
+  const card = decisionId
+    ? document.querySelector(`.authority-approval-card[data-decision-id="${CSS.escape(decisionId)}"]`)
+    : null;
+  if (card) {
+    const question = card.querySelector('.ask-user-question');
+    const preview = card.querySelector('.authority-approval-preview');
+    const actions = card.querySelector('.authority-approval-actions');
+    if (question) {
+      question.textContent = payload?.choice === 'approve'
+        ? `Approved ${payload?.receipt?.scope === 'persistent' ? 'always' : 'once'}: ${capability}. Running the exact pending action now.`
+        : payload?.choice === 'deny'
+          ? `Denied: ${capability}`
+          : `Approval is no longer active: ${capability}`;
+    }
+    preview?.remove();
+    actions?.remove();
+  }
+  if (payload?.choice === 'approve' && payload?.receipt?.scope === 'persistent') {
+    renderAuthorityReceiptCard(payload.receipt);
+  }
+}
+
+export function resetAuthorityApprovalCard(decisionId) {
+  const id = String(decisionId || '');
+  const card = id
+    ? document.querySelector(`.authority-approval-card[data-decision-id="${CSS.escape(id)}"]`)
+    : null;
+  if (!card) return;
+  const capability = String(card.getAttribute('aria-label') || '')
+    .replace(/^Approval required for\s*/, '') || 'requested action';
+  const question = card.querySelector('.ask-user-question');
+  if (question) question.textContent = `Approval required: ${capability}`;
+  card.querySelectorAll('.authority-approval-actions button').forEach(button => {
+    button.disabled = false;
+  });
+}
+
+export function renderAuthorityReceiptCard(receipt) {
+  const receiptId = String(receipt?.receipt_id || '');
+  const chatBox = document.getElementById('chat-history');
+  if (!receiptId || !chatBox || receipt?.status !== 'active' || receipt?.scope !== 'persistent') return null;
+  if (chatBox.querySelector(`.authority-receipt-card[data-receipt-id="${CSS.escape(receiptId)}"]`)) return null;
+  const card = document.createElement('div');
+  card.className = 'ask-user-card authority-receipt-card';
+  card.dataset.receiptId = receiptId;
+  card.setAttribute('role', 'status');
+  const title = document.createElement('div');
+  title.className = 'ask-user-question';
+  title.textContent = `Always approved: ${String(receipt?.capability?.name || 'requested action')}`;
+  const context = document.createElement('div');
+  context.className = 'authority-approval-context';
+  context.textContent = [
+    receipt?.action_effect,
+    receipt?.capability?.target,
+    receipt?.workspace,
+    receiptId,
+  ].filter(Boolean).join(' · ');
+  const preview = document.createElement('pre');
+  preview.className = 'authority-approval-preview';
+  preview.textContent = JSON.stringify(receipt?.preview || {}, null, 2);
+  const revoke = document.createElement('button');
+  revoke.type = 'button';
+  revoke.className = 'ask-user-option';
+  revoke.textContent = 'Revoke';
+  revoke.addEventListener('click', async () => {
+    revoke.disabled = true;
+    try {
+      const response = await fetch(`/api/authority/receipts/${encodeURIComponent(receiptId)}`, {
+        method: 'DELETE', credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+      card.remove();
+    } catch (error) {
+      revoke.disabled = false;
+      uiModule.showError(`Revocation failed: ${error.message || error}`);
+    }
+  });
+  card.append(title, context, preview, revoke);
+  chatBox.appendChild(card);
   return card;
 }
 
@@ -2225,6 +2281,10 @@ export async function restorePendingAuthorityDecision(sessionId) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const state = await response.json();
   const now = Date.now();
+  (state?.receipts || [])
+    .filter(row => row?.scope === 'persistent' && row?.status === 'active')
+    .slice(-5)
+    .forEach(renderAuthorityReceiptCard);
   const pending = (state?.decisions || [])
     .filter(row => (
       row?.session_id === sessionId
@@ -2940,6 +3000,9 @@ const chatRenderer = {
   safeDisplayImageSrc,
   removeAskUserCards,
   renderAuthorityApprovalCard,
+  renderAuthorityDecisionResolved,
+  renderAuthorityReceiptCard,
+  resetAuthorityApprovalCard,
   restorePendingAuthorityDecision,
   renderAskUserCard,
   buildSourcesBox,

@@ -203,6 +203,81 @@ def mask_integration_secret(integration: Dict[str, Any]) -> Dict[str, Any]:
     return safe
 
 
+_CONNECTION_IDENTITY_WORDS = frozenset({
+    "api", "integration", "mcp", "portal", "server", "service",
+})
+
+
+def _connection_identity_tokens(value: Any) -> frozenset[str]:
+    return frozenset(
+        token for token in re.findall(r"[a-z0-9][a-z0-9_-]*", str(value or "").lower())
+        if token not in _CONNECTION_IDENTITY_WORDS
+    )
+
+
+def _connection_origin(value: Any) -> str:
+    try:
+        parsed = urlparse(str(value or "").strip())
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return ""
+        host = parsed.hostname.lower()
+        port = f":{parsed.port}" if parsed.port else ""
+    except ValueError:
+        return ""
+    return f"{parsed.scheme.lower()}://{host}{port}"
+
+
+def native_mcp_companions(integrations: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Match legacy API credentials to the same configured native connection."""
+    try:
+        from core.database import McpServer, SessionLocal
+
+        db = SessionLocal()
+        try:
+            servers = db.query(McpServer).all()
+        finally:
+            db.close()
+    except Exception:
+        return {}
+
+    matches: Dict[str, Dict[str, Any]] = {}
+    for integration in integrations:
+        identity = _connection_identity_tokens(integration.get("name"))
+        origin = _connection_origin(integration.get("base_url"))
+        if not identity or not origin:
+            continue
+        candidates = [
+            server for server in servers
+            if _connection_identity_tokens(getattr(server, "name", "")) == identity
+            and _connection_origin(getattr(server, "url", "")) == origin
+        ]
+        if len(candidates) == 1:
+            server = candidates[0]
+            matches[str(integration.get("id") or "")] = {
+                "id": server.id,
+                "name": server.name,
+                "is_enabled": bool(server.is_enabled),
+            }
+    return matches
+
+
+def delete_native_companion_for_server(name: Any, url: Any) -> bool:
+    """Delete only the one legacy API row proven to be the same connection."""
+    identity = _connection_identity_tokens(name)
+    origin = _connection_origin(url)
+    if not identity or not origin:
+        return False
+    integrations = load_integrations()
+    matching = [
+        item for item in integrations
+        if _connection_identity_tokens(item.get("name")) == identity
+        and _connection_origin(item.get("base_url")) == origin
+    ]
+    if len(matching) != 1:
+        return False
+    return delete_integration(str(matching[0].get("id") or ""))
+
+
 def _normalize_integration_base_url(base_url: Any) -> str:
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("Integration base URL is required")
@@ -367,6 +442,12 @@ async def execute_api_call(
     integration = _find_integration(integration_id)
     if not integration:
         return {"error": f"Integration not found: {integration_id}", "exit_code": 1}
+
+    if native_mcp_companions([integration]).get(str(integration.get("id") or "")):
+        return {
+            "error": "This connection is managed by its native MCP catalog; use its typed tools instead of api_call",
+            "exit_code": 1,
+        }
 
     if not integration.get("enabled", True):
         return {"error": f"Integration '{integration.get('name')}' is disabled", "exit_code": 1}
@@ -573,7 +654,11 @@ def get_integrations_prompt() -> str:
     Returns empty string if no integrations are enabled.
     """
     integrations = load_integrations()
-    enabled = [i for i in integrations if i.get("enabled", True)]
+    companions = native_mcp_companions(integrations)
+    enabled = [
+        item for item in integrations
+        if item.get("enabled", True) and str(item.get("id") or "") not in companions
+    ]
     if not enabled:
         return ""
 
