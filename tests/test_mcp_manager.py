@@ -307,6 +307,9 @@ def test_initialize_read_flow_is_authoritative_with_named_supplements():
             "broker.check_connection",
             "broker.list_service_tools",
             "broker.list_releases",
+            "broker.foo",
+            "broker.bar",
+            "broker.baz",
         ]
     ]
 
@@ -345,6 +348,25 @@ def test_initialize_read_flow_is_authoritative_with_named_supplements():
     }
     assert manager.native_tool_names_for_request(
         "Using Acme Broker, you must not use broker.list_releases."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read"]
+    }
+    assert manager.native_tool_names_for_request(
+        "Do not use broker.list_releases. Actually use broker.list_releases."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read", "list_releases"]
+    }
+    assert manager.native_tool_names_for_request(
+        "Using Acme Broker, avoid guessing IDs and use broker.check_connection."
+    ) == {
+        f"mcp__broker-fixture__broker.{name}"
+        for name in ["start", "discover", "read", "check_connection"]
+    }
+    assert manager.native_tool_names_for_request(
+        "Using Acme Broker, do not use broker.foo, broker.bar, broker.baz, "
+        "or broker.list_releases."
     ) == {
         f"mcp__broker-fixture__broker.{name}"
         for name in ["start", "discover", "read"]

@@ -107,6 +107,7 @@ def _tool_name_is_negated(query: str, name: str) -> bool:
     name_pattern = r"(?<![a-z0-9_-])" + r"[.\s]+".join(
         re.escape(part) for part in name_parts
     ) + r"(?![a-z0-9_-])"
+    negated: bool | None = None
     for match in re.finditer(name_pattern, query_text):
         clause_prefix = re.split(
             r"(?:[!?;\n]|\.(?=\s|$))", query_text[:match.start()]
@@ -118,22 +119,22 @@ def _tool_name_is_negated(query: str, name: str) -> bool:
             clause_prefix,
         ))
         if not negations:
+            negated = False
             continue
-        reset_action = r"(?:use|call|invoke|select|include|expose|admit|run|execute|choose)"
+        reset_action = (
+            r"(?:use|using|call|calling|invoke|invoking|select|selecting|"
+            r"include|including|expose|exposing|admit|admitting|run|running|"
+            r"execute|executing|choose|choosing)"
+        )
         resets = list(re.finditer(
-            rf"(?:,\s*(?:(?:instead|rather)\s+)?|"
-            rf"\b(?:but|however)\s+(?:(?:instead|rather)\s+)?|"
-            rf"\b(?:instead|rather)\s+){reset_action}\b",
+            rf"(?:,\s*|\b(?:and|but|however|instead|rather|then|yet)\s+)"
+            rf"(?:(?:actually|please|instead|rather)\s+)?{reset_action}\b",
             clause_prefix,
         ))
         latest_negation = negations[-1]
         latest_reset_start = resets[-1].start() if resets else -1
-        trailing_tokens = re.findall(
-            r"[a-z0-9][a-z0-9_-]*", clause_prefix[latest_negation.end():]
-        )
-        if latest_negation.start() > latest_reset_start and len(trailing_tokens) <= 6:
-            return True
-    return False
+        negated = latest_negation.start() > latest_reset_start
+    return bool(negated)
 
 
 # Caps for rendering untrusted MCP tool schemas into the agent prompt (issue #2660).
