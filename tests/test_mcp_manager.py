@@ -523,6 +523,43 @@ def test_named_native_connection_selects_requested_actions_without_authorizing_u
     assert "mcp__browser-fixture__browser_unclassified" not in manager.get_action_policies()
 
 
+def test_builtin_browser_natural_language_selects_navigation_and_snapshot():
+    manager = McpManager()
+    manager._connections["builtin_browser"] = {
+        "status": "connected",
+        "name": "Built-in: Browser",
+        "server_info": {"name": "Playwright MCP"},
+        "catalog_terms": ["browser"],
+    }
+    manager._tools["builtin_browser"] = [
+        {
+            "name": "browser_navigate",
+            "description": "Navigate to a URL",
+            "annotations": {"readOnlyHint": False, "destructiveHint": True},
+        },
+        {
+            "name": "browser_snapshot",
+            "description": "Capture the accessibility snapshot",
+            "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        },
+        {
+            "name": "browser_find",
+            "description": "Find text on the current page",
+            "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        },
+    ]
+
+    selected = manager.native_tool_names_for_request(
+        "Use the Built-in Browser to open https://example.com and report the "
+        "page title and H1 text after inspecting the page."
+    )
+
+    assert {
+        "mcp__builtin_browser__browser_navigate",
+        "mcp__builtin_browser__browser_snapshot",
+    } <= selected
+
+
 def test_explicit_native_connection_name_wins_over_earlier_shared_catalog_match():
     manager = McpManager()
     manager._connections["discord-direct"] = {

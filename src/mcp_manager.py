@@ -234,6 +234,23 @@ _MCP_READONLY_VERBS = (
     "show", "view", "lookup", "count", "status", "info", "inspect", "summar",
 )
 
+# Natural-language aliases for the built-in browser's core workflow.  Native
+# MCP routing otherwise exposes effectful tools only when their exact schema
+# name is present in the prompt.  A normal request such as "open this URL" does
+# not contain ``browser_navigate``, leaving the model with inspection tools for
+# an about:blank page.  These aliases only make the schemas visible; the shared
+# authority layer still classifies and gates the eventual action.
+_BUILTIN_BROWSER_ACTION_ALIASES = {
+    "browser_navigate": re.compile(
+        r"https?://|\b(?:open|visit|navigate|browse|go\s+to|load)\b",
+        re.I,
+    ),
+    "browser_snapshot": re.compile(
+        r"\b(?:snapshot|inspect(?:ion)?|page\s+(?:title|content)|h1|heading)\b",
+        re.I,
+    ),
+}
+
 
 def mcp_tool_action_effect(tool: Dict) -> Optional[str]:
     """Map trustworthy MCP annotations to the canonical execution effect.
@@ -1708,18 +1725,30 @@ class McpManager:
                 fully_name_matched = (
                     len(name_tokens) >= 2 and name_tokens <= query_name_tokens
                 )
+                browser_alias_matched = (
+                    server_id == "builtin_browser"
+                    and name in _BUILTIN_BROWSER_ACTION_ALIASES
+                    and bool(_BUILTIN_BROWSER_ACTION_ALIASES[name].search(query))
+                )
                 if not mcp_tool_is_readonly(tool) and not (
-                    directly_named or fully_name_matched
+                    directly_named or fully_name_matched or browser_alias_matched
                 ):
                     continue
-                if referenced and not directly_named and not fully_name_matched:
+                if referenced and not (
+                    directly_named or fully_name_matched or browser_alias_matched
+                ):
                     continue
                 negation_name = name if directly_named else " ".join(action_words)
                 if (directly_named or fully_name_matched) and _tool_name_is_negated(
                     query, negation_name, allow_intervening=not directly_named
                 ):
                     continue
-                scored.append((not directly_named, -overlap, index, name))
+                scored.append((
+                    not (directly_named or fully_name_matched or browser_alias_matched),
+                    -overlap,
+                    index,
+                    name,
+                ))
             for _implicit, _overlap, _index, name in sorted(scored):
                 qualified = f"mcp__{server_id}__{name}"
                 if qualified not in selected:
