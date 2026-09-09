@@ -1561,16 +1561,38 @@ def _portal_followup_fixed_arguments(
             ("channel_name", "channel_names"),
         ),
     }
+    seen_latest_user = False
     for message in reversed(messages):
-        if message.get("role") != "assistant":
+        if message.get("role") == "user":
+            content = message.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict)
+                )
+            metadata = message.get("metadata") or {}
+            if (
+                not str(content or "").strip()
+                or metadata.get("trusted") is False
+                or str(content).startswith("[Tool execution results]")
+            ):
+                continue
+            if not seen_latest_user:
+                seen_latest_user = True
+                continue
+            break
+        if not seen_latest_user or message.get("role") != "assistant":
             continue
         metadata = message.get("metadata") or {}
         for event in reversed(metadata.get("tool_events") or []):
-            if not isinstance(event, dict) or event.get("exit_code") not in (0, None):
+            if not isinstance(event, dict):
                 continue
             relay = event.get("portal_relay") or {}
-            if not isinstance(relay, dict):
+            if not isinstance(relay, dict) or not relay:
                 continue
+            if event.get("exit_code") not in (0, None):
+                return {}
             arguments = relay.get("arguments") or {}
             context = relay.get("context") or {}
             event_objects = set(named_objects)
@@ -1620,6 +1642,7 @@ def _portal_followup_fixed_arguments(
                         ]
                         if candidates:
                             return {argument_name: candidates[-1]}
+            return {}
     return {}
 
 
