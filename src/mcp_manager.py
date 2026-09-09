@@ -1359,9 +1359,6 @@ class McpManager:
     @staticmethod
     def _portal_result_context(payload: Any) -> Dict[str, List[Any]]:
         """Extract bounded resource identifiers needed by referential follow-ups."""
-        resource_fields = {
-            "collections": ("collection_names", ("collection_name", "name", "id")),
-        }
         context: Dict[str, List[Any]] = {}
         queue: List[Any] = [payload]
         visited = 0
@@ -1381,6 +1378,38 @@ class McpManager:
                 continue
             if not isinstance(value, dict):
                 continue
+            collections = value.get("collections")
+            if isinstance(collections, list):
+                collection_ids: List[str] = []
+                collection_names: List[str] = []
+                collection_refs: List[Dict[str, str]] = []
+                for item in collections[:25]:
+                    raw_id: Any = ""
+                    raw_name: Any = item
+                    if isinstance(item, dict):
+                        raw_id = item.get("collection_id") or item.get("id") or ""
+                        raw_name = item.get("collection_name") or item.get("name") or ""
+                    sanitized: Dict[str, str] = {}
+                    for key, raw, target in (
+                        ("id", raw_id, collection_ids),
+                        ("name", raw_name, collection_names),
+                    ):
+                        if not isinstance(raw, (str, int)):
+                            continue
+                        identifier = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw))
+                        identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
+                        if identifier and identifier not in target:
+                            target.append(identifier)
+                        if identifier:
+                            sanitized[key] = identifier
+                    if sanitized and sanitized not in collection_refs:
+                        collection_refs.append(sanitized)
+                if collection_ids:
+                    context["collection_ids"] = collection_ids
+                if collection_names:
+                    context["collection_names"] = collection_names
+                if collection_refs:
+                    context["collection_refs"] = collection_refs
             channels = value.get("channels")
             if isinstance(channels, list):
                 channel_ids: List[str] = []
@@ -1413,26 +1442,6 @@ class McpManager:
                     context["channel_names"] = channel_names
                 if channel_refs:
                     context["channel_refs"] = channel_refs
-            for source_key, (context_key, item_keys) in resource_fields.items():
-                items = value.get(source_key)
-                if not isinstance(items, list):
-                    continue
-                identifiers: List[str] = []
-                for item in items[:25]:
-                    raw = item
-                    if isinstance(item, dict):
-                        raw = next(
-                            (item.get(key) for key in item_keys if item.get(key) is not None),
-                            "",
-                        )
-                    if not isinstance(raw, (str, int)):
-                        continue
-                    identifier = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw))
-                    identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
-                    if identifier and identifier not in identifiers:
-                        identifiers.append(identifier)
-                if identifiers:
-                    context[context_key] = identifiers
             queue.extend(value.values())
         return context
 

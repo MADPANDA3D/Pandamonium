@@ -816,6 +816,36 @@ def test_nounless_followup_reuses_only_resource_type_in_latest_portal_context():
     ) == {"collection_name": "jarvis-knowledgebase"}
 
 
+def test_collection_followup_preserves_last_typed_identity_from_mixed_listing():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list collections."},
+        {
+            "role": "assistant",
+            "content": "I found the collections.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "memory",
+                    "tool_name": "list_collections",
+                    "context": {
+                        "collection_ids": ["collection-123", "collection-456"],
+                        "collection_names": ["general-memory"],
+                        "collection_refs": [
+                            {"id": "collection-123", "name": "general-memory"},
+                            {"id": "collection-456"},
+                        ],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "What's in that collection?"},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"collection_id": "collection-456"}
+
+
 def test_collection_followup_does_not_cross_latest_user_turn_boundary():
     messages = [
         {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},

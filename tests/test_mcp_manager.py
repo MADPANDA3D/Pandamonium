@@ -396,6 +396,27 @@ def test_portal_result_context_keeps_only_compact_collection_identifiers():
 
     assert McpManager._portal_result_context(payload) == {
         "collection_names": ["the-barn", "school", "jarvis-knowledgebase"],
+        "collection_refs": [
+            {"name": "the-barn"},
+            {"name": "school"},
+            {"name": "jarvis-knowledgebase"},
+        ],
+    }
+
+
+def test_portal_result_context_keeps_collection_names_separate_from_ids():
+    assert McpManager._portal_result_context({
+        "data": {"collections": [
+            {"id": "collection-123", "name": "general-memory"},
+            {"id": "collection-456"},
+        ]},
+    }) == {
+        "collection_ids": ["collection-123", "collection-456"],
+        "collection_names": ["general-memory"],
+        "collection_refs": [
+            {"id": "collection-123", "name": "general-memory"},
+            {"id": "collection-456"},
+        ],
     }
 
 

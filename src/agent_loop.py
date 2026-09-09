@@ -1555,7 +1555,10 @@ def _portal_followup_fixed_arguments(
         for match in _CONTEXTUAL_NAMED_OBJECT_RE.finditer(str(text or ""))
     }
     fields = {
-        "collection": (("collection_name", "collection_names"),),
+        "collection": (
+            ("collection_id", "collection_ids"),
+            ("collection_name", "collection_names"),
+        ),
         "channel": (
             ("channel_id", "channel_ids"),
             ("channel_name", "channel_names"),
@@ -1609,7 +1612,9 @@ def _portal_followup_fixed_arguments(
                         and bool(context.get(context_name))
                         for _argument_name, context_name in field_pairs
                     )
-                    if noun == "channel":
+                    if noun == "collection":
+                        has_context = has_context or bool(context.get("collection_refs"))
+                    elif noun == "channel":
                         has_context = has_context or bool(context.get("channel_refs"))
                     if has_argument or has_context:
                         inferred_objects.append(noun)
@@ -1623,6 +1628,17 @@ def _portal_followup_fixed_arguments(
                     direct_value = arguments.get(argument_name)
                     if isinstance(direct_value, (str, int)) and str(direct_value).strip():
                         return {argument_name: direct_value}
+                if noun == "collection":
+                    collection_refs = context.get("collection_refs")
+                    if isinstance(collection_refs, list) and collection_refs:
+                        last_ref = collection_refs[-1]
+                        if isinstance(last_ref, dict):
+                            collection_id = last_ref.get("id")
+                            if isinstance(collection_id, (str, int)) and str(collection_id).strip():
+                                return {"collection_id": collection_id}
+                            collection_name = last_ref.get("name")
+                            if isinstance(collection_name, str) and collection_name.strip():
+                                return {"collection_name": collection_name}
                 if noun == "channel":
                     channel_refs = context.get("channel_refs")
                     if isinstance(channel_refs, list) and channel_refs:
