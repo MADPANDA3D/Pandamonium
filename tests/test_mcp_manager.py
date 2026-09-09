@@ -340,6 +340,31 @@ def test_portal_read_preparation_scopes_search_resolves_target_and_relays_exact_
     }
 
 
+def test_portal_followup_channel_name_is_resolved_before_id_is_fixed():
+    manager, session = _portal_contract_manager()
+    preparation = asyncio.run(manager.prepare_portal_read(
+        "Read the last five messages from that channel.",
+        "Use MAD MCP Portal to list Discord channels.",
+        context_arguments={"channel_name": "general"},
+    ))
+
+    assert preparation is not None
+    assert preparation["schema"]["function"]["parameters"]["properties"] == {
+        "count": {"type": "string", "default": ""},
+    }
+    proxy = manager._portal_proxy_tools[preparation["qualified_name"]]
+    assert proxy["fixed_arguments"] == {
+        "channel_id": "1542679644640247860",
+    }
+    assert [call for call in session.calls if call[0] == "portal.call_read_tool"] == [
+        ("portal.call_read_tool", {
+            "serviceId": "discord",
+            "toolName": "find_channel",
+            "arguments": {"channel_name": "general"},
+        }),
+    ]
+
+
 def test_portal_discovery_query_preserves_outcome_and_drops_negative_constraints():
     assert McpManager._portal_discovery_query(
         "Use Portal to sample ten payloads from a Qdrant collection. Do not include vectors."
