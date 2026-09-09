@@ -1051,7 +1051,7 @@ _FORMATTER_HANDLED_KEYS = {
     "stdout", "stderr", "exit_code", "content", "size",
     "response", "results", "session_id", "name", "model", "session_name",
     "success", "path", "action", "title", "doc_id", "version", "applied",
-    "error", "output",
+    "error", "output", "model_content",
 }
 
 
@@ -1059,7 +1059,12 @@ def format_tool_result(description: str, result: Dict) -> str:
     """Format a tool result into text for feeding back to the LLM."""
     parts = [f"### {description}"]
 
-    if "stdout" in result:
+    if "model_content" in result:
+        parts.append(
+            "**Portal provider result (bounded, item-preserving projection):**\n"
+            f"```json\n{result['model_content']}\n```"
+        )
+    elif "stdout" in result:
         if result["stdout"]:
             parts.append(f"**stdout:**\n```\n{result['stdout']}\n```")
         if result["stderr"]:
@@ -1106,7 +1111,10 @@ def format_tool_result(description: str, result: Dict) -> str:
     # documents, attachments, etc.) that the dedicated branches above don't show.
     # Without this, tools that return {"response": "...", "events": [...]} would
     # silently drop the events list and the model would only see the summary line.
-    extra = {k: v for k, v in result.items() if k not in _FORMATTER_HANDLED_KEYS}
+    handled = _FORMATTER_HANDLED_KEYS | (
+        {"structured_content"} if "model_content" in result else set()
+    )
+    extra = {k: v for k, v in result.items() if k not in handled}
     if extra:
         try:
             extra_json = json.dumps(extra, indent=2, default=str, ensure_ascii=False)

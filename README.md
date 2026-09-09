@@ -81,6 +81,10 @@ following maintained platform capabilities.
   network policy, Workspace allowlist, and per-action capability/effect allowlist.
 - Native MCP connections route through their live handshake, catalog, and exact
   typed tool schemas instead of guessed REST paths or duplicate API identities.
+- Broker-style native MCP connections keep only compact service metadata in the
+  existing tool index, mount one request-specific downstream read schema, and
+  relay the call through the broker. Read-only calls require no approval, and
+  any internal API credential remains grouped beneath the single MCP identity.
 - Approval cards offer deny, approve once, and explicit narrow approve-always;
   persistent receipts remain inspectable and revocable, while target or argument
   changes require a new decision.

@@ -412,9 +412,14 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         "portal.preview_tool_call for safety, and portal.call_read_tool for the single read. "
         "Do not use portal.list_service_tools or portal.call_service_tool."
     )
-    assert manager.native_tool_names_for_request(full_smoke_request, limit=8) == {
-        f"mcp__portal-fixture__{name}" for name in chain
+    normal_read_chain = {
+        f"mcp__portal-fixture__{name}" for name in (
+            "portal.find_tools",
+            "portal.get_tool_reference",
+            "portal.call_read_tool",
+        )
     }
+    assert manager.native_tool_names_for_request(full_smoke_request, limit=8) == normal_read_chain
 
     async def fake_stream(*args, **kwargs):
         captured["messages"] = args[1]
@@ -459,7 +464,7 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         for schema in captured["tools"]
         if schema.get("function")
     }
-    required = {f"mcp__portal-fixture__{name}" for name in chain}
+    required = normal_read_chain
     assert {name for name in sent if name.startswith("mcp__portal-fixture__")} == required
     assert "mcp__portal-fixture__portal.list_service_tools" not in sent
     assert "mcp__portal-fixture__portal.call_service_tool" not in sent
@@ -476,6 +481,160 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     assert required == {
         name for name in required if f"`{name}`" in contract
     }
+
+
+@pytest.mark.asyncio
+async def test_prepared_portal_read_mounts_one_relay_and_removes_all_fallbacks(monkeypatch):
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "Fixture Broker"},
+        "portal_services": [{
+            "id": "qdrant",
+            "name": "QDRANT-MCP",
+            "configured": True,
+            "state": "configured",
+            "catalog_version": "qdrant-v2",
+        }],
+        "catalog_terms": ["Qdrant"],
+    }
+    manager._tools["portal-fixture"] = [
+        {
+            "name": name,
+            "description": name,
+            "input_schema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": True},
+        }
+        for name in (
+            "portal.list_services",
+            "portal.find_tools",
+            "portal.get_tool_reference",
+            "portal.call_read_tool",
+        )
+    ]
+    proxy = "mcp__portal-fixture__portal.read.qdrant.qdrant-list-points"
+    proxy_schema = {
+        "type": "function",
+        "function": {
+            "name": proxy,
+            "description": "One Portal-relayed Qdrant point read.",
+            "parameters": {
+                "type": "object",
+                "required": ["collection_name"],
+                "properties": {
+                    "collection_name": {"type": "string"},
+                    "limit": {"type": "integer"},
+                    "include_payload": {"type": "boolean"},
+                    "include_vectors": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    async def fake_prepare(latest_query, routing_query):
+        assert "jarvis-knowledgebase" in latest_query
+        assert "Qdrant" in routing_query
+        manager._portal_proxy_tools[proxy] = {
+            "server_id": "portal-fixture",
+            "service_id": "qdrant",
+            "tool_name": "qdrant-list-points",
+        }
+        return {
+            "qualified_name": proxy,
+            "schema": proxy_schema,
+            "service_id": "qdrant",
+            "tool_name": "qdrant-list-points",
+            "descriptor_hash": "descriptor-hash",
+            "catalog_version": "qdrant-v2",
+            "trace_events": [{
+                "tool": "mcp__portal-fixture__portal.find_tools",
+                "arguments": {
+                    "query": "collection contents",
+                    "service": "qdrant",
+                    "risk": "read",
+                },
+                "trace_id": "find-trace",
+            }],
+        }
+
+    manager.prepare_portal_read = fake_prepare
+    rounds = {"count": 0}
+    tool_payloads = []
+
+    async def fake_stream(*args, **kwargs):
+        rounds["count"] += 1
+        tool_payloads.append(kwargs.get("tools") or [])
+        if rounds["count"] == 1:
+            call = {
+                "id": "portal-read",
+                "name": proxy,
+                "arguments": json.dumps({
+                    "collection_name": "jarvis-knowledgebase",
+                    "limit": 10,
+                    "include_payload": True,
+                    "include_vectors": False,
+                }),
+            }
+            yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
+        else:
+            yield 'data: {"delta":"Ten payload examples were returned."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    async def fake_execute(block, **_kwargs):
+        assert block.tool_type == proxy
+        return "portal relay", {
+            "stdout": "10 items",
+            "stderr": "",
+            "exit_code": 0,
+            "structured_content": {"data": {"items": list(range(10))}},
+            "portal_relay": {
+                "service_id": "qdrant",
+                "tool_name": "qdrant-list-points",
+                "trace_id": "read-trace",
+            },
+        }
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+
+    chunks = []
+    async for chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{
+            "role": "user",
+            "content": (
+                "Use MAD MCP Portal to sample ten payloads from the "
+                "jarvis-knowledgebase Qdrant collection. Do not include vectors."
+            ),
+        }],
+        owner="leo",
+        context_length=8208,
+        max_rounds=4,
+    ):
+        chunks.append(chunk)
+
+    events = [
+        json.loads(chunk[6:])
+        for chunk in chunks
+        if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]")
+    ]
+    assert rounds["count"] == 2
+    for payload in tool_payloads:
+        assert {
+            schema["function"]["name"] for schema in payload
+            if schema.get("function")
+        } == {proxy}
+    metrics = next(event["data"] for event in events if event.get("type") == "metrics")
+    assert metrics["context_manifest"]["tools"]["mcp"]["names"] == [proxy]
+    assert metrics["context_manifest"]["tools"]["built_in"]["count"] == 0
+    assert metrics["portal_routing"]["trace_events"][0]["trace_id"] == "find-trace"
+    assert metrics["tool_events"][0]["portal_relay"]["trace_id"] == "read-trace"
+    assert not any(event.get("type") == "authority_approval_required" for event in events)
 
 
 @pytest.mark.asyncio
@@ -582,7 +741,13 @@ async def test_collection_followup_keeps_portal_qdrant_chain_in_model_payload(mo
         for schema in captured["tools"]
         if schema.get("function")
     }
-    required = {f"mcp__portal-fixture__{name}" for name in chain}
+    required = {
+        f"mcp__portal-fixture__{name}" for name in (
+            "portal.find_tools",
+            "portal.get_tool_reference",
+            "portal.call_read_tool",
+        )
+    }
     assert {name for name in sent if name.startswith("mcp__portal-fixture__")} == required
     assert {"manage_mcp", "api_call", "app_api", "pipeline"}.isdisjoint(sent)
     visible_messages = json.dumps(captured["messages"])
