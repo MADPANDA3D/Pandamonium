@@ -479,6 +479,119 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
 
 
 @pytest.mark.asyncio
+async def test_collection_followup_keeps_portal_qdrant_chain_in_model_payload(monkeypatch):
+    captured = {}
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "Fixture Broker"},
+        "catalog_terms": ["Qdrant"],
+        "instructions": (
+            "Start with portal.welcome, then portal.list_services. "
+            "Use portal.find_tools with a natural-language intent and "
+            "portal.get_tool_reference for the complete schema and safety rules. "
+            "Call portal.preview_tool_call before writes or destructive work. "
+            "Execute reads with portal.call_read_tool."
+        ),
+    }
+    chain = [
+        "portal.welcome",
+        "portal.list_services",
+        "portal.find_tools",
+        "portal.get_tool_reference",
+        "portal.preview_tool_call",
+        "portal.call_read_tool",
+    ]
+    manager._tools["portal-fixture"] = [
+        {
+            "name": name,
+            "description": f"Agent-ready broker entrypoint {name}",
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True},
+        }
+        for name in chain
+    ]
+
+    async def fake_stream(*args, **kwargs):
+        captured["messages"] = args[1]
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"I will continue the Portal read."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    def fake_setting(key, default=None):
+        if key == "agent_input_token_budget":
+            return 8208
+        return default
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "get_setting", fake_setting)
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "Ok use the mad mcp portal to find the jarvis-knowledgebase "
+                "collection in Qdrant and tell me whats in that collection"
+            ),
+        },
+        {"role": "assistant", "content": "I found the collection."},
+        {
+            "role": "user",
+            "content": "I want you to tell me what information is in that collection",
+        },
+        {"role": "assistant", "content": "I need to inspect the collection."},
+        {
+            "role": "user",
+            "content": (
+                "the mad mcp portal has all the tools you need it is an mcp broker "
+                "which means there is an entire qdrant mcp in there you need to use "
+                "the portal.welcome tool to learn your way around the mad mcp portal "
+                "so you can see how to make the correct tool calls"
+            ),
+        },
+        {"role": "assistant", "content": "I listed the available collections."},
+        {
+            "role": "user",
+            "content": (
+                "Ok but youre not answering my fucking question I already told you I "
+                "want ot know whats in that collection you need to query it and look it "
+                "over and come back to me with bullet points on what is in tere - there "
+                "is a lot of operational stuff in there so I want yo uto tell me what "
+                "the fuck is in that collection"
+            ),
+        },
+    ]
+    async for _chunk in agent_loop.stream_agent_loop(
+        "http://127.0.0.1:1919/v1/chat/completions",
+        "jarvis",
+        messages,
+        context_length=8208,
+        max_tokens=2048,
+    ):
+        pass
+
+    sent = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    required = {f"mcp__portal-fixture__{name}" for name in chain}
+    assert {name for name in sent if name.startswith("mcp__portal-fixture__")} == required
+    assert {"manage_mcp", "api_call", "app_api", "pipeline"}.isdisjoint(sent)
+    visible_messages = json.dumps(captured["messages"])
+    assert "Listing collections does not answer what is inside one" in visible_messages
+    assert "jarvis-knowledgebase" in visible_messages
+    assert "Qdrant" in visible_messages
+
+
+@pytest.mark.asyncio
 async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
     captured = {}
     manager = McpManager()

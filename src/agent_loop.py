@@ -410,6 +410,7 @@ _NATIVE_MCP_DIRECT_RULES = """\
 - Use the selected connection's exact qualified function schemas directly. Follow its declared discovery order and typed arguments.
 - Preserve the provider, profile, channel, and target named by the user. Never substitute a different provider or guess a REST path, HTTP method, service id, profile id, channel id, URL, or tool name.
 - Do not use manage_mcp, api_call, app_api, pipeline, shell, or curl as a fallback for a selected native MCP connection.
+- Treat discovery and enumeration as intermediate steps. Listing collections does not answer what is inside one; continue through the declared reference and read executor until the requested content is returned or one precise terminal error blocks it.
 - Safe tools declared read-only run without approval. If permission, service admission, or schema validation fails, report that bounded error clearly and stop instead of entering a discovery loop."""
 
 _NATIVE_MCP_CONTRACT_HEADING = "## Current native MCP capability contract"
@@ -1335,6 +1336,41 @@ _TOOL_STATUS_CONTINUATION_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_CONTEXTUAL_OBJECT_REFERENCE_RE = re.compile(
+    r"(?:"
+    r"\b(?:this|that|the)\s+(?:collection|connection|database|dataset|document|"
+    r"file|folder|provider|record|resource|result|service|tool|channel)\b|"
+    r"\b(?:query|inspect|read|open|review|check)\s+(?:it|that|this)\b|"
+    r"\blook\s+(?:it|that|this)\s+over\b|"
+    r"\bwhat(?:'s|\s+is)\s+in\s+(?:it|that|this)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_OBJECT_ACTION_RE = re.compile(
+    r"(?:"
+    r"\bwhat(?:'s|\s+is)\s+in\b|"
+    r"\bwhat\s+(?:data|information|items?|records?|contents?)\b|"
+    r"\b(?:contents?|contains?|inside)\b|"
+    r"\b(?:query|inspect|read|open|review|check)\b|"
+    r"\blook\s+(?:it|that|this)\s+over\b"
+    r")",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_NAMED_OBJECT_RE = re.compile(
+    r"\b(?:this|that|the)\s+(?P<object>collection|connection|database|dataset|"
+    r"document|file|folder|provider|record|resource|result|service|tool|channel)\b",
+    re.IGNORECASE,
+)
+_ACTIVE_TOOL_OBJECT_CONTEXT_RE = re.compile(
+    r"\b(?:mcp|tools?|services?|providers?|connectors?|integrations?|"
+    r"databases?|collections?|channels?)\b",
+    re.IGNORECASE,
+)
+_ACTIVE_TOOL_ACTION_CONTEXT_RE = re.compile(
+    r"\b(?:use|call|execute|query|inspect|read|open|review|check|find|list|"
+    r"search|connect)\b",
+    re.IGNORECASE,
+)
 _COOKBOOK_CONTEXT_RE = re.compile(
     r"\b(?:cookbook|serve|serving|served|launch|start|preset|vllm|sglang|"
     r"llama\.?cpp|ollama|download|cached models?|model servers?|running models?|"
@@ -1412,6 +1448,71 @@ def _is_contextual_tool_status_continuation(messages: List[Dict], text: str) -> 
             continue
         return True
     return False
+
+
+def _is_contextual_object_continuation(messages: List[Dict], text: str) -> bool:
+    """Inherit the immediately active tool target for a referential follow-up.
+
+    Natural follow-ups such as "what information is in that collection" carry
+    the requested operation but intentionally omit the connection/provider
+    name from the prior turn. Require both a concrete referent and an action,
+    then inherit only when the immediately preceding trusted human turn still
+    describes active tool work. Named referents must also occur in the last two
+    trusted human turns. This keeps unrelated standalone questions from
+    reviving stale integrations farther back in the conversation.
+    """
+    latest = str(text or "").strip()
+    if not (
+        latest
+        and _CONTEXTUAL_OBJECT_REFERENCE_RE.search(latest)
+        and _CONTEXTUAL_OBJECT_ACTION_RE.search(latest)
+    ):
+        return False
+
+    seen_latest = False
+    prior_turns = []
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict)
+            )
+        content = str(content or "").strip()
+        metadata = message.get("metadata") or {}
+        if not content or metadata.get("trusted") is False or content.startswith("[Tool execution results]"):
+            continue
+        if not seen_latest:
+            seen_latest = True
+            continue
+        prior_turns.append(content)
+        if len(prior_turns) >= 2:
+            break
+
+    if not prior_turns or not (
+        _ACTIVE_TOOL_OBJECT_CONTEXT_RE.search(prior_turns[0])
+        and _ACTIVE_TOOL_ACTION_CONTEXT_RE.search(prior_turns[0])
+    ):
+        return False
+
+    named_objects = {
+        match.group("object").lower()
+        for match in _CONTEXTUAL_NAMED_OBJECT_RE.finditer(latest)
+    }
+    if not named_objects:
+        return True
+
+    # A named referent must be present in the bounded active chain. This keeps
+    # "review this document" from inheriting an unrelated earlier database or
+    # browser request merely because both turns contain tool-adjacent nouns.
+    return any(
+        re.search(rf"\b{re.escape(noun)}s?\b", prior, re.IGNORECASE)
+        for noun in named_objects
+        for prior in prior_turns
+    )
 
 
 def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
@@ -1528,6 +1629,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         or _assistant_requested_followup(messages, text)
         or retry_continuation
         or _is_contextual_tool_status_continuation(messages, text)
+        or _is_contextual_object_continuation(messages, text)
     )
     retrieval_query = _recent_context_for_retrieval(messages) if continuation else text
     q = retrieval_query.lower()
