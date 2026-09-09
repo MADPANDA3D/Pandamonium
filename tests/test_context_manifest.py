@@ -812,6 +812,36 @@ def test_channel_followup_preserves_a_name_for_native_portal_resolution():
     ) == {"channel_name": "general"}
 
 
+def test_channel_followup_preserves_last_identity_from_mixed_portal_listing():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},
+        {
+            "role": "assistant",
+            "content": "I found the channels.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "discord",
+                    "tool_name": "list_channels",
+                    "context": {
+                        "channel_ids": ["1542679644640247860"],
+                        "channel_names": ["general", "announcements"],
+                        "channel_refs": [
+                            {"id": "1542679644640247860", "name": "general"},
+                            {"name": "announcements"},
+                        ],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "Read that channel."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"channel_name": "announcements"}
+
+
 @pytest.mark.asyncio
 async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
     captured = {}

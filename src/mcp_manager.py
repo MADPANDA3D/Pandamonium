@@ -1357,12 +1357,12 @@ class McpManager:
         return None
 
     @staticmethod
-    def _portal_result_context(payload: Any) -> Dict[str, List[str]]:
+    def _portal_result_context(payload: Any) -> Dict[str, List[Any]]:
         """Extract bounded resource identifiers needed by referential follow-ups."""
         resource_fields = {
             "collections": ("collection_names", ("collection_name", "name", "id")),
         }
-        context: Dict[str, List[str]] = {}
+        context: Dict[str, List[Any]] = {}
         queue: List[Any] = [payload]
         visited = 0
         while queue and visited < 1000:
@@ -1385,15 +1385,17 @@ class McpManager:
             if isinstance(channels, list):
                 channel_ids: List[str] = []
                 channel_names: List[str] = []
+                channel_refs: List[Dict[str, str]] = []
                 for item in channels[:25]:
                     raw_id: Any = ""
                     raw_name: Any = item
                     if isinstance(item, dict):
                         raw_id = item.get("channel_id") or item.get("id") or ""
                         raw_name = item.get("channel_name") or item.get("name") or ""
-                    for raw, target in (
-                        (raw_id, channel_ids),
-                        (raw_name, channel_names),
+                    sanitized: Dict[str, str] = {}
+                    for key, raw, target in (
+                        ("id", raw_id, channel_ids),
+                        ("name", raw_name, channel_names),
                     ):
                         if not isinstance(raw, (str, int)):
                             continue
@@ -1401,10 +1403,16 @@ class McpManager:
                         identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
                         if identifier and identifier not in target:
                             target.append(identifier)
+                        if identifier:
+                            sanitized[key] = identifier
+                    if sanitized and sanitized not in channel_refs:
+                        channel_refs.append(sanitized)
                 if channel_ids:
                     context["channel_ids"] = channel_ids
                 if channel_names:
                     context["channel_names"] = channel_names
+                if channel_refs:
+                    context["channel_refs"] = channel_refs
             for source_key, (context_key, item_keys) in resource_fields.items():
                 items = value.get(source_key)
                 if not isinstance(items, list):

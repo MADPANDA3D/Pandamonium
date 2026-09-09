@@ -408,6 +408,10 @@ def test_portal_result_context_keeps_channel_names_separate_from_ids():
     }) == {
         "channel_ids": ["1542679644640247860"],
         "channel_names": ["general", "announcements"],
+        "channel_refs": [
+            {"id": "1542679644640247860", "name": "general"},
+            {"name": "announcements"},
+        ],
     }
 
 
