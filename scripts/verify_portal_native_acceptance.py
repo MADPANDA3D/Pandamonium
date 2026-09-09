@@ -185,7 +185,10 @@ def _safe_tool_events(metrics: dict) -> list[dict]:
             "action_name": action.get("name"),
             "action_arguments": action.get("arguments") or {},
             "action_status": result.get("status"),
-            "approval_present": bool(event.get("authority_decision")),
+            "approval_present": (
+                (event.get("authority_decision") or {}).get("decision")
+                == "approval_required"
+            ),
             "portal_relay": {
                 "service_id": relay.get("service_id"),
                 "tool_name": relay.get("tool_name"),
@@ -194,6 +197,7 @@ def _safe_tool_events(metrics: dict) -> list[dict]:
                 "trace_id": relay.get("trace_id"),
                 "arguments": relay.get("arguments") or {},
                 "item_count": relay.get("item_count"),
+                "context": relay.get("context") or {},
             } if relay else {},
         })
     return rows
@@ -218,6 +222,10 @@ def _project_turn(raw: dict, expected_service: str, expected_tool: str,
         or name.startswith("mcp__qdrant__")
     })
     target_relay = (target or {}).get("portal_relay") or {}
+    event_rounds = [
+        int(row.get("round") or 0) for row in events
+        if str(row.get("round") or "").isdigit()
+    ]
     args_match = all(
         target_relay.get("arguments", {}).get(key) == value
         for key, value in expected_arguments.items()
@@ -278,7 +286,7 @@ def _project_turn(raw: dict, expected_service: str, expected_tool: str,
         "elapsed_seconds": raw.get("elapsed_seconds"),
         "response_chars": raw.get("response_chars"),
         "response_sha256": raw.get("response_sha256"),
-        "rounds": metrics.get("agent_rounds"),
+        "rounds": (max(event_rounds) + 1) if event_rounds else 1,
         "tokens": {
             "input": metrics.get("input_tokens"),
             "output": metrics.get("output_tokens"),

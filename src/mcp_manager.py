@@ -978,7 +978,7 @@ class McpManager:
             result["model_content"] = self._portal_model_projection(
                 result.get("structured_content")
             )
-            result["portal_relay"] = {
+            relay_evidence = {
                 "service_id": portal_relay["service_id"],
                 "tool_name": portal_relay["tool_name"],
                 "descriptor_hash": portal_relay.get("descriptor_hash") or "",
@@ -989,6 +989,10 @@ class McpManager:
                     result.get("structured_content")
                 ),
             }
+            context = self._portal_result_context(result.get("structured_content"))
+            if context:
+                relay_evidence["context"] = context
+            result["portal_relay"] = relay_evidence
         return result
 
     async def _do_call(
@@ -1352,6 +1356,55 @@ class McpManager:
             queue.extend(value.values())
         return None
 
+    @staticmethod
+    def _portal_result_context(payload: Any) -> Dict[str, List[str]]:
+        """Extract bounded resource identifiers needed by referential follow-ups."""
+        resource_fields = {
+            "collections": ("collection_names", ("collection_name", "name", "id")),
+            "channels": ("channel_ids", ("channel_id", "id", "name")),
+        }
+        context: Dict[str, List[str]] = {}
+        queue: List[Any] = [payload]
+        visited = 0
+        while queue and visited < 1000:
+            visited += 1
+            value = queue.pop(0)
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped.startswith(("{", "[")) and len(stripped) <= 1_000_000:
+                    try:
+                        queue.append(json.loads(stripped))
+                    except json.JSONDecodeError:
+                        pass
+                continue
+            if isinstance(value, list):
+                queue.extend(value[:200])
+                continue
+            if not isinstance(value, dict):
+                continue
+            for source_key, (context_key, item_keys) in resource_fields.items():
+                items = value.get(source_key)
+                if not isinstance(items, list):
+                    continue
+                identifiers: List[str] = []
+                for item in items[:25]:
+                    raw = item
+                    if isinstance(item, dict):
+                        raw = next(
+                            (item.get(key) for key in item_keys if item.get(key) is not None),
+                            "",
+                        )
+                    if not isinstance(raw, (str, int)):
+                        continue
+                    identifier = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw))
+                    identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
+                    if identifier and identifier not in identifiers:
+                        identifiers.append(identifier)
+                if identifiers:
+                    context[context_key] = identifiers
+            queue.extend(value.values())
+        return context
+
     async def _portal_resolve_channel(
         self,
         server_id: str,
@@ -1485,6 +1538,8 @@ class McpManager:
         self,
         latest_query: str,
         routing_query: str,
+        *,
+        context_arguments: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Mount one exact downstream schema backed by Portal call_read_tool."""
         server_id = self._portal_connection_for_request(routing_query)
@@ -1538,6 +1593,16 @@ class McpManager:
             descriptor.get("inputSchema") or {}, latest_query
         )
         fixed_arguments: Dict[str, Any] = {}
+        properties = input_schema.get("properties") or {}
+        for name, value in (context_arguments or {}).items():
+            if name not in properties or not isinstance(value, (str, int, float, bool)):
+                continue
+            fixed_arguments[name] = value
+            properties.pop(name, None)
+            if isinstance(input_schema.get("required"), list):
+                input_schema["required"] = [
+                    item for item in input_schema["required"] if item != name
+                ]
         channel_name = self._portal_named_channel(latest_query)
         if channel_name and "channel_id" in (input_schema.get("properties") or {}):
             channel_id = await self._portal_resolve_channel(

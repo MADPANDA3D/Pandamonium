@@ -358,6 +358,99 @@ def test_portal_result_count_recovers_nested_provider_shapes_without_content():
     }) == 3
 
 
+def test_portal_result_context_keeps_only_compact_collection_identifiers():
+    payload = {
+        "data": [{
+            "type": "text",
+            "text": '{"data":{"collections":["the-barn","school",'
+                    '"jarvis-knowledgebase"],"count":3},'
+                    '"meta":{"request_id":"not-model-context"}}',
+        }],
+        "traceId": "trace-context",
+    }
+
+    assert McpManager._portal_result_context(payload) == {
+        "collection_names": ["the-barn", "school", "jarvis-knowledgebase"],
+    }
+
+
+def test_portal_followup_context_is_fixed_and_removed_from_model_schema():
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "mad-mcp-aggregator"},
+        "portal_services": [{
+            "id": "qdrant",
+            "name": "QDRANT-MCP",
+            "configured": True,
+            "state": "configured",
+            "catalog_version": "qdrant-v2",
+        }],
+        "catalog_terms": ["qdrant"],
+    }
+    manager._tools["portal-fixture"] = [
+        {"name": "portal.find_tools"},
+        {"name": "portal.get_tool_reference"},
+        {"name": "portal.call_read_tool"},
+        {"name": "portal.list_services"},
+    ]
+
+    async def fake_call(name, arguments, **_kwargs):
+        if name.endswith("portal.find_tools"):
+            return {
+                "exit_code": 0,
+                "structured_content": {
+                    "traceId": "find-trace",
+                    "data": {"items": [{
+                        "serviceId": "qdrant",
+                        "toolName": "qdrant-list-points",
+                        "description": "List points in a collection.",
+                        "risk": "read",
+                        "descriptorHash": "points-hash",
+                    }]},
+                },
+            }
+        assert name.endswith("portal.get_tool_reference")
+        return {
+            "exit_code": 0,
+            "structured_content": {
+                "traceId": "reference-trace",
+                "data": {"descriptor": {
+                    "serviceId": "qdrant",
+                    "nativeToolName": "qdrant-list-points",
+                    "description": "List points in a collection.",
+                    "descriptorHash": "points-hash",
+                    "catalogVersion": "qdrant-v2",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["collection_name"],
+                        "properties": {
+                            "collection_name": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                    },
+                }},
+            },
+        }
+
+    manager.call_tool = fake_call
+    preparation = asyncio.run(manager.prepare_portal_read(
+        "What information is inside that collection? Show me ten examples.",
+        "Use MAD MCP Portal to list Qdrant collections.",
+        context_arguments={"collection_name": "jarvis-knowledgebase"},
+    ))
+
+    assert preparation is not None
+    assert preparation["schema"]["function"]["parameters"]["properties"] == {
+        "limit": {"type": "integer"},
+    }
+    assert preparation["schema"]["function"]["parameters"]["required"] == []
+    assert manager._portal_proxy_tools[preparation["qualified_name"]][
+        "fixed_arguments"
+    ] == {"collection_name": "jarvis-knowledgebase"}
+
+
 def test_portal_request_schema_keeps_only_exact_fields_needed_for_payload_sample():
     projected = McpManager._portal_request_schema({
         "type": "object",

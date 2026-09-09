@@ -1538,6 +1538,57 @@ def _is_contextual_object_continuation(messages: List[Dict], text: str) -> bool:
     )
 
 
+def _portal_followup_fixed_arguments(
+    messages: List[Dict], text: str
+) -> Dict[str, Any]:
+    """Recover compact Portal resource identity from the last successful read.
+
+    Only internal tool-event metadata is considered. A singular referent after
+    an ordered resource list inherits the most recently presented identifier,
+    avoiding model guesses or repeated clarification for a value Portal already
+    returned.
+    """
+    if not _is_contextual_object_continuation(messages, text):
+        return {}
+    named_objects = {
+        match.group("object").lower()
+        for match in _CONTEXTUAL_NAMED_OBJECT_RE.finditer(str(text or ""))
+    }
+    fields = {
+        "collection": ("collection_name", "collection_names"),
+        "channel": ("channel_id", "channel_ids"),
+    }
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        for event in reversed(metadata.get("tool_events") or []):
+            if not isinstance(event, dict) or event.get("exit_code") not in (0, None):
+                continue
+            relay = event.get("portal_relay") or {}
+            if not isinstance(relay, dict):
+                continue
+            arguments = relay.get("arguments") or {}
+            context = relay.get("context") or {}
+            for noun in named_objects:
+                field_pair = fields.get(noun)
+                if not field_pair:
+                    continue
+                argument_name, context_name = field_pair
+                direct_value = arguments.get(argument_name)
+                if isinstance(direct_value, (str, int)) and str(direct_value).strip():
+                    return {argument_name: direct_value}
+                values = context.get(context_name)
+                if isinstance(values, list):
+                    candidates = [
+                        item for item in values
+                        if isinstance(item, (str, int)) and str(item).strip()
+                    ]
+                    if candidates:
+                        return {argument_name: candidates[-1]}
+    return {}
+
+
 def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
     """Return true for short answers that do not introduce a new task."""
     reply = str(text or "").strip()
@@ -3921,9 +3972,19 @@ async def stream_agent_loop(
             )
             if _preparation_requirement and hasattr(mcp_mgr, "prepare_portal_read"):
                 try:
-                    _portal_preparation = await mcp_mgr.prepare_portal_read(
-                        _last_user, _retrieval_query
+                    _portal_context_arguments = _portal_followup_fixed_arguments(
+                        messages, _last_user
                     )
+                    if _portal_context_arguments:
+                        _portal_preparation = await mcp_mgr.prepare_portal_read(
+                            _last_user,
+                            _retrieval_query,
+                            context_arguments=_portal_context_arguments,
+                        )
+                    else:
+                        _portal_preparation = await mcp_mgr.prepare_portal_read(
+                            _last_user, _retrieval_query
+                        )
                 except Exception as _portal_prepare_error:
                     logger.warning(
                         "[tool-rag] Portal request preparation failed: %s",

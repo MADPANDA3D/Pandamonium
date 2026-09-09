@@ -756,6 +756,39 @@ async def test_collection_followup_keeps_portal_qdrant_chain_in_model_payload(mo
     assert "Qdrant" in visible_messages
 
 
+def test_collection_followup_reuses_last_portal_collection_from_trusted_history():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
+        {
+            "role": "assistant",
+            "content": "I found three collections.",
+            "metadata": {
+                "tool_events": [{
+                    "tool": "mcp__mad-mcp-portal__portal.read.qdrant.qdrant-list-collections",
+                    "exit_code": 0,
+                    "portal_relay": {
+                        "service_id": "qdrant",
+                        "tool_name": "qdrant-list-collections",
+                        "context": {
+                            "collection_names": [
+                                "the-barn", "school", "jarvis-knowledgebase",
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+        {
+            "role": "user",
+            "content": "What information is inside that collection? Show me ten examples.",
+        },
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"collection_name": "jarvis-knowledgebase"}
+
+
 @pytest.mark.asyncio
 async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
     captured = {}
