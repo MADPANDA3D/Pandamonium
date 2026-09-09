@@ -374,6 +374,18 @@ def test_portal_result_context_keeps_only_compact_collection_identifiers():
     }
 
 
+def test_portal_result_context_keeps_channel_names_separate_from_ids():
+    assert McpManager._portal_result_context({
+        "data": {"channels": [
+            {"id": "1542679644640247860", "name": "general"},
+            "announcements",
+        ]},
+    }) == {
+        "channel_ids": ["1542679644640247860"],
+        "channel_names": ["general", "announcements"],
+    }
+
+
 def test_portal_followup_context_is_fixed_and_removed_from_model_schema():
     manager = McpManager()
     manager._connections["portal-fixture"] = {

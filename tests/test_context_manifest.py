@@ -789,6 +789,29 @@ def test_collection_followup_reuses_last_portal_collection_from_trusted_history(
     ) == {"collection_name": "jarvis-knowledgebase"}
 
 
+def test_channel_followup_preserves_a_name_for_native_portal_resolution():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},
+        {
+            "role": "assistant",
+            "content": "I found the channels.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "discord",
+                    "tool_name": "list_channels",
+                    "context": {"channel_names": ["general"]},
+                },
+            }]},
+        },
+        {"role": "user", "content": "Read that channel."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"channel_name": "general"}
+
+
 @pytest.mark.asyncio
 async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
     captured = {}

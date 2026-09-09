@@ -1555,8 +1555,11 @@ def _portal_followup_fixed_arguments(
         for match in _CONTEXTUAL_NAMED_OBJECT_RE.finditer(str(text or ""))
     }
     fields = {
-        "collection": ("collection_name", "collection_names"),
-        "channel": ("channel_id", "channel_ids"),
+        "collection": (("collection_name", "collection_names"),),
+        "channel": (
+            ("channel_id", "channel_ids"),
+            ("channel_name", "channel_names"),
+        ),
     }
     for message in reversed(messages):
         if message.get("role") != "assistant":
@@ -1571,21 +1574,21 @@ def _portal_followup_fixed_arguments(
             arguments = relay.get("arguments") or {}
             context = relay.get("context") or {}
             for noun in named_objects:
-                field_pair = fields.get(noun)
-                if not field_pair:
+                field_pairs = fields.get(noun)
+                if not field_pairs:
                     continue
-                argument_name, context_name = field_pair
-                direct_value = arguments.get(argument_name)
-                if isinstance(direct_value, (str, int)) and str(direct_value).strip():
-                    return {argument_name: direct_value}
-                values = context.get(context_name)
-                if isinstance(values, list):
-                    candidates = [
-                        item for item in values
-                        if isinstance(item, (str, int)) and str(item).strip()
-                    ]
-                    if candidates:
-                        return {argument_name: candidates[-1]}
+                for argument_name, context_name in field_pairs:
+                    direct_value = arguments.get(argument_name)
+                    if isinstance(direct_value, (str, int)) and str(direct_value).strip():
+                        return {argument_name: direct_value}
+                    values = context.get(context_name)
+                    if isinstance(values, list):
+                        candidates = [
+                            item for item in values
+                            if isinstance(item, (str, int)) and str(item).strip()
+                        ]
+                        if candidates:
+                            return {argument_name: candidates[-1]}
     return {}
 
 

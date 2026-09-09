@@ -1361,7 +1361,6 @@ class McpManager:
         """Extract bounded resource identifiers needed by referential follow-ups."""
         resource_fields = {
             "collections": ("collection_names", ("collection_name", "name", "id")),
-            "channels": ("channel_ids", ("channel_id", "id", "name")),
         }
         context: Dict[str, List[str]] = {}
         queue: List[Any] = [payload]
@@ -1382,6 +1381,30 @@ class McpManager:
                 continue
             if not isinstance(value, dict):
                 continue
+            channels = value.get("channels")
+            if isinstance(channels, list):
+                channel_ids: List[str] = []
+                channel_names: List[str] = []
+                for item in channels[:25]:
+                    raw_id: Any = ""
+                    raw_name: Any = item
+                    if isinstance(item, dict):
+                        raw_id = item.get("channel_id") or item.get("id") or ""
+                        raw_name = item.get("channel_name") or item.get("name") or ""
+                    for raw, target in (
+                        (raw_id, channel_ids),
+                        (raw_name, channel_names),
+                    ):
+                        if not isinstance(raw, (str, int)):
+                            continue
+                        identifier = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw))
+                        identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
+                        if identifier and identifier not in target:
+                            target.append(identifier)
+                if channel_ids:
+                    context["channel_ids"] = channel_ids
+                if channel_names:
+                    context["channel_names"] = channel_names
             for source_key, (context_key, item_keys) in resource_fields.items():
                 items = value.get(source_key)
                 if not isinstance(items, list):
@@ -1604,6 +1627,10 @@ class McpManager:
                     item for item in input_schema["required"] if item != name
                 ]
         channel_name = self._portal_named_channel(latest_query)
+        if not channel_name:
+            context_channel = (context_arguments or {}).get("channel_name")
+            if isinstance(context_channel, str):
+                channel_name = context_channel.strip()[:160]
         if channel_name and "channel_id" in (input_schema.get("properties") or {}):
             channel_id = await self._portal_resolve_channel(
                 server_id, service_id, channel_name, trace_events
