@@ -937,6 +937,32 @@ def test_channel_followup_preserves_last_identity_from_mixed_portal_listing():
     ) == {"channel_name": "announcements"}
 
 
+def test_channel_followup_prefers_actual_relay_argument_over_nested_result_refs():
+    messages = [
+        {"role": "user", "content": "Use Portal to read the general channel."},
+        {
+            "role": "assistant",
+            "content": "I read the channel.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "discord",
+                    "tool_name": "read_messages",
+                    "arguments": {"channel_id": "1542679644640247860", "count": "5"},
+                    "context": {
+                        "channel_refs": [{"id": "999", "name": "nested-message-json"}],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "Read that channel again."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"channel_id": "1542679644640247860"}
+
+
 @pytest.mark.asyncio
 async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
     captured = {}

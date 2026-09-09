@@ -1619,6 +1619,10 @@ def _portal_followup_fixed_arguments(
                 field_pairs = fields.get(noun)
                 if not field_pairs:
                     continue
+                for argument_name, _context_name in field_pairs:
+                    direct_value = arguments.get(argument_name)
+                    if isinstance(direct_value, (str, int)) and str(direct_value).strip():
+                        return {argument_name: direct_value}
                 if noun == "channel":
                     channel_refs = context.get("channel_refs")
                     if isinstance(channel_refs, list) and channel_refs:
@@ -1631,9 +1635,6 @@ def _portal_followup_fixed_arguments(
                             if isinstance(channel_name, str) and channel_name.strip():
                                 return {"channel_name": channel_name}
                 for argument_name, context_name in field_pairs:
-                    direct_value = arguments.get(argument_name)
-                    if isinstance(direct_value, (str, int)) and str(direct_value).strip():
-                        return {argument_name: direct_value}
                     values = context.get(context_name)
                     if isinstance(values, list):
                         candidates = [
