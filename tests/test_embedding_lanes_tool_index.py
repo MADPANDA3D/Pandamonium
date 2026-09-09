@@ -33,6 +33,55 @@ def test_tool_index_indexes_and_retrieves_from_available_lanes(monkeypatch):
     assert "bash" in index.retrieve("run a shell command", k=10)
 
 
+def test_tool_index_uses_verified_portal_metadata_without_wrapper_prompt_text():
+    collection = FakeCollection(
+        "odysseus_tool_index_fastembed", metadata={"embedding_lane": "fastembed"}
+    )
+    lane = EmbeddingLane(
+        name=LANE_FASTEMBED,
+        client=FakeEmbedder(384, "mini", "local://fastembed"),
+        collection=collection,
+        collection_name="odysseus_tool_index_fastembed",
+        model="mini",
+        url="local://fastembed",
+        dimension=384,
+        fingerprint="fast",
+    )
+
+    class PortalMetadataOnly:
+        _generation = 7
+
+        @staticmethod
+        def get_tool_descriptions_for_prompt(_disabled):
+            return ""
+
+        @staticmethod
+        def get_portal_index_records():
+            return [{
+                "id": "mcp_portal_service_qdrant",
+                "tool_name": "mcp__portal__portal.find_tools",
+                "document": (
+                    "Portal service: qdrant QDRANT-MCP. Configuration: configured. "
+                    "Catalog version: qdrant-v2."
+                ),
+            }]
+
+    from src.tool_index import ToolIndex
+
+    index = ToolIndex.__new__(ToolIndex)
+    index._lanes = [lane]
+    index._mcp_generation = -1
+    index._healthy = True
+    index.index_mcp_tools(PortalMetadataOnly())
+
+    row = collection.rows["mcp_portal_service_qdrant"]
+    assert row["metadata"] == {
+        "tool_name": "mcp__portal__portal.find_tools",
+        "tool_type": "mcp",
+    }
+    assert "Catalog version: qdrant-v2" in row["document"]
+
+
 def test_tool_index_builtin_indexing_fails_when_all_lanes_fail():
     custom_lane = EmbeddingLane(
         name=LANE_CUSTOM,

@@ -8,6 +8,7 @@ The LLM decides when to use tools by writing fenced code blocks.
 
 import asyncio
 import collections
+import copy
 import json
 import re
 import time
@@ -416,7 +417,7 @@ _NATIVE_MCP_DIRECT_RULES = """\
 _EXPLICIT_PORTAL_READ_RULES = """\
 ## Explicit Portal provider-read requirement
 - This request requires live downstream provider data through MAD MCP Portal. A prose-only response is not completion.
-- Use the mounted Portal discovery/reference steps as needed, then execute the mounted function whose name ends in `portal.call_read_tool` before giving the final answer.
+- Execute the one mounted request-specific Portal read function before giving the final answer. Pandamonium already scoped it through Portal discovery and the selected lossless reference.
 - The Portal is the broker, not the downstream `serviceId`. Preserve the provider named by the user and never use the Portal server id as the downstream service id.
 - Discovery and enumeration are intermediate. Do not claim requested provider data from a service list, tool catalog, reference, or collection-name list.
 - If a required schema, admission, authentication, or transport step fails, report that exact terminal error instead of inventing data."""
@@ -426,6 +427,17 @@ _MCP_DOTTED_CAPABILITY_RE = re.compile(r"\b[a-zA-Z][\w-]*(?:\.[\w-]+)+\b")
 _QUALIFIED_PORTAL_READ_TOOL_RE = re.compile(
     r"^mcp__[a-zA-Z0-9_-]+__portal\.call_read_tool$"
 )
+_QUALIFIED_PORTAL_PROXY_READ_TOOL_RE = re.compile(
+    r"^mcp__[a-zA-Z0-9_-]+__portal\.read\.[a-zA-Z0-9._-]+$"
+)
+
+
+def _is_qualified_portal_read_tool(name: Any) -> bool:
+    value = str(name or "")
+    return bool(
+        _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(value)
+        or _QUALIFIED_PORTAL_PROXY_READ_TOOL_RE.fullmatch(value)
+    )
 
 
 def _with_native_mcp_contract(messages: List[Dict], qualified_names: Set[str]) -> List[Dict]:
@@ -1832,9 +1844,9 @@ def _portal_read_requirement(
     last_user: str,
     selected_tools: Optional[Set[str]],
 ) -> str:
-    """Return the narrow Portal read required by this Qdrant request, if any."""
+    """Return the narrow downstream read required by this Portal request."""
     if not any(
-        _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(str(name or ""))
+        _is_qualified_portal_read_tool(name)
         for name in (selected_tools or set())
     ):
         return ""
@@ -1844,7 +1856,7 @@ def _portal_read_requirement(
         r"\s+", " ", str(intent.get("retrieval_query") or "").strip().lower()
     )
     scope = f"{latest}\n{retrieval}" if intent.get("continuation") else latest
-    if not latest or not re.search(r"\b(?:qdrant|collections?)\b", scope):
+    if not latest:
         return ""
     if re.search(
         r"\b(?:tools?|capabilities|integrations?)\b.{0,48}"
@@ -1875,7 +1887,7 @@ def _portal_read_requirement(
     if not requested:
         return ""
 
-    collection_contents = re.search(r"\bcollections?\b", scope) and (
+    collection_contents = re.search(r"\b(?:qdrant|collections?)\b", scope) and (
         re.search(
             r"\b(?:contents?|points?|payloads?|records?|entries|documents?|"
             r"items?|samples?|data|information)\b",
@@ -1900,7 +1912,7 @@ def _portal_read_attempt_satisfies_request(
     """Check for the requested Portal read without retrying a real attempt."""
     read_events = [
         event for event in tool_events
-        if _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(str(event.get("tool") or ""))
+        if _is_qualified_portal_read_tool(event.get("tool"))
     ]
     if not read_events:
         return False
@@ -1911,12 +1923,19 @@ def _portal_read_attempt_satisfies_request(
     # MAD-842.  For a contents request, require a bounded point/query-style
     # downstream operation before accepting completion.
     for event in read_events:
+        relay = event.get("portal_relay") or {}
         action_call = event.get("action_call") or {}
         arguments = action_call.get("arguments") or {}
         if not isinstance(arguments, Mapping):
             continue
-        service_id = str(arguments.get("serviceId") or arguments.get("service_id") or "").lower()
-        tool_name = str(arguments.get("toolName") or arguments.get("tool_name") or "").lower()
+        service_id = str(
+            relay.get("service_id") or arguments.get("serviceId")
+            or arguments.get("service_id") or ""
+        ).lower()
+        tool_name = str(
+            relay.get("tool_name") or arguments.get("toolName")
+            or arguments.get("tool_name") or ""
+        ).lower()
         if service_id == "qdrant" and re.search(
             r"(?:get|list|scroll|search|query|retrieve)[._-]?points?", tool_name
         ):
@@ -3878,6 +3897,7 @@ async def stream_agent_loop(
             _relevant_tools.add("ui_control")
 
     _native_mcp_tools: Set[str] = set()
+    _portal_preparation: Optional[Dict[str, Any]] = None
     if not guide_only and mcp_mgr and not _is_native_mcp_management_request(_last_user):
         try:
             # Contextual status/follow-up turns carry the named connection in
@@ -3896,6 +3916,32 @@ async def stream_agent_loop(
             _relevant_tools.difference_update({"manage_mcp", "api_call", "app_api", "pipeline"})
             _needs_admin = False
             logger.info("[tool-rag] Selected native MCP tools: %s", sorted(_native_mcp_tools))
+            _preparation_requirement = _portal_read_requirement(
+                _intent, _last_user, _native_mcp_tools
+            )
+            if _preparation_requirement and hasattr(mcp_mgr, "prepare_portal_read"):
+                try:
+                    _portal_preparation = await mcp_mgr.prepare_portal_read(
+                        _last_user, _retrieval_query
+                    )
+                except Exception as _portal_prepare_error:
+                    logger.warning(
+                        "[tool-rag] Portal request preparation failed: %s",
+                        type(_portal_prepare_error).__name__,
+                    )
+                if _portal_preparation:
+                    _proxy_name = str(_portal_preparation["qualified_name"])
+                    _native_mcp_tools = {_proxy_name}
+                    # An explicit Portal route is a hard execution boundary.
+                    # The model receives the one selected typed read and no
+                    # generic, shell, or direct-provider execution target.
+                    _relevant_tools = {_proxy_name}
+                    logger.info(
+                        "[tool-rag] Prepared Portal relay service=%s tool=%s schema=%s",
+                        _portal_preparation.get("service_id"),
+                        _portal_preparation.get("tool_name"),
+                        _proxy_name,
+                    )
     _native_mcp_server_prefixes = {
         f"mcp__{name.split('__', 2)[1]}__"
         for name in _native_mcp_tools
@@ -4145,6 +4191,10 @@ async def stream_agent_loop(
         suppress_skills=_low_signal_turn,
         active_email=active_email,
     )
+    if _portal_preparation:
+        mcp_schemas = list(mcp_schemas) + [
+            copy.deepcopy(_portal_preparation["schema"])
+        ]
     _enabled_mcp_schema_names = {
         schema.get("function", {}).get("name")
         for schema in mcp_schemas
@@ -4152,7 +4202,7 @@ async def stream_agent_loop(
     }
     _portal_read_tool_names = {
         name for name in _native_mcp_tools
-        if _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(str(name or ""))
+        if _is_qualified_portal_read_tool(name)
         and name in _enabled_mcp_schema_names
         and name not in disabled_tools
     }
@@ -5185,11 +5235,10 @@ async def stream_agent_loop(
                 if _intent_nudge_count < _MAX_INTENT_NUDGES:
                     _intent_nudge_count += 1
                     _required_read = (
-                        "a bounded Qdrant point/payload read through "
-                        "`portal.call_read_tool` with downstream `serviceId` "
-                        "`qdrant`; listing collections is not the requested data"
+                        "a bounded point/payload read through the mounted typed "
+                        "Portal relay for Qdrant; listing collections is not the requested data"
                         if _portal_collection_contents_required
-                        else "the mounted `portal.call_read_tool` provider read"
+                        else "the mounted typed Portal provider read"
                     )
                     logger.info(
                         "[agent] explicit Portal-read nudge #%d on round %d",
@@ -5204,8 +5253,7 @@ async def stream_agent_loop(
                             "discovery result, reference, or enumeration is not "
                             f"completion. Execute {_required_read} now. Emit the "
                             "exact qualified function already listed in the Current "
-                            "native MCP capability contract whose raw capability "
-                            "name is `portal.call_read_tool`. If that exact attempt "
+                            "native MCP capability contract. If that exact attempt "
                             "returns a terminal error, report it once and stop; do "
                             "not guess or retry it."
                         ),
@@ -5928,6 +5976,8 @@ async def stream_agent_loop(
 
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": _safe_cmd_display, "output": output_text, "exit_code": result.get("exit_code"), "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "status": _action_result["status"], "evidence": _action_result["evidence"], "authority_ref": _action_call.get("authority_ref")}
+            if isinstance(result.get("portal_relay"), dict):
+                tool_output_data["portal_relay"] = result["portal_relay"]
             if is_doc_tool and "action" in result:
                 tool_output_data.update({
                     "doc_id": result.get("doc_id"),
@@ -6081,6 +6131,8 @@ async def stream_agent_loop(
                 "action_call": audit_safe_action_call(_action_call),
                 "action_result": _action_result,
             }
+            if isinstance(result.get("portal_relay"), dict):
+                tool_event["portal_relay"] = result["portal_relay"]
             if _authority_decision:
                 tool_event["authority_decision"] = _authority_decision
             if _operational_event:
@@ -6360,6 +6412,15 @@ async def stream_agent_loop(
         metrics["completion_guard"] = {
             "reason": "explicit_portal_read_not_executed",
             "nudges": _intent_nudge_count,
+        }
+    if _portal_preparation:
+        metrics["portal_routing"] = {
+            "service_id": _portal_preparation.get("service_id"),
+            "tool_name": _portal_preparation.get("tool_name"),
+            "descriptor_hash": _portal_preparation.get("descriptor_hash"),
+            "catalog_version": _portal_preparation.get("catalog_version"),
+            "model_visible_schema": _portal_preparation.get("qualified_name"),
+            "trace_events": _portal_preparation.get("trace_events") or [],
         }
     _request_status = "succeeded"
     if _exhausted_rounds or _portal_read_guard_exhausted:
