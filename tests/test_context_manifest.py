@@ -479,6 +479,70 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
 
 
 @pytest.mark.asyncio
+async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
+    captured = {}
+    manager = McpManager()
+    manager._connections["browser-fixture"] = {
+        "status": "connected",
+        "name": "Built-in Browser",
+        "server_info": {"name": "Playwright MCP"},
+        "catalog_terms": ["browser"],
+    }
+    manager._tools["browser-fixture"] = [
+        {
+            "name": "browser_navigate",
+            "description": "Navigate to a URL",
+            "input_schema": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+            "annotations": {"readOnlyHint": False, "destructiveHint": True},
+        },
+        {
+            "name": "browser_snapshot",
+            "description": "Capture the accessibility snapshot",
+            "input_schema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        },
+    ]
+
+    async def fake_stream(*args, **kwargs):
+        captured["tools"] = kwargs.get("tools") or []
+        yield 'data: {"delta":"Ready."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+
+    async for _chunk in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions",
+        "gpt-4o",
+        [{
+            "role": "user",
+            "content": (
+                "Use Built-in Browser: browser_navigate to https://example.com/, "
+                "then browser_snapshot and report the title and H1."
+            ),
+        }],
+        context_length=8208,
+        max_tokens=2048,
+    ):
+        pass
+
+    sent = {
+        schema["function"]["name"]
+        for schema in captured["tools"]
+        if schema.get("function")
+    }
+    assert {name for name in sent if name.startswith("mcp__browser-fixture__")} == {
+        "mcp__browser-fixture__browser_navigate",
+        "mcp__browser-fixture__browser_snapshot",
+    }
+
+
+@pytest.mark.asyncio
 async def test_native_mcp_contract_lists_every_mcp_schema_in_the_provider_payload(monkeypatch):
     captured = {}
     manager = McpManager()

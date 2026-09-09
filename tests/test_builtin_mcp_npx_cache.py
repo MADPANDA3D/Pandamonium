@@ -32,8 +32,8 @@ def test_npx_package_from_args_prefers_package_after_y_flag(monkeypatch):
     builtin_mcp = _load_builtin_mcp(monkeypatch)
 
     assert builtin_mcp._npx_package_from_args(
-        ["-y", "@playwright/mcp@latest", "--headless"]
-    ) == "@playwright/mcp@latest"
+        ["-y", "@playwright/mcp@0.0.80", "--headless"]
+    ) == "@playwright/mcp@0.0.80"
 
 
 def test_npx_cache_check_detects_scoped_package_in_npx_cache(monkeypatch, tmp_path):
@@ -61,7 +61,7 @@ def test_npx_cache_check_detects_scoped_package_in_npx_cache(monkeypatch, tmp_pa
     assert asyncio.run(
         builtin_mcp._is_npx_package_cached(
             "npx",
-            "@playwright/mcp@latest",
+            "@playwright/mcp@0.0.80",
             timeout_s=2,
         )
     ) is True
@@ -88,14 +88,14 @@ def test_npx_cache_check_falls_back_when_async_subprocess_is_unsupported(monkeyp
     assert asyncio.run(
         builtin_mcp._is_npx_package_cached(
             "npx.cmd",
-            "@playwright/mcp@latest",
+            "@playwright/mcp@0.0.80",
             timeout_s=2,
         )
     ) is True
     assert captured["args"] == [
         "npx.cmd",
         "--no-install",
-        "@playwright/mcp@latest",
+        "@playwright/mcp@0.0.80",
         "--version",
     ]
     assert captured["kwargs"]["capture_output"] is True
@@ -119,7 +119,56 @@ def test_npx_cache_check_fallback_treats_timeout_as_cache_miss(monkeypatch, tmp_
     assert asyncio.run(
         builtin_mcp._is_npx_package_cached(
             "npx.cmd",
-            "@playwright/mcp@latest",
+            "@playwright/mcp@0.0.80",
             timeout_s=2,
         )
     ) is False
+
+
+def test_baked_browser_launch_passes_only_the_browser_store_environment(monkeypatch):
+    builtin_mcp = _load_builtin_mcp(monkeypatch)
+    captured = {}
+    scheduled = []
+
+    class Manager:
+        async def connect_server(self, **kwargs):
+            captured.update(kwargs)
+            return True
+
+    graphify_runtime = types.ModuleType("src.graphify_runtime")
+    graphify_runtime.configured_roots = lambda: {}
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setitem(sys.modules, "src.graphify_runtime", graphify_runtime)
+    monkeypatch.setattr(builtin_mcp, "_BUILTIN_SERVERS", {})
+    monkeypatch.setattr(builtin_mcp, "_spawn_bg", scheduled.append)
+    monkeypatch.setattr(builtin_mcp.asyncio, "sleep", no_wait)
+    monkeypatch.setattr(
+        builtin_mcp.os.path,
+        "isfile",
+        lambda path: path == builtin_mcp._BROWSER_MCP_CLI,
+    )
+    monkeypatch.setattr(
+        builtin_mcp,
+        "which_tool",
+        lambda name: "/usr/bin/node" if name == "node" else None,
+    )
+
+    async def exercise():
+        await builtin_mcp.register_builtin_servers(Manager())
+        assert len(scheduled) == 1
+        await scheduled[0]
+
+    asyncio.run(exercise())
+
+    assert captured["command"] == "/usr/bin/node"
+    assert captured["args"] == [
+        builtin_mcp._BROWSER_MCP_CLI,
+        *builtin_mcp._BROWSER_MCP_DOCKER_ARGS,
+    ]
+    assert captured["env"] == {
+        "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+        "XDG_CACHE_HOME": "/app/.cache/browser-mcp",
+    }

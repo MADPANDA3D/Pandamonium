@@ -12,9 +12,11 @@ RUN bash /usr/local/bin/build-realesrgan-wheels.sh /wheels
 FROM python:3.14-slim
 
 ARG PANDAMONIUM_SOURCE_REVISION=""
+ARG PLAYWRIGHT_MCP_VERSION=0.0.80
 LABEL org.opencontainers.image.source="https://github.com/MADPANDA3D/Pandamonium" \
       org.opencontainers.image.revision=${PANDAMONIUM_SOURCE_REVISION}
-ENV PANDAMONIUM_SOURCE_REVISION=${PANDAMONIUM_SOURCE_REVISION}
+ENV PANDAMONIUM_SOURCE_REVISION=${PANDAMONIUM_SOURCE_REVISION} \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # System deps. tmux is required by Cookbook for background downloads/serves.
 # openssh-client is required for Cookbook remote server tests, setup, probes,
@@ -42,6 +44,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
+
+# Browser MCP is a supported built-in, so Docker must not download its package
+# or browser on first use. Keep the package and browser revision coupled here;
+# the runtime launches this exact CLI instead of an unpinned npx request.
+RUN npm install --prefix /opt/pandamonium-browser-mcp --omit=dev --no-audit --no-fund \
+        "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+    && node /opt/pandamonium-browser-mcp/node_modules/playwright-core/cli.js install-deps chromium \
+    && node /opt/pandamonium-browser-mcp/node_modules/playwright-core/cli.js install --no-shell chromium
 
 # libgl1/libglib2.0-0t64/libxcb1 are runtime shared libs (libGL.so.1,
 # libglib-2.0/libgthread, libxcb.so.1) that opencv-python (cv2) loads. The

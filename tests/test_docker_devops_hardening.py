@@ -121,6 +121,33 @@ def test_docker_entrypoint_ownership_repair_stays_inside_expected_mounts():
     assert "Skipping recursive ownership repair" in script
 
 
+def test_docker_bakes_pinned_browser_mcp_and_repairs_only_its_cache():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    entrypoint = (ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+    builtin = (ROOT / "src" / "builtin_mcp.py").read_text(encoding="utf-8")
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    volumes = compose["services"]["pandamonium"]["volumes"]
+
+    assert "ARG PLAYWRIGHT_MCP_VERSION=0.0.80" in dockerfile
+    assert '"@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}"' in dockerfile
+    assert "playwright-core/cli.js install-deps chromium" in dockerfile
+    assert "playwright-core/cli.js install --no-shell chromium" in dockerfile
+    assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in dockerfile
+    assert (
+        "${APP_DATA_DIR:-./data}/browser-mcp:/app/.cache/browser-mcp:z"
+        in volumes
+    )
+    assert "mkdir -p /app/.cache/browser-mcp/output" in entrypoint
+    assert "/app/.cache/browser-mcp /app/.local" in entrypoint
+    assert '_BROWSER_MCP_PACKAGE = "@playwright/mcp@0.0.80"' in builtin
+    assert '/opt/pandamonium-browser-mcp/node_modules/@playwright/mcp/cli.js' in builtin
+    assert '"--browser", "chromium"' in builtin
+    assert '"--no-sandbox"' in builtin
+    assert '"--isolated"' in builtin
+    assert '"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"' in builtin
+    assert '"XDG_CACHE_HOME": "/app/.cache/browser-mcp"' in builtin
+
+
 def test_dockerignore_excludes_secrets_editor_backups():
     patterns = set((ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines())
     assert {

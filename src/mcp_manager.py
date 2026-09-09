@@ -52,9 +52,10 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
     if "@playwright/mcp" in lower_command:
         return (
             f"{raw_error}\n\n"
-            "Browser MCP could not start. On fresh installs, cache the Playwright MCP package once before connecting:\n\n"
-            "npx -y @playwright/mcp@latest --version\n\n"
-            "Then restart Pandamonium and reconnect the Browser MCP server."
+            "Browser MCP could not start. Current Docker images already include the pinned package and Chromium; rebuild the image before retrying. "
+            "Native installs can cache the supported package with:\n\n"
+            "npx -y @playwright/mcp@0.0.80 --version\n\n"
+            "Then install its Chromium runtime as documented and restart Pandamonium."
         )
 
     return raw_error
@@ -232,13 +233,12 @@ _MCP_READONLY_VERBS = (
 )
 
 
-def mcp_tool_is_readonly(tool: Dict) -> bool:
-    """Classify an MCP tool as safe (non-mutating) for plan mode.
+def mcp_tool_action_effect(tool: Dict) -> Optional[str]:
+    """Map trustworthy MCP annotations to the canonical execution effect.
 
     Prefer the server's own annotations (readOnlyHint / destructiveHint). When
-    absent, fall back to a tool-name verb heuristic, and FAIL CLOSED (treat as
-    write) for anything that doesn't clearly read — plan mode must not run a
-    write tool just because its intent is ambiguous.
+    absent, fall back to the existing read-name heuristic. Anything that still
+    cannot be classified gets no policy and fails closed at execution.
     """
     ann = tool.get("annotations")
     # annotations may be a dict or a pydantic model
@@ -251,13 +251,22 @@ def mcp_tool_is_readonly(tool: Dict) -> bool:
         else:
             read_hint = getattr(ann, "readOnlyHint", None)
             destructive = getattr(ann, "destructiveHint", None)
+    if destructive is True:
+        return "destructive_or_difficult_to_recover"
     if read_hint is True:
-        return True
-    if read_hint is False or destructive is True:
-        return False
+        return "read"
+    if read_hint is False and destructive is False:
+        return "reversible_write"
+    if read_hint is False:
+        return None
     # No usable hint — heuristic on the tool name's leading verb.
     name = (tool.get("name") or "").lower()
-    return name.startswith(_MCP_READONLY_VERBS)
+    return "read" if name.startswith(_MCP_READONLY_VERBS) else None
+
+
+def mcp_tool_is_readonly(tool: Dict) -> bool:
+    """Fail closed unless MCP metadata or the read-name heuristic proves a read."""
+    return mcp_tool_action_effect(tool) == "read"
 
 
 class McpManager:
@@ -935,7 +944,7 @@ class McpManager:
             scored = []
             for index, tool in enumerate(tools):
                 name = str(tool.get("name") or "")
-                if not name or name in referenced or not mcp_tool_is_readonly(tool):
+                if not name or (name in referenced and mcp_tool_is_readonly(tool)):
                     continue
                 haystack = f"{name} {tool.get('description') or ''}"
                 overlap = len(query_tokens & _routing_tokens(haystack))
@@ -955,6 +964,10 @@ class McpManager:
                 fully_name_matched = (
                     len(name_tokens) >= 2 and name_tokens <= query_name_tokens
                 )
+                if not mcp_tool_is_readonly(tool) and not (
+                    directly_named or fully_name_matched
+                ):
+                    continue
                 if referenced and not directly_named and not fully_name_matched:
                     continue
                 negation_name = name if directly_named else " ".join(action_words)
@@ -1039,11 +1052,12 @@ class McpManager:
 
         return schemas
 
-    def get_readonly_action_policies(self) -> Dict[str, Dict[str, str]]:
-        """Return authority metadata only for MCP calls proven read-only.
+    def get_action_policies(self) -> Dict[str, Dict[str, str]]:
+        """Return authority metadata only for MCP calls with a proven effect.
 
-        Unknown or mutating MCP tools deliberately receive no declaration and
-        continue to fail closed at the authority gate.
+        Unknown MCP tools deliberately receive no declaration and continue to
+        fail closed at the authority gate. Effectful tools remain approval-
+        gated by the shared authority protocol at execution time.
         """
         policies: Dict[str, Dict[str, str]] = {}
         for server_id, tools in self._tools.items():
@@ -1052,8 +1066,11 @@ class McpManager:
             if self.is_builtin(server_id) and server_id != "builtin_browser":
                 continue
             for tool in tools:
-                if mcp_tool_is_readonly(tool):
-                    policies[f"mcp__{server_id}__{tool['name']}"] = {"action_effect": "read"}
+                effect = mcp_tool_action_effect(tool)
+                if effect:
+                    policies[f"mcp__{server_id}__{tool['name']}"] = {
+                        "action_effect": effect
+                    }
         return policies
 
     def get_all_tools(self, disabled_map: Optional[Dict[str, set]] = None) -> List[Dict]:

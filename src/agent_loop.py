@@ -3943,8 +3943,8 @@ async def stream_agent_loop(
             + _NATIVE_MCP_DIRECT_RULES
         )
     _mcp_action_policies = (
-        mcp_mgr.get_readonly_action_policies()
-        if mcp_mgr and hasattr(mcp_mgr, "get_readonly_action_policies")
+        mcp_mgr.get_action_policies()
+        if mcp_mgr and hasattr(mcp_mgr, "get_action_policies")
         else {}
     )
     _extension_catalog_message = _extension_catalog_context_message(context_extensions)
