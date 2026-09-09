@@ -3,8 +3,24 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts import build_release_notes
+
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_release_comparison_keeps_commit_with_empty_body(monkeypatch):
+    monkeypatch.setattr(
+        build_release_notes,
+        "git",
+        lambda *_args: "a" * 40 + "\x1fMerge release branch\x1f\x1e\n",
+    )
+
+    assert build_release_notes.collect_commits("v1.0.32", "HEAD") == [{
+        "sha": "a" * 40,
+        "subject": "Merge release branch",
+        "issues": [],
+    }]
 
 
 def test_release_notes_cover_comparison_and_publish_only_after_verification(tmp_path):

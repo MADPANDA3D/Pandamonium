@@ -36,10 +36,12 @@ def collect_commits(previous_tag: str, tag: str) -> list[dict]:
     )
     commits = []
     for record in raw.split("\x1e"):
-        fields = record.strip().split("\x1f", 2)
+        fields = record.strip("\r\n").split("\x1f", 2)
         if len(fields) != 3:
             continue
         sha, subject, body = fields
+        sha = sha.strip()
+        subject = subject.strip()
         issues = sorted({key.upper() for key in ISSUE_RE.findall(f"{subject}\n{body}")})
         commits.append({"sha": sha, "subject": subject, "issues": issues})
     if not commits:
