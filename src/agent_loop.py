@@ -413,8 +413,19 @@ _NATIVE_MCP_DIRECT_RULES = """\
 - Treat discovery and enumeration as intermediate steps. Listing collections does not answer what is inside one; continue through the declared reference and read executor until the requested content is returned or one precise terminal error blocks it.
 - Safe tools declared read-only run without approval. If permission, service admission, or schema validation fails, report that bounded error clearly and stop instead of entering a discovery loop."""
 
+_EXPLICIT_PORTAL_READ_RULES = """\
+## Explicit Portal provider-read requirement
+- This request requires live downstream provider data through MAD MCP Portal. A prose-only response is not completion.
+- Use the mounted Portal discovery/reference steps as needed, then execute the mounted function whose name ends in `portal.call_read_tool` before giving the final answer.
+- The Portal is the broker, not the downstream `serviceId`. Preserve the provider named by the user and never use the Portal server id as the downstream service id.
+- Discovery and enumeration are intermediate. Do not claim requested provider data from a service list, tool catalog, reference, or collection-name list.
+- If a required schema, admission, authentication, or transport step fails, report that exact terminal error instead of inventing data."""
+
 _NATIVE_MCP_CONTRACT_HEADING = "## Current native MCP capability contract"
 _MCP_DOTTED_CAPABILITY_RE = re.compile(r"\b[a-zA-Z][\w-]*(?:\.[\w-]+)+\b")
+_QUALIFIED_PORTAL_READ_TOOL_RE = re.compile(
+    r"^mcp__[a-zA-Z0-9_-]+__portal\.call_read_tool$"
+)
 
 
 def _with_native_mcp_contract(messages: List[Dict], qualified_names: Set[str]) -> List[Dict]:
@@ -1814,6 +1825,103 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         "domains": domains,
         "retrieval_query": retrieval_query,
     }
+
+
+def _portal_read_requirement(
+    intent: Mapping[str, object],
+    last_user: str,
+    selected_tools: Optional[Set[str]],
+) -> str:
+    """Return the narrow Portal read required by this Qdrant request, if any."""
+    if not any(
+        _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(str(name or ""))
+        for name in (selected_tools or set())
+    ):
+        return ""
+
+    latest = re.sub(r"\s+", " ", str(last_user or "").strip().lower())
+    retrieval = re.sub(
+        r"\s+", " ", str(intent.get("retrieval_query") or "").strip().lower()
+    )
+    scope = f"{latest}\n{retrieval}" if intent.get("continuation") else latest
+    if not latest or not re.search(r"\b(?:qdrant|collections?)\b", scope):
+        return ""
+    if re.search(
+        r"\b(?:tools?|capabilities|integrations?)\b.{0,48}"
+        r"\b(?:available|visible|installed|connected)\b",
+        latest,
+    ):
+        return ""
+
+    operational_action = bool(re.search(
+        r"\b(?:use|call|run|execute|query|read|fetch|retrieve|inspect|sample|"
+        r"search|list|show|check)\b|\blook\s+(?:at|inside|into|over)\b",
+        latest,
+    ))
+    if intent.get("continuation"):
+        requested = operational_action or bool(
+            re.search(r"\b(?:tell|give)\s+me\b", latest)
+        )
+    else:
+        conceptual = (
+            re.match(r"^(?:can|could|does|is it possible)\b", latest)
+            or re.search(
+                r"\b(?:how|what|why)\b.{0,80}"
+                r"\b(?:work|works|mean|means|purpose|schema|arguments?)\b",
+                latest,
+            )
+        )
+        requested = operational_action and not conceptual
+    if not requested:
+        return ""
+
+    collection_contents = re.search(r"\bcollections?\b", scope) and (
+        re.search(
+            r"\b(?:contents?|points?|payloads?|records?|entries|documents?|"
+            r"items?|samples?|data|information)\b",
+            latest,
+        )
+        or re.search(
+            r"\bwhat(?:'s|s| is)\s+(?:stored\s+)?in\b|"
+            r"\b(?:query|read)\s+(?:it|that|this|the\s+collection)\b|"
+            r"\blook\s+(?:inside|into|over)\s+"
+            r"(?:it|that|this|the\s+collection)\b|"
+            r"\b(?:contain|contains|contained)\b",
+            latest,
+        )
+    )
+    return "qdrant_collection_contents" if collection_contents else "provider_read"
+
+
+def _portal_read_attempt_satisfies_request(
+    tool_events: List[Dict],
+    requirement: str,
+) -> bool:
+    """Check for the requested Portal read without retrying a real attempt."""
+    read_events = [
+        event for event in tool_events
+        if _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(str(event.get("tool") or ""))
+    ]
+    if not read_events:
+        return False
+    if requirement != "qdrant_collection_contents":
+        return True
+
+    # A collection-name enumeration is the exact false-positive behind
+    # MAD-842.  For a contents request, require a bounded point/query-style
+    # downstream operation before accepting completion.
+    for event in read_events:
+        action_call = event.get("action_call") or {}
+        arguments = action_call.get("arguments") or {}
+        if not isinstance(arguments, Mapping):
+            continue
+        service_id = str(arguments.get("serviceId") or arguments.get("service_id") or "").lower()
+        tool_name = str(arguments.get("toolName") or arguments.get("tool_name") or "").lower()
+        if service_id == "qdrant" and re.search(
+            r"(?:get|list|scroll|search|query|retrieve)[._-]?points?", tool_name
+        ):
+            return True
+    return False
 
 
 def _turn_targets_active_document(intent: Dict[str, object], last_user: str, active_document) -> bool:
@@ -3793,7 +3901,6 @@ async def stream_agent_loop(
         for name in _native_mcp_tools
         if len(name.split("__", 2)) == 3
     }
-
     # If this turn targets the open document, keep editing tools available
     # regardless of which selection path (RAG, keyword, caller-provided) ran.
     # Do not leak document tools into unrelated turns just because the editor
@@ -4038,11 +4145,47 @@ async def stream_agent_loop(
         suppress_skills=_low_signal_turn,
         active_email=active_email,
     )
+    _enabled_mcp_schema_names = {
+        schema.get("function", {}).get("name")
+        for schema in mcp_schemas
+        if schema.get("function", {}).get("name")
+    }
+    _portal_read_tool_names = {
+        name for name in _native_mcp_tools
+        if _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(str(name or ""))
+        and name in _enabled_mcp_schema_names
+        and name not in disabled_tools
+    }
+    _portal_read_requirement_kind = _portal_read_requirement(
+        _intent,
+        _last_user,
+        _portal_read_tool_names,
+    )
+    _portal_read_required = bool(_portal_read_requirement_kind)
+    _portal_collection_contents_required = (
+        _portal_read_requirement_kind == "qdrant_collection_contents"
+    )
     if _native_mcp_tools and messages and messages[0].get("role") == "system":
         messages[0]["content"] = (
             str(messages[0].get("content") or "")
             + "\n\n"
             + _NATIVE_MCP_DIRECT_RULES
+        )
+    if _portal_read_required and messages and messages[0].get("role") == "system":
+        _collection_contract = (
+            "\n- This is a Qdrant collection-content request. Use downstream "
+            "`serviceId` `qdrant` and a bounded catalog-declared point/payload "
+            "read such as `qdrant-list-points`; set vector inclusion false. "
+            "`qdrant-list-collections` proves existence only and does not satisfy "
+            "the requested contents read."
+            if _portal_collection_contents_required
+            else ""
+        )
+        messages[0]["content"] = (
+            str(messages[0].get("content") or "")
+            + "\n\n"
+            + _EXPLICIT_PORTAL_READ_RULES
+            + _collection_contract
         )
     _mcp_action_policies = (
         mcp_mgr.get_action_policies()
@@ -4242,6 +4385,7 @@ async def stream_agent_loop(
     # that *can't* call the tool from looping forever.
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
+    _portal_read_guard_exhausted = False
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -4282,6 +4426,19 @@ async def stream_agent_loop(
     _web_synthesis_reserve = False
     _model_rounds_used = 0
     for round_num in range(1, max_rounds + 3):
+        _portal_read_pending = (
+            _portal_read_required
+            and not _portal_read_attempt_satisfies_request(
+                tool_events,
+                _portal_read_requirement_kind,
+            )
+        )
+        # A generic stall detector may have scheduled a schema-free synthesis
+        # round.  That mode cannot satisfy an explicit live-read requirement,
+        # and its emergency synthesizer would otherwise expose unsupported
+        # prose before this guard gets a chance to correct the model.
+        if _portal_read_pending:
+            _force_answer = False
         _resume_approved_this_round = _approved_execution_pending
         if _resume_approved_this_round:
             _approved_execution_pending = False
@@ -4390,6 +4547,10 @@ async def stream_agent_loop(
         _priority_order: List[str] = []
         if "ui_control" in _schema_priority:
             _priority_order.append("ui_control")
+        _priority_order.extend(
+            name for name in sorted(_portal_read_tool_names)
+            if name not in _priority_order
+        )
         _priority_order.extend(
             name for name in (
                 schema.get("function", {}).get("name")
@@ -4732,9 +4893,13 @@ async def stream_agent_loop(
                                 else data["delta"]
                             )
                             round_response += _delta_text
-                            full_response += _delta_text
+                            if not _portal_read_pending:
+                                full_response += _delta_text
                             data["delta"] = _delta_text
-                        if not _ody_qwen_finetune_model or data.get("thinking"):
+                        if (
+                            (not _ody_qwen_finetune_model or data.get("thinking"))
+                            and (data.get("thinking") or not _portal_read_pending)
+                        ):
                             yield f"data: {json.dumps(data)}\n\n"
                         # Detect text-fence doc streaming. Normal agent prompts
                         # use ```create_document; the doc LoRA streaming path
@@ -4996,12 +5161,92 @@ async def stream_agent_loop(
         # persisted text either — otherwise it streams once and then disappears
         # on reload (#3222 follow-up).
         cleaned_round = strip_tool_blocks(round_response, skip_fenced=(_is_api_model and not used_native and not guide_only)).strip()
-        round_texts.append(cleaned_round)
-        if _ody_qwen_finetune_model and not tool_blocks and cleaned_round:
+        # A required Portal read has not happened yet, so pre-read prose is an
+        # unverified draft. Keep it available for control-flow inspection in
+        # this round, but never stream or persist it as the user's answer.
+        round_texts.append("" if _portal_read_pending else cleaned_round)
+        if (
+            _ody_qwen_finetune_model
+            and not _portal_read_pending
+            and not tool_blocks
+            and cleaned_round
+        ):
             yield f'data: {json.dumps({"delta": cleaned_round})}\n\n'
 
         if not tool_blocks:
             _round_answer = _strip_think_blocks(cleaned_round).strip()
+            if (
+                _portal_read_required
+                and not _portal_read_attempt_satisfies_request(
+                    tool_events,
+                    _portal_read_requirement_kind,
+                )
+            ):
+                if _intent_nudge_count < _MAX_INTENT_NUDGES:
+                    _intent_nudge_count += 1
+                    _required_read = (
+                        "a bounded Qdrant point/payload read through "
+                        "`portal.call_read_tool` with downstream `serviceId` "
+                        "`qdrant`; listing collections is not the requested data"
+                        if _portal_collection_contents_required
+                        else "the mounted `portal.call_read_tool` provider read"
+                    )
+                    logger.info(
+                        "[agent] explicit Portal-read nudge #%d on round %d",
+                        _intent_nudge_count,
+                        round_num,
+                    )
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "You ended the turn without executing the live Portal "
+                            "read required by the user's request. A prose answer, "
+                            "discovery result, reference, or enumeration is not "
+                            f"completion. Execute {_required_read} now. Emit the "
+                            "exact qualified function already listed in the Current "
+                            "native MCP capability contract whose raw capability "
+                            "name is `portal.call_read_tool`. If that exact attempt "
+                            "returns a terminal error, report it once and stop; do "
+                            "not guess or retry it."
+                        ),
+                    })
+                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                    continue
+
+                _portal_read_guard_exhausted = True
+                _guard_message = (
+                    "The agent stopped because it did not execute the explicit "
+                    "Portal provider read after two corrective rounds."
+                )
+                _guard_delta = (
+                    "I couldn't complete the requested live read: no Portal "
+                    "provider read was executed after two corrective attempts. "
+                    "I did not treat discovery or collection enumeration as the "
+                    "requested data."
+                )
+                logger.warning(
+                    "[agent] explicit Portal-read guard exhausted on round %d after %d nudges",
+                    round_num,
+                    _intent_nudge_count,
+                )
+                yield (
+                    "data: "
+                    + json.dumps({
+                        "type": "intent_nudge_exhausted",
+                        "reason": "explicit_portal_read_not_executed",
+                        "message": _guard_message,
+                        "round": round_num,
+                        "nudges": _intent_nudge_count,
+                    })
+                    + "\n\n"
+                )
+                yield f'data: {json.dumps({"delta": _guard_delta})}\n\n'
+                full_response = (
+                    (full_response.rstrip() + "\n\n") if full_response.strip() else ""
+                ) + _guard_delta
+                if round_texts:
+                    round_texts[-1] = _guard_delta
+                break
             if tool_events and not _round_answer and not _force_answer:
                 # A provider may end a post-tool round successfully while
                 # emitting neither text nor another tool call. Do not treat
@@ -6111,8 +6356,13 @@ async def stream_agent_loop(
         metrics["rounds_exhausted"] = max_rounds
     if _tool_budget_exceeded:
         metrics["tool_budget_exceeded"] = _tool_budget_exceeded
+    if _portal_read_guard_exhausted:
+        metrics["completion_guard"] = {
+            "reason": "explicit_portal_read_not_executed",
+            "nudges": _intent_nudge_count,
+        }
     _request_status = "succeeded"
-    if _exhausted_rounds:
+    if _exhausted_rounds or _portal_read_guard_exhausted:
         _request_status = "degraded"
     for _event in tool_events:
         _status = (_event.get("action_result") or {}).get("status")

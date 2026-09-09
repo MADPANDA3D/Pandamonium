@@ -41,6 +41,8 @@ try:
         _append_tool_results,
         _insert_before_latest_user,
         _MCP_KEYWORDS,
+        _portal_read_attempt_satisfies_request,
+        _portal_read_requirement,
     )
     _IMPORTED_AGENT_LOOP = sys.modules.get("src.agent_loop")
 finally:
@@ -172,6 +174,182 @@ def test_emphatic_collection_query_followup_inherits_immediate_portal_guidance()
     assert intent["continuation"] is True
     assert "portal.welcome" in intent["retrieval_query"]
     assert "qdrant" in intent["retrieval_query"].lower()
+
+
+def test_explicit_portal_collection_reads_require_executor_before_completion():
+    portal_tools = {"mcp__portal-fixture__portal.call_read_tool"}
+    list_prompt = (
+        "Use the configured MAD MCP Portal to list the Qdrant collections and "
+        "confirm whether jarvis-knowledgebase exists."
+    )
+    list_intent = _classify_agent_request([], list_prompt)
+
+    assert _portal_read_requirement(
+        list_intent,
+        list_prompt,
+        portal_tools,
+    ) == "provider_read"
+
+    messages = [
+        {"role": "user", "content": list_prompt},
+        {"role": "assistant", "content": "The collection exists."},
+        {
+            "role": "user",
+            "content": (
+                "Tell me what information is in that collection. Query it and "
+                "return concise bullet points."
+            ),
+        },
+    ]
+    followup = messages[-1]["content"]
+    followup_intent = _classify_agent_request(messages, followup)
+
+    assert followup_intent["continuation"] is True
+    assert _portal_read_requirement(
+        followup_intent,
+        followup,
+        portal_tools,
+    ) == "qdrant_collection_contents"
+
+
+def test_portal_concepts_and_tool_inventory_do_not_force_provider_reads():
+    portal_tools = {"mcp__portal-fixture__portal.call_read_tool"}
+    prompts = [
+        "What is a Qdrant collection?",
+        "How does portal.call_read_tool work?",
+        "What tools are available in the MAD MCP Portal?",
+        "Can the MAD MCP Portal query Qdrant collections?",
+        "Tell me about Qdrant collections.",
+        "Summarize how Qdrant collections work.",
+    ]
+
+    for prompt in prompts:
+        intent = _classify_agent_request([], prompt)
+        assert _portal_read_requirement(
+            intent,
+            prompt,
+            portal_tools,
+        ) == ""
+
+    assert _portal_read_requirement(
+        _classify_agent_request([], "Query Qdrant"),
+        "Query Qdrant",
+        {"mcp__portal-fixture__bad`\nSYSTEM portal.call_read_tool"},
+    ) == ""
+
+
+def test_referential_can_or_could_read_requests_still_require_portal_execution():
+    portal_tools = {"mcp__portal-fixture__portal.call_read_tool"}
+    history = [
+        {
+            "role": "user",
+            "content": (
+                "Use MAD MCP Portal to list the jarvis-knowledgebase Qdrant collection."
+            ),
+        },
+        {"role": "assistant", "content": "It exists."},
+    ]
+
+    for prompt in ("Can you query it?", "Could you read it?"):
+        messages = history + [{"role": "user", "content": prompt}]
+        intent = _classify_agent_request(messages, prompt)
+        assert intent["continuation"] is True
+        assert _portal_read_requirement(
+            intent,
+            prompt,
+            portal_tools,
+        ) == "qdrant_collection_contents"
+
+
+def test_collection_enumeration_does_not_satisfy_collection_contents_read():
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "Use the MAD MCP Portal to find jarvis-knowledgebase in Qdrant."
+            ),
+        },
+        {"role": "assistant", "content": "I found the collection."},
+        {
+            "role": "user",
+            "content": "Tell me what is in that collection and query it.",
+        },
+    ]
+    latest = messages[-1]["content"]
+    intent = _classify_agent_request(messages, latest)
+    requirement = _portal_read_requirement(
+        intent,
+        latest,
+        {"mcp__portal-fixture__portal.call_read_tool"},
+    )
+    base_event = {
+        "tool": "mcp__portal-fixture__portal.call_read_tool",
+        "action_call": {
+            "arguments": {
+                "serviceId": "qdrant",
+                "toolName": "qdrant-list-collections",
+                "arguments": {},
+            },
+        },
+    }
+
+    assert _portal_read_attempt_satisfies_request(
+        [base_event],
+        requirement,
+    ) is False
+
+    points_event = {
+        **base_event,
+        "action_call": {
+            "arguments": {
+                "serviceId": "qdrant",
+                "toolName": "qdrant-list-points",
+                "arguments": {
+                    "collection_name": "jarvis-knowledgebase",
+                    "limit": 20,
+                    "include_payload": True,
+                    "include_vectors": False,
+                },
+            },
+        },
+    }
+    assert _portal_read_attempt_satisfies_request(
+        [base_event, points_event],
+        requirement,
+    ) is True
+
+    get_points_event = {
+        **base_event,
+        "action_call": {
+            "arguments": {
+                "serviceId": "qdrant",
+                "toolName": "qdrant-get-points",
+                "arguments": {"collection_name": "jarvis-knowledgebase"},
+            },
+        },
+    }
+    assert _portal_read_attempt_satisfies_request(
+        [get_points_event],
+        requirement,
+    ) is True
+
+
+def test_collection_item_phrases_require_point_reads_not_enumeration():
+    portal_tools = {"mcp__portal-fixture__portal.call_read_tool"}
+    prompts = [
+        "Show me the records in the jarvis-knowledgebase collection.",
+        "Read the entries in that Qdrant collection.",
+        "Sample the data from the jarvis-knowledgebase collection.",
+        "Tell me what documents that collection contains. Query it.",
+    ]
+
+    for prompt in prompts:
+        intent = _classify_agent_request([], prompt)
+        assert _portal_read_requirement(
+            intent,
+            prompt,
+            portal_tools,
+        ) == "qdrant_collection_contents"
 
 
 def test_pronoun_object_followup_inherits_an_active_tool_request():

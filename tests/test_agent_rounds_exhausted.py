@@ -10,6 +10,10 @@ import asyncio
 import json
 
 import src.agent_loop as al
+from src.mcp_manager import McpManager
+
+
+_PORTAL_READ = "mcp__portal-fixture__portal.call_read_tool"
 
 
 def _collect(gen):
@@ -39,6 +43,44 @@ def _patch_common(monkeypatch):
     async def _fake_exec(block, *a, **k):
         return ("bash", {"output": "ok", "exit_code": 0})
     monkeypatch.setattr(al, "execute_tool_block", _fake_exec, raising=False)
+
+
+def _portal_manager():
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "Fixture Broker"},
+        "catalog_terms": ["Qdrant"],
+        "instructions": (
+            "Use portal.find_tools, portal.get_tool_reference, and "
+            "portal.call_read_tool for downstream reads."
+        ),
+    }
+    manager._tools["portal-fixture"] = [{
+        "name": "portal.call_read_tool",
+        "description": "Execute one typed downstream provider read.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "serviceId": {"type": "string"},
+                "toolName": {"type": "string"},
+                "arguments": {"type": "object"},
+            },
+            "required": ["serviceId", "toolName", "arguments"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    }]
+    return manager
+
+
+def _patch_portal_common(monkeypatch, manager, execute):
+    monkeypatch.setattr(al, "get_setting", lambda key, default=None: default, raising=False)
+    monkeypatch.setattr(al, "get_mcp_manager", lambda: manager, raising=False)
+    monkeypatch.setattr(al, "blocked_tools_for_owner", lambda _owner: set(), raising=False)
+    monkeypatch.setattr(al, "estimate_tokens", lambda *a, **k: 10, raising=False)
+    monkeypatch.setattr(al, "execute_tool_block", execute, raising=False)
 
 
 def _run_loop(monkeypatch, round_text, max_rounds=2, max_tool_calls=20):
@@ -132,6 +174,164 @@ def test_empty_post_tool_completion_forces_a_final_answer(monkeypatch):
 
     assert any(e.get("delta") == "Final answer from the tool result." for e in events), events
     assert not any(e.get("type") == "rounds_exhausted" for e in events), events
+
+
+def test_explicit_portal_read_nudges_plain_prose_then_executes(monkeypatch):
+    manager = _portal_manager()
+    rounds = {"count": 0}
+    executed = []
+    first_messages = {}
+
+    async def _fake_exec(block, *args, **kwargs):
+        executed.append(block)
+        return (
+            f"mcp: {block.tool_type}",
+            {
+                "output": "20 bounded points returned",
+                "structured_content": {"ok": True},
+                "exit_code": 0,
+            },
+        )
+
+    async def _fake_stream(_candidates, messages, **kwargs):
+        rounds["count"] += 1
+        if rounds["count"] == 1:
+            first_messages["value"] = list(messages)
+            yield 'data: {"delta":"The collection contains operational information."}\n\n'
+        elif rounds["count"] == 2:
+            call = {
+                "id": "portal-read-1",
+                "name": _PORTAL_READ,
+                "arguments": json.dumps({
+                    "serviceId": "qdrant",
+                    "toolName": "qdrant-list-points",
+                    "arguments": {
+                        "collection_name": "jarvis-knowledgebase",
+                        "limit": 20,
+                        "include_payload": True,
+                        "include_vectors": False,
+                    },
+                }),
+            }
+            yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
+        else:
+            yield 'data: {"delta":"- Representative operational topic."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    _patch_portal_common(monkeypatch, manager, _fake_exec)
+    monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
+    events = _types(_collect(al.stream_agent_loop(
+        "https://api.openai.com/v1",
+        "gpt-4o",
+        [{
+            "role": "user",
+            "content": (
+                "Use the MAD MCP Portal to tell me what information is in the "
+                "jarvis-knowledgebase Qdrant collection. Query it with a bounded sample."
+            ),
+        }],
+        owner="leo",
+        max_rounds=4,
+        context_length=8208,
+    )))
+
+    assert rounds["count"] == 3
+    assert [block.tool_type for block in executed] == [_PORTAL_READ]
+    assert any(event.get("type") == "tool_start" for event in events)
+    assert not any(event.get("type") == "intent_nudge_exhausted" for event in events)
+    assert "A prose-only response is not completion" in json.dumps(first_messages["value"])
+    emitted_deltas = [event.get("delta", "") for event in events if "delta" in event]
+    assert "The collection contains operational information." not in emitted_deltas
+    assert "- Representative operational topic." in emitted_deltas
+    metrics = next(event["data"] for event in events if event.get("type") == "metrics")
+    assert metrics["round_texts"][0] == ""
+
+
+def test_explicit_portal_read_guard_reports_exhaustion(monkeypatch):
+    manager = _portal_manager()
+
+    async def _fake_exec(*args, **kwargs):
+        raise AssertionError("no tool call should be executed")
+
+    async def _fake_stream(_candidates, messages, **kwargs):
+        yield 'data: {"delta":"Here is a generic answer without a provider read."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    _patch_portal_common(monkeypatch, manager, _fake_exec)
+    monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
+    events = _types(_collect(al.stream_agent_loop(
+        "https://api.openai.com/v1",
+        "gpt-4o",
+        [{
+            "role": "user",
+            "content": (
+                "Use the MAD MCP Portal to query what is in the "
+                "jarvis-knowledgebase Qdrant collection."
+            ),
+        }],
+        owner="leo",
+        max_rounds=5,
+        context_length=8208,
+    )))
+
+    guard = next(
+        event for event in events
+        if event.get("type") == "intent_nudge_exhausted"
+    )
+    metrics = next(event["data"] for event in events if event.get("type") == "metrics")
+    assert guard["reason"] == "explicit_portal_read_not_executed"
+    assert guard["nudges"] == 2
+    assert metrics["completion_guard"] == {
+        "reason": "explicit_portal_read_not_executed",
+        "nudges": 2,
+    }
+    emitted_deltas = [event.get("delta", "") for event in events if "delta" in event]
+    assert "Here is a generic answer without a provider read." not in emitted_deltas
+    assert emitted_deltas == [
+        "I couldn't complete the requested live read: no Portal provider read "
+        "was executed after two corrective attempts. I did not treat discovery "
+        "or collection enumeration as the requested data."
+    ]
+
+
+def test_disabled_portal_read_executor_does_not_activate_impossible_guard(monkeypatch):
+    manager = _portal_manager()
+    rounds = {"count": 0}
+
+    async def _fake_exec(*args, **kwargs):
+        raise AssertionError("disabled tool should not execute")
+
+    async def _fake_stream(_candidates, messages, **kwargs):
+        rounds["count"] += 1
+        yield 'data: {"delta":"The configured read executor is unavailable."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    _patch_portal_common(monkeypatch, manager, _fake_exec)
+    monkeypatch.setattr(
+        al,
+        "_load_mcp_disabled_map",
+        lambda: {"portal-fixture": {"portal.call_read_tool"}},
+        raising=False,
+    )
+    monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
+    events = _types(_collect(al.stream_agent_loop(
+        "https://api.openai.com/v1",
+        "gpt-4o",
+        [{
+            "role": "user",
+            "content": "Use MAD MCP Portal to query the Qdrant collection.",
+        }],
+        owner="leo",
+        max_rounds=4,
+        context_length=8208,
+    )))
+
+    assert rounds["count"] == 1
+    assert any(
+        event.get("delta") == "The configured read executor is unavailable."
+        for event in events
+    )
+    assert not any(event.get("type") == "intent_nudge_exhausted" for event in events)
 
 
 def test_tool_result_without_answer_gets_visible_failure_fallback():
