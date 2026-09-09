@@ -114,6 +114,112 @@ def test_tool_status_question_without_prior_turn_does_not_inherit_context():
     assert intent["retrieval_query"] == prompt
 
 
+def test_collection_content_followup_inherits_immediately_active_portal_request():
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "Ok use the mad mcp portal to find the jarvis-knowledgebase "
+                "collection in Qdrant and tell me whats in that collection"
+            ),
+        },
+        {"role": "assistant", "content": "I found the collection."},
+        {
+            "role": "user",
+            "content": "I want you to tell me what information is in that collection",
+        },
+    ]
+
+    intent = _classify_agent_request(messages, messages[-1]["content"])
+
+    assert intent["continuation"] is True
+    assert intent["low_signal"] is False
+    assert "mad mcp portal" in intent["retrieval_query"].lower()
+    assert "qdrant" in intent["retrieval_query"].lower()
+
+
+def test_emphatic_collection_query_followup_inherits_immediate_portal_guidance():
+    messages = [
+        {
+            "role": "user",
+            "content": "I want you to tell me what information is in that collection",
+        },
+        {"role": "assistant", "content": "I need to inspect the collection."},
+        {
+            "role": "user",
+            "content": (
+                "the mad mcp portal has all the tools you need it is an mcp broker "
+                "which means there is an entire qdrant mcp in there you need to use "
+                "the portal.welcome tool to learn your way around the mad mcp portal "
+                "so you can see how to make the correct tool calls"
+            ),
+        },
+        {"role": "assistant", "content": "I listed the available collections."},
+        {
+            "role": "user",
+            "content": (
+                "Ok but youre not answering my fucking question I already told you I "
+                "want ot know whats in that collection you need to query it and look it "
+                "over and come back to me with bullet points on what is in tere - there "
+                "is a lot of operational stuff in there so I want yo uto tell me what "
+                "the fuck is in that collection"
+            ),
+        },
+    ]
+
+    intent = _classify_agent_request(messages, messages[-1]["content"])
+
+    assert intent["continuation"] is True
+    assert "portal.welcome" in intent["retrieval_query"]
+    assert "qdrant" in intent["retrieval_query"].lower()
+
+
+def test_pronoun_object_followup_inherits_an_active_tool_request():
+    messages = [
+        {
+            "role": "user",
+            "content": "Use Qdrant MCP to find the jarvis-knowledgebase collection.",
+        },
+        {"role": "assistant", "content": "I found it."},
+        {"role": "user", "content": "Query it and report the contents."},
+    ]
+
+    intent = _classify_agent_request(messages, messages[-1]["content"])
+
+    assert intent["continuation"] is True
+    assert "Qdrant MCP" in intent["retrieval_query"]
+
+
+def test_named_object_followup_does_not_inherit_a_different_tool_object():
+    cases = [
+        ("Which database should I use for a new app?", "Review this document."),
+        ("Use the browser tool to inspect example.com.", "Check this file."),
+        ("Tell me about the MCP protocol.", "What information is in that collection?"),
+        ("Tell me about the MCP protocol.", "Query it and report the contents."),
+    ]
+
+    for prior, prompt in cases:
+        messages = [
+            {"role": "user", "content": prior},
+            {"role": "assistant", "content": "Okay."},
+            {"role": "user", "content": prompt},
+        ]
+
+        intent = _classify_agent_request(messages, prompt)
+
+        assert intent["continuation"] is False
+        assert intent["retrieval_query"] == prompt
+
+
+def test_collection_content_question_without_active_tool_turn_stays_standalone():
+    prompt = "What information is in that collection?"
+
+    intent = _classify_agent_request([{"role": "user", "content": prompt}], prompt)
+
+    assert intent["continuation"] is False
+    assert intent["retrieval_query"] == prompt
+
+
 def test_explicit_tool_catalog_question_still_classifies_as_integrations():
     prompt = "What tools are available?"
 
