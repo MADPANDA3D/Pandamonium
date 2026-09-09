@@ -24,6 +24,17 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install 'cryptography==46.0.5'
+      - name: Build and validate curated release notes
+        run: |
+          set -euo pipefail
+          previous_tag="$({ git tag --merged "$GITHUB_SHA^" --list 'v[0-9]*' --sort=-version:refname || true; } | head -n 1)"
+          test -n "$previous_tag"
+          python scripts/build_release_notes.py \
+            --previous-tag "$previous_tag" \
+            --tag "$GITHUB_REF_NAME" \
+            --notes ".github/releases/$GITHUB_REF_NAME.md" \
+            --output dist-release/release-notes.md \
+            --comparison-output dist-release/release-comparison.json
       - name: Build signed source artifact
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.PANDAMONIUM_RELEASE_SIGNING_KEY }}
@@ -36,7 +47,7 @@ jobs:
             --tag "$GITHUB_REF_NAME" \
             --out dist-release \
             --private-key "$RUNNER_TEMP/release-key.pem"
-      - name: Publish immutable update assets
+      - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -45,33 +56,58 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_flags+=(--prerelease)
           fi
-          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"
+            test "$is_draft" = "true"
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file dist-release/release-notes.md \
+              --draft=true
+          else
             gh release create "$GITHUB_REF_NAME" \
               --verify-tag \
-              --generate-notes \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file dist-release/release-notes.md \
               --draft \
               "${release_flags[@]}"
           fi
-
-          is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"
-          if [[ "$is_draft" != "true" ]]; then
-            mapfile -t published_assets < <(
-              gh release view "$GITHUB_REF_NAME" --json assets \
-                --jq '.assets[].name' | sort
-            )
-            expected_assets=(
-              "$(basename dist-release/pandamonium-*.tar.gz)"
-              "pandamonium-release.json"
-            )
-            mapfile -t expected_assets < <(printf '%s\n' "${expected_assets[@]}" | sort)
-            diff -u \
-              <(printf '%s\n' "${expected_assets[@]}") \
-              <(printf '%s\n' "${published_assets[@]}")
-            exit 0
-          fi
-
+      - name: Upload release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
           gh release upload "$GITHUB_REF_NAME" \
             dist-release/pandamonium-release.json \
             dist-release/pandamonium-*.tar.gz \
             --clobber
+      - name: Verify draft body and uploaded artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = "true"
+          verify_dir="$(mktemp -d)"
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$verify_dir/release-notes.md"
+          python -c 'import pathlib,sys; assert pathlib.Path(sys.argv[1]).read_text().rstrip() == pathlib.Path(sys.argv[2]).read_text().rstrip()' \
+            dist-release/release-notes.md "$verify_dir/release-notes.md"
+          archive_name="$(basename dist-release/pandamonium-*.tar.gz)"
+          mapfile -t uploaded_assets < <(
+            gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort
+          )
+          expected_assets=("$archive_name" "pandamonium-release.json")
+          mapfile -t expected_assets < <(printf '%s\n' "${expected_assets[@]}" | sort)
+          diff -u \
+            <(printf '%s\n' "${expected_assets[@]}") \
+            <(printf '%s\n' "${uploaded_assets[@]}")
+          gh release download "$GITHUB_REF_NAME" \
+            --dir "$verify_dir" \
+            --pattern "$archive_name" \
+            --pattern pandamonium-release.json
+          cmp "dist-release/$archive_name" "$verify_dir/$archive_name"
+          cmp dist-release/pandamonium-release.json "$verify_dir/pandamonium-release.json"
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
           gh release edit "$GITHUB_REF_NAME" --draft=false

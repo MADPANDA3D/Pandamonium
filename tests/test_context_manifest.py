@@ -756,6 +756,243 @@ async def test_collection_followup_keeps_portal_qdrant_chain_in_model_payload(mo
     assert "Qdrant" in visible_messages
 
 
+def test_collection_followup_reuses_last_portal_collection_from_trusted_history():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
+        {
+            "role": "assistant",
+            "content": "I found three collections.",
+            "metadata": {
+                "tool_events": [{
+                    "tool": "mcp__mad-mcp-portal__portal.read.qdrant.qdrant-list-collections",
+                    "exit_code": 0,
+                    "portal_relay": {
+                        "service_id": "qdrant",
+                        "tool_name": "qdrant-list-collections",
+                        "context": {
+                            "collection_names": [
+                                "the-barn", "school", "jarvis-knowledgebase",
+                            ],
+                        },
+                    },
+                }],
+            },
+        },
+        {
+            "role": "user",
+            "content": "What information is inside that collection? Show me ten examples.",
+        },
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"collection_name": "jarvis-knowledgebase"}
+
+
+def test_nounless_followup_reuses_only_resource_type_in_latest_portal_context():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
+        {
+            "role": "assistant",
+            "content": "I found three collections.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "qdrant",
+                    "tool_name": "qdrant-list-collections",
+                    "context": {
+                        "collection_names": [
+                            "the-barn", "school", "jarvis-knowledgebase",
+                        ],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "What's in that? Show me ten examples."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"collection_name": "jarvis-knowledgebase"}
+
+
+def test_collection_followup_preserves_last_typed_identity_from_mixed_listing():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list collections."},
+        {
+            "role": "assistant",
+            "content": "I found the collections.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "memory",
+                    "tool_name": "list_collections",
+                    "context": {
+                        "collection_ids": ["collection-123", "collection-456"],
+                        "collection_names": ["general-memory"],
+                        "collection_refs": [
+                            {"id": "collection-123", "name": "general-memory"},
+                            {"id": "collection-456"},
+                        ],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "What's in that collection?"},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"collection_id": "collection-456"}
+
+
+def test_collection_followup_does_not_cross_latest_user_turn_boundary():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
+        {
+            "role": "assistant",
+            "content": "I found collection A.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "qdrant",
+                    "tool_name": "qdrant-list-collections",
+                    "context": {"collection_names": ["collection-a"]},
+                },
+            }]},
+        },
+        {"role": "user", "content": "Use Portal to list the collections again."},
+        {
+            "role": "assistant",
+            "content": "The current listing was empty.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "qdrant",
+                    "tool_name": "qdrant-list-collections",
+                    "context": {},
+                },
+            }]},
+        },
+        {"role": "user", "content": "What's in that collection?"},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {}
+
+
+def test_collection_followup_does_not_reuse_context_before_failed_relay():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
+        {
+            "role": "assistant",
+            "content": "The latest Portal read failed.",
+            "metadata": {"tool_events": [
+                {
+                    "exit_code": 0,
+                    "portal_relay": {
+                        "service_id": "qdrant",
+                        "tool_name": "qdrant-list-collections",
+                        "context": {"collection_names": ["stale-collection"]},
+                    },
+                },
+                {
+                    "exit_code": 1,
+                    "portal_relay": {
+                        "service_id": "qdrant",
+                        "tool_name": "qdrant-list-collections",
+                    },
+                },
+            ]},
+        },
+        {"role": "user", "content": "What's in that collection?"},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {}
+
+
+def test_channel_followup_preserves_a_name_for_native_portal_resolution():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},
+        {
+            "role": "assistant",
+            "content": "I found the channels.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "discord",
+                    "tool_name": "list_channels",
+                    "context": {"channel_names": ["general"]},
+                },
+            }]},
+        },
+        {"role": "user", "content": "Read that channel."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"channel_name": "general"}
+
+
+def test_channel_followup_preserves_last_identity_from_mixed_portal_listing():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},
+        {
+            "role": "assistant",
+            "content": "I found the channels.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "discord",
+                    "tool_name": "list_channels",
+                    "context": {
+                        "channel_ids": ["1542679644640247860"],
+                        "channel_names": ["general", "announcements"],
+                        "channel_refs": [
+                            {"id": "1542679644640247860", "name": "general"},
+                            {"name": "announcements"},
+                        ],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "Read that channel."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"channel_name": "announcements"}
+
+
+def test_channel_followup_prefers_actual_relay_argument_over_nested_result_refs():
+    messages = [
+        {"role": "user", "content": "Use Portal to read the general channel."},
+        {
+            "role": "assistant",
+            "content": "I read the channel.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "discord",
+                    "tool_name": "read_messages",
+                    "arguments": {"channel_id": "1542679644640247860", "count": "5"},
+                    "context": {
+                        "channel_refs": [{"id": "999", "name": "nested-message-json"}],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "Read that channel again."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"channel_id": "1542679644640247860"}
+
+
 @pytest.mark.asyncio
 async def test_requested_browser_actions_reach_the_actual_provider_payload(monkeypatch):
     captured = {}

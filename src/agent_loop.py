@@ -1538,6 +1538,131 @@ def _is_contextual_object_continuation(messages: List[Dict], text: str) -> bool:
     )
 
 
+def _portal_followup_fixed_arguments(
+    messages: List[Dict], text: str
+) -> Dict[str, Any]:
+    """Recover compact Portal resource identity from the last successful read.
+
+    Only internal tool-event metadata is considered. A singular referent after
+    an ordered resource list inherits the most recently presented identifier,
+    avoiding model guesses or repeated clarification for a value Portal already
+    returned.
+    """
+    if not _is_contextual_object_continuation(messages, text):
+        return {}
+    named_objects = {
+        match.group("object").lower()
+        for match in _CONTEXTUAL_NAMED_OBJECT_RE.finditer(str(text or ""))
+    }
+    fields = {
+        "collection": (
+            ("collection_id", "collection_ids"),
+            ("collection_name", "collection_names"),
+        ),
+        "channel": (
+            ("channel_id", "channel_ids"),
+            ("channel_name", "channel_names"),
+        ),
+    }
+    seen_latest_user = False
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            content = message.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict)
+                )
+            metadata = message.get("metadata") or {}
+            if (
+                not str(content or "").strip()
+                or metadata.get("trusted") is False
+                or str(content).startswith("[Tool execution results]")
+            ):
+                continue
+            if not seen_latest_user:
+                seen_latest_user = True
+                continue
+            break
+        if not seen_latest_user or message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        for event in reversed(metadata.get("tool_events") or []):
+            if not isinstance(event, dict):
+                continue
+            relay = event.get("portal_relay") or {}
+            if not isinstance(relay, dict) or not relay:
+                continue
+            if event.get("exit_code") not in (0, None):
+                return {}
+            arguments = relay.get("arguments") or {}
+            context = relay.get("context") or {}
+            event_objects = set(named_objects)
+            if not event_objects:
+                inferred_objects = []
+                for noun, field_pairs in fields.items():
+                    has_argument = any(
+                        isinstance(arguments.get(argument_name), (str, int))
+                        and str(arguments.get(argument_name)).strip()
+                        for argument_name, _context_name in field_pairs
+                    )
+                    has_context = any(
+                        isinstance(context.get(context_name), list)
+                        and bool(context.get(context_name))
+                        for _argument_name, context_name in field_pairs
+                    )
+                    if noun == "collection":
+                        has_context = has_context or bool(context.get("collection_refs"))
+                    elif noun == "channel":
+                        has_context = has_context or bool(context.get("channel_refs"))
+                    if has_argument or has_context:
+                        inferred_objects.append(noun)
+                if len(inferred_objects) == 1:
+                    event_objects.add(inferred_objects[0])
+            for noun in event_objects:
+                field_pairs = fields.get(noun)
+                if not field_pairs:
+                    continue
+                for argument_name, _context_name in field_pairs:
+                    direct_value = arguments.get(argument_name)
+                    if isinstance(direct_value, (str, int)) and str(direct_value).strip():
+                        return {argument_name: direct_value}
+                if noun == "collection":
+                    collection_refs = context.get("collection_refs")
+                    if isinstance(collection_refs, list) and collection_refs:
+                        last_ref = collection_refs[-1]
+                        if isinstance(last_ref, dict):
+                            collection_id = last_ref.get("id")
+                            if isinstance(collection_id, (str, int)) and str(collection_id).strip():
+                                return {"collection_id": collection_id}
+                            collection_name = last_ref.get("name")
+                            if isinstance(collection_name, str) and collection_name.strip():
+                                return {"collection_name": collection_name}
+                if noun == "channel":
+                    channel_refs = context.get("channel_refs")
+                    if isinstance(channel_refs, list) and channel_refs:
+                        last_ref = channel_refs[-1]
+                        if isinstance(last_ref, dict):
+                            channel_id = last_ref.get("id")
+                            if isinstance(channel_id, (str, int)) and str(channel_id).strip():
+                                return {"channel_id": channel_id}
+                            channel_name = last_ref.get("name")
+                            if isinstance(channel_name, str) and channel_name.strip():
+                                return {"channel_name": channel_name}
+                for argument_name, context_name in field_pairs:
+                    values = context.get(context_name)
+                    if isinstance(values, list):
+                        candidates = [
+                            item for item in values
+                            if isinstance(item, (str, int)) and str(item).strip()
+                        ]
+                        if candidates:
+                            return {argument_name: candidates[-1]}
+            return {}
+    return {}
+
+
 def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
     """Return true for short answers that do not introduce a new task."""
     reply = str(text or "").strip()
@@ -3921,9 +4046,19 @@ async def stream_agent_loop(
             )
             if _preparation_requirement and hasattr(mcp_mgr, "prepare_portal_read"):
                 try:
-                    _portal_preparation = await mcp_mgr.prepare_portal_read(
-                        _last_user, _retrieval_query
+                    _portal_context_arguments = _portal_followup_fixed_arguments(
+                        messages, _last_user
                     )
+                    if _portal_context_arguments:
+                        _portal_preparation = await mcp_mgr.prepare_portal_read(
+                            _last_user,
+                            _retrieval_query,
+                            context_arguments=_portal_context_arguments,
+                        )
+                    else:
+                        _portal_preparation = await mcp_mgr.prepare_portal_read(
+                            _last_user, _retrieval_query
+                        )
                 except Exception as _portal_prepare_error:
                     logger.warning(
                         "[tool-rag] Portal request preparation failed: %s",

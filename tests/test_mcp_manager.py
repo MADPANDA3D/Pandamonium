@@ -340,6 +340,31 @@ def test_portal_read_preparation_scopes_search_resolves_target_and_relays_exact_
     }
 
 
+def test_portal_followup_channel_name_is_resolved_before_id_is_fixed():
+    manager, session = _portal_contract_manager()
+    preparation = asyncio.run(manager.prepare_portal_read(
+        "Read the last five messages from that channel.",
+        "Use MAD MCP Portal to list Discord channels.",
+        context_arguments={"channel_name": "general"},
+    ))
+
+    assert preparation is not None
+    assert preparation["schema"]["function"]["parameters"]["properties"] == {
+        "count": {"type": "string", "default": ""},
+    }
+    proxy = manager._portal_proxy_tools[preparation["qualified_name"]]
+    assert proxy["fixed_arguments"] == {
+        "channel_id": "1542679644640247860",
+    }
+    assert [call for call in session.calls if call[0] == "portal.call_read_tool"] == [
+        ("portal.call_read_tool", {
+            "serviceId": "discord",
+            "toolName": "find_channel",
+            "arguments": {"channel_name": "general"},
+        }),
+    ]
+
+
 def test_portal_discovery_query_preserves_outcome_and_drops_negative_constraints():
     assert McpManager._portal_discovery_query(
         "Use Portal to sample ten payloads from a Qdrant collection. Do not include vectors."
@@ -356,6 +381,136 @@ def test_portal_result_count_recovers_nested_provider_shapes_without_content():
     assert McpManager._portal_result_item_count({
         "data": {"result": {"content": [{"text": '{"points":[1,2,3]}' }]}}
     }) == 3
+
+
+def test_portal_result_context_keeps_only_compact_collection_identifiers():
+    payload = {
+        "data": [{
+            "type": "text",
+            "text": '{"data":{"collections":["the-barn","school",'
+                    '"jarvis-knowledgebase"],"count":3},'
+                    '"meta":{"request_id":"not-model-context"}}',
+        }],
+        "traceId": "trace-context",
+    }
+
+    assert McpManager._portal_result_context(payload) == {
+        "collection_names": ["the-barn", "school", "jarvis-knowledgebase"],
+        "collection_refs": [
+            {"name": "the-barn"},
+            {"name": "school"},
+            {"name": "jarvis-knowledgebase"},
+        ],
+    }
+
+
+def test_portal_result_context_keeps_collection_names_separate_from_ids():
+    assert McpManager._portal_result_context({
+        "data": {"collections": [
+            {"id": "collection-123", "name": "general-memory"},
+            {"id": "collection-456"},
+        ]},
+    }) == {
+        "collection_ids": ["collection-123", "collection-456"],
+        "collection_names": ["general-memory"],
+        "collection_refs": [
+            {"id": "collection-123", "name": "general-memory"},
+            {"id": "collection-456"},
+        ],
+    }
+
+
+def test_portal_result_context_keeps_channel_names_separate_from_ids():
+    assert McpManager._portal_result_context({
+        "data": {"channels": [
+            {"id": "1542679644640247860", "name": "general"},
+            "announcements",
+        ]},
+    }) == {
+        "channel_ids": ["1542679644640247860"],
+        "channel_names": ["general", "announcements"],
+        "channel_refs": [
+            {"id": "1542679644640247860", "name": "general"},
+            {"name": "announcements"},
+        ],
+    }
+
+
+def test_portal_followup_context_is_fixed_and_removed_from_model_schema():
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "status": "connected",
+        "name": "MAD MCP Portal",
+        "server_info": {"name": "mad-mcp-aggregator"},
+        "portal_services": [{
+            "id": "qdrant",
+            "name": "QDRANT-MCP",
+            "configured": True,
+            "state": "configured",
+            "catalog_version": "qdrant-v2",
+        }],
+        "catalog_terms": ["qdrant"],
+    }
+    manager._tools["portal-fixture"] = [
+        {"name": "portal.find_tools"},
+        {"name": "portal.get_tool_reference"},
+        {"name": "portal.call_read_tool"},
+        {"name": "portal.list_services"},
+    ]
+
+    async def fake_call(name, arguments, **_kwargs):
+        if name.endswith("portal.find_tools"):
+            return {
+                "exit_code": 0,
+                "structured_content": {
+                    "traceId": "find-trace",
+                    "data": {"items": [{
+                        "serviceId": "qdrant",
+                        "toolName": "qdrant-list-points",
+                        "description": "List points in a collection.",
+                        "risk": "read",
+                        "descriptorHash": "points-hash",
+                    }]},
+                },
+            }
+        assert name.endswith("portal.get_tool_reference")
+        return {
+            "exit_code": 0,
+            "structured_content": {
+                "traceId": "reference-trace",
+                "data": {"descriptor": {
+                    "serviceId": "qdrant",
+                    "nativeToolName": "qdrant-list-points",
+                    "description": "List points in a collection.",
+                    "descriptorHash": "points-hash",
+                    "catalogVersion": "qdrant-v2",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["collection_name"],
+                        "properties": {
+                            "collection_name": {"type": "string"},
+                            "limit": {"type": "integer"},
+                        },
+                    },
+                }},
+            },
+        }
+
+    manager.call_tool = fake_call
+    preparation = asyncio.run(manager.prepare_portal_read(
+        "What information is inside that collection? Show me ten examples.",
+        "Use MAD MCP Portal to list Qdrant collections.",
+        context_arguments={"collection_name": "jarvis-knowledgebase"},
+    ))
+
+    assert preparation is not None
+    assert preparation["schema"]["function"]["parameters"]["properties"] == {
+        "limit": {"type": "integer"},
+    }
+    assert preparation["schema"]["function"]["parameters"]["required"] == []
+    assert manager._portal_proxy_tools[preparation["qualified_name"]][
+        "fixed_arguments"
+    ] == {"collection_name": "jarvis-knowledgebase"}
 
 
 def test_portal_request_schema_keeps_only_exact_fields_needed_for_payload_sample():

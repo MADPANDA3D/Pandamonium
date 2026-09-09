@@ -978,7 +978,7 @@ class McpManager:
             result["model_content"] = self._portal_model_projection(
                 result.get("structured_content")
             )
-            result["portal_relay"] = {
+            relay_evidence = {
                 "service_id": portal_relay["service_id"],
                 "tool_name": portal_relay["tool_name"],
                 "descriptor_hash": portal_relay.get("descriptor_hash") or "",
@@ -989,6 +989,10 @@ class McpManager:
                     result.get("structured_content")
                 ),
             }
+            context = self._portal_result_context(result.get("structured_content"))
+            if context:
+                relay_evidence["context"] = context
+            result["portal_relay"] = relay_evidence
         return result
 
     async def _do_call(
@@ -1352,6 +1356,95 @@ class McpManager:
             queue.extend(value.values())
         return None
 
+    @staticmethod
+    def _portal_result_context(payload: Any) -> Dict[str, List[Any]]:
+        """Extract bounded resource identifiers needed by referential follow-ups."""
+        context: Dict[str, List[Any]] = {}
+        queue: List[Any] = [payload]
+        visited = 0
+        while queue and visited < 1000:
+            visited += 1
+            value = queue.pop(0)
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped.startswith(("{", "[")) and len(stripped) <= 1_000_000:
+                    try:
+                        queue.append(json.loads(stripped))
+                    except json.JSONDecodeError:
+                        pass
+                continue
+            if isinstance(value, list):
+                queue.extend(value[:200])
+                continue
+            if not isinstance(value, dict):
+                continue
+            collections = value.get("collections")
+            if isinstance(collections, list):
+                collection_ids: List[str] = []
+                collection_names: List[str] = []
+                collection_refs: List[Dict[str, str]] = []
+                for item in collections[:25]:
+                    raw_id: Any = ""
+                    raw_name: Any = item
+                    if isinstance(item, dict):
+                        raw_id = item.get("collection_id") or item.get("id") or ""
+                        raw_name = item.get("collection_name") or item.get("name") or ""
+                    sanitized: Dict[str, str] = {}
+                    for key, raw, target in (
+                        ("id", raw_id, collection_ids),
+                        ("name", raw_name, collection_names),
+                    ):
+                        if not isinstance(raw, (str, int)):
+                            continue
+                        identifier = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw))
+                        identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
+                        if identifier and identifier not in target:
+                            target.append(identifier)
+                        if identifier:
+                            sanitized[key] = identifier
+                    if sanitized and sanitized not in collection_refs:
+                        collection_refs.append(sanitized)
+                if collection_ids:
+                    context["collection_ids"] = collection_ids
+                if collection_names:
+                    context["collection_names"] = collection_names
+                if collection_refs:
+                    context["collection_refs"] = collection_refs
+            channels = value.get("channels")
+            if isinstance(channels, list):
+                channel_ids: List[str] = []
+                channel_names: List[str] = []
+                channel_refs: List[Dict[str, str]] = []
+                for item in channels[:25]:
+                    raw_id: Any = ""
+                    raw_name: Any = item
+                    if isinstance(item, dict):
+                        raw_id = item.get("channel_id") or item.get("id") or ""
+                        raw_name = item.get("channel_name") or item.get("name") or ""
+                    sanitized: Dict[str, str] = {}
+                    for key, raw, target in (
+                        ("id", raw_id, channel_ids),
+                        ("name", raw_name, channel_names),
+                    ):
+                        if not isinstance(raw, (str, int)):
+                            continue
+                        identifier = re.sub(r"[\x00-\x1f\x7f]+", " ", str(raw))
+                        identifier = re.sub(r"\s+", " ", identifier).strip()[:160]
+                        if identifier and identifier not in target:
+                            target.append(identifier)
+                        if identifier:
+                            sanitized[key] = identifier
+                    if sanitized and sanitized not in channel_refs:
+                        channel_refs.append(sanitized)
+                if channel_ids:
+                    context["channel_ids"] = channel_ids
+                if channel_names:
+                    context["channel_names"] = channel_names
+                if channel_refs:
+                    context["channel_refs"] = channel_refs
+            queue.extend(value.values())
+        return context
+
     async def _portal_resolve_channel(
         self,
         server_id: str,
@@ -1485,6 +1578,8 @@ class McpManager:
         self,
         latest_query: str,
         routing_query: str,
+        *,
+        context_arguments: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Mount one exact downstream schema backed by Portal call_read_tool."""
         server_id = self._portal_connection_for_request(routing_query)
@@ -1538,7 +1633,21 @@ class McpManager:
             descriptor.get("inputSchema") or {}, latest_query
         )
         fixed_arguments: Dict[str, Any] = {}
+        properties = input_schema.get("properties") or {}
+        for name, value in (context_arguments or {}).items():
+            if name not in properties or not isinstance(value, (str, int, float, bool)):
+                continue
+            fixed_arguments[name] = value
+            properties.pop(name, None)
+            if isinstance(input_schema.get("required"), list):
+                input_schema["required"] = [
+                    item for item in input_schema["required"] if item != name
+                ]
         channel_name = self._portal_named_channel(latest_query)
+        if not channel_name:
+            context_channel = (context_arguments or {}).get("channel_name")
+            if isinstance(context_channel, str):
+                channel_name = context_channel.strip()[:160]
         if channel_name and "channel_id" in (input_schema.get("properties") or {}):
             channel_id = await self._portal_resolve_channel(
                 server_id, service_id, channel_name, trace_events
