@@ -663,17 +663,33 @@ Key settings:
 
 All upload-limit vars are validated (must be a positive integer) and optional; an invalid value fails fast at startup.
 
-### Built-in MCP servers (optional setup)
+### Built-in Browser MCP
 
-Pandamonium auto-registers a few built-in MCP servers at startup. The npx-based ones (currently the browser server, `@playwright/mcp`) only start when their npm package is already in the local npx cache. If a package isn't cached, that server is skipped with a startup log message explaining what to do, so a fresh install does not block on a multi-minute npm download or hang if Playwright system deps are missing.
+The supported Docker image pins `@playwright/mcp@0.0.80` and bakes its
+headless Chromium binary and Linux dependencies. A clean container therefore
+does not download npm packages or a browser on its first action. The built-in
+runs with an isolated browser profile so stale Chromium locks cannot cross a
+container recreate; its bounded output and XDG cache state live only under
+`data/browser-mcp`, mounted at `/app/.cache/browser-mcp`. The entrypoint creates
+that directory and repairs it for the configured `PUID`/`PGID` without widening
+ownership changes to another host path.
 
-To enable the browser MCP (page navigation, screenshots, vision), run once:
+Native installs still need Node.js 18+ and a local browser install. Cache the
+same supported package, then install its matching Chromium runtime:
 
 ```bash
-npx -y @playwright/mcp@latest --version
+npx -y @playwright/mcp@0.0.80 --version
+npx -y playwright@1.63.0-alpha-2026-08-31 install chromium
 ```
 
-That installs `@playwright/mcp` plus Playwright (~300MB total). Restart Pandamonium and the server will register at startup.
+Restart Pandamonium after a native install. Browser read schemas such as
+`browser_snapshot` remain owner-scoped reads. Directly requested action schemas
+such as `browser_navigate` may be shown to the model, but the MCP server's effect
+annotations are still classified by the shared execution authority layer;
+effectful actions require the matching approval, and unknown actions fail
+closed. Roll back Docker by rebuilding or pulling the prior Pandamonium version;
+the dedicated cache can remain mounted, or be removed separately to reset only
+the Browser MCP profile.
 
 ## Architecture
 ```

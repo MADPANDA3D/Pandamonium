@@ -29,6 +29,9 @@ services:
       # Cookbook local model cache. Inside Docker, "Local" means the Pandamonium
       # container, so persist its HuggingFace cache under ./data/huggingface.
       - ${APP_DATA_DIR:-./data}/huggingface:/app/.cache/huggingface:z
+      # Browser MCP profile/output cache. The entrypoint repairs only this
+      # dedicated mount for PUID/PGID; the baked browser remains image-owned.
+      - ${APP_DATA_DIR:-./data}/browser-mcp:/app/.cache/browser-mcp:z
       # Cookbook-installed Python CLIs/packages (vLLM, llama-cpp-python, etc.)
       # land under /app/.local for the pandamonium user. Persist them so a
       # container recreate does not silently remove installed serve engines.

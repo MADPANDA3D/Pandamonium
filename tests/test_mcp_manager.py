@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.agent_loop import _NATIVE_MCP_DIRECT_RULES
-from src.authority_protocol import action_effect_for
+from src.authority_protocol import AuthorityStore, action_effect_for
 from src.mcp_manager import (
     McpManager,
     _format_mcp_connection_error,
@@ -16,13 +16,13 @@ def test_playwright_mcp_connection_error_includes_install_hint():
     msg = _format_mcp_connection_error(
         "Browser (Playwright)",
         "npx",
-        ["-y", "@playwright/mcp@latest", "--headless"],
+        ["-y", "@playwright/mcp@0.0.80", "--headless"],
         RuntimeError("package not found"),
     )
 
     assert "package not found" in msg
     assert "Browser MCP could not start" in msg
-    assert "npx -y @playwright/mcp@latest --version" in msg
+    assert "npx -y @playwright/mcp@0.0.80 --version" in msg
     assert "restart Pandamonium" in msg
 
 
@@ -113,20 +113,27 @@ def test_mcp_call_preserves_bounded_structured_content_for_native_consumers():
     }
 
 
-def test_readonly_mcp_health_tools_receive_authority_metadata_and_unknowns_fail_closed():
+def test_mcp_tools_receive_proven_authority_metadata_and_unknowns_fail_closed(tmp_path):
     manager = McpManager()
     manager._tools["portal"] = [
         {"name": "get_health", "annotations": {"readOnlyHint": True}},
         {"name": "status_services", "annotations": None},
+        {
+            "name": "navigate",
+            "annotations": {"readOnlyHint": False, "destructiveHint": True},
+        },
         {"name": "post_message", "annotations": None},
     ]
     manager._connections["portal"] = {"name": "MAD MCP Portal"}
 
-    policies = manager.get_readonly_action_policies()
+    policies = manager.get_action_policies()
 
     assert policies == {
         "mcp__portal__get_health": {"action_effect": "read"},
         "mcp__portal__status_services": {"action_effect": "read"},
+        "mcp__portal__navigate": {
+            "action_effect": "destructive_or_difficult_to_recover"
+        },
     }
     read_call = {
         "name": "mcp__portal__get_health",
@@ -135,8 +142,17 @@ def test_readonly_mcp_health_tools_receive_authority_metadata_and_unknowns_fail_
         "capability_policy": policies["mcp__portal__get_health"],
     }
     unknown_call = {"name": "mcp__portal__post_message", "target": "mcp", "arguments": {}}
+    navigate_call = {
+        "name": "mcp__portal__navigate",
+        "target": "mcp",
+        "arguments": {"url": "https://example.com/"},
+        "capability_policy": policies["mcp__portal__navigate"],
+    }
     assert action_effect_for(read_call) == "read"
     assert action_effect_for(unknown_call) == "unclassified"
+    assert AuthorityStore(tmp_path / "authority.json").decide(
+        navigate_call, operator_id="owner", session_id="browser-session"
+    )["decision"] == "approval_required"
 
 
 def test_http_tool_projection_preserves_readonly_annotations():
@@ -201,6 +217,39 @@ def test_named_native_connection_selects_declared_discovery_and_read_tools_only(
     assert not any("write" in name for name in selected)
     assert not any("slack-fixture" in name for name in selected)
     assert manager.native_tool_names_for_request("Read the last five Teams messages") == set()
+
+
+def test_named_native_connection_selects_requested_actions_without_authorizing_unknowns():
+    manager = McpManager()
+    manager._connections["browser-fixture"] = {
+        "status": "connected",
+        "name": "Built-in Browser",
+        "server_info": {"name": "Playwright MCP"},
+        "catalog_terms": ["browser"],
+    }
+    manager._tools["browser-fixture"] = [
+        {
+            "name": "browser_navigate",
+            "description": "Navigate to a URL",
+            "annotations": {"readOnlyHint": False, "destructiveHint": True},
+        },
+        {
+            "name": "browser_snapshot",
+            "description": "Capture the accessibility snapshot",
+            "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        },
+        {"name": "browser_unclassified", "description": "Unknown browser action"},
+    ]
+
+    selected = manager.native_tool_names_for_request(
+        "Use Built-in Browser: browser_navigate to https://example.com/, then browser_snapshot."
+    )
+
+    assert selected == {
+        "mcp__browser-fixture__browser_navigate",
+        "mcp__browser-fixture__browser_snapshot",
+    }
+    assert "mcp__browser-fixture__browser_unclassified" not in manager.get_action_policies()
 
 
 def test_explicit_native_connection_name_wins_over_earlier_shared_catalog_match():

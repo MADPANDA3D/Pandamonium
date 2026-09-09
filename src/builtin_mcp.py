@@ -83,12 +83,32 @@ _OPTIONAL_BUILTIN_SERVERS = {
     ),
 }
 
-# NPX-based built-in servers (run via npx, not Python)
+# Command-based built-in servers. Docker launches the baked CLI directly;
+# native installs use the same pinned package through npx after its cache check.
+_BROWSER_MCP_PACKAGE = "@playwright/mcp@0.0.80"
+_BROWSER_MCP_CLI = "/opt/pandamonium-browser-mcp/node_modules/@playwright/mcp/cli.js"
+_BROWSER_MCP_COMMON_ARGS = [
+    "--headless",
+    "--browser", "chromium",
+    "--no-sandbox",
+    "--caps", "vision",
+]
+_BROWSER_MCP_DOCKER_ARGS = [
+    *_BROWSER_MCP_COMMON_ARGS,
+    "--isolated",
+    "--output-dir", "/app/.cache/browser-mcp/output",
+]
 _BUILTIN_NPX_SERVERS = {
     "builtin_browser": {
         "name": "Built-in: Browser",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision"],
+        "args": ["-y", _BROWSER_MCP_PACKAGE, *_BROWSER_MCP_COMMON_ARGS],
+        "cli_path": _BROWSER_MCP_CLI,
+        "runtime_args": _BROWSER_MCP_DOCKER_ARGS,
+        "runtime_env": {
+            "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+            "XDG_CACHE_HOME": "/app/.cache/browser-mcp",
+        },
     }
 }
 
@@ -177,13 +197,21 @@ async def register_builtin_servers(mcp_manager):
             else:
                 logger.warning("Optional MCP server script not found: %s", script_path)
 
-    # Register NPX-based servers in the background (they take longer to start)
-    npx_path = _find_npx()
-    logger.info(f"NPX binary resolved to: {npx_path}")
-
+    # Register command-based servers in the background (they take longer to start).
     async def _start_npx_servers():
         await asyncio.sleep(3)  # let Python servers finish first
         for server_id, cfg in _BUILTIN_NPX_SERVERS.items():
+            cli_path = str(cfg.get("cli_path") or "")
+            if cli_path and os.path.isfile(cli_path):
+                command_path = which_tool("node") or "node"
+                args = [cli_path, *cfg.get("runtime_args", [])]
+                command_env = cfg.get("runtime_env")
+                pkg_spec = None
+            else:
+                command_path = _find_npx()
+                args = cfg["args"]
+                command_env = None
+                pkg_spec = _npx_package_from_args(args)
             # Skip the server if its npx package isn't cached. Without this
             # check, npx would try to download/install the package on first
             # use, which can take minutes (or hang) on fresh installs without
@@ -195,28 +223,27 @@ async def register_builtin_servers(mcp_manager):
             # task, which cascades cancellations into the rest of the event
             # loop and downs the app. Detecting installed-state up-front lets
             # us bail with a useful warning before we ever touch stdio_client.
-            args = cfg["args"]
-            pkg_spec = _npx_package_from_args(args)
-            if pkg_spec and not await _is_npx_package_cached(npx_path, pkg_spec):
+            if pkg_spec and not await _is_npx_package_cached(command_path, pkg_spec):
                 logger.warning(
                     f"{cfg['name']} is not available.\n"
                     f"  Reason: npm package {pkg_spec!r} is not installed in the npx cache.\n"
                     f"  Impact: tools provided by this MCP server will be unavailable.\n"
-                    f"  Fix:    {os.path.basename(npx_path)} -y {pkg_spec} --version\n"
+                    f"  Fix:    {os.path.basename(command_path)} -y {pkg_spec} --version\n"
                     f"          (run once, then restart Pandamonium)\n"
                     f"  Notes:  this server is optional; see README.md "
                     f"'Built-in MCP servers' for details."
                 )
                 continue
 
-            logger.info(f"Starting NPX server: {cfg['name']} ({npx_path} {' '.join(args)})")
+            logger.info(f"Starting built-in server: {cfg['name']} ({command_path} {' '.join(args)})")
             try:
                 ok = await mcp_manager.connect_server(
                     server_id=server_id,
                     name=cfg["name"],
                     transport="stdio",
-                    command=npx_path,
+                    command=command_path,
                     args=args,
+                    env=command_env,
                 )
                 if ok:
                     logger.info(f"Built-in NPX server registered: {cfg['name']}")
