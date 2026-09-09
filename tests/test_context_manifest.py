@@ -789,6 +789,33 @@ def test_collection_followup_reuses_last_portal_collection_from_trusted_history(
     ) == {"collection_name": "jarvis-knowledgebase"}
 
 
+def test_nounless_followup_reuses_only_resource_type_in_latest_portal_context():
+    messages = [
+        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
+        {
+            "role": "assistant",
+            "content": "I found three collections.",
+            "metadata": {"tool_events": [{
+                "exit_code": 0,
+                "portal_relay": {
+                    "service_id": "qdrant",
+                    "tool_name": "qdrant-list-collections",
+                    "context": {
+                        "collection_names": [
+                            "the-barn", "school", "jarvis-knowledgebase",
+                        ],
+                    },
+                },
+            }]},
+        },
+        {"role": "user", "content": "What's in that? Show me ten examples."},
+    ]
+
+    assert agent_loop._portal_followup_fixed_arguments(
+        messages, messages[-1]["content"]
+    ) == {"collection_name": "jarvis-knowledgebase"}
+
+
 def test_channel_followup_preserves_a_name_for_native_portal_resolution():
     messages = [
         {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},

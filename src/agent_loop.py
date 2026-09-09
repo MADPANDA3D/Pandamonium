@@ -1573,7 +1573,27 @@ def _portal_followup_fixed_arguments(
                 continue
             arguments = relay.get("arguments") or {}
             context = relay.get("context") or {}
-            for noun in named_objects:
+            event_objects = set(named_objects)
+            if not event_objects:
+                inferred_objects = []
+                for noun, field_pairs in fields.items():
+                    has_argument = any(
+                        isinstance(arguments.get(argument_name), (str, int))
+                        and str(arguments.get(argument_name)).strip()
+                        for argument_name, _context_name in field_pairs
+                    )
+                    has_context = any(
+                        isinstance(context.get(context_name), list)
+                        and bool(context.get(context_name))
+                        for _argument_name, context_name in field_pairs
+                    )
+                    if noun == "channel":
+                        has_context = has_context or bool(context.get("channel_refs"))
+                    if has_argument or has_context:
+                        inferred_objects.append(noun)
+                if len(inferred_objects) == 1:
+                    event_objects.add(inferred_objects[0])
+            for noun in event_objects:
                 field_pairs = fields.get(noun)
                 if not field_pairs:
                     continue
