@@ -43200,13 +43200,25 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 .session-context-toggle { position: absolute; right: 16px; top: 8px; z-index: 12; border: 0; border-radius: 6px; background: var(--bg); color: var(--fg); padding: 5px 9px; cursor: pointer; font: inherit; font-size: 12px; }
 .session-context-panel { position: absolute; top: 48px; right: 16px; width: 252px; max-height: calc(100% - 64px); overflow-y: auto; z-index: 11; padding: 16px; border-radius: 22px; background: var(--panel); border: 1px solid color-mix(in srgb, var(--border) 40%, transparent); box-shadow: 0 8px 28px color-mix(in srgb, var(--red) 8%, transparent); box-sizing: border-box; font-size: 12px; }
 .session-context-heading { margin-bottom: 4px; }
-.session-context-panel section + section { border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent); margin-top: 18px; padding-top: 4px; }
-.session-context-panel h2 { margin: 12px 0; font: inherit; color: color-mix(in srgb, var(--fg) 60%, transparent); }
-.session-context-panel dl { margin: 0; }
-.session-context-panel dt { font-size: 10px; opacity: 0.55; margin-top: 10px; }
-.session-context-panel dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.session-context-panel section + section { border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent); margin-top: 12px; padding-top: 4px; }
+.session-context-panel h2 { margin: 8px 0; font: inherit; color: color-mix(in srgb, var(--fg) 60%, transparent); }
+.session-context-panel dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: baseline; }
+.session-context-panel dt { font-size: 10px; opacity: 0.55; }
+.session-context-panel dd { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .session-context-panel ul { list-style: none; padding: 0; margin: 0; }
-.session-context-panel li { margin: 9px 0; overflow-wrap: anywhere; line-height: 1.5; }
+.session-context-panel li { margin: 6px 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 1.5; }
+.session-context-panel .context-view-all { border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; padding: 4px 0; }
+.context-view-all:hover { color: var(--red); }
+.session-context-drawer { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(560px, 100%); max-width: 100%; height: 100dvh; max-height: 100dvh; box-sizing: border-box; padding: 24px; border: 1px solid var(--border); border-radius: 22px 0 0 22px; color: var(--fg); background: var(--panel); font: inherit; overflow-y: auto; }
+.session-context-drawer[open] { animation: context-slide-in .18s ease-out; }
+.session-context-drawer::backdrop { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.session-context-drawer h2 { font: inherit; margin: 0; }
+.session-context-drawer > .session-context-heading { position: sticky; top: 0; z-index: 1; background: var(--panel); padding: 8px 0; }
+.session-context-drawer ul { list-style: none; padding: 0; }
+.session-context-drawer li { padding: 16px 0; border-bottom: 1px solid color-mix(in srgb, var(--fg) 15%, transparent); overflow-wrap: anywhere; white-space: pre-wrap; }
+#session-context-drawer-status, .codex-history-attachment { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+@keyframes context-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .session-context-drawer[open] { animation: none; } }
 #session-context-status { margin-top: 18px; font-size: 10px; opacity: 0.6; line-height: 1.5; }
 @media (min-width: 1250px) { .chat-container.context-open { padding-right: 286px; } }
 @media (max-width: 1249px) { .session-context-panel { box-shadow: 0 10px 48px #0009; width: min(300px, calc(100% - 32px)); } }

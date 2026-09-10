@@ -1026,12 +1026,18 @@
     <button type="button" id="session-context-toggle" class="session-context-toggle" aria-controls="session-context-panel" aria-expanded="false" title="Session details">ⓘ <span>Details</span></button>
     <aside id="session-context-panel" class="session-context-panel" aria-label="Session details" hidden>
       <div class="session-context-heading"><strong>Session</strong><button type="button" id="session-context-close" aria-label="Close session details">×</button></div>
-      <section><h2>Environment</h2><dl id="session-context-environment"></dl></section>
-      <section><h2>Sources</h2><ul id="session-context-sources"></ul></section>
-      <section><h2>Tools used</h2><ul id="session-context-tools"></ul></section>
-      <section><h2>Outputs</h2><ul id="session-context-outputs"></ul></section>
+      <section><div class="session-context-heading"><h2>Environment</h2><button type="button" class="context-view-all" data-context-view="environment">View all</button></div><dl id="session-context-environment"></dl></section>
+      <section><h2>Sources</h2><ul id="session-context-sources"></ul><button type="button" class="context-view-all" data-context-view="sources">View all</button></section>
+      <section><div class="session-context-heading"><h2>Tools used</h2><button type="button" class="context-view-all" data-context-view="tools">View all</button></div><ul id="session-context-tools"></ul></section>
+      <section><div class="session-context-heading"><h2>Outputs</h2><button type="button" class="context-view-all" data-context-view="outputs">View all</button></div><ul id="session-context-outputs"></ul></section>
       <p id="session-context-status" role="status"></p>
     </aside>
+    <dialog id="session-context-drawer" class="session-context-drawer" aria-labelledby="session-context-drawer-title">
+      <div class="session-context-heading"><h2 id="session-context-drawer-title">Sources</h2><button type="button" id="session-context-drawer-close" aria-label="Close details panel" autofocus>×</button></div>
+      <ul id="session-context-drawer-list"></ul>
+      <p id="session-context-drawer-status" role="status"></p>
+      <button type="button" id="session-context-drawer-more" class="codex-browser-more" hidden>Load earlier activity</button>
+    </dialog>
     <!-- Persistent page heading for assistive tech. Visually hidden so it
          never affects layout, but always present inside the main landmark
          (the sidebar that shows the visible brand is hidden off-canvas on

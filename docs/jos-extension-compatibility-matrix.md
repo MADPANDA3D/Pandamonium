@@ -42,6 +42,33 @@ retained until source and deployed equivalence are separately proven.
 | [Robin](https://github.com/apurvsinghgautam/robin/tree/575d105e2f0fd61a450d5b4368535d0e83060354) | `575d105e2f0fd61a450d5b4368535d0e83060354` | MIT | Native Python search, scrape, health, and LLM modules in an isolated runtime | Published as maintained tag `jos-v2.8.0-jos.2`; fixture-only public-tag lifecycle replay passed through the generic MCP adapter | `MAD-760` |
 | [text-to-cad](https://github.com/earthtojake/text-to-cad/tree/0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6) | `0e94cd1d2b5fa2013d89aa9504ecadcf16ce39f6` | MIT | Existing Codex plugin metadata, 12 Agent Skills, deterministic CLIs, loopback viewer, artifact workflow | Published as maintained tag `jos-v0.4.28-jos.2`; public-tag lifecycle replay passed through the generic skill-bundle adapter | `MAD-759` |
 
+## Planned candidates — Leo's list, 2026-09-10
+
+These entries record requested future research and plugin work. They have not
+been assessed here for compatibility, licensing, or deployment; the published
+candidate decisions and evidence above remain separate.
+
+### Potential harness to study
+
+- [Pantheon](https://github.com/PrometheanLink/pantheon): evaluate the harness
+  for ideas, patterns, or reusable components that could improve Pandamonium.
+  This is a research candidate, not a regular plugin or a decision to replace
+  Pandamonium's harness.
+
+### Regular plugins
+
+| Candidate | Requested scope |
+| --- | --- |
+| [Chatterbox](https://github.com/resemble-ai/chatterbox) | Build a deployment wizard that helps users deploy Chatterbox on the node of their choice and automatically configures Pandamonium's voice integration. Users must then be able to select the voice in Settings. Every setting established by the wizard must remain editable in Settings, including the deployment node, connection configuration, and voice selection. |
+| [myinstants-api](https://github.com/MADPANDA3D/myinstants-api) | Planned plugin; detailed integration scope to be defined. |
+| [blender-agent-tools](https://github.com/elasticdotventures/blender-agent-tools) | Planned plugin; detailed integration scope to be defined. |
+| [step.parts](https://github.com/earthtojake/step.parts) | Planned plugin; detailed integration scope to be defined. |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Planned plugin; detailed integration scope to be defined. |
+| [open-gif-api](https://github.com/bryanstedman/open-gif-api) | Planned plugin; detailed integration scope to be defined. |
+| [OtakuGIFs](https://otakugifs.xyz/) | Planned plugin; supplied website is the source pointer; detailed integration scope to be defined. |
+| [gifukai-api](https://github.com/lucialv/gifukai-api) | Planned plugin; detailed integration scope to be defined. |
+| [ani-cli](https://github.com/pystardust/ani-cli) | Planned plugin; detailed integration scope to be defined. |
+
 ## Distribution claim states
 
 Temporary approval-gated lifecycle proof counts as source-tested evidence. It

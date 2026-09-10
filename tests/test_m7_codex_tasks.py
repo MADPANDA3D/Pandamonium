@@ -723,3 +723,45 @@ async def test_execution_rollback_switches_fail_closed_without_worker_or_bridge_
     }]
     with pytest.raises(RuntimeError, match="codex_task_execution_disabled"):
         bridge.create_task({"workspace": "disposable", "prompt": "Do not run."})
+
+
+@pytest.mark.asyncio
+async def test_native_history_route_requires_user_and_preserves_cursor(tmp_path, monkeypatch):
+    import httpx
+    from fastapi import FastAPI
+    from src.agent_worker_adapters import CodexBridgeAdapter
+
+    token = tmp_path / 'token'
+    token.write_text('private-fixture-token')
+    adapter = CodexBridgeAdapter('pc-codex', 'http://bridge.test', token, enabled=True, machine='workstation')
+    requests = []
+
+    def bridge_request(request):
+        requests.append(request)
+        assert request.headers['authorization'] == 'Bearer private-fixture-token'
+        return httpx.Response(200, json={'items': [], 'next_cursor': 'more'})
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr('src.agent_worker_adapters.httpx.AsyncClient', lambda **kwargs: original_client(transport=httpx.MockTransport(bridge_request), **kwargs))
+    monkeypatch.setattr(agent_task_routes, 'adapters', lambda: {'pc-codex': adapter})
+    monkeypatch.setattr(agent_task_routes, 'configure', lambda *_args: None)
+    monkeypatch.setenv('AUTH_ENABLED', 'true')
+    app = FastAPI()
+    app.state.auth_manager = SimpleNamespace(is_configured=True)
+    app.include_router(agent_task_routes.setup_agent_task_routes(SimpleNamespace()))
+
+    @app.middleware('http')
+    async def test_identity(request, call_next):
+        request.state.current_user = request.headers.get('x-test-user')
+        return await call_next(request)
+
+    async with original_client(transport=httpx.ASGITransport(app=app), base_url='http://app.test') as client:
+        path = '/api/codex/projects/allowed/tasks/selected/history?cursor=opaque%2Bcursor&limit=5'
+        assert (await client.get(path)).status_code == 401
+        assert requests == []
+        response = await client.get(path, headers={'x-test-user': 'alice'})
+        assert response.status_code == 200 and response.json()['next_cursor'] == 'more'
+        assert requests[-1].url.path == '/v1/catalog/projects/allowed/tasks/selected/history'
+        assert requests[-1].url.params['cursor'] == 'opaque+cursor'
+        assert 'private-fixture-token' not in response.text
+        assert (await client.get(path + '0', headers={'x-test-user': 'alice'})).status_code == 422

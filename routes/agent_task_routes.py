@@ -428,6 +428,22 @@ def setup_agent_task_routes(session_manager):
         except Exception:
             raise HTTPException(503, "Codex project catalog is unavailable")
 
+    @router.get("/api/codex/projects/{project_id}/tasks/{thread_id}/history")
+    async def codex_task_history(project_id: str, thread_id: str,
+                                 cursor: str | None = Query(default=None, max_length=2000),
+                                 limit: int = Query(default=5, ge=1, le=10),
+                                 _owner: str = Depends(require_user)):
+        try:
+            return await _codex_catalog_adapter().catalog_task_details(project_id, thread_id, history=True, cursor=cursor, limit=limit)
+        except ValueError:
+            raise HTTPException(400, "Invalid Codex task")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise HTTPException(404, "Task history is unavailable. Verify the project and update its Codex bridge to v1.0.39 or later.")
+            raise HTTPException(503, "Codex task history is unavailable. Check the selected bridge.")
+        except Exception:
+            raise HTTPException(503, "Codex task history is unavailable. Check the selected bridge.")
+
     @router.get("/api/codex/projects/{project_id}/tasks/{thread_id}")
     async def codex_task_details(project_id: str, thread_id: str, _owner: str = Depends(require_user)):
         try:

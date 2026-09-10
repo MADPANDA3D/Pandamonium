@@ -282,7 +282,11 @@ async function activate(
   return { activationPendingForNavigation, claimed, deleted, messages, navigated, statusRequests };
 }
 
-const futureWorker = currentWorker.replace('pandamonium-v393', 'pandamonium-v394');
+const currentCache = currentWorker.match(/const CACHE_NAME = '(pandamonium-v(\d+))';/);
+assert.ok(currentCache, 'current worker must declare its cache version');
+const futureCache = `pandamonium-v${Number(currentCache[2]) + 1}`;
+const futureWorker = currentWorker.replace(currentCache[1], futureCache);
+assert.notEqual(futureWorker, currentWorker, 'the upgrade fixture must actually change the cache');
 const recovered = await activate(futureWorker, [
   new Error('restart gap'),
   { status: 503 },
@@ -296,7 +300,7 @@ assert.equal(recovered.statusRequests, 4);
 assert.equal(recovered.navigated.length, 1);
 assert.equal(
   new URL(recovered.navigated[0]).searchParams.get('pandamonium-update-reconcile'),
-  'pandamonium-v394',
+  futureCache,
 );
 
 const lateReplacement = await activate(

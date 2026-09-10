@@ -897,3 +897,38 @@ def test_steer_endpoint_requires_authentication(tmp_path):
         server.server_close()
         bridge.TASKS.pop(task.task_id, None)
         bridge.TOKEN_FILE = original_token_file
+
+
+def test_native_history_pages_full_conversation_without_private_tool_payloads(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge, 'WORKSPACES', {'project': str(tmp_path)})
+    thread = {'id': 'selected', 'cwd': str(tmp_path), 'name': 'Selected task'}
+    calls = []
+
+    def rpc(method, params):
+        calls.append((method, params))
+        if method == 'thread/read':
+            return {'thread': thread}
+        assert params == {'threadId': 'selected', 'limit': 5, 'sortDirection': 'desc', 'itemsView': 'full', 'cursor': 'older'}
+        return {'data': [
+            {'id': 'newer', 'items': [{'id': 'answer', 'type': 'agentMessage', 'text': 'Answer', 'phase': 'final'}]},
+            {'id': 'older', 'items': [
+                {'id': 'question', 'type': 'userMessage', 'content': [{'type': 'text', 'text': 'Question'}, {'type': 'localImage', 'path': '/tmp/photo.png'}]},
+                *[{'type': 'reasoning', 'content': ['private reasoning']} for _ in range(501)],
+                {'type': 'mcpToolCall', 'server': 'portal', 'tool': 'read', 'arguments': {'token': 'secret'}},
+                {'type': 'fileChange', 'changes': [{'path': 'src/answer.py', 'diff': 'private diff'}]},
+            ]},
+        ], 'nextCursor': 'oldest'}
+
+    monkeypatch.setattr(bridge, '_app_server_call', rpc)
+    result = bridge.catalog_task_history('project', 'selected', cursor='older')
+    assert [(item['id'], item['role'], item['text']) for item in result['items']] == [
+        ('older:question', 'user', 'Question'), ('newer:answer', 'assistant', 'Answer')]
+    assert result['items'][0]['attachments'] == ['/tmp/photo.png']
+    assert result['activity'] == {'sources': ['/tmp/photo.png'], 'tools': ['portal/read'], 'outputs': ['src/answer.py']}
+    assert result['next_cursor'] == 'oldest'
+    assert not any(private in json.dumps(result) for private in ('private reasoning', 'secret', 'private diff'))
+    calls.clear()
+    thread['cwd'] = str(tmp_path / 'another-project')
+    with pytest.raises(ValueError, match='project_mismatch'):
+        bridge.catalog_task_history('project', 'selected', cursor='older')
+    assert [method for method, _params in calls] == ['thread/read']

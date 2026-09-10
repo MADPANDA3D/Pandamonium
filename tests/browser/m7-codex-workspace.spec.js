@@ -55,7 +55,7 @@ function taskPage(cursor = null) {
   };
 }
 
-async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat = null, pinned = [], preferences = {} } = {}) {
+async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat = null, onHistory = null, pinned = [], preferences = {} } = {}) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/selector-catalog') return route.fulfill({ json: selector });
@@ -63,6 +63,7 @@ async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat
     if (url.pathname === '/api/models') return route.fulfill({ json: { items: [] } });
     if (url.pathname === '/api/default-chat') return route.fulfill({ json: {} });
     if (url.pathname === '/api/sessions') return route.fulfill({ json: sessions });
+    if (url.pathname === '/api/session' && route.request().method() === 'POST') return route.fulfill({ json: { id: 'friday-chat' } });
     if (url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
     if (url.pathname === '/api/codex/models') return route.fulfill({ json: {
       items: [{ model: 'fixture-model', display_name: 'Fixture Codex', reasoning_efforts: ['medium', 'high'], default_reasoning_effort: 'medium' }],
@@ -73,6 +74,12 @@ async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat
       return route.fulfill({ json: { value: preferences[key] ?? null } });
     }
     if (url.pathname === '/api/codex/projects') return route.fulfill({ json: { items: catalog, pinned_tasks: pinned, next_cursor: null } });
+    if (url.pathname.endsWith('/history') && url.pathname.startsWith('/api/codex/') && onHistory) return onHistory(route);
+    if (url.pathname.endsWith('/history') && url.pathname.startsWith('/api/codex/')) return route.fulfill({ json: {
+      task: { ...taskPage().items[0], task_id: url.pathname.split('/').at(-2), cwd: '/work/disposable', model: 'recorded-model', recorded_branch: 'recorded-branch' },
+      items: [{ id: 'native-user', role: 'user', text: 'The earlier request.' }, { id: 'native-answer', role: 'assistant', text: 'The earlier answer.' }],
+      activity: { sources: ['/tmp/attached.png'], tools: ['portal/list_services'], outputs: ['src/fix.py'] }, next_cursor: null,
+    } });
     if (url.pathname.startsWith('/api/codex/projects/test-project/tasks/')) return route.fulfill({ json: {
       ...taskPage().items[0], cwd: '/work/disposable', model: 'recorded-model', recorded_branch: 'recorded-branch',
       sources: ['attached.png'], tools: ['portal/list_services'], outputs: ['src/fix.py'], activity_available: true,
@@ -158,11 +165,14 @@ test('Friday shows readable project folders and nested tasks without a sidebar f
   await page.getByText('Fixture resume task', { exact: true }).click();
   await expect(page.locator('#message:visible')).toHaveAttribute('placeholder', /Message Friday about Fixture resume task/);
   await expect(page.locator('#codex-workspace-browser textarea')).toHaveCount(0);
-  await expect(page.locator('#session-context-environment')).toContainText('/work/disposable');
-  await expect(page.locator('#session-context-environment')).toContainText('recorded-branch');
+  await expect(page.locator('#session-context-environment dd[title="/work/disposable"]')).toHaveCount(1);
+  await page.locator('[data-context-view="environment"]').click();
+  await expect(page.locator('#session-context-drawer')).toContainText('recorded-branch');
+  await page.locator('#session-context-drawer-close').click();
   await expect(page.locator('#session-context-tools')).toHaveText('portal/list_services');
   await expect(page.locator('#session-context-sources')).toHaveText('attached.png');
-  await expect(page.locator('#session-context-outputs')).toHaveText('src/fix.py');
+  await expect(page.locator('#session-context-outputs li')).toHaveText('fix.py');
+  await expect(page.locator('#session-context-outputs li')).toHaveAttribute('title', 'src/fix.py');
   await project.click();
   await expect(page.locator('#session-context-environment')).not.toContainText('/work/disposable');
   await expect(page.locator('#session-context-tools')).toHaveText('No tools recorded');
@@ -324,7 +334,7 @@ test('selected Friday project and task flow through the normal composer', async 
   await page.locator('#model-picker-btn').click();
   await page.locator('#model-picker-refresh-btn').click();
   await expect(page.locator('#message:visible')).toHaveAttribute('placeholder', /Fixture resume task/);
-  await expect(page.locator('#session-context-environment')).toContainText('recorded-branch');
+  await expect(page.locator('#session-context-environment dd[title="/work/disposable"]')).toHaveCount(1);
   await page.locator('#codex-model').selectOption('fixture-model');
   await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
   await page.locator('#conversation-effort').focus();
@@ -345,7 +355,7 @@ test('selected Friday project and task flow through the normal composer', async 
   expect(submitted).toContain('codex_reasoning_effort');
   expect(submitted).toContain('high');
   await expect(page.locator('.jarvis-task-activity[data-task-id="direct-friday-task"]')).toContainText('Friday');
-  await expect(page.locator('#session-context-environment')).toContainText('recorded-branch');
+  await expect(page.locator('#session-context-environment dd[title="/work/disposable"]')).toHaveCount(1);
   await page.setViewportSize({ width: 390, height: 844 });
   if (!await page.locator('#sidebar').evaluate(sidebar => sidebar.classList.contains('hidden'))) await page.locator('#hamburger-btn').click();
   await page.locator('#model-picker-btn').click();
@@ -465,6 +475,9 @@ test('rounded workspace controls follow theme colors on desktop and phone', asyn
     if (!await page.locator('#session-context-panel').isVisible()) await page.locator('#session-context-toggle').click();
     await expect(page.locator('#session-context-panel')).toHaveCSS('background-color', expected.panel);
     await expect(page.locator('#session-context-panel')).toContainText('Local workstation');
+    await page.locator('[data-context-view="environment"]').click();
+    await expect(page.locator('#session-context-drawer')).toHaveCSS('background-color', expected.panel);
+    await page.keyboard.press('Escape');
     await page.screenshot({ path: test.info().outputPath(`details-theme-${index}.png`), animations: 'disabled' });
     await page.locator('#session-context-close').click();
     await page.locator('#model-picker-btn').click();
@@ -474,4 +487,109 @@ test('rounded workspace controls follow theme colors on desktop and phone', asyn
   const menu = await page.locator('#model-picker-menu').boundingBox();
   expect(menu.x).toBeGreaterThanOrEqual(0);
   expect(menu.x + menu.width).toBeLessThanOrEqual(390);
+});
+
+
+test('native history opens recent messages, pages without duplicates, and restores the selected task on reload', async ({ page }) => {
+  await mockShell(page, { onHistory: route => {
+    const url = new URL(route.request().url());
+    const earlier = url.searchParams.has('cursor');
+    return route.fulfill({ json: {
+      task: { ...taskPage().items[0], cwd: '/work/disposable' },
+      items: earlier ? [
+        { id: 'old', role: 'user', text: 'Older native request' },
+        { id: 'answer', role: 'assistant', text: 'Recent native answer' },
+      ] : [{ id: 'question', role: 'user', text: 'Recent native request' }, { id: 'answer', role: 'assistant', text: 'Recent native answer' }],
+      activity: { sources: earlier ? ['/tmp/older-source.png'] : Array.from({ length: 8 }, (_, i) => `/tmp/long-source-filename-${i}.png`), tools: ['Terminal'], outputs: [] },
+      next_cursor: earlier ? null : 'earlier',
+    } });
+  } });
+  await page.goto('/static/index.html');
+  await selectFriday(page);
+  await page.getByText('Disposable Test Project', { exact: true }).click();
+  await page.getByText('Fixture resume task', { exact: true }).click();
+  await expect(page.locator('[data-native-message-id]')).toHaveCount(2);
+  await expect(page.locator('#current-meta')).toHaveText('Fixture resume task');
+  await page.locator('#codex-history-more').click();
+  await expect(page.locator('[data-native-message-id]')).toHaveCount(3);
+  await expect(page.locator('[data-native-message-id]').first()).toContainText('Older native request');
+  await expect(page.locator('[data-native-message-id="answer"]')).toHaveCount(1);
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#codex-model').selectOption('fixture-model');
+  await page.locator('#conversation-effort').press('End');
+  await page.locator('#model-picker-btn').click();
+  await page.reload();
+  await expect(page.locator('[data-native-message-id]')).toHaveCount(2);
+  await expect(page.locator('#message')).toHaveAttribute('placeholder', /Fixture resume task/);
+  await expect(page.locator('#codex-model')).toHaveValue('fixture-model');
+  await expect(page.locator('#codex-reasoning')).toHaveValue('high');
+  expect(await page.evaluate(() => window.codexWorkspaceBrowser.getSelectedContext())).toMatchObject({ workspace: 'test-project', codexThreadId: THREAD_ID });
+  await page.locator('#sidebar-new-chat-btn').click();
+  await expect(page.locator('#model-picker-btn')).toContainText('Friday');
+  await expect(page.locator('[data-native-message-id]')).toHaveCount(0);
+});
+
+test('compact Details loads all older sources into a themed sliding panel on desktop and phone', async ({ page }) => {
+  await mockShell(page, { onHistory: route => {
+    const earlier = new URL(route.request().url()).searchParams.has('cursor');
+    return route.fulfill({ json: {
+      task: { ...taskPage().items[0], cwd: '/work/a-very-long-workspace-name', model: 'recorded-model', recorded_branch: 'main' },
+      items: [{ id: 'question', role: 'user', text: 'Native conversation with many attachments.' }],
+      activity: { sources: earlier ? ['/tmp/oldest-source.png'] : Array.from({ length: 60 }, (_, i) => `/tmp/codex-clipboard-long-filename-${i}.png`), tools: ['Terminal', 'Web search', 'portal/read'], outputs: ['src/fix.py'] },
+      next_cursor: earlier ? null : 'older-sources',
+    } });
+  } });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/static/index.html');
+  await selectFriday(page);
+  await page.getByText('Disposable Test Project', { exact: true }).click();
+  await page.getByText('Fixture resume task', { exact: true }).click();
+  await expect(page.locator('#session-context-sources li')).toHaveCount(3);
+  expect((await page.locator('#session-context-panel').boundingBox()).height).toBeLessThan(560);
+  await expect(page.locator('#session-context-sources li').first()).toHaveCSS('text-overflow', 'ellipsis');
+  await page.screenshot({ path: test.info().outputPath('compact-details-desktop.png'), animations: 'disabled' });
+  await page.locator('[data-context-view="sources"]').click();
+  await expect(page.locator('#session-context-drawer-list li')).toHaveCount(61);
+  await expect(page.locator('#session-context-drawer')).toContainText('/tmp/oldest-source.png');
+  await expect(page.locator('#session-context-drawer-status')).toContainText('all available history loaded');
+  await page.screenshot({ path: test.info().outputPath('compact-sources-desktop.png'), animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-context-view="sources"]')).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('[data-context-view="sources"]').click();
+  await expect.poll(async () => { const box = await page.locator('#session-context-drawer').boundingBox(); return box.x + box.width; }).toBeLessThanOrEqual(390);
+  const bounds = await page.locator('#session-context-drawer').boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  expect(bounds.height).toBeLessThanOrEqual(844);
+  await page.screenshot({ path: test.info().outputPath('compact-details-phone.png') });
+});
+
+test('native task navigation discards late history and reports bridge errors with retry', async ({ page }) => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let requested = false;
+  let fail = true;
+  await mockShell(page, { onHistory: async route => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-2);
+    if (id === THREAD_ID) { requested = true; await held; }
+    else if (fail) return route.fulfill({ status: 503, json: { detail: 'Update the selected Codex bridge.' } });
+    return route.fulfill({ json: { task: { task_id: id, project_id: 'test-project', title: id === THREAD_ID ? 'Old task' : 'Second task' }, items: [{ id: id + ':message', role: 'assistant', text: id === THREAD_ID ? 'Stale answer must not appear' : 'Second task conversation' }], activity: {}, next_cursor: null } });
+  } });
+  await page.goto('/static/index.html');
+  await selectFriday(page);
+  await page.getByText('Disposable Test Project', { exact: true }).click();
+  await page.getByText('Fixture resume task', { exact: true }).click();
+  await expect.poll(() => requested).toBe(true);
+  await page.getByText('Fixture task 1', { exact: true }).click();
+  await expect(page.locator('#codex-history-more')).toContainText('Update the selected Codex bridge.');
+  release();
+  fail = false;
+  await page.locator('#codex-history-more').click();
+  await expect(page.locator('[data-native-message-id]')).toHaveCount(1);
+  await expect(page.locator('#chat-history')).toContainText('Second task conversation');
+  await expect(page.locator('#chat-history')).not.toContainText('Stale answer');
+  await page.locator('#sidebar-new-chat-btn').click();
+  await expect(page.locator('[data-native-message-id]')).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has('codex_task')).toBe(false);
 });

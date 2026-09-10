@@ -18,7 +18,7 @@ optional model overrides in the private service environment:
 
 ```env
 JARVIS_CODEX_WORKSPACES_JSON='{"project":{"path":"/absolute/path/to/project","display_name":"Project"}}'
-JARVIS_CODEX_WORKER_LABEL=Friday
+JARVIS_CODEX_WORKER_LABEL=Developer
 JARVIS_CODEX_MODEL=your-model-id
 JARVIS_CODEX_REASONING_EFFORT=high
 ```
@@ -36,9 +36,27 @@ supply a filesystem root.
 The PC bridge defaults to `gpt-5.6-terra` with `high` reasoning. The shared VPS bridge keeps its existing App Server defaults unless those variables are explicitly set.
 
 The authenticated catalog routes use Codex App Server's supported `thread/list`
-API with an exact allowlisted `cwd` filter. Responses identify approved roots by
-logical `workspace:<alias>` references and never return workstation paths,
-thread previews, provider metadata, or bridge credentials.
+API with an exact allowlisted `cwd` filter. Project-list responses identify approved
+roots by logical `workspace:<alias>` references. Authenticated task Details and history
+responses include the selected workspace and recorded attachment/output paths after
+verifying exact project membership. They never expose bridge credentials or raw
+reasoning/tool argument payloads.
+
+## Native conversation history (v1.0.39+)
+
+Update this bridge alongside the Pandamonium app. The authenticated
+`GET /v1/catalog/projects/{workspace}/tasks/{thread_id}/history` endpoint uses
+App Server `thread/turns/list`, accepts its opaque cursor, and returns five recent
+turns by default (maximum ten) in chronological display order. It includes visible
+user/assistant messages and recorded activity, with a cursor for earlier turns.
+
+Pandamonium preserves the selected native task and model/effort across reload and
+resumes that task when sending. Browsing does not start a model turn or replay tools.
+Attachment filenames and paths are listed; binary files remain on the native node.
+Keep the existing private token, Codex home, project map and service environment
+when replacing the two-file bridge bundle. Restart the bridge only when its worker
+tasks are idle; keep the previous bundle for rollback. Older bridges continue to
+serve the existing catalog and task controls but cannot load native history.
 
 `JARVIS_CODEX_BRIDGE_HOSTS` may contain a comma-separated list of explicit bind addresses for a loopback plus tailnet-only transition. Wildcard binds are rejected. Keep interface addresses in private machine configuration, not reusable source.
 

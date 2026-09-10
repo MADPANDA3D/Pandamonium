@@ -776,6 +776,8 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
 
     const el = uiModule.el;
     const msg = el('message').value;
+    const selectedCodexContext = sessionModule.getChatAgentTarget() === 'pc-codex'
+      ? window.codexWorkspaceBrowser?.getSelectedContext?.() : null;
     // Allow empty text when a regen carries over the original message's
     // attachment ids — a photo-only message still has something to send.
     if (!msg.trim() && !_authorityControl && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
@@ -1225,7 +1227,11 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       const agentEffort = window.conversationContext?.getAgentEffort?.();
       if (agentEffort && (!streamAgentTarget || streamAgentTarget === 'jarvis')) fd.append('agent_effort', agentEffort);
       if (streamAgentTarget === 'pc-codex') {
-        const codexContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
+        const currentContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
+        if (selectedCodexContext?.workspace !== currentContext?.workspace || selectedCodexContext?.codexThreadId !== currentContext?.codexThreadId) {
+          throw new Error('The selected Codex task changed. Send the message again in the intended task.');
+        }
+        const codexContext = selectedCodexContext;
         if (codexContext?.workspace) fd.append('worker_workspace', codexContext.workspace);
         if (codexContext?.codexThreadId) fd.append('worker_thread_id', codexContext.codexThreadId);
         if (codexContext?.codexModel) fd.append('codex_model', codexContext.codexModel);

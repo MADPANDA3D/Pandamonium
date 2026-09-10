@@ -139,7 +139,8 @@ function _selectedAgent() {
   if (!_agentCatalogVerified) return null;
   const selected = _selectedAgents.get(_agentSelectionKey()) || _selectedAgents.get(_PENDING_AGENT_KEY);
   if (selected) return selected;
-  const defaultIdentity = _selectorItems.find(item => item.target === 'jarvis' && !item.disabled)
+  const defaultTarget = new URLSearchParams(window.location.search).has('codex_task') ? 'pc-codex' : 'jarvis';
+  const defaultIdentity = _selectorItems.find(item => item.target === defaultTarget && !item.disabled)
     || _selectorItems.find(item => !item.disabled);
   return defaultIdentity ? {
     target: defaultIdentity.target,
@@ -170,7 +171,7 @@ export function clearPendingAgentTarget() {
 }
 
 export function preserveSelectedAgentForNewChat() {
-  const selected = _selectedAgents.get(_agentSelectionKey());
+  const selected = _selectedAgent();
   if (selected) _selectedAgents.set(_PENDING_AGENT_KEY, { ...selected });
   else clearPendingAgentTarget();
 }
