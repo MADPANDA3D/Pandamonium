@@ -35,6 +35,7 @@ from src.action_protocol import (
     classify_target,
     compose_capability_catalog,
     denied_action_result,
+    invalid_action_result,
     normalize_action_call,
     utc_now,
     validate_action_call,
@@ -414,30 +415,8 @@ _NATIVE_MCP_DIRECT_RULES = """\
 - Treat discovery and enumeration as intermediate steps. Listing collections does not answer what is inside one; continue through the declared reference and read executor until the requested content is returned or one precise terminal error blocks it.
 - Safe tools declared read-only run without approval. If permission, service admission, or schema validation fails, report that bounded error clearly and stop instead of entering a discovery loop."""
 
-_EXPLICIT_PORTAL_READ_RULES = """\
-## Explicit Portal provider-read requirement
-- This request requires live downstream provider data through MAD MCP Portal. A prose-only response is not completion.
-- Execute the one mounted request-specific Portal read function before giving the final answer. Pandamonium already scoped it through Portal discovery and the selected lossless reference.
-- The Portal is the broker, not the downstream `serviceId`. Preserve the provider named by the user and never use the Portal server id as the downstream service id.
-- Discovery and enumeration are intermediate. Do not claim requested provider data from a service list, tool catalog, reference, or collection-name list.
-- If a required schema, admission, authentication, or transport step fails, report that exact terminal error instead of inventing data."""
-
 _NATIVE_MCP_CONTRACT_HEADING = "## Current native MCP capability contract"
 _MCP_DOTTED_CAPABILITY_RE = re.compile(r"\b[a-zA-Z][\w-]*(?:\.[\w-]+)+\b")
-_QUALIFIED_PORTAL_READ_TOOL_RE = re.compile(
-    r"^mcp__[a-zA-Z0-9_-]+__portal\.call_read_tool$"
-)
-_QUALIFIED_PORTAL_PROXY_READ_TOOL_RE = re.compile(
-    r"^mcp__[a-zA-Z0-9_-]+__portal\.read\.[a-zA-Z0-9._-]+$"
-)
-
-
-def _is_qualified_portal_read_tool(name: Any) -> bool:
-    value = str(name or "")
-    return bool(
-        _QUALIFIED_PORTAL_READ_TOOL_RE.fullmatch(value)
-        or _QUALIFIED_PORTAL_PROXY_READ_TOOL_RE.fullmatch(value)
-    )
 
 
 def _with_native_mcp_contract(messages: List[Dict], qualified_names: Set[str]) -> List[Dict]:
@@ -1538,131 +1517,6 @@ def _is_contextual_object_continuation(messages: List[Dict], text: str) -> bool:
     )
 
 
-def _portal_followup_fixed_arguments(
-    messages: List[Dict], text: str
-) -> Dict[str, Any]:
-    """Recover compact Portal resource identity from the last successful read.
-
-    Only internal tool-event metadata is considered. A singular referent after
-    an ordered resource list inherits the most recently presented identifier,
-    avoiding model guesses or repeated clarification for a value Portal already
-    returned.
-    """
-    if not _is_contextual_object_continuation(messages, text):
-        return {}
-    named_objects = {
-        match.group("object").lower()
-        for match in _CONTEXTUAL_NAMED_OBJECT_RE.finditer(str(text or ""))
-    }
-    fields = {
-        "collection": (
-            ("collection_id", "collection_ids"),
-            ("collection_name", "collection_names"),
-        ),
-        "channel": (
-            ("channel_id", "channel_ids"),
-            ("channel_name", "channel_names"),
-        ),
-    }
-    seen_latest_user = False
-    for message in reversed(messages):
-        if message.get("role") == "user":
-            content = message.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict)
-                )
-            metadata = message.get("metadata") or {}
-            if (
-                not str(content or "").strip()
-                or metadata.get("trusted") is False
-                or str(content).startswith("[Tool execution results]")
-            ):
-                continue
-            if not seen_latest_user:
-                seen_latest_user = True
-                continue
-            break
-        if not seen_latest_user or message.get("role") != "assistant":
-            continue
-        metadata = message.get("metadata") or {}
-        for event in reversed(metadata.get("tool_events") or []):
-            if not isinstance(event, dict):
-                continue
-            relay = event.get("portal_relay") or {}
-            if not isinstance(relay, dict) or not relay:
-                continue
-            if event.get("exit_code") not in (0, None):
-                return {}
-            arguments = relay.get("arguments") or {}
-            context = relay.get("context") or {}
-            event_objects = set(named_objects)
-            if not event_objects:
-                inferred_objects = []
-                for noun, field_pairs in fields.items():
-                    has_argument = any(
-                        isinstance(arguments.get(argument_name), (str, int))
-                        and str(arguments.get(argument_name)).strip()
-                        for argument_name, _context_name in field_pairs
-                    )
-                    has_context = any(
-                        isinstance(context.get(context_name), list)
-                        and bool(context.get(context_name))
-                        for _argument_name, context_name in field_pairs
-                    )
-                    if noun == "collection":
-                        has_context = has_context or bool(context.get("collection_refs"))
-                    elif noun == "channel":
-                        has_context = has_context or bool(context.get("channel_refs"))
-                    if has_argument or has_context:
-                        inferred_objects.append(noun)
-                if len(inferred_objects) == 1:
-                    event_objects.add(inferred_objects[0])
-            for noun in event_objects:
-                field_pairs = fields.get(noun)
-                if not field_pairs:
-                    continue
-                for argument_name, _context_name in field_pairs:
-                    direct_value = arguments.get(argument_name)
-                    if isinstance(direct_value, (str, int)) and str(direct_value).strip():
-                        return {argument_name: direct_value}
-                if noun == "collection":
-                    collection_refs = context.get("collection_refs")
-                    if isinstance(collection_refs, list) and collection_refs:
-                        last_ref = collection_refs[-1]
-                        if isinstance(last_ref, dict):
-                            collection_id = last_ref.get("id")
-                            if isinstance(collection_id, (str, int)) and str(collection_id).strip():
-                                return {"collection_id": collection_id}
-                            collection_name = last_ref.get("name")
-                            if isinstance(collection_name, str) and collection_name.strip():
-                                return {"collection_name": collection_name}
-                if noun == "channel":
-                    channel_refs = context.get("channel_refs")
-                    if isinstance(channel_refs, list) and channel_refs:
-                        last_ref = channel_refs[-1]
-                        if isinstance(last_ref, dict):
-                            channel_id = last_ref.get("id")
-                            if isinstance(channel_id, (str, int)) and str(channel_id).strip():
-                                return {"channel_id": channel_id}
-                            channel_name = last_ref.get("name")
-                            if isinstance(channel_name, str) and channel_name.strip():
-                                return {"channel_name": channel_name}
-                for argument_name, context_name in field_pairs:
-                    values = context.get(context_name)
-                    if isinstance(values, list):
-                        candidates = [
-                            item for item in values
-                            if isinstance(item, (str, int)) and str(item).strip()
-                        ]
-                        if candidates:
-                            return {argument_name: candidates[-1]}
-            return {}
-    return {}
-
-
 def _is_contextless_followup_reply(text: str, question: str = "") -> bool:
     """Return true for short answers that do not introduce a new task."""
     reply = str(text or "").strip()
@@ -1962,110 +1816,6 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         "domains": domains,
         "retrieval_query": retrieval_query,
     }
-
-
-def _portal_read_requirement(
-    intent: Mapping[str, object],
-    last_user: str,
-    selected_tools: Optional[Set[str]],
-) -> str:
-    """Return the narrow downstream read required by this Portal request."""
-    if not any(
-        _is_qualified_portal_read_tool(name)
-        for name in (selected_tools or set())
-    ):
-        return ""
-
-    latest = re.sub(r"\s+", " ", str(last_user or "").strip().lower())
-    retrieval = re.sub(
-        r"\s+", " ", str(intent.get("retrieval_query") or "").strip().lower()
-    )
-    scope = f"{latest}\n{retrieval}" if intent.get("continuation") else latest
-    if not latest:
-        return ""
-    if re.search(
-        r"\b(?:tools?|capabilities|integrations?)\b.{0,48}"
-        r"\b(?:available|visible|installed|connected)\b",
-        latest,
-    ):
-        return ""
-
-    operational_action = bool(re.search(
-        r"\b(?:use|call|run|execute|query|read|fetch|retrieve|inspect|sample|"
-        r"search|list|show|check)\b|\blook\s+(?:at|inside|into|over)\b",
-        latest,
-    ))
-    if intent.get("continuation"):
-        requested = operational_action or bool(
-            re.search(r"\b(?:tell|give)\s+me\b", latest)
-        )
-    else:
-        conceptual = (
-            re.match(r"^(?:can|could|does|is it possible)\b", latest)
-            or re.search(
-                r"\b(?:how|what|why)\b.{0,80}"
-                r"\b(?:work|works|mean|means|purpose|schema|arguments?)\b",
-                latest,
-            )
-        )
-        requested = operational_action and not conceptual
-    if not requested:
-        return ""
-
-    collection_contents = re.search(r"\b(?:qdrant|collections?)\b", scope) and (
-        re.search(
-            r"\b(?:contents?|points?|payloads?|records?|entries|documents?|"
-            r"items?|samples?|data|information)\b",
-            latest,
-        )
-        or re.search(
-            r"\bwhat(?:'s|s| is)\s+(?:stored\s+)?in\b|"
-            r"\b(?:query|read)\s+(?:it|that|this|the\s+collection)\b|"
-            r"\blook\s+(?:inside|into|over)\s+"
-            r"(?:it|that|this|the\s+collection)\b|"
-            r"\b(?:contain|contains|contained)\b",
-            latest,
-        )
-    )
-    return "qdrant_collection_contents" if collection_contents else "provider_read"
-
-
-def _portal_read_attempt_satisfies_request(
-    tool_events: List[Dict],
-    requirement: str,
-) -> bool:
-    """Check for the requested Portal read without retrying a real attempt."""
-    read_events = [
-        event for event in tool_events
-        if _is_qualified_portal_read_tool(event.get("tool"))
-    ]
-    if not read_events:
-        return False
-    if requirement != "qdrant_collection_contents":
-        return True
-
-    # A collection-name enumeration is the exact false-positive behind
-    # MAD-842.  For a contents request, require a bounded point/query-style
-    # downstream operation before accepting completion.
-    for event in read_events:
-        relay = event.get("portal_relay") or {}
-        action_call = event.get("action_call") or {}
-        arguments = action_call.get("arguments") or {}
-        if not isinstance(arguments, Mapping):
-            continue
-        service_id = str(
-            relay.get("service_id") or arguments.get("serviceId")
-            or arguments.get("service_id") or ""
-        ).lower()
-        tool_name = str(
-            relay.get("tool_name") or arguments.get("toolName")
-            or arguments.get("tool_name") or ""
-        ).lower()
-        if service_id == "qdrant" and re.search(
-            r"(?:get|list|scroll|search|query|retrieve)[._-]?points?", tool_name
-        ):
-            return True
-    return False
 
 
 def _turn_targets_active_document(intent: Dict[str, object], last_user: str, active_document) -> bool:
@@ -4022,7 +3772,6 @@ async def stream_agent_loop(
             _relevant_tools.add("ui_control")
 
     _native_mcp_tools: Set[str] = set()
-    _portal_preparation: Optional[Dict[str, Any]] = None
     if not guide_only and mcp_mgr and not _is_native_mcp_management_request(_last_user):
         try:
             # Contextual status/follow-up turns carry the named connection in
@@ -4041,42 +3790,6 @@ async def stream_agent_loop(
             _relevant_tools.difference_update({"manage_mcp", "api_call", "app_api", "pipeline"})
             _needs_admin = False
             logger.info("[tool-rag] Selected native MCP tools: %s", sorted(_native_mcp_tools))
-            _preparation_requirement = _portal_read_requirement(
-                _intent, _last_user, _native_mcp_tools
-            )
-            if _preparation_requirement and hasattr(mcp_mgr, "prepare_portal_read"):
-                try:
-                    _portal_context_arguments = _portal_followup_fixed_arguments(
-                        messages, _last_user
-                    )
-                    if _portal_context_arguments:
-                        _portal_preparation = await mcp_mgr.prepare_portal_read(
-                            _last_user,
-                            _retrieval_query,
-                            context_arguments=_portal_context_arguments,
-                        )
-                    else:
-                        _portal_preparation = await mcp_mgr.prepare_portal_read(
-                            _last_user, _retrieval_query
-                        )
-                except Exception as _portal_prepare_error:
-                    logger.warning(
-                        "[tool-rag] Portal request preparation failed: %s",
-                        type(_portal_prepare_error).__name__,
-                    )
-                if _portal_preparation:
-                    _proxy_name = str(_portal_preparation["qualified_name"])
-                    _native_mcp_tools = {_proxy_name}
-                    # An explicit Portal route is a hard execution boundary.
-                    # The model receives the one selected typed read and no
-                    # generic, shell, or direct-provider execution target.
-                    _relevant_tools = {_proxy_name}
-                    logger.info(
-                        "[tool-rag] Prepared Portal relay service=%s tool=%s schema=%s",
-                        _portal_preparation.get("service_id"),
-                        _portal_preparation.get("tool_name"),
-                        _proxy_name,
-                    )
     _native_mcp_server_prefixes = {
         f"mcp__{name.split('__', 2)[1]}__"
         for name in _native_mcp_tools
@@ -4326,51 +4039,11 @@ async def stream_agent_loop(
         suppress_skills=_low_signal_turn,
         active_email=active_email,
     )
-    if _portal_preparation:
-        mcp_schemas = list(mcp_schemas) + [
-            copy.deepcopy(_portal_preparation["schema"])
-        ]
-    _enabled_mcp_schema_names = {
-        schema.get("function", {}).get("name")
-        for schema in mcp_schemas
-        if schema.get("function", {}).get("name")
-    }
-    _portal_read_tool_names = {
-        name for name in _native_mcp_tools
-        if _is_qualified_portal_read_tool(name)
-        and name in _enabled_mcp_schema_names
-        and name not in disabled_tools
-    }
-    _portal_read_requirement_kind = _portal_read_requirement(
-        _intent,
-        _last_user,
-        _portal_read_tool_names,
-    )
-    _portal_read_required = bool(_portal_read_requirement_kind)
-    _portal_collection_contents_required = (
-        _portal_read_requirement_kind == "qdrant_collection_contents"
-    )
     if _native_mcp_tools and messages and messages[0].get("role") == "system":
         messages[0]["content"] = (
             str(messages[0].get("content") or "")
             + "\n\n"
             + _NATIVE_MCP_DIRECT_RULES
-        )
-    if _portal_read_required and messages and messages[0].get("role") == "system":
-        _collection_contract = (
-            "\n- This is a Qdrant collection-content request. Use downstream "
-            "`serviceId` `qdrant` and a bounded catalog-declared point/payload "
-            "read such as `qdrant-list-points`; set vector inclusion false. "
-            "`qdrant-list-collections` proves existence only and does not satisfy "
-            "the requested contents read."
-            if _portal_collection_contents_required
-            else ""
-        )
-        messages[0]["content"] = (
-            str(messages[0].get("content") or "")
-            + "\n\n"
-            + _EXPLICIT_PORTAL_READ_RULES
-            + _collection_contract
         )
     _mcp_action_policies = (
         mcp_mgr.get_action_policies()
@@ -4565,12 +4238,13 @@ async def stream_agent_loop(
     _repeated_failed_outcome: Optional[str] = None
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
     _terminal_native_mcp_error: Optional[Dict[str, str]] = None
+    _retryable_native_mcp_error = False
+    _native_validation_retry_available = True
     # Supervisor: how many times we've nudged the model after it announced
     # an action without emitting the tool call. Capped to prevent a model
     # that *can't* call the tool from looping forever.
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
-    _portal_read_guard_exhausted = False
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -4611,19 +4285,6 @@ async def stream_agent_loop(
     _web_synthesis_reserve = False
     _model_rounds_used = 0
     for round_num in range(1, max_rounds + 3):
-        _portal_read_pending = (
-            _portal_read_required
-            and not _portal_read_attempt_satisfies_request(
-                tool_events,
-                _portal_read_requirement_kind,
-            )
-        )
-        # A generic stall detector may have scheduled a schema-free synthesis
-        # round.  That mode cannot satisfy an explicit live-read requirement,
-        # and its emergency synthesizer would otherwise expose unsupported
-        # prose before this guard gets a chance to correct the model.
-        if _portal_read_pending:
-            _force_answer = False
         _resume_approved_this_round = _approved_execution_pending
         if _resume_approved_this_round:
             _approved_execution_pending = False
@@ -4732,10 +4393,6 @@ async def stream_agent_loop(
         _priority_order: List[str] = []
         if "ui_control" in _schema_priority:
             _priority_order.append("ui_control")
-        _priority_order.extend(
-            name for name in sorted(_portal_read_tool_names)
-            if name not in _priority_order
-        )
         _priority_order.extend(
             name for name in (
                 schema.get("function", {}).get("name")
@@ -5078,12 +4735,10 @@ async def stream_agent_loop(
                                 else data["delta"]
                             )
                             round_response += _delta_text
-                            if not _portal_read_pending:
-                                full_response += _delta_text
+                            full_response += _delta_text
                             data["delta"] = _delta_text
                         if (
                             (not _ody_qwen_finetune_model or data.get("thinking"))
-                            and (data.get("thinking") or not _portal_read_pending)
                         ):
                             yield f"data: {json.dumps(data)}\n\n"
                         # Detect text-fence doc streaming. Normal agent prompts
@@ -5346,13 +5001,9 @@ async def stream_agent_loop(
         # persisted text either — otherwise it streams once and then disappears
         # on reload (#3222 follow-up).
         cleaned_round = strip_tool_blocks(round_response, skip_fenced=(_is_api_model and not used_native and not guide_only)).strip()
-        # A required Portal read has not happened yet, so pre-read prose is an
-        # unverified draft. Keep it available for control-flow inspection in
-        # this round, but never stream or persist it as the user's answer.
-        round_texts.append("" if _portal_read_pending else cleaned_round)
+        round_texts.append(cleaned_round)
         if (
             _ody_qwen_finetune_model
-            and not _portal_read_pending
             and not tool_blocks
             and cleaned_round
         ):
@@ -5360,76 +5011,6 @@ async def stream_agent_loop(
 
         if not tool_blocks:
             _round_answer = _strip_think_blocks(cleaned_round).strip()
-            if (
-                _portal_read_required
-                and not _portal_read_attempt_satisfies_request(
-                    tool_events,
-                    _portal_read_requirement_kind,
-                )
-            ):
-                if _intent_nudge_count < _MAX_INTENT_NUDGES:
-                    _intent_nudge_count += 1
-                    _required_read = (
-                        "a bounded point/payload read through the mounted typed "
-                        "Portal relay for Qdrant; listing collections is not the requested data"
-                        if _portal_collection_contents_required
-                        else "the mounted typed Portal provider read"
-                    )
-                    logger.info(
-                        "[agent] explicit Portal-read nudge #%d on round %d",
-                        _intent_nudge_count,
-                        round_num,
-                    )
-                    messages.append({
-                        "role": "system",
-                        "content": (
-                            "You ended the turn without executing the live Portal "
-                            "read required by the user's request. A prose answer, "
-                            "discovery result, reference, or enumeration is not "
-                            f"completion. Execute {_required_read} now. Emit the "
-                            "exact qualified function already listed in the Current "
-                            "native MCP capability contract. If that exact attempt "
-                            "returns a terminal error, report it once and stop; do "
-                            "not guess or retry it."
-                        ),
-                    })
-                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
-                    continue
-
-                _portal_read_guard_exhausted = True
-                _guard_message = (
-                    "The agent stopped because it did not execute the explicit "
-                    "Portal provider read after two corrective rounds."
-                )
-                _guard_delta = (
-                    "I couldn't complete the requested live read: no Portal "
-                    "provider read was executed after two corrective attempts. "
-                    "I did not treat discovery or collection enumeration as the "
-                    "requested data."
-                )
-                logger.warning(
-                    "[agent] explicit Portal-read guard exhausted on round %d after %d nudges",
-                    round_num,
-                    _intent_nudge_count,
-                )
-                yield (
-                    "data: "
-                    + json.dumps({
-                        "type": "intent_nudge_exhausted",
-                        "reason": "explicit_portal_read_not_executed",
-                        "message": _guard_message,
-                        "round": round_num,
-                        "nudges": _intent_nudge_count,
-                    })
-                    + "\n\n"
-                )
-                yield f'data: {json.dumps({"delta": _guard_delta})}\n\n'
-                full_response = (
-                    (full_response.rstrip() + "\n\n") if full_response.strip() else ""
-                ) + _guard_delta
-                if round_texts:
-                    round_texts[-1] = _guard_delta
-                break
             if tool_events and not _round_answer and not _force_answer:
                 # A provider may end a post-tool round successfully while
                 # emitting neither text nor another tool call. Do not treat
@@ -5743,6 +5324,14 @@ async def stream_agent_loop(
                 metadata={"capability": _action_call["name"]},
             )
             _validation_error = validate_action_call(_action_call, _action_catalog)
+            if not _validation_error and _action_call["target"] == "mcp":
+                # Validation may normalize model-generated arguments (for
+                # example, dropping nulls for optional non-null MCP fields).
+                # Execute the validated arguments, not the original wire text.
+                block = ToolBlock(
+                    block.tool_type,
+                    json.dumps(_action_call["arguments"], separators=(",", ":")),
+                )
             _authority_decision = None
             if not _validation_error:
                 _authority_decision = authority_store.decide(
@@ -5785,19 +5374,30 @@ async def stream_agent_loop(
                 )
 
             if _validation_error:
-                desc = f"{block.tool_type}: DENIED"
+                _validation_retry_safe = bool(
+                    _native_validation_retry_available
+                    and _validation_error["category"] in {
+                        "malformed_arguments", "schema_validation"
+                    }
+                    and _action_call["target"] == "mcp"
+                    and _action_call.get("capability_policy", {}).get("action_effect") == "read"
+                )
+                if _validation_retry_safe:
+                    _native_validation_retry_available = False
+                desc = f"{block.tool_type}: INVALID ARGUMENTS"
                 result = {
                     "error": _validation_error["detail"],
                     "exit_code": 1,
-                    "blocked": True,
+                    "retry_safe": _validation_retry_safe,
                 }
-                _action_result = denied_action_result(
+                _action_result = invalid_action_result(
                     _action_call,
                     _validation_error,
+                    retry_safe=_validation_retry_safe,
                     at=_action_started_at,
                 )
                 logger.info(
-                    "Tool denied by JOS-P4 validation: %s (%s)",
+                    "Tool arguments rejected by JOS-P4 validation: %s (%s)",
                     block.tool_type,
                     _validation_error["category"],
                 )
@@ -6088,6 +5688,7 @@ async def stream_agent_loop(
                 )
                 and _action_result.get("status") != "succeeded"
                 and ((_action_result.get("error") or {}).get("category") != "approval_required")
+                and not _action_result.get("retry_safe")
             ):
                 _terminal_category = str(
                     (_action_result.get("error") or {}).get("category")
@@ -6108,11 +5709,17 @@ async def stream_agent_loop(
                     "category": _terminal_category,
                     "detail": _terminal_detail,
                 }
+            elif (
+                any(
+                    block.tool_type.startswith(prefix)
+                    for prefix in _native_mcp_server_prefixes
+                )
+                and _action_result.get("retry_safe")
+            ):
+                _retryable_native_mcp_error = True
 
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": _safe_cmd_display, "output": output_text, "exit_code": result.get("exit_code"), "request_id": _action_call["request_id"], "call_id": _action_call["call_id"], "status": _action_result["status"], "evidence": _action_result["evidence"], "authority_ref": _action_call.get("authority_ref")}
-            if isinstance(result.get("portal_relay"), dict):
-                tool_output_data["portal_relay"] = result["portal_relay"]
             if is_doc_tool and "action" in result:
                 tool_output_data.update({
                     "doc_id": result.get("doc_id"),
@@ -6266,8 +5873,6 @@ async def stream_agent_loop(
                 "action_call": audit_safe_action_call(_action_call),
                 "action_result": _action_result,
             }
-            if isinstance(result.get("portal_relay"), dict):
-                tool_event["portal_relay"] = result["portal_relay"]
             if _authority_decision:
                 tool_event["authority_decision"] = _authority_decision
             if _operational_event:
@@ -6329,8 +5934,25 @@ async def stream_agent_loop(
 
             if _terminal_native_mcp_error:
                 break
+            if _retryable_native_mcp_error:
+                break
             if _repeated_failed_outcome:
                 break
+
+        if _retryable_native_mcp_error:
+            _append_tool_results(
+                messages,
+                round_response,
+                converted_calls[:len(tool_result_texts)],
+                tool_results,
+                tool_result_texts,
+                used_native,
+                round_num,
+                round_reasoning=round_reasoning,
+            )
+            _retryable_native_mcp_error = False
+            yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+            continue
 
         if _terminal_native_mcp_error:
             _append_tool_results(
@@ -6543,22 +6165,8 @@ async def stream_agent_loop(
         metrics["rounds_exhausted"] = max_rounds
     if _tool_budget_exceeded:
         metrics["tool_budget_exceeded"] = _tool_budget_exceeded
-    if _portal_read_guard_exhausted:
-        metrics["completion_guard"] = {
-            "reason": "explicit_portal_read_not_executed",
-            "nudges": _intent_nudge_count,
-        }
-    if _portal_preparation:
-        metrics["portal_routing"] = {
-            "service_id": _portal_preparation.get("service_id"),
-            "tool_name": _portal_preparation.get("tool_name"),
-            "descriptor_hash": _portal_preparation.get("descriptor_hash"),
-            "catalog_version": _portal_preparation.get("catalog_version"),
-            "model_visible_schema": _portal_preparation.get("qualified_name"),
-            "trace_events": _portal_preparation.get("trace_events") or [],
-        }
     _request_status = "succeeded"
-    if _exhausted_rounds or _portal_read_guard_exhausted:
+    if _exhausted_rounds:
         _request_status = "degraded"
     for _event in tool_events:
         _status = (_event.get("action_result") or {}).get("status")

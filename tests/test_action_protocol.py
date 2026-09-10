@@ -10,6 +10,7 @@ from src.action_protocol import (
     classify_target,
     compose_capability_catalog,
     denied_action_result,
+    invalid_action_result,
     normalize_action_call,
     validate_action_call,
 )
@@ -98,6 +99,45 @@ def test_unknown_malformed_oversized_and_schema_invalid_calls_fail_closed():
     assert validate_action_call(_call(arguments={}), catalog)["category"] == "schema_validation"
 
 
+def test_optional_nulls_are_omitted_but_required_and_nullable_nulls_are_preserved():
+    schema = _schema()
+    properties = schema["function"]["parameters"]["properties"]
+    properties["optional"] = {"type": "string"}
+    properties["nullable"] = {"type": ["string", "null"]}
+    properties["rows"] = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string"},
+                "nullable": {"type": ["string", "null"]},
+            },
+        },
+    }
+    catalog = compose_capability_catalog([schema])
+    call = _call(arguments={
+        "path": "README.md",
+        "optional": None,
+        "nullable": None,
+        "rows": [{"label": None, "nullable": None}],
+    })
+    call["target"] = "mcp"
+
+    assert validate_action_call(call, catalog) is None
+    assert call["arguments"] == {
+        "path": "README.md",
+        "nullable": None,
+        "rows": [{"nullable": None}],
+    }
+
+    required = _call(arguments={"path": None})
+    required["target"] = "mcp"
+    assert validate_action_call(required, catalog)["category"] == "schema_validation"
+
+    builtin = _call(arguments={"path": "README.md", "optional": None})
+    assert validate_action_call(builtin, catalog)["category"] == "schema_validation"
+
+
 def test_action_result_preserves_all_distinct_outcomes_and_unknown_never_retries():
     cases = {
         "succeeded": {"output": "ok", "exit_code": 0},
@@ -169,6 +209,16 @@ def test_validation_denial_is_correlated_and_non_retryable():
     assert result["status"] == "denied"
     assert result["call_id"] == "call-1"
     assert result["retry_safe"] is False
+
+
+def test_invalid_arguments_are_failures_and_may_be_marked_retryable():
+    result = invalid_action_result(
+        _call(), {"category": "schema_validation", "detail": "bad argument"},
+        retry_safe=True, at="now",
+    )
+    assert result["status"] == "failed"
+    assert result["error"]["category"] == "schema_validation"
+    assert result["retry_safe"] is True
 
 
 @pytest.mark.asyncio

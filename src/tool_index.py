@@ -273,25 +273,6 @@ class ToolIndex:
                     ids.append(f"mcp_{name}")
                     metadatas.append({"tool_name": name, "tool_type": "mcp"})
 
-        # Keep Portal service identities and request-time discovery hits in the
-        # existing retrieval index.  These are compact verified records, not a
-        # copied descriptor catalog.
-        try:
-            portal_records = mcp_mgr.get_portal_index_records()
-        except (AttributeError, TypeError):
-            portal_records = []
-        for record in portal_records:
-            if not isinstance(record, dict):
-                continue
-            record_id = str(record.get("id") or "")
-            document = str(record.get("document") or "")
-            tool_name = str(record.get("tool_name") or "")
-            if not record_id or not document or not tool_name:
-                continue
-            ids.append(record_id)
-            docs.append(document)
-            metadatas.append({"tool_name": tool_name, "tool_type": "mcp"})
-
         if not docs:
             self._mcp_generation = gen
             return
