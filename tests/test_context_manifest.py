@@ -441,18 +441,37 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     monkeypatch.setattr(agent_loop, "get_setting", fake_setting)
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
 
-    exact_request = (
-        "Run this read-only installed acceptance through the native configured MAD MCP Portal. "
-        "Use only the mounted Portal tools and never bypass Portal. Follow one bounded flow: "
-        "bootstrap once, list configured services once, check Discord connection once, discover "
-        "the catalog-declared read tool for the configured Discord #general channel once, read its "
-        "lossless reference once, and call the Portal read executor exactly once with a count of five. "
-        "Do not preview a read. Do not call another executor or connector. Do not retry any tool. "
-        "On any schema, permission, unsupported capability, service, authentication, or transport "
-        "failure, stop immediately with one precise terminal error and never continue to a step limit. "
-        "Never include message content, author names, identifiers, timestamps, attachments, or credentials "
-        "in the final response. If and only if the returned Portal envelope is valid and proves exactly "
-        "five messages, return exactly: MAD842_PORTAL_READ_OK count=5"
+    exact_request = """Run a complete end-to-end, READ-ONLY acceptance test of every currently configured service available through the MAD MCP Portal.
+
+Rules:
+Use only the MAD MCP Portal connection. Do not assume or require direct provider integrations.
+First enumerate every configured service.
+For each configured service:
+- Use the Portal’s declared discovery tools to find one agent-ready, unquestionably read-only tool.
+- Inspect and follow that tool’s exact schema.
+- Actually execute the downstream tool through the Portal.
+- Merely finding or listing the tool does NOT count as success.Prefer harmless calls such as status, identity, account metadata, list, search, describe, inspect, or get operations. Use the smallest available result limit.
+Never create, update, delete, send, publish, upload, generate, trigger, deploy, purchase, or otherwise mutate anything.
+Do not invent IDs, paths, names, or required arguments. If legitimate required input is unavailable, mark that service BLOCKED and state exactly what is missing.
+Omit unknown optional arguments. Never send null for a string, object, array, number, or boolean field.
+If a safe read call fails schema validation, inspect the declared schema and retry it once with corrected arguments.
+Do not stop after a failure. Continue until every configured service has been attempted.
+Do not expose secrets or sensitive record contents. Report only minimal evidence such as the returned identity, count, status, resource name, or redacted identifier.
+
+A service receives PASS only when its selected downstream tool actually returns a response from that service.
+
+Finish with a table containing:
+
+Service
+Read-only tool executed
+Arguments used, with sensitive values redacted
+Minimal downstream evidence
+PASS, BLOCKED, or FAIL
+Exact error or missing requirement for anything not passing
+Then provide totals for configured, attempted, passed, blocked, and failed services. Explicitly confirm that no write or mutating tools were executed."""
+    assert not agent_loop._is_native_mcp_management_request(exact_request)
+    assert agent_loop._is_native_mcp_management_request(
+        "Disconnect and delete the MAD MCP Portal connection"
     )
     async for _chunk in agent_loop.stream_agent_loop(
         "https://api.openai.com/v1/chat/completions",
@@ -468,8 +487,11 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
         for schema in captured["tools"]
         if schema.get("function")
     }
-    required = normal_read_chain
+    required = normal_read_chain - {
+        "mcp__portal-fixture__portal.check_connection"
+    }
     assert {name for name in sent if name.startswith("mcp__portal-fixture__")} == required
+    assert {"manage_mcp", "api_call", "app_api", "pipeline"}.isdisjoint(sent)
     assert "mcp__portal-fixture__portal.list_service_tools" not in sent
     assert "mcp__portal-fixture__portal.call_service_tool" not in sent
 
