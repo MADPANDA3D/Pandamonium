@@ -104,12 +104,31 @@ def test_optional_nulls_are_omitted_but_required_and_nullable_nulls_are_preserve
     properties = schema["function"]["parameters"]["properties"]
     properties["optional"] = {"type": "string"}
     properties["nullable"] = {"type": ["string", "null"]}
+    properties["rows"] = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string"},
+                "nullable": {"type": ["string", "null"]},
+            },
+        },
+    }
     catalog = compose_capability_catalog([schema])
-    call = _call(arguments={"path": "README.md", "optional": None, "nullable": None})
+    call = _call(arguments={
+        "path": "README.md",
+        "optional": None,
+        "nullable": None,
+        "rows": [{"label": None, "nullable": None}],
+    })
     call["target"] = "mcp"
 
     assert validate_action_call(call, catalog) is None
-    assert call["arguments"] == {"path": "README.md", "nullable": None}
+    assert call["arguments"] == {
+        "path": "README.md",
+        "nullable": None,
+        "rows": [{"nullable": None}],
+    }
 
     required = _call(arguments={"path": None})
     required["target"] = "mcp"

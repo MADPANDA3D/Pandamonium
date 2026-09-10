@@ -226,6 +226,12 @@ def _validate_value(value: Any, schema: Mapping[str, Any], path: str) -> str | N
 
 def _drop_optional_nulls(value: Any, schema: Mapping[str, Any]) -> None:
     """Treat a model-emitted null like omission when the schema requires a value."""
+    if isinstance(value, list):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            for item in value:
+                _drop_optional_nulls(item, item_schema)
+        return
     if not isinstance(value, dict):
         return
     required = set(schema.get("required") or ())
@@ -239,7 +245,7 @@ def _drop_optional_nulls(value: Any, schema: Mapping[str, Any]) -> None:
         expected = child.get("type")
         if value[key] is None and key not in required and expected and not _matches_type(None, expected):
             value.pop(key)
-        elif isinstance(value[key], dict):
+        elif isinstance(value[key], (dict, list)):
             _drop_optional_nulls(value[key], child)
 
 
