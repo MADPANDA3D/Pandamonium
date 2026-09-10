@@ -315,6 +315,7 @@ test('external worker reuses the canonical selector, workspace browser, transcri
   await expect(voiceChoice).toBeDisabled();
 
   await selectWorkspace(page);
+  while (await page.locator('#codex-task-more').isVisible()) await page.locator('#codex-task-more').click();
   for (const status of taskStates) {
     await expect(page.locator(`.codex-task-row[data-task-status="${status}"]`)).toHaveCount(1);
   }

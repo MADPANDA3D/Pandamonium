@@ -31,10 +31,11 @@ const HISTORY_PAGE_LIMIT_MOBILE = 8;
 const HISTORY_PAGE_LIMIT_DESKTOP = 24;
 let _initialLoadComplete = false;
 
-const SIDEBAR_MAX_VISIBLE = 10;
+const SIDEBAR_MAX_VISIBLE = 5;
 const FOLDER_MAX_VISIBLE = 5;
-let _showAllSessions = false;
-let _expandedFolders = {};  // folderName -> true if "show more" clicked
+let _visibleUnfiled = SIDEBAR_MAX_VISIBLE;
+let _expandedFolders = {};  // folderName -> number of visible sessions
+let _sessionOrderWrites = Promise.resolve();
 let _sortMode = Storage.get('odysseus-session-sort') || 'active'; // default to last active
 let _autoCreateInProgress = false; // guard against recursive auto-create
 const _INCOGNITO_SESSIONS_KEY = 'ody-incognito-sessions'; // sessionStorage key for incognito session IDs
@@ -309,7 +310,7 @@ function _removeSessionFromLocalState(sid) {
     if (savedOrder) {
       const orderIds = JSON.parse(savedOrder);
       if (Array.isArray(orderIds) && orderIds.some(x => String(x) === id)) {
-        Storage.set('session-order', JSON.stringify(orderIds.filter(x => String(x) !== id)));
+        saveSessionOrder(orderIds.filter(x => String(x) !== id));
       }
     }
   } catch (e) {
@@ -373,6 +374,17 @@ function loadFolderOrder() {
   return [..._folderOrder];
 }
 
+function saveSessionOrder(order) {
+  Storage.setJSON('session-order', order);
+  _sessionOrderWrites = _sessionOrderWrites.catch(() => {}).then(async () => {
+    const response = await fetch(`${API_BASE}/api/prefs/sidebar-session-order`, {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: order }),
+    });
+    if (!response.ok) throw new Error('Could not save chat order');
+  }).catch(() => uiModule.showToast?.('Could not save chat order. Try the change again.'));
+}
+
 function saveFolderOrder(order) {
   const clean = _sanitizeFolderOrder(order);
   _folderOrder = clean;
@@ -402,6 +414,13 @@ function _loadFolderOrderPreference() {
   if (_folderOrderPreferencePromise) return _folderOrderPreferencePromise;
   const startingRevision = _folderOrderRevision;
   _folderOrderPreferencePromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/prefs/sidebar-session-order`, { credentials: 'same-origin' });
+      if (response.ok) {
+        const payload = await response.json();
+        if (Array.isArray(payload.value)) Storage.setJSON('session-order', payload.value.filter(id => typeof id === 'string'));
+      }
+    } catch (_) { /* Keep the existing local order while offline. */ }
     try {
       const response = await fetch(`${API_BASE}/api/prefs/${FOLDER_ORDER_PREF_KEY}`, {
         credentials: 'same-origin',
@@ -644,7 +663,7 @@ function createSessionItem(s) {
   const handle = document.createElement('span');
   handle.className = 'item-drag-handle';
   handle.textContent = '\u22EE\u22EE';
-  handle.title = 'Drag to reorder';
+  handle.title = 'Drag to reorder; Alt + Arrow keys also move this chat';
   div.appendChild(handle);
 
   // Provider dot indicator
@@ -1243,7 +1262,7 @@ function _renderSessionListImpl() {
 
   // Project folders stay visible in every sort mode. Sort changes the chats
   // inside each project; it never destroys the project hierarchy.
-  if (_sortMode && _sortMode !== 'group') orderedSessions.sort(_compareSessionsByActivity);
+  if (!restoredSessionOrder && _sortMode && _sortMode !== 'group') orderedSessions.sort(_compareSessionsByActivity);
   const folderState = loadFolderState();
   const folders = {}; // folderName -> [sessions]
   const unfiled = [];
@@ -1262,12 +1281,7 @@ function _renderSessionListImpl() {
   // while leaving every chat accessible without inventing a destructive
   // synthetic "Chats" folder.
   if (unfiled.length) {
-    const activeInUnfiled = unfiled.findIndex(s => s.id === currentSessionId);
-    const limit = _showAllSessions ? unfiled.length : SIDEBAR_MAX_VISIBLE;
-    const visibleUnfiled = unfiled.slice(0, limit);
-    if (!_showAllSessions && activeInUnfiled >= limit) {
-      visibleUnfiled.push(unfiled[activeInUnfiled]);
-    }
+    const visibleUnfiled = unfiled.slice(0, _visibleUnfiled);
 
     const unfiledRegion = document.createElement('div');
     unfiledRegion.className = 'session-unfiled-region';
@@ -1275,21 +1289,15 @@ function _renderSessionListImpl() {
     unfiledRegion.setAttribute('role', 'group');
     unfiledRegion.setAttribute('aria-label', 'Recent chats');
     unfiledRegion.tabIndex = 0;
-    unfiledRegion.style.maxHeight = 'clamp(132px, 34vh, 320px)';
-    unfiledRegion.style.overflowY = 'auto';
-    unfiledRegion.style.overflowX = 'hidden';
-    unfiledRegion.style.overscrollBehavior = 'contain';
-    unfiledRegion.style.scrollbarWidth = 'thin';
 
     _appendSessionItemsWithDateHeaders(unfiledRegion, visibleUnfiled);
-    if (unfiled.length > SIDEBAR_MAX_VISIBLE) {
-      const remaining = unfiled.length - SIDEBAR_MAX_VISIBLE;
+    if (unfiled.length > _visibleUnfiled) {
       const toggleBtn = document.createElement('button');
       toggleBtn.className = 'session-show-more-btn';
-      toggleBtn.textContent = _showAllSessions ? 'Show less' : `Show ${remaining} more`;
+      toggleBtn.textContent = 'Show more';
       toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        _showAllSessions = !_showAllSessions;
+        _visibleUnfiled += SIDEBAR_MAX_VISIBLE;
         renderSessionList();
       });
       unfiledRegion.appendChild(toggleBtn);
@@ -1398,26 +1406,18 @@ function _renderSessionListImpl() {
       const content = document.createElement('div');
       content.className = 'session-folder-content';
       const folderSessions = folders[folderName];
-      const folderExpanded = _expandedFolders[folderName];
-      const folderLimit = folderExpanded ? folderSessions.length : FOLDER_MAX_VISIBLE;
+      const folderLimit = _expandedFolders[folderName] || FOLDER_MAX_VISIBLE;
       const visibleFolder = folderSessions.slice(0, folderLimit);
-
-      // Always include active session even if beyond limit
-      const activeInFolder = folderSessions.findIndex(s => s.id === currentSessionId);
-      if (!folderExpanded && activeInFolder >= folderLimit) {
-        visibleFolder.push(folderSessions[activeInFolder]);
-      }
 
       _appendSessionItemsWithDateHeaders(content, visibleFolder);
 
-      if (folderSessions.length > FOLDER_MAX_VISIBLE) {
-        const rem = folderSessions.length - FOLDER_MAX_VISIBLE;
+      if (folderSessions.length > folderLimit) {
         const moreBtn = document.createElement('button');
         moreBtn.className = 'session-show-more-btn';
-        moreBtn.textContent = folderExpanded ? 'Show less' : `Show ${rem} more`;
+        moreBtn.textContent = 'Show more';
         moreBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          _expandedFolders[folderName] = !folderExpanded;
+          _expandedFolders[folderName] = folderLimit + FOLDER_MAX_VISIBLE;
           renderSessionList();
         });
         content.appendChild(moreBtn);
@@ -1689,6 +1689,7 @@ function _animateSessionRowsRemoving(ids, selector) {
 }
 
 export async function loadSessions() {
+  const navigationAtStart = _sessionNavToken;
   try {
     // Resolve the owner-scoped project order before the first sidebar render.
     // A failed preference read is absorbed and leaves the local fallback live.
@@ -1742,6 +1743,8 @@ export async function loadSessions() {
     const hasPendingChat = !!_pendingChat;
     const initialPageLoad = !_initialLoadComplete;
     _initialLoadComplete = true;
+    // A slow preference/catalog read must not undo an explicit task selection.
+    if (navigationAtStart !== _sessionNavToken) return;
     const startFreshOnLoad = initialPageLoad && !hashId && !hasPendingChat;
     if (startFreshOnLoad) Storage.remove('lastSessionId');
     let targetId = null;
@@ -1787,6 +1790,7 @@ export async function loadSessions() {
         try {
           const dcRes = await fetch(`${API_BASE}/api/default-chat`);
           const dc = await dcRes.json();
+          if (navigationAtStart !== _sessionNavToken) return;
           if (dc.endpoint_url && dc.model) {
             // Check if there's already an empty session with this model we can reuse
             const emptyDefault = activeSessions.find(s =>
@@ -2428,6 +2432,22 @@ async function _onSessionListKeydown(e) {
   const item = e.target.closest('.list-item[data-session-id]');
   if (!item) return;
 
+  if (e.altKey && ['ArrowUp', 'ArrowDown'].includes(e.key)) {
+    e.preventDefault();
+    e.stopPropagation();
+    const siblings = [...item.parentElement.children].filter(row => row.matches('.list-item[data-session-id]'));
+    const neighbor = siblings[siblings.indexOf(item) + (e.key === 'ArrowUp' ? -1 : 1)];
+    if (!neighbor) return;
+    const saved = Storage.getJSON('session-order', []);
+    const order = [...new Set([...(Array.isArray(saved) ? saved : []), ...sessions.map(session => String(session.id))])];
+    const a = order.indexOf(item.dataset.sessionId), b = order.indexOf(neighbor.dataset.sessionId);
+    [order[a], order[b]] = [order[b], order[a]];
+    saveSessionOrder(order);
+    renderSessionList();
+    requestAnimationFrame(() => document.querySelector(`.list-item[data-session-id="${CSS.escape(item.dataset.sessionId)}"]`)?.focus());
+    return;
+  }
+
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     // Get all visible session items across all containers
@@ -2497,7 +2517,7 @@ export function initDragSort() {
     let index = 0;
     const order = baseline.map(id => moved.has(id) ? movedIds[index++] : id);
     order.push(...movedIds.slice(index));
-    Storage.setJSON('session-order', order);
+    saveSessionOrder(order);
   };
 
   window.dragSortModule.enable('session-list', '.list-item', {
@@ -2533,6 +2553,7 @@ export function initDragSort() {
     content.id = id;
     window.dragSortModule.enable(id, '.list-item', {
       handleSelector: '.item-drag-handle',
+      onReorder: persistSessionOrder,
     });
   });
 }
@@ -3645,6 +3666,7 @@ export function setSortMode(mode) {
   _sortMode = mode || null;
   if (mode) Storage.set('odysseus-session-sort', mode);
   else Storage.remove('odysseus-session-sort');
+  saveSessionOrder([]);
   renderSessionList();
 }
 

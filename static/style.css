@@ -2056,7 +2056,8 @@ body.bg-pattern-sparkles {
       display:flex;
       flex-direction:column;
       padding:0 16px;
-      overflow:hidden;
+      /* Only chat-history scrolls; focusing a popup must not pan the shell. */
+      overflow:clip;
       position:relative;
       min-height:0;
       min-width:0;
@@ -3493,8 +3494,8 @@ body.bg-pattern-sparkles {
       letter-spacing: 0.02em;
     }
     .codex-browser-list {
-      max-height: min(300px, 52dvh);
-      overflow-y: auto;
+      max-height: none;
+      overflow: visible;
     }
     #codex-project-list {
       max-height: none;
@@ -3528,6 +3529,14 @@ body.bg-pattern-sparkles {
       text-align: left;
       cursor: pointer;
     }
+    .codex-task-entry { display: flex; align-items: center; min-width: 0; }
+    .codex-task-entry > .codex-task-row { flex: 1; min-width: 0; }
+    .workspace-drag { opacity: 0.3; cursor: grab; flex: 0 0 10px; font-size: 14px; touch-action: none; }
+    .codex-browser-row:hover .workspace-drag { opacity: 0.8; }
+    .codex-pin-button { flex: 0 0 24px; padding: 4px; border: 0; background: transparent; color: var(--fg); opacity: 0.3; cursor: pointer; }
+    .codex-task-entry:hover .codex-pin-button, .codex-pin-button:focus-visible, .codex-pin-button[aria-pressed="true"] { opacity: 0.9; }
+    .codex-pin-button[aria-pressed="true"] { color: var(--accent, var(--red)); }
+    .codex-browser-row:focus-visible, .codex-pin-button:focus-visible { outline: 1px solid var(--accent, var(--red)); outline-offset: -1px; }
     .codex-browser-row:hover,
     .codex-browser-row:focus-visible {
       background: color-mix(in srgb, var(--red) 8%, transparent);
@@ -43155,3 +43164,32 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   .marketplace-workspace.has-detail .marketplace-detail { display: block; }
   .marketplace-back { display: inline-flex; }
 }
+
+/* Conversation controls share the existing theme and native input behavior. */
+.conversation-effort-card { padding: 16px; margin: 8px; border-radius: 18px; background: color-mix(in srgb, var(--fg) 9%, var(--bg)); border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent); }
+.conversation-effort-card[hidden], .session-context-panel[hidden] { display: none; }
+.effort-card-heading, .session-context-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.effort-card-heading { font-size: 12px; color: color-mix(in srgb, var(--fg) 65%, transparent); }
+.effort-card-heading button, .session-context-heading button { border: 0; color: inherit; background: transparent; cursor: pointer; font-size: 22px; }
+#conversation-effort-value { display: block; margin: 3px 0 8px; text-align: center; font-size: 24px; font-weight: 600; color: var(--accent, var(--red)); }
+#conversation-effort { display: block; width: 100%; margin: 16px 0 4px; accent-color: var(--accent, var(--red)); cursor: pointer; }
+.effort-endpoints { display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; }
+#conversation-effort-help, #codex-model-status { font-size: 11px; line-height: 1.5; color: color-mix(in srgb, var(--fg) 65%, transparent); }
+#codex-model-controls { padding: 0; }
+#codex-model { background: transparent; font-size: 14px; text-align: center; }
+#codex-model-status { display: none; }
+#codex-reasoning[hidden] { display: none; }
+.session-context-toggle { position: absolute; right: 16px; top: 8px; z-index: 12; border: 0; border-radius: 6px; background: var(--bg); color: var(--fg); padding: 5px 9px; cursor: pointer; font: inherit; font-size: 12px; }
+.session-context-panel { position: absolute; top: 48px; right: 16px; width: 252px; max-height: calc(100% - 64px); overflow-y: auto; z-index: 11; padding: 16px; border-radius: 22px; background: color-mix(in srgb, var(--fg) 10%, var(--bg)); border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent); box-sizing: border-box; font-size: 12px; }
+.session-context-heading { margin-bottom: 4px; }
+.session-context-panel section + section { border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent); margin-top: 18px; padding-top: 4px; }
+.session-context-panel h2 { margin: 12px 0; font: inherit; color: color-mix(in srgb, var(--fg) 60%, transparent); }
+.session-context-panel dl { margin: 0; }
+.session-context-panel dt { font-size: 10px; opacity: 0.55; margin-top: 10px; }
+.session-context-panel dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.session-context-panel ul { list-style: none; padding: 0; margin: 0; }
+.session-context-panel li { margin: 9px 0; overflow-wrap: anywhere; line-height: 1.5; }
+#session-context-status { margin-top: 18px; font-size: 10px; opacity: 0.6; line-height: 1.5; }
+@media (min-width: 1250px) { .chat-container.context-open { padding-right: 286px; } }
+@media (max-width: 1249px) { .session-context-panel { box-shadow: 0 10px 48px #0009; width: min(300px, calc(100% - 32px)); } }
+@media (max-width: 768px) { .session-context-toggle { right: 48px; } }

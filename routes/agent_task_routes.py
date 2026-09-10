@@ -428,6 +428,19 @@ def setup_agent_task_routes(session_manager):
         except Exception:
             raise HTTPException(503, "Codex project catalog is unavailable")
 
+    @router.get("/api/codex/projects/{project_id}/tasks/{thread_id}")
+    async def codex_task_details(project_id: str, thread_id: str, _owner: str = Depends(require_user)):
+        try:
+            return await _codex_catalog_adapter().catalog_task_details(project_id, thread_id)
+        except ValueError:
+            raise HTTPException(400, "Invalid Codex task")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise HTTPException(404, "Codex task is unavailable in this project")
+            raise HTTPException(503, "Codex session details are unavailable")
+        except Exception:
+            raise HTTPException(503, "Codex session details are unavailable")
+
     @router.get("/api/codex/projects/{project_id}/tasks")
     async def codex_project_tasks(
         project_id: str,

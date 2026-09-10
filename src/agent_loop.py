@@ -3374,6 +3374,9 @@ def _record_repeated_api_failure(
     return fingerprint if failure_freq[fingerprint] >= threshold else None
 
 
+AGENT_EFFORT_ROUNDS = {"low": 8, "medium": 12, "high": 20, "xhigh": 40, "max": 80}
+
+
 async def stream_agent_loop(
     endpoint_url: str,
     model: str,
@@ -6172,6 +6175,7 @@ async def stream_agent_loop(
         context_manifest=_final_context_manifest,
     )
     metrics["requested_model"] = requested_model
+    metrics["max_rounds"] = max_rounds
     if _exhausted_rounds:
         metrics["rounds_exhausted"] = max_rounds
     if _tool_budget_exceeded:

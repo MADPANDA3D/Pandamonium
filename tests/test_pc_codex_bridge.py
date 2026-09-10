@@ -11,12 +11,22 @@ import sys
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 
 BRIDGE_PATH = Path(__file__).parents[1] / "services" / "pc-codex-bridge" / "jarvis_codex_bridge.py"
 SPEC = importlib.util.spec_from_file_location("jarvis_codex_bridge", BRIDGE_PATH)
 bridge = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(bridge)
+
+
+@pytest.fixture(autouse=True)
+def isolated_catalog(monkeypatch):
+    monkeypatch.setattr(bridge, '_desktop_sidebar', lambda: {})
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError('fixture_app_server_unavailable')
+    monkeypatch.setattr(bridge, '_app_server_call', unavailable)
 
 
 def test_bridge_standalone_bundle_loads_shared_atomic_writer(tmp_path):
@@ -180,6 +190,8 @@ def test_catalog_tasks_uses_supported_app_server_and_projects_safe_metadata(tmp_
             "status": "idle",
             "created_at": 10,
             "updated_at": 20,
+            "model": "",
+            "reasoning_effort": "",
         }],
         "next_cursor": "opaque-next",
     }
@@ -210,6 +222,69 @@ def test_project_catalog_paginates_and_counts_without_exposing_roots(tmp_path, m
     assert str(tmp_path) not in json.dumps([first, second])
 
 
+def test_catalog_seeds_desktop_order_and_only_allowlisted_pins(tmp_path, monkeypatch):
+    roots = {name: str(tmp_path / name) for name in ('alpha', 'beta')}
+    for root in roots.values():
+        Path(root).mkdir()
+    monkeypatch.setattr(bridge, 'WORKSPACES', roots)
+    monkeypatch.setattr(bridge, 'WORKSPACE_NAMES', {'alpha': 'Alpha', 'beta': 'Beta'})
+    monkeypatch.setattr(bridge, '_desktop_sidebar', lambda: {
+        'local-projects': {'legacy-alpha': {'rootPaths': [roots['alpha']]}},
+        'sidebar-project-thread-orders': {'legacy-alpha': {'threadIds': ['older', 'newer']}},
+        'pinned-thread-ids': ['pinned', 'outside'],
+    })
+
+    def rpc(method, params):
+        if method == 'project/list':
+            return {'data': [{'roots': [{'path': roots[name]}]} for name in ('beta', 'alpha')]}
+        assert method == 'thread/read' and params['includeTurns'] is False
+        return {'thread': {'id': params['threadId'], 'name': params['threadId'],
+                           'cwd': roots['alpha'] if params['threadId'] == 'pinned' else str(tmp_path / 'private')}}
+
+    monkeypatch.setattr(bridge, '_app_server_call', rpc)
+    result = bridge.catalog_projects()
+    assert [item['project_id'] for item in result['items']] == ['beta', 'alpha']
+    assert result['items'][1]['task_order'] == ['older', 'newer']
+    assert [item['task_id'] for item in result['pinned_tasks']] == ['pinned']
+    assert str(tmp_path) not in json.dumps(result)
+
+
+def test_task_details_verify_root_before_reading_activity(tmp_path, monkeypatch):
+    root = tmp_path / 'project'
+    root.mkdir()
+    monkeypatch.setattr(bridge, 'WORKSPACES', {'project': str(root)})
+    calls = []
+    thread = {'id': 'selected', 'cwd': str(root), 'name': 'Selected task', 'model': 'fixture-model',
+              'reasoningEffort': 'high', 'gitInfo': {'branch': 'recorded-branch'}}
+
+    def rpc(method, params):
+        calls.append(method)
+        if method == 'thread/read':
+            return {'thread': thread}
+        assert (method, params) == ('thread/turns/list', {
+            'threadId': 'selected', 'limit': 5, 'sortDirection': 'desc', 'itemsView': 'full'})
+        return {'data': [{'items': [
+            {'type': 'userMessage', 'content': [{'type': 'localImage', 'path': '/tmp/attached.png'}]},
+            {'type': 'mcpToolCall', 'server': 'portal', 'tool': 'list_services', 'arguments': {'token': 'secret'}},
+            {'type': 'commandExecution', 'command': 'private command', 'aggregatedOutput': 'private output'},
+            {'type': 'fileChange', 'changes': [{'path': 'src/fix.py', 'diff': 'private diff'}]},
+        ]}]}
+
+    monkeypatch.setattr(bridge, '_app_server_call', rpc)
+    details = bridge.catalog_task_details('project', 'selected')
+    assert details['sources'] == ['attached.png']
+    assert details['tools'] == ['portal/list_services', 'Terminal']
+    assert details['outputs'] == ['src/fix.py']
+    assert details['recorded_branch'] == 'recorded-branch'
+    assert details['model'] == 'fixture-model' and details['activity_available'] is True
+    assert not any(value in json.dumps(details) for value in ('secret', 'private command', 'private output', 'private diff'))
+    calls.clear()
+    thread['cwd'] = str(tmp_path / 'other-project')
+    with pytest.raises(ValueError, match='project_mismatch'):
+        bridge.catalog_task_details('project', 'selected')
+    assert calls == ['thread/read']
+
+
 def test_catalog_failures_are_explicit(tmp_path, monkeypatch):
     missing = tmp_path / "missing"
     monkeypatch.setattr(bridge, "WORKSPACES", {"missing": str(missing)})
@@ -222,6 +297,7 @@ def test_catalog_failures_are_explicit(tmp_path, monkeypatch):
         "approved_root": "workspace:missing",
         "availability": "unavailable",
         "reason": "project_root_unavailable",
+        "task_order": [],
     }
     try:
         bridge.catalog_tasks("denied")

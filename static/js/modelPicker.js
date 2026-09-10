@@ -478,6 +478,9 @@ function _initModelPickerDropdown() {
       Math.max(inset + width, window.innerWidth - inset),
     );
     menu.style.right = `${anchorRight - desiredRight}px`;
+    const top = wrap.getBoundingClientRect().top;
+    menu.style.maxHeight = `${Math.max(120, top - 24)}px`;
+    menu.style.overflowY = 'auto';
   }
 
   function _openPickerShortcut(kind) {
