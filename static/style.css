@@ -3277,9 +3277,9 @@ body.bg-pattern-sparkles {
       max-width: min(360px, calc(100vw - 16px));
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 24px;
       box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
-      padding: 6px;
+      padding: 10px;
       animation: picker-roll-up 0.2s ease-out;
       transform-origin: bottom right;
     }
@@ -3620,6 +3620,7 @@ body.bg-pattern-sparkles {
     }
     .model-picker-list .model-switch-item .model-switch-ep {
       flex: 0 1 auto;
+      max-width: 55%;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -43166,21 +43167,38 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 }
 
 /* Conversation controls share the existing theme and native input behavior. */
-.conversation-effort-card { padding: 16px; margin: 8px; border-radius: 18px; background: color-mix(in srgb, var(--fg) 9%, var(--bg)); border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent); }
+.conversation-effort-card { padding: 14px; margin: 8px 0 0; border-radius: 22px; background: color-mix(in srgb, var(--red) 4%, var(--panel)); border: 1px solid color-mix(in srgb, var(--border) 35%, transparent); }
 .conversation-effort-card[hidden], .session-context-panel[hidden] { display: none; }
 .effort-card-heading, .session-context-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .effort-card-heading { font-size: 12px; color: color-mix(in srgb, var(--fg) 65%, transparent); }
 .effort-card-heading button, .session-context-heading button { border: 0; color: inherit; background: transparent; cursor: pointer; font-size: 22px; }
-#conversation-effort-value { display: block; margin: 3px 0 8px; text-align: center; font-size: 24px; font-weight: 600; color: var(--accent, var(--red)); }
-#conversation-effort { display: block; width: 100%; margin: 16px 0 4px; accent-color: var(--accent, var(--red)); cursor: pointer; }
+#conversation-effort-value { display: block; margin: 3px 0 8px; text-align: center; font-size: 24px; font-weight: 600; color: var(--red); }
+#conversation-effort { display: block; width: 100%; height: 28px; margin: 12px 0 4px; padding: 0; border: 0; appearance: none; background: transparent; cursor: pointer; }
+#conversation-effort::-webkit-slider-runnable-track { height: 18px; border-radius: 999px; background: linear-gradient(to right, var(--red) 0 var(--effort-fill), color-mix(in srgb, var(--fg) 18%, var(--panel)) var(--effort-fill) 100%); }
+#conversation-effort::-webkit-slider-thumb { appearance: none; width: 26px; height: 26px; margin-top: -4px; border: 2px solid var(--panel); border-radius: 50%; background: var(--fg); box-shadow: 0 1px 4px #0004; }
+#conversation-effort::-moz-range-track { height: 18px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 18%, var(--panel)); }
+#conversation-effort::-moz-range-progress { height: 18px; border-radius: 999px; background: var(--red); }
+#conversation-effort::-moz-range-thumb { width: 24px; height: 24px; border: 2px solid var(--panel); border-radius: 50%; background: var(--fg); }
+#conversation-effort:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; border-radius: 999px; }
+#conversation-effort:disabled { opacity: .5; cursor: default; }
 .effort-endpoints { display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; }
 #conversation-effort-help, #codex-model-status { font-size: 11px; line-height: 1.5; color: color-mix(in srgb, var(--fg) 65%, transparent); }
 #codex-model-controls { padding: 0; }
-#codex-model { background: transparent; font-size: 14px; text-align: center; }
+#codex-model { width: 100%; max-width: 100%; min-width: 0; border: 1px solid color-mix(in srgb, var(--border) 35%, transparent); border-radius: 999px; padding: 8px 12px; background: var(--panel); color: var(--fg); font: inherit; text-align: center; }
+@supports (appearance: base-select) {
+  #codex-model, #codex-model::picker(select) { appearance: base-select; }
+  #codex-model::picker(select) { border: 1px solid var(--border); border-radius: 20px; padding: 8px; background: var(--panel); color: var(--fg); max-width: calc(100vw - 32px); }
+  #codex-model option { padding: 9px 12px; border-radius: 12px; }
+  #codex-model option:checked, #codex-model option:hover { background: color-mix(in srgb, var(--red) 14%, var(--panel)); }
+}
+#model-picker-btn { min-height: 26px; padding: 3px 10px; border-radius: 999px; background: var(--panel); border-color: color-mix(in srgb, var(--border) 35%, transparent); }
+.model-picker-menu input[type="text"] { border-radius: 999px; }
+.model-picker-menu .model-picker-action-btn { border-radius: 50%; }
+.model-picker-list .model-switch-item { border-radius: 12px; padding: 8px 10px; }
 #codex-model-status { display: none; }
 #codex-reasoning[hidden] { display: none; }
 .session-context-toggle { position: absolute; right: 16px; top: 8px; z-index: 12; border: 0; border-radius: 6px; background: var(--bg); color: var(--fg); padding: 5px 9px; cursor: pointer; font: inherit; font-size: 12px; }
-.session-context-panel { position: absolute; top: 48px; right: 16px; width: 252px; max-height: calc(100% - 64px); overflow-y: auto; z-index: 11; padding: 16px; border-radius: 22px; background: color-mix(in srgb, var(--fg) 10%, var(--bg)); border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent); box-sizing: border-box; font-size: 12px; }
+.session-context-panel { position: absolute; top: 48px; right: 16px; width: 252px; max-height: calc(100% - 64px); overflow-y: auto; z-index: 11; padding: 16px; border-radius: 22px; background: var(--panel); border: 1px solid color-mix(in srgb, var(--border) 40%, transparent); box-shadow: 0 8px 28px color-mix(in srgb, var(--red) 8%, transparent); box-sizing: border-box; font-size: 12px; }
 .session-context-heading { margin-bottom: 4px; }
 .session-context-panel section + section { border-top: 1px solid color-mix(in srgb, var(--fg) 15%, transparent); margin-top: 18px; padding-top: 4px; }
 .session-context-panel h2 { margin: 12px 0; font: inherit; color: color-mix(in srgb, var(--fg) 60%, transparent); }
@@ -43193,3 +43211,8 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 @media (min-width: 1250px) { .chat-container.context-open { padding-right: 286px; } }
 @media (max-width: 1249px) { .session-context-panel { box-shadow: 0 10px 48px #0009; width: min(300px, calc(100% - 32px)); } }
 @media (max-width: 768px) { .session-context-toggle { right: 48px; } }
+
+/* Sidebar ordering is available in every agent view, including touch layouts. */
+#session-list .item-drag-handle, #session-list .folder-drag-handle { display: inline-flex !important; flex-shrink: 0; width: 18px; min-height: 24px; align-items: center; justify-content: center; padding: 0; font-size: 13px; letter-spacing: normal; cursor: grab; opacity: .55; }
+#session-list .folder-icon { display: inline-flex; flex-shrink: 0; }
+#session-list .folder-drag-handle:focus-visible { outline: 2px solid var(--red); border-radius: 4px; }

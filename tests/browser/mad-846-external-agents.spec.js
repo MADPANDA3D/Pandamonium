@@ -98,6 +98,8 @@ async function installRoutes(page, {
   ambiguousActionStatus = 0,
   authorityGate = null,
   requests = [],
+  preferences = {},
+  catalog = null,
 } = {}) {
   let approvalResolved = false;
   let actionResponsesDropped = 0;
@@ -105,7 +107,12 @@ async function installRoutes(page, {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (url.pathname === '/api/selector-catalog') {
-      return route.fulfill({ json: selectorCatalog({ available, governed, canStart, canSteer }) });
+      return route.fulfill({ json: catalog || selectorCatalog({ available, governed, canStart, canSteer }) });
+    }
+    if (url.pathname.startsWith('/api/prefs/')) {
+      const key = url.pathname.split('/').pop();
+      if (method === 'PUT') preferences[key] = route.request().postDataJSON().value;
+      return route.fulfill({ json: { value: preferences[key] ?? null } });
     }
     if (url.pathname === '/api/auth/status') {
       return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
@@ -150,11 +157,11 @@ async function installRoutes(page, {
       });
       return route.fulfill({ json: { ok: true } });
     }
-    if (url.pathname === `/api/agent-workers/${TARGET}/tasks` && method === 'GET') {
+    if ([`/api/agent-workers/${TARGET}/tasks`, '/api/agent-workers/second-sidecar/tasks'].includes(url.pathname) && method === 'GET') {
       return route.fulfill({ json: {
         items: taskStates.map((status, index) => ({
           task_ref: `task-${index}`, title: `${status} task`, status,
-          project_id: WORKSPACE,
+          project_id: url.searchParams.get('workspace') || WORKSPACE,
         })),
         next_cursor: null,
       } });
@@ -284,7 +291,7 @@ async function openExternalWorker(page) {
   const choice = page.locator('#model-picker-list .model-switch-item')
     .filter({ hasText: 'Installation supplied worker' });
   await expect(choice.locator('[data-canonical-identity-icon="worker"]')).toBeVisible();
-  await expect(choice).toHaveAttribute('aria-label', /Installation supplied worker, External worker/);
+  await expect(choice).toHaveAttribute('aria-label', /Installation supplied worker, External agent/);
   await choice.click();
   await expect(page.locator('#codex-workspace-browser')).toBeVisible();
   await expect(page.locator('#codex-browser-title')).toHaveText('Installation supplied worker');
@@ -397,7 +404,7 @@ test('denial never dispatches the external action again and unavailable workers 
   const unavailable = unavailablePage.locator('#model-picker-list .model-switch-item')
     .filter({ hasText: 'Installation supplied worker' });
   await expect(unavailable).toHaveAttribute('aria-disabled', 'true');
-  await expect(unavailable).toContainText('External worker');
+  await expect(unavailable).toContainText('External agent');
   await unavailable.click({ force: true });
   await expect(unavailablePage.locator('#model-picker-label')).toHaveText('Jarvis');
   await expect(unavailablePage.locator('#codex-workspace-browser')).toBeHidden();
@@ -840,4 +847,61 @@ test('JOS-EXT-1 canvas is bounded, focus-safe, responsive, and tears down on nav
     };
   });
   expect(rejected).toEqual({ hidden: true, src: null });
+});
+
+
+test('catalog workers retain their own pins and project/task order across switches and reloads', async ({ page }) => {
+  const preferences = {};
+  const catalog = selectorCatalog();
+  catalog.discovery.entities[1].permissions.configured_scopes.push('workspace:second-project');
+  catalog.discovery.entities.push({ ...structuredClone(catalog.discovery.entities[1]), id: 'worker:second', display_name: 'Second worker' });
+  catalog.selections.push({ ...catalog.selections[1], entity_id: 'worker:second', target: 'second-sidecar', runtime: 'Claude', location: 'Build node' });
+  await installRoutes(page, { catalog, preferences });
+  await openExternalWorker(page);
+  await selectWorkspace(page);
+  const rows = page.locator('#codex-task-list .codex-task-entry');
+  await expect(rows).toHaveCount(5);
+  await page.locator('#codex-task-more').click();
+  await expect(rows).toHaveCount(9);
+  const handle = rows.nth(1).locator('.task-drag');
+  await expect(handle).toBeVisible();
+  const from = await handle.boundingBox();
+  const to = await rows.first().boundingBox();
+  await handle.dispatchEvent('touchstart', { touches: [{ identifier: 1, clientX: from.x + 4, clientY: from.y + 4 }] });
+  await expect(rows.nth(1)).toHaveClass(/touch-dragging/);
+  await handle.dispatchEvent('touchmove', { touches: [{ identifier: 1, clientX: to.x + 4, clientY: to.y - 8 }] });
+  await handle.dispatchEvent('touchend', { touches: [] });
+  await expect.poll(() => preferences['worker-sidebar-layouts']?.[TARGET]?.tasks?.[WORKSPACE]?.[0]).toBe('task-1');
+  await rows.first().getByRole('button', { name: 'Pin empty task', exact: true }).click();
+  await expect(page.locator('#codex-pinned-list .codex-task-entry')).toHaveCount(1);
+  await page.locator('.codex-project-row[data-project-id="second-project"]').press('Alt+ArrowUp');
+  await page.locator('.codex-project-row[data-project-id="second-project"]').click();
+  await rows.filter({ has: page.locator('[data-task-id="task-1"]') }).getByRole('button', { name: 'Pin empty task', exact: true }).click();
+  await expect(page.locator('#codex-pinned-list .codex-task-entry')).toHaveCount(2);
+  // The same task reference in two projects must stay independently pinnable.
+  await page.locator('#codex-pinned-list .codex-task-entry[data-project-id="second-project"] .codex-task-row').press('Alt+ArrowUp');
+  await expect.poll(() => preferences['worker-sidebar-layouts']?.[TARGET]?.pins?.map(task => task.project_id)).toEqual(['second-project', WORKSPACE]);
+  const select = async name => {
+    await page.locator('#model-picker-btn').click();
+    await page.locator('#model-picker-list').getByText(name, { exact: true }).click();
+  };
+  await select('Second worker');
+  await expect(page.locator('#codex-pinned-list .codex-task-entry')).toHaveCount(0);
+  await expect(page.locator('.codex-project-row').first()).toContainText(WORKSPACE);
+  await selectWorkspace(page);
+  await rows.nth(1).getByRole('button', { name: 'Pin empty task', exact: true }).click();
+  if (!await page.locator('#session-context-panel').isVisible()) await page.locator('#session-context-toggle').click();
+  await expect(page.locator('#session-context-environment')).toContainText('Claude');
+  await expect(page.locator('#session-context-environment')).toContainText('Build node');
+  await expect(page.locator('#session-context-environment')).not.toContainText('Friday');
+  await page.locator('#session-context-close').click();
+  await select('Installation supplied worker');
+  await expect(page.locator('#codex-pinned-list .codex-task-entry')).toHaveCount(2);
+  await expect(page.locator('.codex-project-row').first()).toContainText('second-project');
+  await expect.poll(() => preferences['worker-sidebar-layouts']?.['second-sidecar']?.pins?.length).toBe(1);
+  await openExternalWorker(page);
+  await expect(page.locator('#codex-pinned-list .codex-task-entry')).toHaveCount(2);
+  await selectWorkspace(page);
+  await page.locator('#codex-pinned-list .codex-task-entry[data-project-id="sample-project"] .codex-pin-button').click();
+  await expect(rows.first()).toHaveAttribute('data-task-id', 'task-1');
 });

@@ -386,7 +386,10 @@ function saveSessionOrder(order) {
 }
 
 function saveFolderOrder(order) {
-  const clean = _sanitizeFolderOrder(order);
+  const visible = _sanitizeFolderOrder(order);
+  const moved = new Set(visible);
+  let index = 0;
+  const clean = [...new Set([..._folderOrder, ...visible])].map(name => moved.has(name) ? visible[index++] : name);
   _folderOrder = clean;
   _folderOrderRevision += 1;
   Storage.setJSON(FOLDER_ORDER_KEY, clean);
@@ -662,7 +665,7 @@ function createSessionItem(s) {
   // Drag handle
   const handle = document.createElement('span');
   handle.className = 'item-drag-handle';
-  handle.textContent = '\u22EE\u22EE';
+  handle.textContent = '⠿';
   handle.title = 'Drag to reorder; Alt + Arrow keys also move this chat';
   div.appendChild(handle);
 
@@ -1332,13 +1335,16 @@ function _renderSessionListImpl() {
     // Drag handle for folder reordering
     const dragHandle = document.createElement('span');
     dragHandle.className = 'folder-drag-handle';
-    dragHandle.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
+    const folderIcon = document.createElement('span');
+    folderIcon.className = 'folder-icon';
+    folderIcon.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>';
+    dragHandle.textContent = '⠿';
     dragHandle.title = 'Drag to reorder project; Alt+Arrow keys also reorder';
     dragHandle.tabIndex = 0;
     dragHandle.setAttribute('role', 'button');
     dragHandle.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     dragHandle.setAttribute('aria-label', `Reorder ${folderName} project. Use Alt plus Arrow Up or Arrow Down.`);
-    header.appendChild(dragHandle);
+    header.append(dragHandle, folderIcon);
 
     const toggle = document.createElement('span');
     toggle.className = 'folder-toggle';

@@ -185,7 +185,8 @@ export function enable(containerId, itemSelector, options = {}) {
 
   function onTouchStart(e) {
     // Don't start on buttons/inputs.
-    if (e.target.closest('button, input, select, a')) return;
+    if (e.target.closest('button, input, select, a')
+        && !(config.handleSelector && e.target.closest(config.handleSelector))) return;
     // Respect handleSelector on touch too — long-press anywhere was
     // unintentionally letting users start a reorder from the whole row.
     if (config.handleSelector && !e.target.closest(config.handleSelector)) return;

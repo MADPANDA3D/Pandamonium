@@ -26,7 +26,7 @@ const selector = {
   selections: [
     { entity_id: 'agent:jarvis', kind: 'agent', target: 'jarvis', selectable: true, reason: null },
     { entity_id: 'agent:gordon', kind: 'agent', target: 'hermes', selectable: false, reason: 'connection_failed' },
-    { entity_id: 'worker:pc', kind: 'worker', target: 'pc-codex', selectable: true, reason: null },
+    { entity_id: 'worker:pc', kind: 'worker', target: 'pc-codex', capabilities: ['codex'], runtime: 'Codex', location: 'Local workstation', selectable: true, reason: null },
   ],
 };
 
@@ -429,4 +429,49 @@ test('Jarvis budget slider submits a work budget and resets to the installation 
   await page.locator('#model-picker-btn').click();
   await page.locator('#conversation-effort-reset').click();
   await expect(page.locator('#conversation-effort-value')).toHaveText('Default');
+});
+
+
+test('rounded workspace controls follow theme colors on desktop and phone', async ({ page }) => {
+  await mockShell(page);
+  await page.goto('/static/index.html');
+  await selectFriday(page);
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#codex-model').selectOption('fixture-model');
+  await page.locator('#conversation-effort').press('ArrowRight');
+  await expect(page.locator('#conversation-effort-value')).toHaveText('High');
+  await expect(page.locator('#conversation-effort')).toHaveCSS('--effort-fill', '100%');
+  const themes = [
+    { bg: '#09080c', fg: '#faf5ed', panel: '#110f15', border: '#343036', red: '#ff294f' },
+    { bg: '#f0f4ec', fg: '#203018', panel: '#fcfff7', border: '#a2b396', red: '#347020' },
+  ];
+  for (const [index, colors] of themes.entries()) {
+    await page.evaluate(async colors => (await import('/static/js/theme.js')).applyColors(colors), colors);
+    await expect(page.locator('#model-picker-menu')).toHaveCSS('border-radius', '24px');
+    await expect(page.locator('#codex-model')).toHaveCSS('border-radius', '999px');
+    const expected = await page.evaluate(colors => {
+      const probe = document.createElement('span');
+      document.body.append(probe);
+      probe.style.color = colors.red;
+      const accent = getComputedStyle(probe).color;
+      probe.style.color = colors.panel;
+      const panel = getComputedStyle(probe).color;
+      probe.remove();
+      return { accent, panel };
+    }, colors);
+    await expect(page.locator('#conversation-effort-value')).toHaveCSS('color', expected.accent);
+    await page.screenshot({ path: test.info().outputPath(`workspace-theme-${index}.png`), animations: 'disabled' });
+    await page.locator('#model-picker-btn').click();
+    if (!await page.locator('#session-context-panel').isVisible()) await page.locator('#session-context-toggle').click();
+    await expect(page.locator('#session-context-panel')).toHaveCSS('background-color', expected.panel);
+    await expect(page.locator('#session-context-panel')).toContainText('Local workstation');
+    await page.screenshot({ path: test.info().outputPath(`details-theme-${index}.png`), animations: 'disabled' });
+    await page.locator('#session-context-close').click();
+    await page.locator('#model-picker-btn').click();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: test.info().outputPath('workspace-phone.png'), animations: 'disabled' });
+  const menu = await page.locator('#model-picker-menu').boundingBox();
+  expect(menu.x).toBeGreaterThanOrEqual(0);
+  expect(menu.x + menu.width).toBeLessThanOrEqual(390);
 });
