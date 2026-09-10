@@ -88,6 +88,8 @@ following maintained platform capabilities.
 
 Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png)
 and [mobile preview](docs/screenshots/workspace-shared-mobile.png).
+Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png)
+and [mobile](docs/screenshots/workspace-context-mobile.png).
 
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
 
