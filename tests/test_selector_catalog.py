@@ -26,6 +26,7 @@ def _workers():
     return {
         "pc-codex": {
             "label": "Friday",
+            "machine": "Local workstation",
             "configured": True,
             "ready": True,
             "installation_capabilities": ["codex"],
@@ -96,11 +97,15 @@ def test_selector_catalog_preserves_taxonomy_and_same_health(monkeypatch):
         "entity_id": entities["Scribe"]["id"],
         "kind": "agent",
         "target": "desktop-claude",
+        "runtime": "Claude",
+        "location": "Not reported",
         "capabilities": ["claude"],
         "selectable": True,
         "reason": None,
     }
     assert selections[entities["Friday"]["id"]]["capabilities"] == ["codex"]
+    assert selections[entities["Friday"]["id"]]["runtime"] == "Codex"
+    assert selections[entities["Friday"]["id"]]["location"] == "Local workstation"
     assert selections[entities["Installation supplied worker"]["id"]]["capabilities"] == [
         "external_agent", "governed_task_actions", "task.start", "task.steer",
     ]

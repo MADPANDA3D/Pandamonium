@@ -26,12 +26,13 @@ function renderEffort() {
   range.max = String(Math.max(0, options.length - 1));
   range.value = String(chosen ? index : native ? 0 : 2);
   range.disabled = !options.length;
+  range.style.setProperty('--effort-fill', `${Number(range.max) ? Number(range.value) / Number(range.max) * 100 : 0}%`);
   const label = names[chosen] || chosen || 'Default';
   byId('conversation-effort-label').textContent = native ? 'Reasoning effort' : 'Agent work budget';
   byId('conversation-effort-value').textContent = label;
   range.setAttribute('aria-valuetext', native ? label : chosen ? `${label}, up to ${rounds[index]} rounds` : 'Installation default');
   byId('conversation-effort-help').textContent = native
-    ? options.length ? 'Codex reasoning for the next turn.' : byId('codex-model-status').textContent.includes('unavailable') ? byId('codex-model-status').textContent : 'Choose a Codex model to adjust reasoning. Default keeps the task or workstation setting.'
+    ? options.length ? 'Codex reasoning for the next turn.' : byId('codex-model-status').textContent.includes('unavailable') ? byId('codex-model-status').textContent : 'Choose a Codex model to adjust reasoning. Default keeps the task or node setting.'
     : `${chosen ? `Up to ${rounds[index]} rounds` : 'Uses the installation default'}. A round asks the model, runs its requested tools, and returns their results. Stops when finished. Applies to the next text turn.`;
   renderPanel();
 }
@@ -50,15 +51,18 @@ function renderPanel() {
   const context = window.codexWorkspaceBrowser?.getSelectedContext?.();
   const native = target() === 'pc-codex';
   const model = native ? byId('codex-model').selectedOptions[0]?.textContent : session.model || window.sessionModule?.getCurrentModel?.();
+  const agent = getSelectedAgentSelection();
+  const catalogTask = native || agent?.external;
   const pairs = [
-    ['Agent', getSelectedAgentSelection()?.label || (native ? 'Friday' : target())],
-    ['Runs on', native ? 'Your workstation' : target() === 'jarvis' ? 'Pandamonium' : 'Selected worker'],
-    ['Project', native ? details?.cwd || context?.projectName || context?.workspace || 'Choose a project' : session.folder || 'No project selected'],
-    ['Task', native ? details?.title || context?.title || 'New task' : session.name || 'New task'],
+    ['Agent', agent?.label || target()],
+    ['Runtime', agent?.runtime || 'Not reported'],
+    ['Runs on', agent?.location || 'Not reported'],
+    ['Project', catalogTask ? details?.cwd || context?.projectName || context?.workspace || 'Choose a project' : session.folder || 'No project selected'],
+    ['Task', catalogTask ? details?.title || context?.title || 'New task' : session.name || 'New task'],
     ['Next turn model', model || 'Default'],
   ];
   if (native) {
-    pairs.push(['Next turn reasoning', names[byId('codex-reasoning').value] || 'Task / workstation default']);
+    pairs.push(['Next turn reasoning', names[byId('codex-reasoning').value] || 'Task / node default']);
     if (details?.model) pairs.push(['Recorded model', details.model]);
     if (details?.recorded_branch) pairs.push(['Recorded branch', details.recorded_branch]);
   } else if (target() === 'jarvis') {

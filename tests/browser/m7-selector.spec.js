@@ -33,8 +33,8 @@ function selectorCatalog({ includeGordon = true, gordonState = 'unavailable' } =
     selections: [
       { entity_id: 'agent:jarvis', kind: 'agent', target: 'jarvis', capabilities: ['model'], selectable: true, reason: null },
       { entity_id: 'agent:gordon', kind: 'agent', target: 'hermes', capabilities: ['hermes'], selectable: gordonState === 'healthy', reason: gordonState === 'healthy' ? null : 'connection_failed' },
-      { entity_id: 'worker:friday', kind: 'worker', target: 'pc-codex', capabilities: ['codex'], selectable: true, reason: null },
-      { entity_id: 'worker:vps', kind: 'worker', target: 'vps-codex', capabilities: ['codex'], selectable: false, reason: 'connection_failed' },
+      { entity_id: 'worker:friday', kind: 'worker', target: 'pc-codex', capabilities: ['codex'], runtime: 'Codex', location: 'Local workstation', selectable: true, reason: null },
+      { entity_id: 'worker:vps', kind: 'worker', target: 'vps-codex', capabilities: ['codex'], runtime: 'Codex', location: 'Remote server', selectable: false, reason: 'connection_failed' },
       { entity_id: 'model:alpha', kind: 'model', model_id: 'vendor/alpha', endpoint_id: 'endpoint-one', capabilities: ['model'], selectable: true, reason: null },
     ].filter(selection => entities.some(entity => entity.id === selection.entity_id)),
   };
@@ -70,9 +70,10 @@ test('text and voice render one compact identity list without duplicate models o
   await expect(textList).toContainText('Configured Friday');
   await expect(textList).toContainText('Configured VPS Codex');
   await expect(textList.getByText('Configured Jarvis', { exact: true })).toHaveCount(1);
-  await expect(textList).toContainText('Self-hosted model');
+  await expect(textList).toContainText('Model-backed agent');
   await expect(textList).toContainText('Hermes');
-  await expect(textList).toContainText('Workstation Codex');
+  await expect(textList).toContainText('Codex · Local workstation');
+  await expect(textList).toContainText('Codex · Remote server');
   await expect(textList.getByText('Configured Gordon').locator('..')).toHaveAttribute('aria-disabled', 'true');
 
   const voiceList = page.locator('#jarvis-agent-menu');

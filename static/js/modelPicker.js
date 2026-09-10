@@ -161,7 +161,8 @@ export function getSelectedAgentTarget() {
 
 export function getSelectedAgentSelection() {
   const selected = _selectedAgent();
-  return selected ? { ...selected } : null;
+  const current = _selectorItems.find(item => item.target === selected?.target);
+  return selected ? { ...selected, runtime: current?.runtime || '', location: current?.location || '' } : null;
 }
 
 export function clearPendingAgentTarget() {
@@ -209,6 +210,8 @@ function _emitConversationTarget(selectedAgent) {
   if (!selectedAgent) return;
   const detail = {
     target: selectedAgent.target,
+    runtime: _selectorItems.find(item => item.target === selectedAgent.target)?.runtime || '',
+    location: _selectorItems.find(item => item.target === selectedAgent.target)?.location || '',
     label: selectedAgent.label || selectedAgent.target,
     kind: selectedAgent.kind,
     available: selectedAgent.available !== false,
@@ -242,6 +245,7 @@ async function _refreshSelectorCatalog() {
       const entity = entityById.get(selection.entity_id);
       if (!entity || !['model', 'agent', 'worker'].includes(entity.kind)) return;
       const capabilities = Array.isArray(selection.capabilities) ? selection.capabilities : [];
+      const runtime = String(selection.runtime || (capabilities.includes('codex') ? 'Codex' : capabilities.includes('claude') ? 'Claude' : capabilities.includes('hermes') ? 'Hermes' : capabilities.includes('external_agent') ? 'External agent' : 'Model-backed agent'));
       const item = {
         kind: entity.kind,
         target: String(selection.target || ''),
@@ -249,15 +253,9 @@ async function _refreshSelectorCatalog() {
         modelId: String(selection.model_id || ''),
         endpointId: String(selection.endpoint_id || ''),
         display: String(entity.display_name || 'Configured choice'),
-        epName: capabilities.includes('codex')
-          ? 'Workstation Codex'
-          : (capabilities.includes('hermes')
-            ? 'Hermes'
-            : (capabilities.includes('claude')
-              ? 'Claude'
-              : (capabilities.includes('external_agent')
-                ? 'External worker'
-                : (capabilities.includes('model') ? 'Self-hosted model' : 'Configured identity')))),
+        runtime,
+        location: String(selection.location || ''),
+        epName: [runtime, selection.location].filter(Boolean).join(' · '),
         providerText: `${entity.kind} ${entity.health?.state || ''} ${selection.reason || ''}`,
         stale: selection.selectable !== true,
         disabled: selection.selectable !== true,

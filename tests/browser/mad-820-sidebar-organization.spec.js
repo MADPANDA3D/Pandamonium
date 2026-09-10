@@ -25,6 +25,7 @@ async function mockShell(page, state) {
     const request = route.request();
     const url = new URL(request.url());
 
+    if (url.pathname === '/api/selector-catalog' && state.catalog) return route.fulfill({ json: state.catalog });
     if (url.pathname === PROJECT_ORDER_PREF_PATH) {
       if (request.method() === 'PUT') {
         const body = request.postDataJSON();
@@ -257,7 +258,7 @@ test('pinned and unfiled drag sorting preserve one combined session order', asyn
   });
   await mockShell(page, state);
   await page.goto('/static/index.html');
-  await page.evaluate(() => document.body.classList.add('rearrange-mode'));
+  await expect(page.locator('#session-list .item-drag-handle').first()).toBeVisible();
 
   const ids = selector => page.locator(selector).evaluateAll(
     items => items.map(item => item.dataset.sessionId),
@@ -292,7 +293,7 @@ test('project chats reveal five at a time and retain drag order over activity so
   await expect(rows).toHaveCount(10);
   await page.locator('.session-show-more-btn').click();
   await expect(rows).toHaveCount(12);
-  await page.evaluate(() => document.body.classList.add('rearrange-mode'));
+  await expect(page.locator('#session-list .item-drag-handle').first()).toBeVisible();
   await page.locator('.list-item[data-session-id="folder-2"]').hover();
   await dragBefore(page, 'folder-2', 'folder-0');
   await expect.poll(() => state.sessionOrder?.[0]).toBe('folder-2');
@@ -323,4 +324,43 @@ test('a slow sidebar preference read cannot replace an explicit task selection',
   release();
   await expect.poll(() => page.evaluate(() => window.sessionModule.getSessions().length)).toBe(2);
   await expect.poll(() => page.evaluate(() => window.sessionModule.getCurrentSessionId())).toBe('beta');
+});
+
+
+test('reordering one agent preserves the other agent project order on reload', async ({ page }) => {
+  const state = {
+    sessions: [
+      sessionFixture('a', 'A chat', { folder: 'A' }),
+      sessionFixture('b', 'B chat', { folder: 'B' }),
+      { ...sessionFixture('c', 'C chat', { folder: 'C' }), agent_target: 'hermes' },
+      { ...sessionFixture('d', 'D chat', { folder: 'D' }), agent_target: 'hermes' },
+    ],
+    remoteOrder: ['B', 'A', 'D', 'C'], prefStatus: 200, puts: [],
+    catalog: {
+      discovery: { schema_version: 'pandamonium.discovery.v1', entities: ['jarvis', 'hermes'].map(target => ({ id: `agent:${target}`, kind: 'agent', display_name: target })) },
+      selections: ['jarvis', 'hermes'].map(target => ({ entity_id: `agent:${target}`, target, kind: 'agent', capabilities: ['model'], selectable: true })),
+    },
+  };
+  await mockShell(page, state);
+  await page.goto('/static/index.html');
+  const activate = id => page.evaluate(async sessionId => {
+    const module = await import('/static/js/sessions.js');
+    module.setCurrentSessionId(sessionId);
+    module.updateModelPicker();
+  }, id);
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(4);
+  await activate('a');
+  await expect.poll(() => projectOrder(page)).toEqual(['B', 'A']);
+  await page.locator('[data-folder-name="B"] .folder-drag-handle').press('Alt+ArrowDown');
+  await expect.poll(() => state.remoteOrder).toEqual(['A', 'B', 'D', 'C']);
+  await activate('c');
+  await expect.poll(() => projectOrder(page)).toEqual(['D', 'C']);
+  await page.locator('[data-folder-name="D"] .folder-drag-handle').press('Alt+ArrowDown');
+  await expect.poll(() => state.remoteOrder).toEqual(['A', 'B', 'C', 'D']);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(4);
+  await activate('a');
+  await expect.poll(() => projectOrder(page)).toEqual(['A', 'B']);
+  await activate('c');
+  await expect.poll(() => projectOrder(page)).toEqual(['C', 'D']);
 });

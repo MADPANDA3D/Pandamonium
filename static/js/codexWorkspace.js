@@ -39,23 +39,42 @@ let projects = [];
 let taskItems = [];
 let visibleTasks = VISIBLE_TASKS;
 let desktopPins = [];
-let layout = { projects: [], tasks: {}, pins: null };
+let codexLayout = { projects: [], tasks: {}, pins: null };
+let workerLayouts = Object.create(null);
 let layoutRevision = 0;
 let layoutWrites = Promise.resolve();
-const layoutReady = requestJson('/api/prefs/codex-sidebar-layout').then(payload => {
-  if (layoutRevision || !payload.value || typeof payload.value !== 'object') return;
-  const value = payload.value;
-  layout = {
-    projects: Array.isArray(value.projects) ? value.projects.filter(id => typeof id === 'string') : [],
-    tasks: value.tasks && typeof value.tasks === 'object' && !Array.isArray(value.tasks) ? value.tasks : {},
-    pins: Array.isArray(value.pins) ? value.pins.filter(item => item && typeof item.task_id === 'string' && typeof item.project_id === 'string') : null,
+
+function cleanLayout(value = {}) {
+  return {
+    projects: Array.isArray(value?.projects) ? value.projects.filter(id => typeof id === 'string') : [],
+    tasks: value?.tasks && typeof value.tasks === 'object' && !Array.isArray(value.tasks) ? value.tasks : {},
+    pins: Array.isArray(value?.pins) ? value.pins.filter(item => item && typeof item.task_id === 'string' && typeof item.project_id === 'string') : null,
   };
-}).catch(() => {});
+}
+
+function layout() {
+  if (state.mode === 'codex') return codexLayout;
+  return workerLayouts[state.target] ||= cleanLayout();
+}
+
+const layoutReady = Promise.all([
+  requestJson('/api/prefs/codex-sidebar-layout').catch(() => ({})),
+  requestJson('/api/prefs/worker-sidebar-layouts').catch(() => ({})),
+]).then(([codex, workers]) => {
+  if (layoutRevision) return;
+  codexLayout = cleanLayout(codex.value);
+  if (workers.value && typeof workers.value === 'object' && !Array.isArray(workers.value)) {
+    for (const [target, value] of Object.entries(workers.value)) {
+      if (/^[a-z][a-z0-9_-]{0,63}$/.test(target)) workerLayouts[target] = cleanLayout(value);
+    }
+  }
+});
 
 function saveLayout() {
   layoutRevision += 1;
-  const value = JSON.stringify({ value: layout });
-  layoutWrites = layoutWrites.catch(() => {}).then(() => requestJson('/api/prefs/codex-sidebar-layout', {
+  const key = state.mode === 'codex' ? 'codex-sidebar-layout' : 'worker-sidebar-layouts';
+  const value = JSON.stringify({ value: state.mode === 'codex' ? codexLayout : workerLayouts });
+  layoutWrites = layoutWrites.catch(() => {}).then(() => requestJson(`/api/prefs/${key}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: value,
   })).catch(() => window.uiModule?.showToast?.('Could not save the sidebar layout. Try the change again.'));
 }
@@ -65,8 +84,8 @@ function ordered(items, ids, key) {
   return [...items].sort((a, b) => (order.get(a[key]) ?? Infinity) - (order.get(b[key]) ?? Infinity));
 }
 
-function pins() { return state.mode === 'codex' ? layout.pins ?? desktopPins : []; }
-function isPinned(taskId) { return pins().some(task => task.task_id === taskId); }
+function pins() { return layout().pins ?? (state.mode === 'codex' ? desktopPins : []); }
+function isPinned(taskId, projectId = state.selectedProject) { return pins().some(task => task.task_id === taskId && task.project_id === projectId); }
 
 function moveVisibleOrder(items, existing) {
   const ids = items.map(item => item.dataset.taskId || item.dataset.projectId);
@@ -77,8 +96,8 @@ function moveVisibleOrder(items, existing) {
 }
 
 function saveTaskOrder(items) {
-  const baseline = ordered(taskItems, layout.tasks[state.selectedProject] || projects.find(p => p.project_id === state.selectedProject)?.task_order, 'task_id').map(task => task.task_id);
-  layout.tasks[state.selectedProject] = moveVisibleOrder(items, baseline);
+  const baseline = ordered(taskItems, layout().tasks[state.selectedProject] || projects.find(p => p.project_id === state.selectedProject)?.task_order, 'task_id').map(task => task.task_id);
+  layout().tasks[state.selectedProject] = moveVisibleOrder(items, baseline);
   saveLayout();
 }
 
@@ -131,14 +150,14 @@ async function loadModels() {
   const select = byId('codex-model');
   if (!select) return;
   select.disabled = true;
-  byId('codex-model-status').textContent = 'Loading models from your workstation…';
+  byId('codex-model-status').textContent = 'Loading models from the selected Codex connection…';
   try {
     const catalog = await requestJson('/api/codex/models');
     if (request !== modelRequest || state.mode !== 'codex') return;
     const previous = select.value;
     codexModels = (Array.isArray(catalog.items) ? catalog.items : [])
       .filter(item => typeof item.model === 'string' && Array.isArray(item.reasoning_efforts));
-    select.replaceChildren(new Option('Task / workstation default', ''),
+    select.replaceChildren(new Option('Task / node default', ''),
       ...codexModels.map(item => new Option(item.display_name || item.model, item.model)));
     if (codexModels.some(item => item.model === previous)) select.value = previous;
     select.disabled = !codexModels.length;
@@ -148,7 +167,7 @@ async function loadModels() {
   } catch (error) {
     if (request !== modelRequest || state.mode !== 'codex') return;
     codexModels = [];
-    select.replaceChildren(new Option('Task / workstation default', ''));
+    select.replaceChildren(new Option('Task / node default', ''));
     byId('codex-model-status').textContent = error.message;
     renderReasoningOptions();
   }
@@ -201,7 +220,7 @@ function renderProjects(items, append = false) {
     }
     list.replaceChildren();
   }
-  ordered(items, state.mode === 'codex' ? layout.projects : [], 'project_id').forEach(project => {
+  ordered(items, layout().projects, 'project_id').forEach(project => {
     const projectId = String(project.project_id || '');
     const projectName = String(project.display_name || projectId || 'Project');
     const group = document.createElement('div');
@@ -221,15 +240,15 @@ function renderProjects(items, append = false) {
     const title = document.createElement('span');
     title.className = 'codex-browser-label';
     title.textContent = projectName;
-    if (state.mode === 'codex') button.append(dragHandle('project'));
+    button.append(dragHandle('project'));
     button.append(folderIcon(), title);
     if (button.disabled) button.append(activityDot('unavailable', button.title));
     group.appendChild(button);
     list.appendChild(group);
   });
   if (!list.children.length) list.appendChild(statusRow(`No projects are available for ${state.targetLabel || 'this worker'}.`));
-  if (state.mode === 'codex') enableSort('codex-project-list', '.codex-project-group', '.project-drag', rows => {
-    layout.projects = rows.map(row => row.dataset.projectId);
+  enableSort('codex-project-list', '.codex-project-group', '.project-drag', rows => {
+    layout().projects = rows.map(row => row.dataset.projectId);
     saveLayout();
   });
 }
@@ -264,6 +283,7 @@ function renderTasks(items, append = false, pinned = false) {
     const row = document.createElement('div');
     row.className = 'codex-task-entry';
     row.dataset.taskId = taskId;
+    row.dataset.projectId = String(task.project_id || state.selectedProject || '');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'codex-browser-row codex-task-row';
@@ -276,7 +296,7 @@ function renderTasks(items, append = false, pinned = false) {
     const title = document.createElement('span');
     title.className = 'codex-browser-label';
     title.textContent = button.dataset.taskTitle;
-    if (state.mode === 'codex') button.append(dragHandle('task'));
+    button.append(dragHandle('task'));
     button.append(title);
     if (['active', 'running', 'queued', 'waiting', 'waiting_approval', 'reconnecting'].includes(status)) {
       button.append(activityDot('active', status.replaceAll('_', ' ')));
@@ -286,12 +306,11 @@ function renderTasks(items, append = false, pinned = false) {
     const pin = document.createElement('button');
     pin.type = 'button';
     pin.className = 'codex-pin-button';
-    pin.hidden = state.mode !== 'codex';
-    pin.textContent = isPinned(taskId) ? '◆' : '◇';
-    pin.setAttribute('aria-label', `${isPinned(taskId) ? 'Unpin' : 'Pin'} ${task.title || 'task'}`);
-    pin.setAttribute('aria-pressed', String(isPinned(taskId)));
+    pin.textContent = isPinned(taskId, row.dataset.projectId) ? '◆' : '◇';
+    pin.setAttribute('aria-label', `${isPinned(taskId, row.dataset.projectId) ? 'Unpin' : 'Pin'} ${task.title || 'task'}`);
+    pin.setAttribute('aria-pressed', String(isPinned(taskId, row.dataset.projectId)));
     pin.addEventListener('click', () => {
-      layout.pins = isPinned(taskId) ? pins().filter(item => item.task_id !== taskId) : [...pins(), task];
+      layout().pins = isPinned(taskId, row.dataset.projectId) ? pins().filter(item => item.task_id !== taskId || item.project_id !== row.dataset.projectId) : [...pins(), task];
       saveLayout();
       renderPinned();
       renderVisibleTasks();
@@ -300,8 +319,8 @@ function renderTasks(items, append = false, pinned = false) {
     list.appendChild(row);
   });
   if (!list.children.length) list.appendChild(statusRow('No tasks in this project yet.'));
-  if (state.mode === 'codex') enableSort(list.id, '.codex-task-entry', '.task-drag', pinned ? rows => {
-    layout.pins = ordered(pins(), rows.map(row => row.dataset.taskId), 'task_id');
+  enableSort(list.id, '.codex-task-entry', '.task-drag', pinned ? rows => {
+    layout().pins = rows.map(row => pins().find(task => task.task_id === row.dataset.taskId && task.project_id === row.dataset.projectId)).filter(Boolean);
     saveLayout();
   } : saveTaskOrder);
 }
@@ -313,7 +332,7 @@ function renderPinned() {
 }
 
 function renderVisibleTasks() {
-  const preferred = state.mode === 'codex' ? layout.tasks[state.selectedProject] || projects.find(p => p.project_id === state.selectedProject)?.task_order : [];
+  const preferred = layout().tasks[state.selectedProject] || projects.find(p => p.project_id === state.selectedProject)?.task_order;
   const tasks = ordered(taskItems, preferred, 'task_id').filter(task => !isPinned(task.task_id));
   renderTasks(tasks.slice(0, visibleTasks));
   byId('codex-task-more').hidden = tasks.length <= visibleTasks;
@@ -342,7 +361,7 @@ async function loadProjects({ append = false } = {}) {
     if (more) more.hidden = !state.projectCursor;
   } catch (error) {
     if (requestId !== state.projectRequest || !list) return;
-    list.replaceChildren(statusRow(error.message || 'Friday workstation is unavailable.', true));
+    list.replaceChildren(statusRow(error.message || 'The selected Codex connection is unavailable.', true));
   }
 }
 
@@ -379,7 +398,7 @@ async function loadTasks({ append = false } = {}) {
       seen.add(state.taskCursor);
       if (state.taskCursor) params.set('cursor', state.taskCursor);
     } while (state.taskCursor);
-    taskItems = [...new Map(taskItems.map(task => [task.task_id || task.task_ref, task])).values()];
+    taskItems = [...new Map(taskItems.map(task => [task.task_id || task.task_ref, { ...task, task_id: task.task_id || task.task_ref, project_id: task.project_id || state.selectedProject }])).values()];
     renderVisibleTasks();
   } catch (error) {
     if (requestId !== state.taskRequest || !list) return;
@@ -606,7 +625,7 @@ async function selectTask(button) {
   state.selectedTask = {
     taskId: button.dataset.taskId,
     projectId: button.dataset.projectId,
-    title: button.dataset.taskTitle || 'Codex task',
+    title: button.dataset.taskTitle || 'Agent task',
     status: button.dataset.taskStatus || 'unknown',
   };
   document.querySelectorAll('.codex-task-row.is-selected').forEach(row => row.classList.remove('is-selected'));
@@ -651,12 +670,14 @@ function open(detail = {}) {
     : 'Projects';
   const list = byId('codex-project-list');
   if (detail.available === false) {
-    list?.replaceChildren(statusRow(detail.reason || 'Friday is not currently available.', true));
+    list?.replaceChildren(statusRow(detail.reason || `${state.targetLabel} is not currently available.`, true));
     if (byId('codex-project-more')) byId('codex-project-more').hidden = true;
     return;
   }
-  if (state.mode === 'external') renderExternalWorkspaces();
-  else loadProjects();
+  if (state.mode === 'external') {
+    const generation = state.projectRequest;
+    layoutReady.then(() => { if (generation === state.projectRequest) renderExternalWorkspaces(); });
+  } else loadProjects();
 }
 
 function close() {

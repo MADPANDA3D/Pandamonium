@@ -61,14 +61,21 @@ following maintained platform capabilities.
 - The server persists each conversation target. The left sidebar follows that
   target: conversational identities show only their dated chats, while a Codex
   worker shows its allowlisted projects with tasks loaded beneath each project.
-- Pinned tasks, project order, and task order seed from the Codex desktop.
-  Pandamonium saves later pin/order changes in the signed-in owner's preferences.
-  Project chats reveal five at a time with **Show more**; drag handles or
-  **Alt + Up/Down** reorder rows without changing their execution directory.
+- Pins, project/chat ordering, and five-row **Show more** are shared sidebar
+  behavior for all configured agents and catalog workers. Visible drag handles
+  support pointer/touch reordering; **Alt + Up/Down** moves focused rows.
+  The signed-in owner's preferences preserve each worker's layout independently.
+  The local Codex catalog retains its desktop layout seed. Reordering never
+  changes a task's project or execution directory.
+- The rounded conversation picker, effort control, and Details card follow the
+  active Pandamonium theme. Assigned identity names remain separate from runtime
+  and configured node labels. Tailnet discovery probes selected nodes for model
+  endpoints; installed Codex/Claude capabilities come from configured bridges,
+  not from detecting arbitrary bare CLI installations.
 - **Details** shows available session environment, sources, tools, and outputs.
   Codex activity covers the latest five turns; branch/model metadata is labeled
   as recorded rather than claimed to be current filesystem state.
-- The model picker uses Codex's supported native reasoning efforts. Jarvis's
+- The model picker uses Codex's supported native reasoning efforts. The model-backed agent's
   **Agent work budget** controls maximum model/tool rounds: Low 8, Medium 12,
   High 20, Very high 40, Maximum 80. Reset uses the installation default.
   These are caps for the next text turn, not required loops or an intelligence
