@@ -1222,6 +1222,8 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
         _pendingAuthorityControl = null;
       }
       if (streamAgentTarget) fd.append('agent_target', streamAgentTarget);
+      const agentEffort = window.conversationContext?.getAgentEffort?.();
+      if (agentEffort && (!streamAgentTarget || streamAgentTarget === 'jarvis')) fd.append('agent_effort', agentEffort);
       if (streamAgentTarget === 'pc-codex') {
         const codexContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
         if (codexContext?.workspace) fd.append('worker_workspace', codexContext.workspace);
@@ -2442,6 +2444,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                   });
                 }
               } else if (json.type === 'attachments') {
+                window.dispatchEvent(new CustomEvent('odysseus:session-activity', { detail: { sessionId: streamSessionId, sources: Array.isArray(json.data) ? json.data : [] } }));
                 if (_isBg) continue;
                 // Update user bubble — replace file chips with image previews
                 const _ub = document.querySelector('#chat-history .msg-user:last-of-type');
@@ -2547,6 +2550,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                 if (currentHolder && json.id) currentHolder.dataset.dbId = json.id;
 
               } else if (json.type === 'tool_start') {
+                window.dispatchEvent(new CustomEvent('odysseus:session-activity', { detail: { sessionId: streamSessionId, tool: json.tool } }));
                 if (_isBg) continue;
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
@@ -3525,6 +3529,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
       clearResponseTimeout();
       clearProcessingProbe();
       clearFirstTokenWaitTimers();
+      window.dispatchEvent(new CustomEvent('odysseus:turn-completed', { detail: { sessionId: streamSessionId } }));
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');
       if (_chatLogDone) _chatLogDone.setAttribute('aria-busy', 'false');

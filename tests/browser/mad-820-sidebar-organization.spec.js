@@ -39,6 +39,10 @@ async function mockShell(page, state) {
       });
     }
     if (url.pathname.startsWith('/api/prefs/')) {
+      if (url.pathname === '/api/prefs/sidebar-session-order') {
+        if (request.method() === 'PUT') state.sessionOrder = request.postDataJSON().value;
+        return route.fulfill({ json: { value: state.sessionOrder ?? null } });
+      }
       return route.fulfill({ json: { key: url.pathname.split('/').pop(), value: null } });
     }
     if (url.pathname === '/api/sessions') return route.fulfill({ json: state.sessions });
@@ -75,7 +79,7 @@ async function dragBefore(page, sourceId, targetId) {
   }, { sourceId, targetId });
 }
 
-test('unfiled chats stay above Projects in their own bounded region without a synthetic folder', async ({ page }) => {
+test('unfiled chats reveal five at a time above Projects without a nested scroller', async ({ page }) => {
   const state = {
     sessions: [
       ...Array.from({ length: 18 }, (_, index) => sessionFixture(
@@ -100,7 +104,7 @@ test('unfiled chats stay above Projects in their own bounded region without a sy
   await expect(unfiled).toHaveAttribute('aria-label', 'Recent chats');
   await expect(page.locator('#session-list .unsorted-folder')).toHaveCount(0);
   await expect(page.locator('#session-list .session-folder-header .folder-name', { hasText: /^Chats$/ })).toHaveCount(0);
-  await expect(unfiled.locator('.session-item')).toHaveCount(10);
+  await expect(unfiled.locator('.session-item')).toHaveCount(5);
 
   const topLevelOrder = await page.locator('#session-list').evaluate(list => (
     Array.from(list.children).map(child => {
@@ -112,17 +116,18 @@ test('unfiled chats stay above Projects in their own bounded region without a sy
   ));
   expect(topLevelOrder.slice(0, 2)).toEqual(['recent', 'label:Projects']);
 
-  await unfiled.getByRole('button', { name: 'Show 8 more' }).click();
-  await expect(unfiled.locator('.session-item')).toHaveCount(18);
+  for (const count of [10, 15, 18]) {
+    await unfiled.getByRole('button', { name: 'Show more' }).click();
+    await expect(unfiled.locator('.session-item')).toHaveCount(count);
+  }
   const bounded = await unfiled.evaluate(region => ({
     clientHeight: region.clientHeight,
     scrollHeight: region.scrollHeight,
     overflowY: getComputedStyle(region).overflowY,
     viewportHeight: window.innerHeight,
   }));
-  expect(bounded.overflowY).toBe('auto');
-  expect(bounded.scrollHeight).toBeGreaterThan(bounded.clientHeight);
-  expect(bounded.clientHeight).toBeLessThanOrEqual(Math.ceil(bounded.viewportHeight * 0.34) + 1);
+  expect(bounded.overflowY).toBe('visible');
+  expect(bounded.scrollHeight).toBe(bounded.clientHeight);
 
   await page.setViewportSize({ width: 390, height: 640 });
   if (await page.locator('#sidebar').evaluate(sidebar => sidebar.classList.contains('hidden'))) {
@@ -272,4 +277,50 @@ test('pinned and unfiled drag sorting preserve one combined session order', asyn
     .toEqual(['pin-new', 'pin-old']);
   await expect.poll(() => ids('#session-unfiled-region .list-item[data-session-id]'))
     .toEqual(['loose-new', 'loose-old']);
+});
+
+test('project chats reveal five at a time and retain drag order over activity sorting on another device', async ({ browser, page }) => {
+  const state = {
+    sessions: Array.from({ length: 12 }, (_, index) => sessionFixture(`folder-${index}`, `Project chat ${index}`, { folder: 'Alpha', minutes: index })),
+    remoteOrder: null, prefStatus: 200, puts: [],
+  };
+  await mockShell(page, state);
+  await page.goto('/static/index.html');
+  const rows = page.locator('.session-folder-content .session-item');
+  await expect(rows).toHaveCount(5);
+  await page.locator('.session-show-more-btn').click();
+  await expect(rows).toHaveCount(10);
+  await page.locator('.session-show-more-btn').click();
+  await expect(rows).toHaveCount(12);
+  await page.evaluate(() => document.body.classList.add('rearrange-mode'));
+  await page.locator('.list-item[data-session-id="folder-2"]').hover();
+  await dragBefore(page, 'folder-2', 'folder-0');
+  await expect.poll(() => state.sessionOrder?.[0]).toBe('folder-2');
+  const context = await browser.newContext();
+  const other = await context.newPage();
+  await mockShell(other, state);
+  await other.goto('/static/index.html');
+  await expect(other.locator('.session-folder-content .session-item').first()).toContainText('Project chat 2');
+  await other.locator('.session-folder-content .session-item').first().focus();
+  await other.locator('.session-folder-content .session-item').first().press('Alt+ArrowDown');
+  await expect(other.locator('.session-folder-content .session-item').first()).toContainText('Project chat 0');
+  await expect.poll(() => state.sessionOrder?.[0]).toBe('folder-0');
+  await context.close();
+});
+
+test('a slow sidebar preference read cannot replace an explicit task selection', async ({ page }) => {
+  const state = { sessions: [sessionFixture('alpha', 'Alpha chat'), sessionFixture('beta', 'Beta chat')], remoteOrder: null, prefStatus: 200, puts: [] };
+  await mockShell(page, state);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/prefs/sidebar-session-order', async route => {
+    await gate;
+    return route.fulfill({ json: { value: null } });
+  });
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule))).toBe(true);
+  await page.evaluate(() => window.sessionModule.selectSession('beta', { showLoading: false }));
+  release();
+  await expect.poll(() => page.evaluate(() => window.sessionModule.getSessions().length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.sessionModule.getCurrentSessionId())).toBe('beta');
 });

@@ -8,6 +8,21 @@ from routes.chat_routes import (
 from src.worker_routing import selected_worker_workspace
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('encoding', ['json', 'form'])
+async def test_chat_rejects_unknown_work_budget_before_dispatch(encoding):
+    import httpx
+    from fastapi import FastAPI
+    from routes.chat_routes import setup_chat_routes
+    app = FastAPI()
+    app.include_router(setup_chat_routes(None, None, None, None, None, None))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        data = {'message': 'Inspect the project', 'agent_effort': 'unlimited'}
+        response = await client.post('/api/chat_stream', **({'json': data} if encoding == 'json' else {'data': data}))
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'Invalid agent work budget'
+
+
 def test_only_jarvis_uses_the_configured_reasoning_model_context():
     context = _selected_agent_context("Jarvis")
 

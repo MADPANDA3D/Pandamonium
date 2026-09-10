@@ -199,6 +199,7 @@ test('setup guide can be skipped, closed, reopened, continued, and restarted wit
 test('ASK_USER keeps long choices readable and supports keyboard selection, Send, and close', async ({ page }) => {
   await mockApp(page);
   await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.hasPendingChat?.())).toBe(true);
   await page.evaluate(() => {
     window.__askUserSent = [];
     document.querySelector('.send-btn').addEventListener('click', event => {

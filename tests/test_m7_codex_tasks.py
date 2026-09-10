@@ -712,11 +712,14 @@ async def test_execution_rollback_switches_fail_closed_without_worker_or_bridge_
     monkeypatch.setenv("JARVIS_CODEX_EXECUTION_ENABLED", "false")
     monkeypatch.setattr(bridge, "WORKSPACES", {"disposable": str(root)})
     monkeypatch.setattr(bridge, "WORKSPACE_NAMES", {"disposable": "Disposable"})
+    monkeypatch.setattr(bridge, "_desktop_sidebar", lambda: {})
+    monkeypatch.setattr(bridge, "_app_server_call", lambda *_args: {"data": []})
     assert bridge.catalog_projects()["items"] == [{
         "project_id": "disposable",
         "display_name": "Disposable",
         "approved_root": "workspace:disposable",
         "availability": "available",
+        "task_order": [],
     }]
     with pytest.raises(RuntimeError, match="codex_task_execution_disabled"):
         bridge.create_task({"workspace": "disposable", "prompt": "Do not run."})

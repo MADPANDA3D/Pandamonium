@@ -265,6 +265,8 @@ def _workspace_root(workspace: str) -> Path:
 
 
 def _safe_thread(thread: dict, workspace: str, root: Path) -> dict | None:
+    if not isinstance(thread, dict) or not thread.get("cwd"):
+        return None
     try:
         if Path(str(thread.get("cwd") or "")).resolve() != root:
             return None
@@ -284,7 +286,63 @@ def _safe_thread(thread: dict, workspace: str, root: Path) -> dict | None:
         "status": status,
         "created_at": int(thread.get("createdAt") or 0),
         "updated_at": int(thread.get("updatedAt") or 0),
+        "model": str(thread.get("model") or "")[:128],
+        "reasoning_effort": str(thread.get("reasoningEffort") or "")[:32],
     }
+
+
+def _desktop_sidebar() -> dict:
+    """Read desktop-only layout hints; task contents still come from App Server."""
+    path = Path(os.getenv("CODEX_HOME", str(Path.home() / ".codex"))) / ".codex-global-state.json"
+    try:
+        if path.stat().st_size > 8_000_000:
+            return {}
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            return {}
+        return {key: data[key] for key, kind in {"local-projects": dict, "sidebar-project-thread-orders": dict, "pinned-thread-ids": list}.items() if isinstance(data.get(key), kind)}
+    except (OSError, ValueError):
+        return {}
+
+
+def catalog_task(workspace: str, thread_id: str) -> dict:
+    root = _workspace_root(workspace)
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", thread_id):
+        raise ValueError("invalid_thread_id")
+    thread = _app_server_call("thread/read", {"threadId": thread_id, "includeTurns": False}).get("thread") or {}
+    safe = _safe_thread(thread, workspace, root)
+    if safe is None or safe["task_id"] != thread_id:
+        raise ValueError("codex_thread_project_mismatch")
+    safe.update(cwd=str(root), recorded_branch=str((thread.get("gitInfo") or {}).get("branch") or "")[:200])
+    return safe
+
+
+def catalog_task_details(workspace: str, thread_id: str) -> dict:
+    task = catalog_task(workspace, thread_id)
+    sources, tools, outputs = [], [], []
+    try:
+        turns = _app_server_call("thread/turns/list", {
+            "threadId": thread_id, "limit": 5, "sortDirection": "desc", "itemsView": "full",
+        }).get("data") or []
+        for turn in turns:
+            for item in (turn.get("items") or [])[:500]:
+                kind = item.get("type")
+                if kind == "userMessage":
+                    for part in item.get("content") or []:
+                        path = part.get("path") or part.get("filename")
+                        if path:
+                            sources.append(Path(str(path)).name[:200])
+                elif kind == "fileChange":
+                    outputs.extend(str(change.get("path") or "")[:500] for change in item.get("changes") or [])
+                elif kind == "mcpToolCall":
+                    tools.append(f"{item.get('server', '')}/{item.get('tool', '')}"[:200])
+                elif kind in {"commandExecution", "webSearch", "imageView"}:
+                    tools.append({"commandExecution": "Terminal", "webSearch": "Web search", "imageView": "Image viewer"}[kind])
+        task["activity_available"] = True
+    except (RuntimeError, TimeoutError):
+        task["activity_available"] = False
+    task.update(sources=list(dict.fromkeys(sources))[:50], tools=list(dict.fromkeys(tools))[:50], outputs=list(dict.fromkeys(filter(None, outputs)))[:50])
+    return task
 
 
 def catalog_tasks(
@@ -324,10 +382,30 @@ def catalog_tasks(
 def catalog_projects(*, query: str = "", cursor: str | None = None, limit: int = 20) -> dict:
     query = " ".join(str(query or "").split()).casefold()[:200]
     limit = max(1, min(int(limit), 50))
+    desktop = _desktop_sidebar()
+    roots = {str(Path(path).resolve()): key for key, path in WORKSPACES.items()}
+    native_order = []
+    try:
+        native = _app_server_call("project/list", {"limit": 100}).get("data") or []
+        native_order = [roots.get(str(Path(root.get("path", "")).resolve())) for project in native for root in project.get("roots") or []]
+    except (RuntimeError, TimeoutError, OSError):
+        pass
     projects = [
-        workspace for workspace in sorted(WORKSPACES)
+        workspace for workspace in dict.fromkeys([item for item in native_order if item] + sorted(WORKSPACES))
         if not query or query in workspace.casefold() or query in WORKSPACE_NAMES[workspace].casefold()
     ]
+    task_orders = {}
+    for project_id, project in (desktop.get("local-projects") or {}).items():
+        if not isinstance(project, dict):
+            continue
+        for path in project.get("rootPaths") or []:
+            if not isinstance(path, str):
+                continue
+            workspace = roots.get(str(Path(path).resolve()))
+            saved_order = (desktop.get("sidebar-project-thread-orders") or {}).get(project_id, {})
+            order = saved_order.get("threadIds", []) if isinstance(saved_order, dict) else []
+            if workspace and isinstance(order, list):
+                task_orders[workspace] = [value for value in order[:2000] if isinstance(value, str) and len(value) <= 100]
     try:
         offset = max(0, int(cursor or 0))
     except ValueError as exc:
@@ -341,13 +419,28 @@ def catalog_projects(*, query: str = "", cursor: str | None = None, limit: int =
             "display_name": WORKSPACE_NAMES[workspace],
             "approved_root": f"workspace:{workspace}",
             "availability": "available" if root.is_dir() else "unavailable",
+            "task_order": task_orders.get(workspace, []),
         }
         if not root.is_dir():
             project["reason"] = "project_root_unavailable"
         items.append(project)
     next_offset = offset + len(selected)
+    pinned = []
+    if offset == 0 and not query:
+        for thread_id in (desktop.get("pinned-thread-ids") or [])[:100]:
+            if not isinstance(thread_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", thread_id):
+                continue
+            try:
+                thread = _app_server_call("thread/read", {"threadId": thread_id, "includeTurns": False}).get("thread") or {}
+                workspace = roots.get(str(Path(thread.get("cwd") or "").resolve()))
+                safe = _safe_thread(thread, workspace, _workspace_root(workspace)) if workspace else None
+                if safe:
+                    pinned.append(safe)
+            except (RuntimeError, TimeoutError, OSError, ValueError):
+                continue
     return {
         "items": items,
+        "pinned_tasks": pinned,
         "next_cursor": str(next_offset) if next_offset < len(projects) else None,
     }
 
@@ -971,6 +1064,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
         parts = parsed.path.strip("/").split("/")
+        if len(parts) == 6 and parts[:3] == ["v1", "catalog", "projects"] and parts[4] == "tasks":
+            try:
+                _json(self, 200, catalog_task_details(parts[3], parts[5]))
+            except ValueError:
+                _json(self, 404, {"error": "codex_task_not_available_in_project"})
+            except Exception:
+                _json(self, 503, {"error": "codex_task_details_unavailable"})
+            return
         if parts == ["v1", "catalog", "models"]:
             try:
                 _json(self, 200, catalog_models())

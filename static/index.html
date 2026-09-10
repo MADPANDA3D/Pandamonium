@@ -793,12 +793,9 @@
         </div>
         <div id="session-list" role="listbox"></div>
         <section id="codex-workspace-browser" class="codex-workspace-browser" aria-label="Codex projects and tasks" hidden>
-          <div id="codex-model-controls" class="codex-model-controls" hidden>
-            <label for="codex-model">Codex model</label>
-            <select id="codex-model" disabled><option value="">Loading models…</option></select>
-            <label for="codex-reasoning">Reasoning</label>
-            <select id="codex-reasoning" disabled><option value="">Task default</option></select>
-            <span id="codex-model-status" role="status"></span>
+          <div id="codex-pinned-view" hidden>
+            <div class="codex-browser-head"><strong>Pinned</strong></div>
+            <div id="codex-pinned-list" role="list"></div>
           </div>
           <div class="codex-browser-head">
             <strong id="codex-browser-title">Projects</strong>
@@ -808,7 +805,7 @@
             <button type="button" id="codex-project-more" class="codex-browser-more" hidden>Load more projects</button>
             <div id="codex-task-view" hidden>
               <div id="codex-task-list" class="codex-browser-list" role="list"></div>
-              <button type="button" id="codex-task-more" class="codex-browser-more" hidden>Load more tasks</button>
+              <button type="button" id="codex-task-more" class="codex-browser-more" hidden>Show more</button>
             </div>
           </div>
         </section>
@@ -1026,6 +1023,15 @@
   </nav>
 
   <main class="chat-container welcome-active" id="chat-container" aria-label="Chat area" aria-busy="false">
+    <button type="button" id="session-context-toggle" class="session-context-toggle" aria-controls="session-context-panel" aria-expanded="false" title="Session details">ⓘ <span>Details</span></button>
+    <aside id="session-context-panel" class="session-context-panel" aria-label="Session details" hidden>
+      <div class="session-context-heading"><strong>Session</strong><button type="button" id="session-context-close" aria-label="Close session details">×</button></div>
+      <section><h2>Environment</h2><dl id="session-context-environment"></dl></section>
+      <section><h2>Sources</h2><ul id="session-context-sources"></ul></section>
+      <section><h2>Tools used</h2><ul id="session-context-tools"></ul></section>
+      <section><h2>Outputs</h2><ul id="session-context-outputs"></ul></section>
+      <p id="session-context-status" role="status"></p>
+    </aside>
     <!-- Persistent page heading for assistive tech. Visually hidden so it
          never affects layout, but always present inside the main landmark
          (the sidebar that shows the visible brand is hidden off-canvas on
@@ -1159,6 +1165,19 @@
               </button>
             </div>
             <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured conversation identities"></div>
+            <div id="conversation-effort-card" class="conversation-effort-card" hidden>
+              <div class="effort-card-heading"><label for="conversation-effort" id="conversation-effort-label">Reasoning</label><button type="button" id="conversation-effort-reset" title="Use the default effort" aria-label="Reset effort">↺</button></div>
+              <output id="conversation-effort-value" for="conversation-effort">Default</output>
+              <div id="codex-model-controls" class="codex-model-controls" hidden>
+                <label for="codex-model" class="sr-only">Codex model</label>
+                <select id="codex-model" disabled><option value="">Loading models…</option></select>
+                <select id="codex-reasoning" aria-label="Codex reasoning effort" hidden disabled><option value="">Task default</option></select>
+                <span id="codex-model-status" role="status"></span>
+              </div>
+              <input id="conversation-effort" type="range" min="0" max="4" value="2" step="1" aria-describedby="conversation-effort-help">
+              <div class="effort-endpoints" aria-hidden="true"><span>Less</span><span>More</span></div>
+              <p id="conversation-effort-help"></p>
+            </div>
           </div>
         </div>
       </div>
@@ -2843,6 +2862,7 @@
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/jarvisVoice.js?v=20260905T210749Z"></script>
 <script type="module" src="/static/js/codexWorkspace.js"></script>
+<script type="module" src="/static/js/conversationContext.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
 <script type="module" src="/static/js/chatRenderer.js?v=20260906T203500Z"></script>

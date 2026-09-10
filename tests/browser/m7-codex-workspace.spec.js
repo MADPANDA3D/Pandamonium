@@ -55,7 +55,7 @@ function taskPage(cursor = null) {
   };
 }
 
-async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat = null } = {}) {
+async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat = null, pinned = [], preferences = {} } = {}) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/selector-catalog') return route.fulfill({ json: selector });
@@ -67,7 +67,16 @@ async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat
     if (url.pathname === '/api/codex/models') return route.fulfill({ json: {
       items: [{ model: 'fixture-model', display_name: 'Fixture Codex', reasoning_efforts: ['medium', 'high'], default_reasoning_effort: 'medium' }],
     } });
-    if (url.pathname === '/api/codex/projects') return route.fulfill({ json: { items: catalog, next_cursor: null } });
+    if (url.pathname.startsWith('/api/prefs/')) {
+      const key = url.pathname.split('/').pop();
+      if (route.request().method() === 'PUT') preferences[key] = route.request().postDataJSON().value;
+      return route.fulfill({ json: { value: preferences[key] ?? null } });
+    }
+    if (url.pathname === '/api/codex/projects') return route.fulfill({ json: { items: catalog, pinned_tasks: pinned, next_cursor: null } });
+    if (url.pathname.startsWith('/api/codex/projects/test-project/tasks/')) return route.fulfill({ json: {
+      ...taskPage().items[0], cwd: '/work/disposable', model: 'recorded-model', recorded_branch: 'recorded-branch',
+      sources: ['attached.png'], tools: ['portal/list_services'], outputs: ['src/fix.py'], activity_available: true,
+    } });
     if (url.pathname === '/api/codex/projects/test-project/tasks') {
       return route.fulfill({ json: taskPage(url.searchParams.get('cursor')) });
     }
@@ -136,13 +145,27 @@ test('Friday shows readable project folders and nested tasks without a sidebar f
 
   await project.click();
   await expect(project).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('#codex-task-list .codex-task-row')).toHaveCount(50);
+  await expect(page.locator('#codex-task-list .codex-task-row')).toHaveCount(5);
   await page.locator('#codex-task-more').click();
-  await expect(page.locator('#codex-task-list .codex-task-row')).toHaveCount(51);
+  await expect(page.locator('#codex-task-list .codex-task-row')).toHaveCount(10);
+  for (let count = 15; count <= 55; count += 5) {
+    await page.locator('#codex-task-more').click();
+    await expect(page.locator('#codex-task-list .codex-task-row')).toHaveCount(Math.min(count, 51));
+  }
+  await expect(page.locator('#codex-task-more')).toBeHidden();
+  expect(await page.locator('#codex-task-list').evaluate(list => getComputedStyle(list).overflowY)).toBe('visible');
 
   await page.getByText('Fixture resume task', { exact: true }).click();
   await expect(page.locator('#message:visible')).toHaveAttribute('placeholder', /Message Friday about Fixture resume task/);
   await expect(page.locator('#codex-workspace-browser textarea')).toHaveCount(0);
+  await expect(page.locator('#session-context-environment')).toContainText('/work/disposable');
+  await expect(page.locator('#session-context-environment')).toContainText('recorded-branch');
+  await expect(page.locator('#session-context-tools')).toHaveText('portal/list_services');
+  await expect(page.locator('#session-context-sources')).toHaveText('attached.png');
+  await expect(page.locator('#session-context-outputs')).toHaveText('src/fix.py');
+  await project.click();
+  await expect(page.locator('#session-context-environment')).not.toContainText('/work/disposable');
+  await expect(page.locator('#session-context-tools')).toHaveText('No tools recorded');
 });
 
 test('Chats reuses the Tools ripple when Friday projects collapse and expand', async ({ page }) => {
@@ -298,11 +321,18 @@ test('selected Friday project and task flow through the normal composer', async 
   await expect(page.locator('#codex-workspace-browser')).toBeVisible();
   await page.getByText('Disposable Test Project', { exact: true }).click();
   await page.getByText('Fixture resume task', { exact: true }).click();
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#model-picker-refresh-btn').click();
+  await expect(page.locator('#message:visible')).toHaveAttribute('placeholder', /Fixture resume task/);
+  await expect(page.locator('#session-context-environment')).toContainText('recorded-branch');
   await page.locator('#codex-model').selectOption('fixture-model');
   await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
-  await page.locator('#codex-reasoning').selectOption('high');
-  await page.locator('#codex-model-controls').scrollIntoViewIfNeeded();
-  await page.locator('#sidebar').screenshot({ path: test.info().outputPath('friday-model-selection.png') });
+  await page.locator('#conversation-effort').focus();
+  await page.locator('#conversation-effort').press('ArrowRight');
+  await expect(page.locator('#codex-reasoning')).toHaveValue('high');
+  await expect(page.locator('#conversation-effort-value')).toHaveText('High');
+  await page.screenshot({ path: test.info().outputPath('friday-model-selection.png'), animations: 'disabled' });
+  await page.locator('#model-picker-btn').click();
   await page.locator('#message:visible').fill('Inspect the selected project.');
   await page.locator('.send-btn:visible').click();
 
@@ -315,4 +345,88 @@ test('selected Friday project and task flow through the normal composer', async 
   expect(submitted).toContain('codex_reasoning_effort');
   expect(submitted).toContain('high');
   await expect(page.locator('.jarvis-task-activity[data-task-id="direct-friday-task"]')).toContainText('Friday');
+  await expect(page.locator('#session-context-environment')).toContainText('recorded-branch');
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (!await page.locator('#sidebar').evaluate(sidebar => sidebar.classList.contains('hidden'))) await page.locator('#hamburger-btn').click();
+  await page.locator('#model-picker-btn').click();
+  await expect(page.locator('#session-context-panel')).toBeHidden();
+  await page.locator('#conversation-effort').focus();
+  await page.locator('#conversation-effort').press('Home');
+  await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
+  const bounds = await page.locator('#model-picker-menu').boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  const composer = await page.locator('.chat-input-bar:visible').boundingBox();
+  expect(composer.x).toBeGreaterThanOrEqual(0);
+  expect(composer.x + composer.width).toBeLessThanOrEqual(391);
+  await page.screenshot({ path: test.info().outputPath('friday-model-selection-mobile.png'), animations: 'disabled' });
+});
+
+test('Friday imports pins and custom order, then persists pin and drag changes in Pandamonium', async ({ page }) => {
+  const preferences = {};
+  await mockShell(page, {
+    preferences, pinned: [taskPage().items[0]],
+    catalog: [{ ...projectCatalog[0], task_order: ['task-50', 'task-3'] }, projectCatalog[1]],
+  });
+  await page.goto('/static/index.html');
+  await selectFriday(page);
+  await expect(page.locator('#codex-pinned-view')).toContainText('Fixture resume task');
+  await page.locator('.codex-project-row').first().click();
+  const rows = page.locator('#codex-task-list .codex-task-row');
+  await expect(rows).toHaveCount(5);
+  await expect(rows.first()).toContainText('Fixture task 50');
+  await expect(rows.nth(1)).toContainText('Fixture task 3');
+  await rows.nth(1).focus();
+  await rows.nth(1).press('Alt+ArrowUp');
+  await expect.poll(() => preferences['codex-sidebar-layout']?.tasks['test-project']?.[0]).toBe('task-3');
+  await page.getByRole('button', { name: 'Pin Fixture task 3', exact: true }).click();
+  await expect(page.locator('#codex-pinned-list .codex-task-row')).toHaveCount(2);
+
+  const handle = page.locator('.codex-project-row .project-drag').first();
+  const start = await handle.boundingBox();
+  const destination = await page.locator('.codex-project-row').nth(1).boundingBox();
+  await handle.dispatchEvent('mousedown', { button: 0, clientX: start.x + 3, clientY: start.y + 3 });
+  await page.mouse.move(start.x + 3, destination.y + destination.height - 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => preferences['codex-sidebar-layout']?.projects?.[0]).toBe('missing-project');
+  await page.reload();
+  await selectFriday(page);
+  await expect(page.locator('.codex-project-row').first()).toContainText('Missing Project');
+  await expect(page.locator('#codex-pinned-list .codex-task-row')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Unpin Fixture task 3', exact: true }).click();
+  await page.getByText('Disposable Test Project', { exact: true }).click();
+  await expect(page.locator('#codex-task-list .codex-task-row').first()).toContainText('Fixture task 3');
+});
+
+test('Jarvis budget slider submits a work budget and resets to the installation default', async ({ page }) => {
+  const now = new Date().toISOString();
+  const sessions = [{ id: 'budget-chat', name: 'Budget chat', model: 'fixture', endpoint_url: 'http://model.test',
+    agent_target: 'jarvis', created_at: now, updated_at: now, message_count: 1 }];
+  let submitted = '';
+  await page.addInitScript(() => localStorage.setItem('lastSessionId', 'budget-chat'));
+  await mockShell(page, { sessions, onChat: route => {
+    submitted = route.request().postData() || '';
+    return route.fulfill({ headers: { 'Content-Type': 'text/event-stream' }, body: 'data: {"delta":"Done."}\n\ndata: [DONE]\n\n' });
+  } });
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => window.sessionModule?.getSessions?.().length)).toBe(1);
+  await page.evaluate(async () => {
+    const module = await import('/static/js/sessions.js');
+    module.setCurrentSessionId('budget-chat');
+    module.updateModelPicker();
+  });
+  await page.locator('#model-picker-btn').click();
+  await expect(page.locator('#conversation-effort-label')).toHaveText('Agent work budget');
+  await page.locator('#conversation-effort').focus();
+  await page.locator('#conversation-effort').press('Home');
+  await expect(page.locator('#conversation-effort-help')).toContainText('Up to 8 rounds');
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#message:visible').fill('Inspect the current state.');
+  await page.locator('.send-btn:visible').click();
+  await expect.poll(() => submitted).toContain('agent_effort');
+  expect(submitted).toMatch(/name="agent_effort"\r?\n\r?\nlow/);
+  await page.locator('#model-picker-btn').click();
+  await page.locator('#conversation-effort-reset').click();
+  await expect(page.locator('#conversation-effort-value')).toHaveText('Default');
 });

@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from core.models import ChatMessage
 from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
-from src.agent_loop import stream_agent_loop
+from src.agent_loop import AGENT_EFFORT_ROUNDS, stream_agent_loop
 from src import agent_runs
 from src.model_context import annotate_context_messages, build_context_manifest, estimate_tokens
 from src.chat_helpers import coerce_message_and_session
@@ -720,6 +720,7 @@ def setup_chat_routes(
         worker_thread_id = str(form_data.get("worker_thread_id") or "").strip()
         codex_model = str(form_data.get("codex_model") or "").strip()
         codex_reasoning_effort = str(form_data.get("codex_reasoning_effort") or "").strip()
+        agent_effort = str(form_data.get("agent_effort") or "").strip()
         authority_decision_id = str(form_data.get("authority_decision_id") or "").strip()
         authority_choice = str(form_data.get("authority_choice") or "").strip().lower()
         authority_scope = str(form_data.get("authority_scope") or "").strip().lower()
@@ -743,6 +744,8 @@ def setup_chat_routes(
                 codex_model = str(body.get("codex_model") or "").strip()
             if not codex_reasoning_effort:
                 codex_reasoning_effort = str(body.get("codex_reasoning_effort") or "").strip()
+            if not agent_effort:
+                agent_effort = str(body.get("agent_effort") or "").strip()
             if not authority_decision_id:
                 authority_decision_id = str(body.get("authority_decision_id") or "").strip()
             if not authority_choice:
@@ -751,6 +754,8 @@ def setup_chat_routes(
                 authority_scope = str(body.get("authority_scope") or "").strip().lower()
         if len(codex_model) > 128 or len(codex_reasoning_effort) > 32:
             raise HTTPException(400, "Invalid Codex model selection")
+        if agent_effort and agent_effort not in AGENT_EFFORT_ROUNDS:
+            raise HTTPException(400, "Invalid agent work budget")
         _authority_control = bool(authority_decision_id or authority_choice or authority_scope)
         if _authority_control and not (
             authority_decision_id
@@ -1910,6 +1915,7 @@ def setup_chat_routes(
                     except (TypeError, ValueError):
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
+                    _max_rounds = AGENT_EFFORT_ROUNDS.get(agent_effort, _max_rounds)
 
                     _forced_tools = set()
                     if _search_enabled:

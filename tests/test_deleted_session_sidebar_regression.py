@@ -19,7 +19,7 @@ def test_deleted_sessions_are_pruned_from_local_sidebar_state():
 
     assert "function _removeSessionFromLocalState(sid)" in source
     assert "sessions = sessions.filter(s => String(s.id) !== id);" in source
-    assert "Storage.set('session-order', JSON.stringify(orderIds.filter(x => String(x) !== id)))" in source
+    assert "saveSessionOrder(orderIds.filter(x => String(x) !== id))" in source
     assert "_removeSessionFromLocalState(s.id);" in source
 
 

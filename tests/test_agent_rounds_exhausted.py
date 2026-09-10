@@ -63,6 +63,16 @@ def test_emits_rounds_exhausted_when_cap_hit_mid_task(monkeypatch):
     assert any(e.get("type") == "rounds_exhausted" for e in events), events
     metrics = next(e["data"] for e in events if e.get("type") == "metrics")
     assert metrics["rounds_exhausted"] == 2
+    assert metrics["max_rounds"] == 2
+
+
+def test_effort_budget_keeps_early_completion(monkeypatch):
+    _patch_common(monkeypatch)
+    for limit in al.AGENT_EFFORT_ROUNDS.values():
+        events = _run_loop(monkeypatch, 'All done, here is your answer.', max_rounds=limit)
+        metrics = next(event['data'] for event in events if event.get('type') == 'metrics')
+        assert metrics['max_rounds'] == limit
+        assert not any(event.get('type') == 'rounds_exhausted' for event in events)
 
 
 def test_persists_tool_budget_exhaustion_in_metrics(monkeypatch):

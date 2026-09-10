@@ -207,7 +207,7 @@ async function activate(
       return 0;
     },
     caches: {
-      keys: async () => ['pandamonium-v392'],
+      keys: async () => ['pandamonium-v393'],
       delete: async key => {
         deleted.push(key);
         return true;
@@ -282,7 +282,7 @@ async function activate(
   return { activationPendingForNavigation, claimed, deleted, messages, navigated, statusRequests };
 }
 
-const futureWorker = currentWorker.replace('pandamonium-v392', 'pandamonium-v393');
+const futureWorker = currentWorker.replace('pandamonium-v393', 'pandamonium-v394');
 const recovered = await activate(futureWorker, [
   new Error('restart gap'),
   { status: 503 },
@@ -291,12 +291,12 @@ const recovered = await activate(futureWorker, [
 ], { includeClosedClient: true });
 assert.equal(recovered.activationPendingForNavigation, null);
 assert.equal(recovered.claimed, 1);
-assert.deepEqual(recovered.deleted, ['pandamonium-v392']);
+assert.deepEqual(recovered.deleted, ['pandamonium-v393']);
 assert.equal(recovered.statusRequests, 4);
 assert.equal(recovered.navigated.length, 1);
 assert.equal(
   new URL(recovered.navigated[0]).searchParams.get('pandamonium-update-reconcile'),
-  'pandamonium-v393',
+  'pandamonium-v394',
 );
 
 const lateReplacement = await activate(

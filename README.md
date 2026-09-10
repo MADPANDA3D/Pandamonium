@@ -61,6 +61,19 @@ following maintained platform capabilities.
 - The server persists each conversation target. The left sidebar follows that
   target: conversational identities show only their dated chats, while a Codex
   worker shows its allowlisted projects with tasks loaded beneath each project.
+- Pinned tasks, project order, and task order seed from the Codex desktop.
+  Pandamonium saves later pin/order changes in the signed-in owner's preferences.
+  Project chats reveal five at a time with **Show more**; drag handles or
+  **Alt + Up/Down** reorder rows without changing their execution directory.
+- **Details** shows available session environment, sources, tools, and outputs.
+  Codex activity covers the latest five turns; branch/model metadata is labeled
+  as recorded rather than claimed to be current filesystem state.
+- The model picker uses Codex's supported native reasoning efforts. Jarvis's
+  **Agent work budget** controls maximum model/tool rounds: Low 8, Medium 12,
+  High 20, Very high 40, Maximum 80. Reset uses the installation default.
+  These are caps for the next text turn, not required loops or an intelligence
+  setting: successful completion stops early and authority/verification gates
+  still apply. Voice keeps its existing budget.
 - Tool-using assistant turns keep visible reasoning, status, and tool activity
   in one chronological disclosure above the final answer. The disclosure is
   collapsed after completion, expands in the page flow without a nested scroll

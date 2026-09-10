@@ -78,6 +78,9 @@ test('composer reserves the live picker width across desktop, split, and narrow 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/static/index.html');
 
+  // Exercise the full-width composer independently of the optional details panel.
+  await page.locator('#session-context-close').click();
+
   const textarea = page.locator('#message:visible');
   await page.locator('#model-picker-label:visible').evaluate(label => {
     label.textContent = 'Jarvis Network Inspector';
