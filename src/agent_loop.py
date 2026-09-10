@@ -540,11 +540,22 @@ def _project_native_mcp_guidance_for_model(
 
 
 def _is_native_mcp_management_request(text: str) -> bool:
-    return bool(re.search(
+    action = re.compile(
         r"\b(?:add|configure|connect|delete|disable|disconnect|enable|install|reconnect|remove|rename|setup)\b",
-        str(text or ""),
         re.IGNORECASE,
-    ))
+    )
+    target = re.compile(r"\b(?:connection|integration|mcp|server)\b", re.IGNORECASE)
+    negation = re.compile(
+        r"\b(?:avoid|cannot|can['’]?t|do\s+not|don['’]?t|never|not\s+to|without)\b",
+        re.IGNORECASE,
+    )
+    clauses = re.split(r"(?:[!?;\n]|\.(?=\s|$)|,\s*(?:but|however|instead|then|yet)\s+)", str(text or ""))
+    return any(
+        target.search(clause)
+        and (match := action.search(clause))
+        and not negation.search(clause[:match.start()])
+        for clause in clauses
+    )
 
 _NETWORK_FILE_MUTATION_TOOLS = {
     "append_file",
