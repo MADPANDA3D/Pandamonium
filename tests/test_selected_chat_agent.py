@@ -71,6 +71,9 @@ async def test_selected_friday_routes_directly_through_codex(monkeypatch):
         workspace="home-lab",
         presenter="Friday",
         codex_thread_id="thread-selected-in-sidebar",
+        codex_model="fixture-model",
+        codex_reasoning_effort="high",
+        explicit_workspace=True,
     )
 
     assert result == (
@@ -85,6 +88,9 @@ async def test_selected_friday_routes_directly_through_codex(monkeypatch):
         "workspace": "home-lab",
         "presenter": "Friday",
         "codex_thread_id": "thread-selected-in-sidebar",
+        "codex_model": "fixture-model",
+        "codex_reasoning_effort": "high",
+        "explicit_workspace": True,
     }
 
 

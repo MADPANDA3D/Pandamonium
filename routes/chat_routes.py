@@ -91,6 +91,9 @@ async def _direct_selected_identity_turn(
     workspace: str,
     presenter: str,
     codex_thread_id: str | None = None,
+    codex_model: str | None = None,
+    codex_reasoning_effort: str | None = None,
+    explicit_workspace: bool = False,
 ) -> tuple[str, Any, str]:
     """Route non-Jarvis selections without sending them through Jarvis's model."""
     from src.jarvis_agent import direct_codex_turn, direct_hermes_turn
@@ -107,6 +110,9 @@ async def _direct_selected_identity_turn(
             workspace=workspace,
             presenter=presenter,
             codex_thread_id=codex_thread_id,
+            codex_model=codex_model,
+            codex_reasoning_effort=codex_reasoning_effort,
+            explicit_workspace=explicit_workspace,
         )
         return "task", task, action
     raise ValueError("unsupported_conversation_target")
@@ -712,6 +718,8 @@ def setup_chat_routes(
         agent_target = str(form_data.get("agent_target") or "").strip()
         worker_workspace = str(form_data.get("worker_workspace") or "").strip()
         worker_thread_id = str(form_data.get("worker_thread_id") or "").strip()
+        codex_model = str(form_data.get("codex_model") or "").strip()
+        codex_reasoning_effort = str(form_data.get("codex_reasoning_effort") or "").strip()
         authority_decision_id = str(form_data.get("authority_decision_id") or "").strip()
         authority_choice = str(form_data.get("authority_choice") or "").strip().lower()
         authority_scope = str(form_data.get("authority_scope") or "").strip().lower()
@@ -731,12 +739,18 @@ def setup_chat_routes(
                 worker_workspace = str(body.get("worker_workspace") or "").strip()
             if not worker_thread_id:
                 worker_thread_id = str(body.get("worker_thread_id") or "").strip()
+            if not codex_model:
+                codex_model = str(body.get("codex_model") or "").strip()
+            if not codex_reasoning_effort:
+                codex_reasoning_effort = str(body.get("codex_reasoning_effort") or "").strip()
             if not authority_decision_id:
                 authority_decision_id = str(body.get("authority_decision_id") or "").strip()
             if not authority_choice:
                 authority_choice = str(body.get("authority_choice") or "").strip().lower()
             if not authority_scope:
                 authority_scope = str(body.get("authority_scope") or "").strip().lower()
+        if len(codex_model) > 128 or len(codex_reasoning_effort) > 32:
+            raise HTTPException(400, "Invalid Codex model selection")
         _authority_control = bool(authority_decision_id or authority_choice or authority_scope)
         if _authority_control and not (
             authority_decision_id
@@ -1383,6 +1397,9 @@ def setup_chat_routes(
                         workspace=selected_agent_workspace or "home-lab",
                         presenter=selected_agent_label,
                         codex_thread_id=worker_thread_id or None,
+                        codex_model=codex_model or None,
+                        codex_reasoning_effort=codex_reasoning_effort or None,
+                        explicit_workspace=bool(worker_workspace),
                     )
                     if kind == "response":
                         reply = str(payload or "").strip()

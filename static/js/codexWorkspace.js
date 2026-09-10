@@ -31,8 +31,50 @@ const state = {
 const pendingAuthorityActions = new Map();
 const retryableRequestIds = new Map();
 let authorityLifecycle = 0;
+let codexModels = [];
+let modelRequest = 0;
 
 function byId(id) { return document.getElementById(id); }
+
+function renderReasoningOptions() {
+  const select = byId('codex-reasoning');
+  if (!select) return;
+  const model = codexModels.find(item => item.model === byId('codex-model')?.value);
+  const efforts = model?.reasoning_efforts || [];
+  select.replaceChildren(...(efforts.length
+    ? efforts.map(effort => new Option(effort, effort))
+    : [new Option('Task default', '')]));
+  if (efforts.includes(model?.default_reasoning_effort)) select.value = model.default_reasoning_effort;
+  select.disabled = !efforts.length;
+}
+
+async function loadModels() {
+  const request = ++modelRequest;
+  const select = byId('codex-model');
+  if (!select) return;
+  select.disabled = true;
+  byId('codex-model-status').textContent = 'Loading models from your workstation…';
+  try {
+    const catalog = await requestJson('/api/codex/models');
+    if (request !== modelRequest || state.mode !== 'codex') return;
+    const previous = select.value;
+    codexModels = (Array.isArray(catalog.items) ? catalog.items : [])
+      .filter(item => typeof item.model === 'string' && Array.isArray(item.reasoning_efforts));
+    select.replaceChildren(new Option('Task / workstation default', ''),
+      ...codexModels.map(item => new Option(item.display_name || item.model, item.model)));
+    if (codexModels.some(item => item.model === previous)) select.value = previous;
+    select.disabled = !codexModels.length;
+    renderReasoningOptions();
+    byId('codex-model-status').textContent = codexModels.length
+      ? 'Model changes apply to the next turn.' : 'No Codex models are available.';
+  } catch (error) {
+    if (request !== modelRequest || state.mode !== 'codex') return;
+    codexModels = [];
+    select.replaceChildren(new Option('Task / workstation default', ''));
+    renderReasoningOptions();
+    byId('codex-model-status').textContent = error.message;
+  }
+}
 
 async function requestJson(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options });
@@ -452,6 +494,9 @@ function open(detail = {}) {
   if (bulkBar && !bulkBar.classList.contains('hidden')) byId('session-bulk-cancel')?.click();
   bulkBar?.classList.add('hidden');
   browser.hidden = false;
+  if (byId('codex-model-controls')) byId('codex-model-controls').hidden = state.mode !== 'codex';
+  if (state.mode === 'codex') loadModels();
+  else modelRequest += 1;
   clearSelection();
   if (byId('codex-browser-title')) byId('codex-browser-title').textContent = state.mode === 'external'
     ? state.targetLabel
@@ -467,6 +512,7 @@ function open(detail = {}) {
 }
 
 function close() {
+  modelRequest += 1;
   clearTranscript();
   if (byId('codex-workspace-browser')) byId('codex-workspace-browser').hidden = true;
   if (byId('session-list')) byId('session-list').hidden = false;
@@ -495,6 +541,8 @@ function getSelectedContext() {
   return {
     workspace: state.selectedProject,
     codexThreadId: state.selectedTask?.taskId || null,
+    codexModel: state.mode === 'codex' ? byId('codex-model')?.value || null : null,
+    codexReasoningEffort: state.mode === 'codex' ? byId('codex-reasoning')?.value || null : null,
   };
 }
 
@@ -756,6 +804,7 @@ async function handleExternalAuthorityDecision({ decisionId, choice, scope }) {
 function bind() {
   if (document.documentElement.dataset.codexWorkspaceBound === '1') return;
   document.documentElement.dataset.codexWorkspaceBound = '1';
+  byId('codex-model')?.addEventListener('change', renderReasoningOptions);
   byId('codex-project-list')?.addEventListener('click', event => {
     const button = event.target.closest('.codex-project-row[data-project-id]');
     if (button && !button.disabled) selectProject(button.dataset.projectId, button.dataset.projectName);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +25,56 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(bridge)
 
 THREAD_ID = "019f5022-a520-7de0-9208-018cd2d4d222"
+
+
+def test_codex_models_are_discovered_and_selection_is_validated(monkeypatch):
+    def rpc(method, params):
+        assert (method, params) == ("model/list", {"limit": 100, "includeHidden": False})
+        return {"data": [{
+            "model": "fixture-model", "displayName": "Fixture",
+            "supportedReasoningEfforts": [{"reasoningEffort": "medium"}, {"reasoningEffort": "high"}],
+            "defaultReasoningEffort": "medium", "private": "not exposed",
+        }]}
+
+    monkeypatch.setattr(bridge, "_app_server_call", rpc)
+    assert "private" not in bridge.catalog_models()["items"][0]
+    assert bridge._model_selection({}) == (None, None)
+    assert bridge._model_selection({"codex_model": "fixture-model"}) == ("fixture-model", "medium")
+    assert bridge._model_selection({"codex_model": "fixture-model", "codex_reasoning_effort": "high"}) == ("fixture-model", "high")
+    for payload in ({"codex_model": "unknown"}, {"codex_reasoning_effort": "high"},
+                    {"codex_model": "fixture-model", "codex_reasoning_effort": "ultra"}):
+        with pytest.raises(ValueError, match="invalid_codex_"):
+            bridge._model_selection(payload)
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_selected_model_reaches_codex_turn_without_changing_project_instructions(tmp_path, monkeypatch, resume):
+    process = SimpleNamespace(
+        stdin=io.StringIO(), stderr=io.StringIO(), poll=lambda: 0,
+        stdout=io.StringIO(json.dumps({"method": "turn/completed", "params": {}}) + "\n"),
+    )
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(bridge, "STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(bridge, "_validate_resume_thread", lambda *_args: None)
+    monkeypatch.setattr(bridge, "_read_until", lambda _task, request_id: {
+        1: {}, 2: {"thread": {"id": THREAD_ID}}, 3: {"turn": {"id": "turn-1"}},
+    }[request_id])
+    task = _bridge_task(tmp_path)
+    task.data.update(prompt="Read the project instructions.", permission_mode="read_only", approved=False,
+                     codex_model="fixture-model", codex_reasoning_effort="high",
+                     codex_thread_id=THREAD_ID if resume else None)
+
+    bridge._run_task(task)
+
+    sent = [json.loads(line) for line in process.stdin.getvalue().splitlines()]
+    opened = next(message for message in sent if message.get("id") == 2)
+    assert opened["method"] == ("thread/resume" if resume else "thread/start")
+    assert opened["params"]["cwd"] == str(tmp_path)
+    assert opened["params"]["developerInstructions"] == bridge.DEVELOPER_INSTRUCTIONS
+    turn = next(message for message in sent if message.get("id") == 3)
+    assert turn["params"]["model"] == "fixture-model"
+    assert turn["params"]["effort"] == "high"
+    assert turn["params"]["threadId"] == THREAD_ID
 
 
 def _bridge_task(root: Path) -> object:
@@ -283,12 +334,39 @@ async def test_direct_codex_turn_resumes_the_thread_selected_in_the_sidebar(brok
         workspace="other-project",
         presenter="Friday",
         codex_thread_id=selected_thread,
+        codex_model="fixture-model",
+        codex_reasoning_effort="high",
+        explicit_workspace=True,
     )
 
     assert action == "started"
     assert task["workspace"] == "other-project"
     assert task["codex_thread_id"] == selected_thread
     assert adapter.started[0]["codex_thread_id"] == selected_thread
+    assert adapter.started[0]["codex_model"] == "fixture-model"
+    assert adapter.started[0]["codex_reasoning_effort"] == "high"
+
+    with pytest.raises(RuntimeError, match="finish before changing"):
+        await jarvis_agent.direct_codex_turn(
+            "session-2", "Continue", owner="leo", workspace="other-project",
+            presenter="Friday", codex_model="another-model",
+        )
+
+
+@pytest.mark.asyncio
+async def test_explicit_friday_project_does_not_silently_follow_an_old_binding(broker_fixture):
+    adapter, _tasks_file = broker_fixture
+    first, _ = await jarvis_agent.direct_codex_turn(
+        "session-1", "Inspect", owner="leo", workspace="disposable", presenter="Friday",
+    )
+    adapter.remote_status[first["remote_task_id"]] = "completed"
+    await jarvis_agent.refresh_task(first["task_id"], owner="leo")
+    with pytest.raises(RuntimeError, match="conversation_project_mismatch"):
+        await jarvis_agent.direct_codex_turn(
+            "session-1", "Inspect", owner="leo", workspace="other-project",
+            presenter="Friday", explicit_workspace=True,
+        )
+    assert len(adapter.started) == 1
 
 
 @pytest.mark.asyncio

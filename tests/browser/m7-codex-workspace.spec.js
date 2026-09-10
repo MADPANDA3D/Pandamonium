@@ -64,6 +64,9 @@ async function mockShell(page, { sessions = [], catalog = projectCatalog, onChat
     if (url.pathname === '/api/default-chat') return route.fulfill({ json: {} });
     if (url.pathname === '/api/sessions') return route.fulfill({ json: sessions });
     if (url.pathname === '/api/model-endpoints') return route.fulfill({ json: [] });
+    if (url.pathname === '/api/codex/models') return route.fulfill({ json: {
+      items: [{ model: 'fixture-model', display_name: 'Fixture Codex', reasoning_efforts: ['medium', 'high'], default_reasoning_effort: 'medium' }],
+    } });
     if (url.pathname === '/api/codex/projects') return route.fulfill({ json: { items: catalog, next_cursor: null } });
     if (url.pathname === '/api/codex/projects/test-project/tasks') {
       return route.fulfill({ json: taskPage(url.searchParams.get('cursor')) });
@@ -295,6 +298,11 @@ test('selected Friday project and task flow through the normal composer', async 
   await expect(page.locator('#codex-workspace-browser')).toBeVisible();
   await page.getByText('Disposable Test Project', { exact: true }).click();
   await page.getByText('Fixture resume task', { exact: true }).click();
+  await page.locator('#codex-model').selectOption('fixture-model');
+  await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
+  await page.locator('#codex-reasoning').selectOption('high');
+  await page.locator('#codex-model-controls').scrollIntoViewIfNeeded();
+  await page.locator('#sidebar').screenshot({ path: test.info().outputPath('friday-model-selection.png') });
   await page.locator('#message:visible').fill('Inspect the selected project.');
   await page.locator('.send-btn:visible').click();
 
@@ -302,5 +310,9 @@ test('selected Friday project and task flow through the normal composer', async 
   expect(submitted).toContain('test-project');
   expect(submitted).toContain('worker_thread_id');
   expect(submitted).toContain(THREAD_ID);
+  expect(submitted).toContain('codex_model');
+  expect(submitted).toContain('fixture-model');
+  expect(submitted).toContain('codex_reasoning_effort');
+  expect(submitted).toContain('high');
   await expect(page.locator('.jarvis-task-activity[data-task-id="direct-friday-task"]')).toContainText('Friday');
 });

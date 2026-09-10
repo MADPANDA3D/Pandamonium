@@ -7,6 +7,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -349,6 +350,45 @@ def catalog_projects(*, query: str = "", cursor: str | None = None, limit: int =
         "items": items,
         "next_cursor": str(next_offset) if next_offset < len(projects) else None,
     }
+
+
+def catalog_models() -> dict:
+    result = _app_server_call("model/list", {"limit": 100, "includeHidden": False})
+    return {
+        "items": [
+            {
+                "model": item["model"],
+                "display_name": str(item.get("displayName") or item["model"])[:120],
+                "reasoning_efforts": [
+                    effort["reasoningEffort"]
+                    for effort in item.get("supportedReasoningEfforts") or []
+                    if isinstance(effort, dict) and isinstance(effort.get("reasoningEffort"), str)
+                ],
+                "default_reasoning_effort": item.get("defaultReasoningEffort"),
+            }
+            for item in result.get("data") or []
+            if isinstance(item, dict) and isinstance(item.get("model"), str)
+            and not item.get("hidden")
+        ],
+        "default_model": CODEX_MODEL or None,
+        "default_reasoning_effort": CODEX_REASONING_EFFORT or None,
+    }
+
+
+def _model_selection(payload: dict) -> tuple[str | None, str | None]:
+    model = payload.get("codex_model") or None
+    effort = payload.get("codex_reasoning_effort") or None
+    if model is None and effort is None:
+        return None, None
+    if not isinstance(model, str) or len(model) > 128:
+        raise ValueError("invalid_codex_model")
+    selected = next((item for item in catalog_models()["items"] if item["model"] == model), None)
+    if selected is None:
+        raise ValueError("invalid_codex_model")
+    effort = effort or selected["default_reasoning_effort"]
+    if effort is not None and effort not in selected["reasoning_efforts"]:
+        raise ValueError("invalid_codex_reasoning_effort")
+    return model, effort
 
 
 def _resume_after(task: "Task", after: int, last_event_id: str) -> int:
@@ -728,7 +768,12 @@ def _run_task(task: Task) -> None:
             f"Codex task {thread_id} opened in {task.data['cwd']}",
             {"codex_thread_id": thread_id, "workspace": task.data["workspace"], "cwd": task.data["cwd"]},
         )
-        task.send({"id": 3, "method": "turn/start", "params": {"threadId": thread_id, "input": [{"type": "text", "text": task.data["prompt"]}]}})
+        turn_params = {"threadId": thread_id, "input": [{"type": "text", "text": task.data["prompt"]}]}
+        if task.data.get("codex_model"):
+            turn_params["model"] = task.data["codex_model"]
+        if task.data.get("codex_reasoning_effort"):
+            turn_params["effort"] = task.data["codex_reasoning_effort"]
+        task.send({"id": 3, "method": "turn/start", "params": turn_params})
         turn = _read_until(task, 3)
         task.data["codex_turn_id"] = turn["turn"]["id"]
         task.save()
@@ -795,6 +840,7 @@ def create_task(payload: dict) -> Task:
     permission = str(payload.get("permission_mode") or "read_only")
     approved = payload.get("approved") is True
     _validate_task_permission(permission, approved)
+    codex_model, codex_reasoning_effort = _model_selection(payload)
     codex_thread_id = str(payload.get("codex_thread_id") or "").strip() or None
     if codex_thread_id:
         try:
@@ -817,6 +863,8 @@ def create_task(payload: dict) -> Task:
         "thread_title": thread_title,
         "request_id": request_id,
         "codex_thread_id": codex_thread_id,
+        "codex_model": codex_model,
+        "codex_reasoning_effort": codex_reasoning_effort,
         "status": "queued",
         "result": None,
         "error": None,
@@ -901,10 +949,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health":
+            available = shutil.which(CODEX_BIN) is not None
             _json(self, 200, {
-                "ok": True,
+                "ok": available,
+                "reason": None if available else "codex_binary_not_found",
                 "worker": WORKER_ID,
-                "app_server": True,
+                "app_server": available,
                 "protocol_version": BRIDGE_PROTOCOL_VERSION,
                 "features": {
                     "project_catalog": True,
@@ -921,6 +971,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
         parts = parsed.path.strip("/").split("/")
+        if parts == ["v1", "catalog", "models"]:
+            try:
+                _json(self, 200, catalog_models())
+            except Exception:
+                _json(self, 503, {"error": "codex_model_catalog_unavailable"})
+            return
         if parts == ["v1", "catalog", "projects"]:
             params = parse_qs(parsed.query)
             try:

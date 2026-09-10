@@ -217,6 +217,8 @@ class CodexBridgeAdapter:
             "codex_thread_id": task.get("codex_thread_id"),
             "thread_title": task.get("thread_title"),
             "request_id": task.get("request_id"),
+            "codex_model": task.get("codex_model"),
+            "codex_reasoning_effort": task.get("codex_reasoning_effort"),
         }
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(f"{self.url}/v1/tasks", json=payload, headers=self._headers())
@@ -234,6 +236,14 @@ class CodexBridgeAdapter:
                 f"{self.url}/v1/tasks/{task['remote_task_id']}",
                 headers=self._headers(),
             )
+        response.raise_for_status()
+        return response.json()
+
+    async def catalog_models(self) -> dict[str, Any]:
+        if not self.enabled:
+            raise WorkerUnavailable("codex_bridge_not_configured")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(f"{self.url}/v1/catalog/models", headers=self._headers())
         response.raise_for_status()
         return response.json()
 
@@ -336,6 +346,14 @@ class CodexBridgeAdapter:
             response.raise_for_status()
             payload = response.json()
             payload = payload if isinstance(payload, dict) else {}
+            if payload.get("ok") is False or payload.get("app_server") is False:
+                return {
+                    "state": "unreachable",
+                    "reason": "codex_binary_not_found" if payload.get("reason") == "codex_binary_not_found" else "codex_unavailable",
+                    "machine": self.machine,
+                    "protocol": "codex-bridge",
+                    "protocol_ready": False,
+                }
             features = payload.get("features") if isinstance(payload.get("features"), dict) else {}
             protocol_ready = (
                 payload.get("protocol_version") == CODEX_BRIDGE_PROTOCOL

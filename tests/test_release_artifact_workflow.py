@@ -27,16 +27,12 @@ def test_release_notes_cover_comparison_and_publish_only_after_verification(tmp_
     output = tmp_path / "notes.md"
     comparison = tmp_path / "comparison.json"
     source_notes = tmp_path / "source.md"
-    source_notes.write_text(
-        (ROOT / ".github/releases/v1.0.33.md").read_text().replace(
-            "# Pandamonium v1.0.33", "# Pandamonium HEAD", 1
-        )
-    )
+    source_notes.write_text((ROOT / ".github/releases/v1.0.33.md").read_text())
     subprocess.run([
         sys.executable,
         str(ROOT / "scripts/build_release_notes.py"),
         "--previous-tag", "v1.0.32",
-        "--tag", "HEAD",
+        "--tag", "v1.0.33",
         "--notes", str(source_notes),
         "--output", str(output),
         "--comparison-output", str(comparison),
@@ -45,7 +41,7 @@ def test_release_notes_cover_comparison_and_publish_only_after_verification(tmp_
     provenance = json.loads(comparison.read_text())
     assert provenance["linear_issues"] == ["MAD-842"]
     assert len(provenance["commits"]) == int(subprocess.check_output(
-        ["git", "rev-list", "--count", "v1.0.32..HEAD"], cwd=ROOT, text=True
+        ["git", "rev-list", "--count", "v1.0.32..v1.0.33"], cwd=ROOT, text=True
     ))
     assert all(commit["sha"] in output.read_text() for commit in provenance["commits"])
 
@@ -68,7 +64,7 @@ def test_release_notes_cover_comparison_and_publish_only_after_verification(tmp_
         sys.executable,
         str(ROOT / "scripts/build_release_notes.py"),
         "--previous-tag", "v1.0.32",
-        "--tag", "HEAD",
+        "--tag", "v1.0.33",
         "--notes", str(bad_notes),
         "--output", str(tmp_path / "bad-output.md"),
         "--comparison-output", str(tmp_path / "bad-comparison.json"),

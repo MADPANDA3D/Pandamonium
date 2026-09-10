@@ -47,6 +47,8 @@ class TaskCreate(BaseModel):
     codex_thread_id: str | None = None
     thread_title: str | None = Field(default=None, max_length=200)
     request_id: str | None = Field(default=None, max_length=200)
+    codex_model: str | None = Field(default=None, max_length=128)
+    codex_reasoning_effort: str | None = Field(default=None, max_length=32)
 
 
 class TaskSteer(BaseModel):
@@ -396,6 +398,13 @@ def setup_agent_task_routes(session_manager):
             raise HTTPException(503, "Codex project catalog is unavailable")
         return adapter
 
+    @router.get("/api/codex/models")
+    async def codex_models(_owner: str = Depends(require_user)):
+        try:
+            return await _codex_catalog_adapter().catalog_models()
+        except Exception:
+            raise HTTPException(503, "Codex model catalog is unavailable. Check the workstation bridge.")
+
     @router.get("/api/codex/projects")
     async def codex_projects(
         query: str = Query(default="", max_length=200),
@@ -478,6 +487,8 @@ def setup_agent_task_routes(session_manager):
                 action_arguments={
                     "prompt": payload.prompt,
                     "permission_mode": payload.permission_mode,
+                    **({"codex_model": payload.codex_model} if payload.codex_model else {}),
+                    **({"codex_reasoning_effort": payload.codex_reasoning_effort} if payload.codex_reasoning_effort else {}),
                 },
             )
             external_policy = trace.get("external_policy") or {}

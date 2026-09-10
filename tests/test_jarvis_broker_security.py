@@ -100,6 +100,7 @@ async def test_worker_health_redacts_transport_details(tmp_path, monkeypatch):
     ("payload", "expected_state"),
     [
         ({"app_server": True}, "incompatible"),
+        ({"ok": False, "app_server": False, "reason": "codex_binary_not_found"}, "unreachable"),
         ({
             "app_server": True,
             "protocol_version": "pandamonium.codex-bridge.v2",
@@ -143,6 +144,8 @@ async def test_codex_bridge_requires_the_catalog_and_task_protocol(
     assert health["protocol_ready"] is (expected_state == "connected")
     if expected_state == "incompatible":
         assert health["reason"] == "bridge_update_required"
+    if expected_state == "unreachable":
+        assert health["reason"] == "codex_binary_not_found"
 
 
 @pytest.mark.asyncio

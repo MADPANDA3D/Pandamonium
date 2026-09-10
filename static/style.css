@@ -3460,6 +3460,23 @@ body.bg-pattern-sparkles {
     .codex-workspace-browser {
       padding: 0 0 8px;
     }
+    .codex-model-controls {
+      display: grid;
+      gap: 5px;
+      padding: 8px;
+      font-size: 0.75em;
+    }
+    .codex-model-controls[hidden] { display: none; }
+    .codex-model-controls select {
+      width: 100%;
+      min-width: 0;
+      padding: 6px;
+      color: var(--fg);
+      background: var(--bg);
+      border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent);
+      border-radius: 4px;
+      font: inherit;
+    }
     .codex-browser-head {
       display: flex;
       align-items: center;
