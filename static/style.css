@@ -3620,6 +3620,7 @@ body.bg-pattern-sparkles {
     }
     .model-picker-list .model-switch-item .model-switch-ep {
       flex: 0 1 auto;
+      max-width: 55%;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
