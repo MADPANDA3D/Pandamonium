@@ -8,6 +8,9 @@ import os
 import queue
 import re
 import shutil
+import socket
+import stat
+import struct
 import subprocess
 import threading
 import time
@@ -365,8 +368,14 @@ def catalog_task_history(workspace: str, thread_id: str, *, cursor: str | None =
                 "role": "user" if kind == "userMessage" else "assistant", "text": text,
                 "attachments": attachments, "phase": item.get("phase"),
                 "timestamp": turn.get("startedAt"),
+                "turn_id": turn.get("id"),
+                "turn_status": turn.get("status"),
+                "duration_ms": turn.get("durationMs"),
             })
-    return {"task": task, "items": messages, "activity": _turn_activity(turns), "next_cursor": page.get("nextCursor")}
+    return {"task": task, "items": messages, "turns": [
+        {"id": turn.get("id"), "status": turn.get("status"), "duration_ms": turn.get("durationMs"),
+         "activity": _turn_activity([turn])} for turn in reversed(turns)
+    ], "activity": _turn_activity(turns), "next_cursor": page.get("nextCursor")}
 
 
 def catalog_task_details(workspace: str, thread_id: str) -> dict:
@@ -835,12 +844,159 @@ def _validate_resume_thread(task: Task, thread_id: str) -> None:
         raise RuntimeError("codex_thread_project_mismatch")
 
 
+def _desktop_request(method: str, params: dict, *, owner: str | None = None) -> dict | None:
+    """Use the desktop's versioned owner/follower IPC, never steal its writer."""
+    versions = {"initialize": 0, "thread-owner-discovery": 1, "thread-follower-start-turn": 2,
+                "thread-follower-steer-turn": 1, "thread-follower-interrupt-turn": 4}
+    path = Path(os.getenv("CODEX_HOME", str(Path.home() / ".codex"))) / "ipc/ipc.sock"
+    if not path.exists():
+        return None
+    for target in (path.parent, path):
+        info = target.lstat()
+        if info.st_uid != os.getuid() or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+            raise RuntimeError("codex_desktop_socket_not_private")
+    if not stat.S_ISSOCK(path.stat().st_mode):
+        raise RuntimeError("codex_desktop_socket_invalid")
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(15)
+        connection.connect(str(path))
+        if hasattr(socket, "SO_PEERCRED"):
+            _, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            if uid != os.getuid():
+                raise RuntimeError("codex_desktop_peer_mismatch")
+
+        def read_bytes(length: int) -> bytes:
+            data = bytearray()
+            while len(data) < length:
+                chunk = connection.recv(length - len(data))
+                if not chunk:
+                    raise RuntimeError("codex_desktop_disconnected")
+                data.extend(chunk)
+            return bytes(data)
+
+        def request(name: str, arguments: dict, client: str, target: str | None = None) -> dict:
+            request_id = str(uuid.uuid4())
+            envelope = {"type": "request", "requestId": request_id, "sourceClientId": client,
+                        "version": versions[name], "method": name, "params": arguments, "timeoutMs": 12000}
+            if target:
+                envelope["targetClientId"] = target
+            payload = json.dumps(envelope).encode()
+            connection.sendall(struct.pack("<I", len(payload)) + payload)
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                size = struct.unpack("<I", read_bytes(4))[0]
+                if not 0 < size <= 32_000_000:
+                    raise RuntimeError("codex_desktop_invalid_frame")
+                response = json.loads(read_bytes(size))
+                if response.get("type") != "response" or response.get("requestId") != request_id:
+                    continue
+                if response.get("resultType") == "success" and (response.get("method") != name or target and response.get("handledByClientId") != target):
+                    raise RuntimeError("codex_desktop_response_mismatch")
+                return response
+            raise TimeoutError("codex_desktop_outcome_unknown")
+
+        initialized = request("initialize", {"clientType": "pandamonium"}, "initializing-client")
+        client = (initialized.get("result") or {}).get("clientId")
+        if initialized.get("resultType") != "success" or not client:
+            raise RuntimeError("codex_desktop_initialize_failed")
+        result = request(method, params, client, owner)
+        if result.get("resultType") != "success":
+            if method == "thread-owner-discovery" and result.get("error") == "no-client-found":
+                return None
+            raise RuntimeError("codex_desktop_request_failed: " + str(result.get("error") or "unknown")[:300])
+        return result
+
+
+def _desktop_steer(task: Task, prompt: str) -> dict:
+    thread_id = task.data["codex_thread_id"]
+    turns = _app_server_call("thread/turns/list", {"threadId": thread_id, "limit": 1, "sortDirection": "desc", "itemsView": "full"}).get("data") or []
+    if not turns or turns[0].get("id") != task.data["codex_turn_id"] or turns[0].get("completedAt") is not None:
+        raise RuntimeError("codex_turn_not_active")
+    result = _desktop_request("thread-follower-steer-turn", {
+        "conversationId": thread_id, "input": [{"type": "text", "text": prompt[:50000], "text_elements": []}],
+        "clientUserMessageId": str(uuid.uuid4()), "attachments": [],
+        "restoreMessage": {"cwd": task.data["cwd"], "context": {"workspaceRoots": [task.data["cwd"]], "commentAttachments": []}},
+    }, owner=task.data["desktop_owner"])
+    if result is None:
+        raise RuntimeError("codex_desktop_owner_unavailable")
+    return {"ok": True, "task_id": task.task_id, "codex_thread_id": thread_id, "codex_turn_id": task.data["codex_turn_id"]}
+
+
+def _follow_desktop_turn(task: Task) -> None:
+    seen = set()
+    deadline = time.monotonic() + MAX_TASK_RUNTIME
+    while task.data.get("status") not in TERMINAL and time.monotonic() < deadline:
+        page = _app_server_call("thread/turns/list", {
+            "threadId": task.data["codex_thread_id"], "limit": 5, "sortDirection": "desc", "itemsView": "full",
+        })
+        turn = next((item for item in page.get("data") or [] if item.get("id") == task.data["codex_turn_id"]), None)
+        if turn:
+            items = turn.get("items") or []
+            final = next((item for item in reversed(items) if item.get("type") == "agentMessage" and item.get("phase") != "commentary"), None)
+            for index, item in enumerate(items):
+                key = item.get("id") or str(index)
+                if key in seen:
+                    continue
+                # Do not mark a streaming message complete before its native turn completes.
+                if item.get("status") == "inProgress" or item.get("type") == "agentMessage" and turn.get("completedAt") is None:
+                    continue
+                if item.get("type") == "agentMessage" and item.get("phase") != "commentary" and item is not final:
+                    continue
+                seen.add(key)
+                _handle_server_message(task, {"method": "item/completed", "params": {"item": item}})
+            if turn.get("completedAt") is not None:
+                if task.data.get("status") not in TERMINAL:
+                    task.event("error", "Codex stopped without a final answer. Check the task in Codex.")
+                return
+        time.sleep(1)
+    if task.data.get("status") not in TERMINAL:
+        task.event("error", "Friday stopped observing this turn. Check Codex before resending; the turn may still be running.")
+
+
+def _run_desktop_task(task: Task) -> bool:
+    thread_id = task.data.get("codex_thread_id")
+    if not thread_id:
+        return False
+    owner = _desktop_request("thread-owner-discovery", {"hostId": "local", "conversationId": thread_id})
+    if not owner:
+        return False
+    verified = catalog_task(task.data["workspace"], thread_id)
+    if Path(verified["cwd"]).resolve() != Path(task.data["source_root"]).resolve():
+        raise RuntimeError("codex_thread_project_mismatch")
+    task.data["desktop_owner"] = owner["handledByClientId"]
+    turns = _app_server_call("thread/turns/list", {"threadId": thread_id, "limit": 1, "sortDirection": "desc", "itemsView": "full"}).get("data") or []
+    if turns and turns[0].get("completedAt") is None:
+        # Model/effort selections apply to the next turn, never change a running turn.
+        task.data["codex_turn_id"] = turns[0]["id"]
+        _desktop_steer(task, task.data["prompt"])
+    else:
+        request = {"threadId": thread_id, "input": [{"type": "text", "text": task.data["prompt"], "text_elements": []}],
+                   "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": _runtime_workspace_roots(task)} if _approved_workspace_write(task) else {"type": "readOnly"},
+                   "approvalPolicy": "never"}
+        if task.data.get("codex_model"):
+            request["model"] = task.data["codex_model"]
+        if task.data.get("codex_reasoning_effort"):
+            request["effort"] = task.data["codex_reasoning_effort"]
+        result = _desktop_request("thread-follower-start-turn", {
+            "conversationId": thread_id, "turnStart": {"request": request, "context": {"inheritThreadSettings": True}},
+        }, owner=task.data["desktop_owner"])
+        if result is None:
+            raise RuntimeError("codex_desktop_owner_unavailable")
+        task.data["codex_turn_id"] = result["result"]["result"]["turn"]["id"]
+    task.data["status"] = "running"
+    task.save()
+    _follow_desktop_turn(task)
+    return True
+
+
 def _run_task(task: Task) -> None:
     try:
         _validate_task_permission(
             str(task.data.get("permission_mode") or "read_only"),
             task.data.get("approved") is True,
         )
+        if _run_desktop_task(task):
+            return
         task.proc = subprocess.Popen(
             _codex_command(),
             stdin=subprocess.PIPE,
@@ -939,6 +1095,9 @@ def _watch_task(task: Task) -> None:
     time.sleep(MAX_TASK_RUNTIME)
     if task.data.get("status") in TERMINAL:
         return
+    if task.data.get("desktop_owner"):
+        task.event("error", "Friday stopped observing this turn. Check Codex before resending; the turn may still be running.")
+        return
     try:
         if task.data.get("codex_thread_id") and task.data.get("codex_turn_id"):
             task.send({
@@ -1018,6 +1177,8 @@ def steer_task(task: Task, prompt: str, timeout: float = 10) -> dict:
     prompt = prompt.strip()
     if not prompt:
         raise ValueError("prompt_required")
+    if task.data.get("desktop_owner"):
+        return _desktop_steer(task, prompt)
     with task.lock:
         if task.data.get("status") != "running":
             raise RuntimeError("task_not_active")
@@ -1229,7 +1390,15 @@ class Handler(BaseHTTPRequestHandler):
             if action == "cancel":
                 if task.data.get("status") not in TERMINAL:
                     if task.data.get("codex_thread_id") and task.data.get("codex_turn_id"):
-                        task.send({"id": 90, "method": "turn/interrupt", "params": {"threadId": task.data["codex_thread_id"], "turnId": task.data["codex_turn_id"]}})
+                        if task.data.get("desktop_owner"):
+                            result = _desktop_request("thread-follower-interrupt-turn", {
+                                "conversationId": task.data["codex_thread_id"], "mode": "user-stop",
+                                "expectedTurnId": task.data["codex_turn_id"],
+                            }, owner=task.data["desktop_owner"])
+                            if result is None:
+                                raise RuntimeError("codex_desktop_owner_unavailable")
+                        else:
+                            task.send({"id": 90, "method": "turn/interrupt", "params": {"threadId": task.data["codex_thread_id"], "turnId": task.data["codex_turn_id"]}})
                     task.event("cancelled", "Codex task cancelled.")
                 _json(self, 200, task.data)
                 return

@@ -1684,6 +1684,7 @@ function renderWorkerResult(event, task, replaceMessage = null) {
     replaceMessage.remove();
     if (liveAssistantMessage === replaceMessage) liveAssistantMessage = null;
   }
+  if (task?.worker === 'pc-codex') result?.classList.add('native-final');
   positionWorkerResult(result, taskId);
   window.uiModule?.scrollHistory?.();
   return result;
@@ -1702,7 +1703,7 @@ function setActivityStatus(group, task, status) {
   }
   if (task.status === 'completed') group.open = false;
   else if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'blocked') group.open = true;
-  else if (!previous) group.open = true;
+  else if (!previous) group.open = task.worker !== 'pc-codex';
   updateActivitySummary(group, task);
   if (TERMINAL_TASK_STATES.has(task.status)) positionActivityGroup(group);
   if (!TERMINAL_TASK_STATES.has(task.status)) ensureActivityTicker();
@@ -1860,6 +1861,7 @@ function renderActivityEvent(event) {
   }
 
   if (event.type === 'tool_activity') {
+    if (task.worker === 'pc-codex' && event.metadata?.codex_thread_id && !event.metadata?.item_type) return group;
     ensureTaskDeepLink(group, event);
     const last = history.lastElementChild;
     const row = last?.dataset.eventType === 'tool_activity' ? last : document.createElement('div');
@@ -1922,6 +1924,7 @@ function positionWorkerSummary(summary, taskId, afterResult = false) {
 }
 
 function renderWorkerSummary(event, task) {
+  if (task?.worker === 'pc-codex') return null;
   const metadata = event.metadata || {};
   const text = String(event.spoken_text || '').trim();
   const isBrokerSummary = event.type === 'progress'

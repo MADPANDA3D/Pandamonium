@@ -337,17 +337,23 @@ test('selected Friday project and task flow through the normal composer', async 
   await expect(page.locator('#session-context-environment dd[title="/work/disposable"]')).toHaveCount(1);
   await page.locator('#codex-model').selectOption('fixture-model');
   await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
-  await page.locator('#conversation-effort').focus();
-  await page.locator('#conversation-effort').press('ArrowRight');
+  await page.locator('#codex-reasoning').selectOption('high');
   await expect(page.locator('#codex-reasoning')).toHaveValue('high');
   await expect(page.locator('#conversation-effort-value')).toHaveText('High');
   await page.screenshot({ path: test.info().outputPath('friday-model-selection.png'), animations: 'disabled' });
   await page.locator('#model-picker-btn').click();
-  await page.locator('#message:visible').fill('Inspect the selected project.');
+  await page.locator('#message:visible').fill('Inspect the selected project. ');
+  await page.locator('#message').evaluate(input => {
+    input.setSelectionRange(input.value.length, input.value.length);
+    const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'https://github.com/MADPANDA3D/myinstants-api');
+    input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  });
   await page.locator('.send-btn:visible').click();
 
   await expect.poll(() => submitted).toContain('worker_workspace');
   expect(submitted).toContain('test-project');
+  expect(submitted).toContain('https://github.com/MADPANDA3D/myinstants-api');
+  await expect(page.locator('.msg-ai[data-task-id="direct-friday-task"]:visible')).toHaveCount(0);
   expect(submitted).toContain('worker_thread_id');
   expect(submitted).toContain(THREAD_ID);
   expect(submitted).toContain('codex_model');
@@ -360,8 +366,7 @@ test('selected Friday project and task flow through the normal composer', async 
   if (!await page.locator('#sidebar').evaluate(sidebar => sidebar.classList.contains('hidden'))) await page.locator('#hamburger-btn').click();
   await page.locator('#model-picker-btn').click();
   await expect(page.locator('#session-context-panel')).toBeHidden();
-  await page.locator('#conversation-effort').focus();
-  await page.locator('#conversation-effort').press('Home');
+  await page.locator('#codex-reasoning').selectOption('medium');
   await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
   const bounds = await page.locator('#model-picker-menu').boundingBox();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
@@ -448,7 +453,7 @@ test('rounded workspace controls follow theme colors on desktop and phone', asyn
   await selectFriday(page);
   await page.locator('#model-picker-btn').click();
   await page.locator('#codex-model').selectOption('fixture-model');
-  await page.locator('#conversation-effort').press('ArrowRight');
+  await page.locator('#codex-reasoning').selectOption('high');
   await expect(page.locator('#conversation-effort-value')).toHaveText('High');
   await expect(page.locator('#conversation-effort')).toHaveCSS('--effort-fill', '100%');
   const themes = [
@@ -458,7 +463,7 @@ test('rounded workspace controls follow theme colors on desktop and phone', asyn
   for (const [index, colors] of themes.entries()) {
     await page.evaluate(async colors => (await import('/static/js/theme.js')).applyColors(colors), colors);
     await expect(page.locator('#model-picker-menu')).toHaveCSS('border-radius', '24px');
-    await expect(page.locator('#codex-model')).toHaveCSS('border-radius', '999px');
+    await expect(page.locator('#codex-model')).toHaveCSS('border-radius', '10px');
     const expected = await page.evaluate(colors => {
       const probe = document.createElement('span');
       document.body.append(probe);
@@ -516,7 +521,7 @@ test('native history opens recent messages, pages without duplicates, and restor
   await expect(page.locator('[data-native-message-id="answer"]')).toHaveCount(1);
   await page.locator('#model-picker-btn').click();
   await page.locator('#codex-model').selectOption('fixture-model');
-  await page.locator('#conversation-effort').press('End');
+  await page.locator('#codex-reasoning').selectOption('high');
   await page.locator('#model-picker-btn').click();
   await page.reload();
   await expect(page.locator('[data-native-message-id]')).toHaveCount(2);
@@ -592,4 +597,73 @@ test('native task navigation discards late history and reports bridge errors wit
   await page.locator('#sidebar-new-chat-btn').click();
   await expect(page.locator('[data-native-message-id]')).toHaveCount(0);
   expect(new URL(page.url()).searchParams.has('codex_task')).toBe(false);
+});
+
+
+test('native commentary collapses into one work disclosure while the final answer stays visible', async ({ page }) => {
+  await mockShell(page, { onHistory: route => route.fulfill({ json: {
+    task: { ...taskPage().items[0], cwd: '/work/disposable' },
+    items: [
+      { id: 't:user', turn_id: 't', role: 'user', text: 'Fix it.' },
+      { id: 't:progress', turn_id: 't', role: 'assistant', phase: 'commentary', text: 'Checking the files.' },
+      { id: 't:progress2', turn_id: 't', role: 'assistant', phase: 'commentary', text: 'Tests passed.' },
+      { id: 't:final', turn_id: 't', role: 'assistant', phase: 'final_answer', text: 'Fixed and verified.' },
+    ],
+    turns: [{ id: 't', status: 'completed', duration_ms: 68000, activity: { tools: ['Terminal'], outputs: ['src/fix.py'] } }],
+    activity: {}, next_cursor: null,
+  } }) });
+  await page.goto('/static/index.html'); await selectFriday(page);
+  await page.getByText('Disposable Test Project', { exact: true }).click();
+  await page.getByText('Fixture resume task', { exact: true }).click();
+  await expect(page.locator('.native-work')).toHaveCount(1);
+  await expect(page.locator('.native-work')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(page.locator('.native-final > .role')).toBeHidden();
+  await expect(page.getByText('Checking the files.', { exact: true })).toBeHidden();
+  await expect(page.locator('.native-final')).toHaveText(/Fixed and verified/);
+  await page.getByText('Worked for 1m 8s', { exact: true }).click();
+  await expect(page.getByText('Checking the files.', { exact: true })).toBeVisible();
+  await expect(page.locator('.native-work')).toContainText('Edited src/fix.py');
+  await page.getByText('Worked for 1m 8s', { exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath('native-conversation.png'), animations: 'disabled' });
+});
+
+test('composer pasted link chips retain exact URLs through edits, copy, undo and clearing', async ({ page }) => {
+  await mockShell(page);
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(document.querySelector('#message-editor')))).toBe(true);
+  await page.locator('#message').fill('Look at ');
+  await page.locator('#message').evaluate(input => {
+    input.setSelectionRange(input.value.length, input.value.length);
+    const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'https://github.com/MADPANDA3D/myinstants-api');
+    input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  });
+  await expect(page.locator('#message-editor .rich-link-label')).toHaveText('MADPANDA3D/myinstants-api');
+  await page.keyboard.insertText(' please');
+  await expect(page.locator('#message')).toHaveValue('Look at https://github.com/MADPANDA3D/myinstants-api please');
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('#message')).toHaveValue('Look at https://github.com/MADPANDA3D/myinstants-api');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(page.locator('#message')).toHaveValue('Look at https://github.com/MADPANDA3D/myinstants-api please');
+  const copied = await page.locator('#message-editor').evaluate(editor => {
+    const range = document.createRange(); range.selectNodeContents(editor);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    const clipboardData = new DataTransfer(); editor.dispatchEvent(new ClipboardEvent('copy', { clipboardData, bubbles: true, cancelable: true }));
+    return clipboardData.getData('text/plain');
+  });
+  expect(copied).toBe('Look at https://github.com/MADPANDA3D/myinstants-api please');
+  await expect(page.locator('#message-editor .rich-link-icon')).toHaveCSS('width', '16px');
+  await page.locator('#message-editor').evaluate(editor => { getSelection().collapse(editor, editor.childNodes.length); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const bounds = await page.locator('#message-editor').boundingBox();
+  expect(bounds.width).toBeLessThan(390);
+  await page.screenshot({ path: test.info().outputPath('composer-link-mobile.png'), animations: 'disabled' });
+  await page.locator('#message-editor').evaluate(editor => {
+    const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', '\n<img src=x onerror=alert(1)>\nnext');
+    editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  });
+  await expect(page.locator('#message')).toHaveValue('Look at https://github.com/MADPANDA3D/myinstants-api please\n<img src=x onerror=alert(1)>\nnext');
+  await expect(page.locator('#message-editor img')).toHaveCount(1);
+  await page.locator('#message').evaluate(input => { input.value = ''; input.dispatchEvent(new Event('input')); });
+  await expect(page.locator('#message')).toBeVisible();
+  await expect(page.locator('#message-editor')).toBeHidden();
 });

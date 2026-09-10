@@ -19,11 +19,13 @@ SPEC = importlib.util.spec_from_file_location("jarvis_codex_bridge", BRIDGE_PATH
 bridge = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(bridge)
+DESKTOP_REQUEST = bridge._desktop_request
 
 
 @pytest.fixture(autouse=True)
 def isolated_catalog(monkeypatch):
     monkeypatch.setattr(bridge, '_desktop_sidebar', lambda: {})
+    monkeypatch.setattr(bridge, '_desktop_request', lambda *_args, **_kwargs: None)
     def unavailable(*_args, **_kwargs):
         raise RuntimeError('fixture_app_server_unavailable')
     monkeypatch.setattr(bridge, '_app_server_call', unavailable)
@@ -932,3 +934,144 @@ def test_native_history_pages_full_conversation_without_private_tool_payloads(tm
     with pytest.raises(ValueError, match='project_mismatch'):
         bridge.catalog_task_history('project', 'selected', cursor='older')
     assert [method for method, _params in calls] == ['thread/read']
+
+
+def test_native_history_retains_turn_and_commentary_boundaries(tmp_path, monkeypatch):
+    monkeypatch.setattr(bridge, 'WORKSPACES', {'project': str(tmp_path)})
+    def rpc(method, params):
+        if method == 'thread/read':
+            return {'thread': {'id': 'selected', 'cwd': str(tmp_path)}}
+        return {'data': [{'id': 'turn-1', 'status': 'completed', 'durationMs': 68000, 'items': [
+            {'id': 'progress', 'type': 'agentMessage', 'phase': 'commentary', 'text': 'Checking the files.'},
+            {'id': 'final', 'type': 'agentMessage', 'phase': 'final_answer', 'text': 'Fixed.'},
+        ]}]}
+    monkeypatch.setattr(bridge, '_app_server_call', rpc)
+    result = bridge.catalog_task_history('project', 'selected')
+    assert [item['turn_id'] for item in result['items']] == ['turn-1', 'turn-1']
+    assert result['turns'][0]['duration_ms'] == 68000
+    assert [item['phase'] for item in result['items']] == ['commentary', 'final_answer']
+
+
+def test_desktop_owner_routes_same_thread_without_resuming_a_second_writer(tmp_path, monkeypatch):
+    task = _task(tmp_path)
+    task.data.update(codex_thread_id='selected', source_root=str(tmp_path), prompt='Continue', permission_mode='read_only', approved=False)
+    monkeypatch.setattr(bridge, 'catalog_task', lambda *_: {'task_id': 'selected', 'cwd': str(tmp_path)})
+    calls = []
+    def owner(method, params, **kwargs):
+        calls.append((method, params, kwargs))
+        if method == 'thread-owner-discovery':
+            return {'handledByClientId': 'owner', 'result': {}}
+        return {'result': {'result': {'turn': {'id': 'turn-2'}}}}
+    monkeypatch.setattr(bridge, '_desktop_request', owner)
+    monkeypatch.setattr(bridge, '_app_server_call', lambda *_: {'data': []})
+    monkeypatch.setattr(bridge, '_follow_desktop_turn', lambda *_: None)
+    assert bridge._run_desktop_task(task) is True
+    assert task.data['codex_turn_id'] == 'turn-2'
+    method, params, kwargs = calls[-1]
+    assert method == 'thread-follower-start-turn'
+    assert kwargs['owner'] == 'owner'
+    assert params['conversationId'] == params['turnStart']['request']['threadId'] == 'selected'
+    assert params['turnStart']['request']['sandboxPolicy'] == {'type': 'readOnly'}
+    assert params['turnStart']['request']['input'] == [{'type': 'text', 'text': 'Continue', 'text_elements': []}]
+
+
+def test_desktop_steering_keeps_turn_identity_and_supplies_native_text_elements(tmp_path, monkeypatch):
+    task = _task(tmp_path)
+    task.data.update(codex_thread_id='selected', codex_turn_id='active', desktop_owner='owner', cwd=str(tmp_path))
+    turn = {'id': 'active', 'status': 'completed', 'completedAt': None}
+    monkeypatch.setattr(bridge, '_app_server_call', lambda *_: {'data': [turn]})
+    calls = []
+    monkeypatch.setattr(bridge, '_desktop_request', lambda *args, **kwargs: calls.append((args, kwargs)) or {'resultType': 'success'})
+    assert bridge._desktop_steer(task, 'Continue')['codex_turn_id'] == 'active'
+    assert calls[0][0][1]['input'] == [{'type': 'text', 'text': 'Continue', 'text_elements': []}]
+    assert calls[0][1]['owner'] == 'owner'
+    turn['completedAt'] = 123
+    with pytest.raises(RuntimeError, match='not_active'):
+        bridge._desktop_steer(task, 'Do not replay')
+    assert len(calls) == 1
+
+
+def test_desktop_observer_waits_for_native_completion_timestamp(tmp_path, monkeypatch):
+    task = _task(tmp_path)
+    task.data.update(codex_thread_id='selected', codex_turn_id='active', status='running')
+    turn = {'id': 'active', 'status': 'completed', 'completedAt': None, 'items': [
+        {'id': 'earlier', 'type': 'agentMessage', 'phase': 'final_answer', 'text': 'Superseded answer'},
+        {'id': 'answer', 'type': 'agentMessage', 'phase': 'final_answer', 'text': 'Partial'}]}
+    monkeypatch.setattr(bridge, '_app_server_call', lambda *_: {'data': [turn]})
+    def finish(_):
+        assert task.data['status'] == 'running'
+        turn['completedAt'] = 123
+        turn['items'][-1]['text'] = 'Complete answer'
+    monkeypatch.setattr(bridge.time, 'sleep', finish)
+    bridge._follow_desktop_turn(task)
+    assert task.data['result'] == 'Complete answer'
+
+
+@pytest.mark.parametrize('reply,expected', [
+    ({'resultType': 'success', 'method': 'thread-follower-steer-turn', 'handledByClientId': 'owner', 'result': {}}, None),
+    ({'resultType': 'error', 'error': 'turn-not-active'}, 'turn-not-active'),
+    ({'resultType': 'success', 'method': 'thread-follower-steer-turn', 'handledByClientId': 'other'}, 'response_mismatch'),
+])
+def test_desktop_ipc_correlates_owner_and_errors_without_replay(tmp_path, monkeypatch, reply, expected):
+    import socket
+    import struct
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path))
+    directory = tmp_path / 'ipc'
+    directory.mkdir(mode=0o700)
+    received = []
+    failures = []
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind(str(directory / 'ipc.sock'))
+        server.listen(1)
+        server.settimeout(3)
+        def respond():
+            try:
+                with server.accept()[0] as connection:
+                    connection.settimeout(3)
+                    def read(size):
+                        data = b''
+                        while len(data) < size:
+                            part = connection.recv(size - len(data))
+                            if not part: raise RuntimeError('unexpected_disconnect')
+                            data += part
+                        return data
+                    for response in [dict(resultType='success', method='initialize', result={'clientId': 'client'}), reply]:
+                        request = json.loads(read(struct.unpack('<I', read(4))[0]))
+                        received.append(request)
+                        payload = json.dumps(dict(response, type='response', requestId=request['requestId'])).encode()
+                        connection.sendall(struct.pack('<I', len(payload)) + payload)
+            except Exception as error:
+                failures.append(error)
+        worker = threading.Thread(target=respond)
+        worker.start()
+        if expected:
+            with pytest.raises(RuntimeError, match=expected):
+                DESKTOP_REQUEST('thread-follower-steer-turn', {'conversationId': 'selected'}, owner='owner')
+        else:
+            assert DESKTOP_REQUEST('thread-follower-steer-turn', {'conversationId': 'selected'}, owner='owner')['resultType'] == 'success'
+        worker.join(4)
+    assert not failures and not worker.is_alive()
+    assert [item['version'] for item in received] == [0, 1]
+    assert received[-1]['targetClientId'] == 'owner'
+    assert received[-1]['sourceClientId'] == 'client'
+
+
+def test_desktop_ipc_missing_and_unsafe_socket_fail_before_sending(tmp_path, monkeypatch):
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path))
+    assert DESKTOP_REQUEST('thread-owner-discovery', {}) is None
+    directory = tmp_path / 'ipc'
+    directory.mkdir()
+    (directory / 'ipc.sock').write_text('not a socket')
+    directory.chmod(0o777)
+    with pytest.raises(RuntimeError, match='not_private'):
+        DESKTOP_REQUEST('thread-owner-discovery', {})
+
+
+def test_desktop_watchdog_reports_observation_timeout_without_stopping_owner(tmp_path, monkeypatch):
+    task = _task(tmp_path)
+    task.data['desktop_owner'] = 'owner'
+    monkeypatch.setattr(bridge.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(task, 'send', lambda _: pytest.fail('must not interrupt desktop owner'))
+    bridge._watch_task(task)
+    assert task.data['status'] == 'failed'
+    assert 'may still be running' in task.data['error']

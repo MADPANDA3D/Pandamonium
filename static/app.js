@@ -3,6 +3,7 @@
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 import Storage from './js/storage.js';
+import { initComposerLinks } from './js/composerLinks.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -52,6 +53,8 @@ import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 import marketplaceModule from './js/marketplace.js';
 import updaterModule from './js/updater.js';
+
+initComposerLinks();
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -3520,8 +3523,8 @@ function initializeEventListeners() {
     });
     textarea.addEventListener('input', (e) => {
       const currentValue = textarea.value || '';
-      const insertedLineBreak = _isLineBreakInputEvent(e)
-        || _countLineBreaks(currentValue) > _countLineBreaks(previousTextareaValue);
+      const insertedLineBreak = e.inputType !== 'insertFromPaste' && (_isLineBreakInputEvent(e)
+        || _countLineBreaks(currentValue) > _countLineBreaks(previousTextareaValue));
       if (insertedLineBreak && _shouldQueueFromMobileLineBreak(textarea)) {
         textarea.value = currentValue.replace(/\n+$/g, '');
         previousTextareaValue = textarea.value || '';

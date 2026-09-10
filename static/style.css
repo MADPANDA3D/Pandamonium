@@ -8708,13 +8708,13 @@ button.hamburger {
 }
 
 /* Links */
-.msg a {
+:is(.msg, #message-editor) a {
   color: var(--hl-function, #5b8def);
   text-decoration: none;
   border-bottom: 1px solid rgba(91, 141, 239, 0.3);
   transition: border-color 0.15s;
 }
-.msg a:hover {
+:is(.msg, #message-editor) a:hover {
   border-bottom-color: var(--hl-function, #5b8def);
 }
 .msg a.is-loading {
@@ -8735,7 +8735,7 @@ button.hamburger {
   border: 0 !important;
 }
 
-.msg a.rich-link {
+:is(.msg, #message-editor) a.rich-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -8748,18 +8748,18 @@ button.hamburger {
   vertical-align: middle;
   text-decoration: none;
 }
-.msg a.rich-link:hover,
-.msg a.rich-link:focus-visible {
+:is(.msg, #message-editor) a.rich-link:hover,
+:is(.msg, #message-editor) a.rich-link:focus-visible {
   border-color: currentColor;
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
-.msg .rich-link-icon {
+:is(.msg, #message-editor) .rich-link-icon {
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
   border-radius: 4px;
 }
-.msg .rich-link-label {
+:is(.msg, #message-editor) .rich-link-label {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -43228,3 +43228,21 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 #session-list .item-drag-handle, #session-list .folder-drag-handle { display: inline-flex !important; flex-shrink: 0; width: 18px; min-height: 24px; align-items: center; justify-content: center; padding: 0; font-size: 13px; letter-spacing: normal; cursor: grab; opacity: .55; }
 #session-list .folder-icon { display: inline-flex; flex-shrink: 0; }
 #session-list .folder-drag-handle:focus-visible { outline: 2px solid var(--red); border-radius: 4px; }
+
+/* Native worker turns share one compact work disclosure and final answer. */
+.native-work, .native-work[open] { background: transparent; border: 0; border-radius: 0; margin: 8px 0; padding: 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--fg) 14%, transparent); color: var(--fg); }
+.native-work > summary, .native-work > summary:hover { background: transparent; border: 0; padding: 0; cursor: pointer; color: color-mix(in srgb, var(--fg) 60%, transparent); font-size: 13px; }
+.native-work > p { font-size: 12px; overflow-wrap: anywhere; }
+.native-work .msg, .msg.native-final { border: 0; background: transparent; box-shadow: none; }
+.native-work .msg { margin: 8px 0; padding: 0; width: 100%; max-width: 100%; }
+.native-work .msg .role, .native-work .msg .msg-actions, .msg.native-final > .role { display: none; }
+.msg[hidden] { display: none !important; }
+.conversation-effort-card.is-native { padding: 10px 0 0; border: 0; border-top: 1px solid color-mix(in srgb, var(--fg) 14%, transparent); border-radius: 0; background: transparent; }
+.conversation-effort-card.is-native > :not(#codex-model-controls) { display: none; }
+.conversation-effort-card.is-native #codex-model-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, .65fr); gap: 8px; }
+#conversation-effort-card.is-native select { width: 100%; min-width: 0; padding: 7px 10px; font: inherit; font-size: 12px; border-radius: 10px; text-align: left; background: var(--panel); color: var(--fg); border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent); }
+
+#message[hidden], #message-editor[hidden] { display: none !important; }
+#message-editor { flex: 1; width: 100%; min-height: 34px; max-height: 200px; padding: 0 var(--model-picker-clearance) 0 0; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.4; color: var(--fg); outline: none; }
+#message-editor .composer-link { display: inline; }
+#message-editor .rich-link { vertical-align: baseline; }

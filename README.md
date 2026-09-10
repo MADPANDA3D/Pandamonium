@@ -73,9 +73,14 @@ following maintained platform capabilities.
   endpoints; installed Codex/Claude capabilities come from configured bridges,
   not from detecting arbitrary bare CLI installations.
 - Selecting a native Codex task loads its recent conversation. **Load earlier messages**
-  pages older turns; continuing uses that same native task and the selected model/effort.
+  pages older turns. Commentary and tool activity collapse under **Worked**; the
+  final answer stays visible. Desktop-owned tasks continue through their existing
+  owner; active turns accept steering. Compact model/effort choices apply to the next turn.
   Task selection survives reload. Update the selected [Codex bridge](services/pc-codex-bridge/README.md)
   together with Pandamonium for native history support.
+- Pasted web links appear as the same compact link chips in the composer and sent
+  messages. Copying/submitting preserves the full URL; double-click a chip to edit
+  its URL. Plain-text paste, multiline drafts, and native undo/redo stay available.
 - **Details** keeps essential environment rows, three source previews, and short
   tool/output previews compact. **View all** opens a themed sliding panel and
   progressively reads earlier activity. Full paths remain available there; attachment
