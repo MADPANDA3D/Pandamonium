@@ -80,7 +80,7 @@ function _richLinkPresentation(text, safeUrl) {
   return { ...meta, display };
 }
 
-function linkHtml(text, url) {
+export function linkHtml(text, url) {
   const safeUrl = safeLinkUrl(url);
   const safeText = escapeHtml(text);
   if (!safeUrl) return safeText;

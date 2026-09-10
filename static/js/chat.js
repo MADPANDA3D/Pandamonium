@@ -1913,6 +1913,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                 continue;
               }
               if (json.delta) {
+                if (holder) holder.hidden = false;
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 // Text arrived after tools — connect thread line to this bubble
@@ -2357,6 +2358,7 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
                 if (holder && json.task_id) {
                   holder.dataset.taskId = String(json.task_id);
                   holder.dataset.worker = String(json.worker || '');
+                  if (!accumulated && json.worker === 'pc-codex') holder.hidden = true;
                 }
                 window.jarvisVoice?.trackWorkerTask?.(json);
                 continue;

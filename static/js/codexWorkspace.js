@@ -516,6 +516,8 @@ async function loadNativeTranscript({ earlier = false } = {}) {
     if (page.task?.task_id !== task.taskId || page.task?.project_id !== task.projectId || !Array.isArray(page.items)) throw new Error('The bridge returned history for an unverified task.');
     if (page.next_cursor && paging.cursors.has(page.next_cursor)) throw new Error('History pagination stopped making progress.');
     const fragment = document.createDocumentFragment();
+    const work = new Map();
+    const turns = new Map((page.turns || []).map(turn => [turn.id, turn]));
     for (const item of Array.isArray(page.items) ? page.items : []) {
       if (!item.id || paging.ids.has(item.id)) continue;
       paging.ids.add(item.id);
@@ -530,7 +532,27 @@ async function loadNativeTranscript({ earlier = false } = {}) {
         attachment.title = path;
         node.appendChild(attachment);
       }
-      fragment.appendChild(node);
+      const turnId = item.turn_id || item.id.split(':')[0];
+      if (item.role === 'assistant' && (item.turn_id || item.phase === 'commentary')) {
+        let group = work.get(turnId);
+        if (!group) {
+          const turn = turns.get(turnId) || {};
+          group = document.createElement('details');
+          group.className = 'native-work';
+          group.dataset.externalAgentTranscript = 'true';
+          const summary = document.createElement('summary');
+          const seconds = Math.max(0, Math.round((turn.duration_ms || item.duration_ms || 0) / 1000));
+          summary.textContent = turn.status === 'inProgress' ? 'Working…' : seconds ? `Worked for ${Math.floor(seconds / 60)}m ${seconds % 60}s` : 'Worked';
+          group.appendChild(summary);
+          for (const text of [...(turn.activity?.tools || []), ...(turn.activity?.outputs || []).map(path => `Edited ${path}`)]) {
+            const activity = document.createElement('p'); activity.textContent = text; group.appendChild(activity);
+          }
+          fragment.appendChild(group);
+          work.set(turnId, group);
+        }
+        if (item.phase === 'commentary') group.appendChild(node);
+        else { node.classList.add('native-final'); fragment.appendChild(node); }
+      } else fragment.appendChild(node);
     }
     if (earlier) box.insertBefore(fragment, anchor);
     else box.appendChild(fragment);

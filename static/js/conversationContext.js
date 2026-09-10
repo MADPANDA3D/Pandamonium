@@ -24,7 +24,9 @@ function renderEffort() {
   const native = target() === 'pc-codex';
   const card = byId('conversation-effort-card');
   card.hidden = !native && target() !== 'jarvis';
+  card.classList.toggle('is-native', native);
   byId('codex-model-controls').hidden = !native;
+  byId('codex-reasoning').hidden = !native;
   const range = byId('conversation-effort');
   const options = native ? [...byId('codex-reasoning').options].map(option => option.value).filter(Boolean) : levels;
   const chosen = native ? byId('codex-reasoning').value : agentEffort;
