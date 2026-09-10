@@ -1226,6 +1226,8 @@ import { emitVoiceLifecycle } from './voiceLifecycle.js';
         const codexContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
         if (codexContext?.workspace) fd.append('worker_workspace', codexContext.workspace);
         if (codexContext?.codexThreadId) fd.append('worker_thread_id', codexContext.codexThreadId);
+        if (codexContext?.codexModel) fd.append('codex_model', codexContext.codexModel);
+        if (codexContext?.codexReasoningEffort) fd.append('codex_reasoning_effort', codexContext.codexReasoningEffort);
       }
       if (_textExtensionBridge) {
         fd.append('extension_bridge_session', _textExtensionBridge.sessionId);

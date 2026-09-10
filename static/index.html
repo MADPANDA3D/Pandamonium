@@ -793,6 +793,13 @@
         </div>
         <div id="session-list" role="listbox"></div>
         <section id="codex-workspace-browser" class="codex-workspace-browser" aria-label="Codex projects and tasks" hidden>
+          <div id="codex-model-controls" class="codex-model-controls" hidden>
+            <label for="codex-model">Codex model</label>
+            <select id="codex-model" disabled><option value="">Loading models…</option></select>
+            <label for="codex-reasoning">Reasoning</label>
+            <select id="codex-reasoning" disabled><option value="">Task default</option></select>
+            <span id="codex-model-status" role="status"></span>
+          </div>
           <div class="codex-browser-head">
             <strong id="codex-browser-title">Projects</strong>
           </div>

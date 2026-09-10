@@ -811,10 +811,16 @@ async def direct_codex_turn(
     workspace: str,
     presenter: str,
     codex_thread_id: str | None = None,
+    codex_model: str | None = None,
+    codex_reasoning_effort: str | None = None,
+    explicit_workspace: bool = False,
 ) -> tuple[dict, str]:
     """Start or steer the one Codex task bound to this conversation."""
     active = find_active_task(session_id, "pc-codex", None, owner)
     if active:
+        _check_active_codex_selection(active, codex_model, codex_reasoning_effort)
+        if explicit_workspace and workspace != active.get("workspace"):
+            raise RuntimeError("conversation_project_mismatch")
         if codex_thread_id and active.get("codex_thread_id") not in {None, codex_thread_id}:
             raise RuntimeError("conversation_task_conflict")
         _bind_task_presenter(active, presenter)
@@ -826,14 +832,19 @@ async def direct_codex_turn(
             owner=owner,
         ), "steered"
     binding = get_worker_binding(owner, session_id, "pc-codex", workspace)
-    workspace = str(binding.get("workspace") or workspace)
+    if not explicit_workspace and not codex_thread_id:
+        workspace = str(binding.get("workspace") or workspace)
     task = await start_task(
         "pc-codex",
         session_id,
         workspace,
         prompt,
         owner=owner,
-        codex_thread_id=codex_thread_id or binding.get("codex_thread_id"),
+        codex_thread_id=codex_thread_id or (
+            binding.get("codex_thread_id") if binding.get("workspace") == workspace else None
+        ),
+        codex_model=codex_model,
+        codex_reasoning_effort=codex_reasoning_effort,
         presenter=presenter,
     )
     if task.get("reused"):
@@ -845,6 +856,13 @@ async def direct_codex_turn(
             owner=owner,
         ), "steered"
     return task, "blocked" if task.get("status") == "blocked" else "started"
+
+
+def _check_active_codex_selection(task: dict, model: str | None, effort: str | None) -> None:
+    if (model and model != task.get("codex_model")) or (
+        effort and effort != task.get("codex_reasoning_effort")
+    ):
+        raise RuntimeError("Wait for the current Codex task to finish before changing its model or reasoning.")
 
 
 async def start_task(
@@ -866,6 +884,8 @@ async def start_task(
     external_connection_version: str | None = None,
     presenter: str | None = None,
     persist_result: bool = True,
+    codex_model: str | None = None,
+    codex_reasoning_effort: str | None = None,
 ) -> dict:
     owner = str(owner or "").strip()
     if not owner:
@@ -904,6 +924,7 @@ async def start_task(
     async with _start_lock(owner, session_id, worker):
         active = find_active_task(session_id, worker, None, owner)
         if active:
+            _check_active_codex_selection(active, codex_model, codex_reasoning_effort)
             incompatible = (
                 active.get("workspace") != workspace
                 or (
@@ -938,6 +959,8 @@ async def start_task(
             "permission_mode": permission_mode,
             "approved": approved,
             "codex_thread_id": codex_thread_id,
+            "codex_model": codex_model,
+            "codex_reasoning_effort": codex_reasoning_effort,
             "thread_title": " ".join(str(thread_title or "").split())[:200] or None,
             "read_all_requested": asks_read_all(prompt),
             "request_id": str(request_id or "").strip()[:200] or None,

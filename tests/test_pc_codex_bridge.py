@@ -262,6 +262,15 @@ def test_catalog_http_endpoint_requires_auth_and_returns_safe_page(tmp_path, mon
         }
         connection.close()
 
+        monkeypatch.setattr(bridge, "CODEX_BIN", str(tmp_path / "missing-codex"))
+        connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+        connection.request("GET", "/health")
+        health = json.loads(connection.getresponse().read())
+        assert health["ok"] is False
+        assert health["app_server"] is False
+        assert health["reason"] == "codex_binary_not_found"
+        connection.close()
+
         connection = http.client.HTTPConnection(*server.server_address, timeout=2)
         connection.request("GET", "/v1/catalog/projects")
         assert connection.getresponse().status == 401

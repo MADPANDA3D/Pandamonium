@@ -30,6 +30,30 @@ Mount the same token file into the Pandamonium process and set the matching `PAN
 
 The bridge does not select or prewarm a model. `PANDAMONIUM_CODEX_MODEL` and `PANDAMONIUM_CODEX_REASONING_EFFORT` are optional overrides; otherwise Codex uses its current defaults.
 
+## Private Friday workstation catalog
+
+The existing private `services/pc-codex-bridge/jarvis_codex_bridge.py` integration
+uses Codex App Server on the workstation. Set `JARVIS_CODEX_BIN` to the absolute
+CLI path if the service cannot find a user-local installation. Its health result
+reports `codex_binary_not_found` when that executable is unavailable.
+
+Friday's sidebar offers the workstation's available Codex models and supported
+reasoning efforts. An explicit selection applies to the next new or resumed
+turn; an active turn must finish before its model can change. Leaving the
+selection at the task/workstation default preserves the existing behavior.
+Both the web application and workstation bridge must be updated for the model
+catalog and selection controls to work.
+
+Projects remain an explicit workstation allowlist (`JARVIS_CODEX_WORKSPACES_JSON`),
+with the same aliases in the web application's worker workspace configuration.
+Task history comes from Codex's `thread/list` and `thread/resume` APIs, without
+copying or remotely mounting Codex's databases. The bridge starts in the selected
+project directory and uses its configured `CODEX_HOME`; Codex's normal global
+and project `AGENTS.md` loading still applies. A Whoami bootloader installed in
+those instructions remains in control. Selecting a different project does not
+silently move an already-bound conversation; use a new conversation or select
+an existing task in that project.
+
 ## Hermes compatibility gate
 
 Hermes is not considered ready merely because its health endpoint responds. `/v1/capabilities` must report:
