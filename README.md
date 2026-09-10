@@ -79,6 +79,9 @@ following maintained platform capabilities.
   collapsed after completion, expands in the page flow without a nested scroll
   region, and remains keyboard-accessible after reopening a saved conversation.
 
+Workspace controls: [desktop preview](docs/screenshots/workspace-context-desktop.png)
+and [mobile preview](docs/screenshots/workspace-context-mobile.png).
+
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
 
 ![Assistant turn disclosure on mobile](docs/images/chat-turn-disclosure-mobile.png)
