@@ -301,6 +301,7 @@ test('selected Friday project and task flow through the normal composer', async 
   await page.locator('#codex-model').selectOption('fixture-model');
   await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
   await page.locator('#codex-reasoning').selectOption('high');
+  await page.locator('#codex-model-controls').scrollIntoViewIfNeeded();
   await page.locator('#sidebar').screenshot({ path: test.info().outputPath('friday-model-selection.png') });
   await page.locator('#message:visible').fill('Inspect the selected project.');
   await page.locator('.send-btn:visible').click();
