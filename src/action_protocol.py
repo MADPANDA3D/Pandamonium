@@ -224,6 +224,25 @@ def _validate_value(value: Any, schema: Mapping[str, Any], path: str) -> str | N
     return None
 
 
+def _drop_optional_nulls(value: Any, schema: Mapping[str, Any]) -> None:
+    """Treat a model-emitted null like omission when the schema requires a value."""
+    if not isinstance(value, dict):
+        return
+    required = set(schema.get("required") or ())
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return
+    for key in list(value):
+        child = properties.get(key)
+        if not isinstance(child, Mapping):
+            continue
+        expected = child.get("type")
+        if value[key] is None and key not in required and expected and not _matches_type(None, expected):
+            value.pop(key)
+        elif isinstance(value[key], dict):
+            _drop_optional_nulls(value[key], child)
+
+
 def validate_action_call(call: Mapping[str, Any], catalog: Mapping[str, Any]) -> dict[str, str] | None:
     """Fail closed for absent, conflicting, malformed, or oversized calls."""
     name = str(call.get("name") or "")
@@ -242,6 +261,11 @@ def validate_action_call(call: Mapping[str, Any], catalog: Mapping[str, Any]) ->
     if isinstance(function, Mapping):
         parameters = function.get("parameters")
     if isinstance(parameters, Mapping):
+        # MCP models commonly serialize absent optional fields as null. Keep
+        # this tolerance at the external MCP boundary so built-in tool
+        # validation remains strict and unchanged.
+        if call.get("target") == "mcp":
+            _drop_optional_nulls(arguments, parameters)
         error = _validate_value(arguments, parameters, "arguments")
         if error:
             return {"category": "schema_validation", "detail": error}
@@ -263,6 +287,33 @@ def denied_action_result(
         "finished_at": moment,
         "retry_safe": False,
         "error": {"category": str(error.get("category") or "denied"), "detail": str(error.get("detail") or "Action denied")},
+    }
+
+
+def invalid_action_result(
+    call: Mapping[str, Any],
+    error: Mapping[str, Any],
+    *,
+    retry_safe: bool,
+    at: str | None = None,
+) -> dict[str, Any]:
+    """Record malformed model arguments as a failure, never a policy denial."""
+    moment = at or utc_now()
+    detail = str(error.get("detail") or "Invalid action arguments")[:MAX_SUMMARY_CHARS]
+    return {
+        "request_id": call.get("request_id"),
+        "call_id": call.get("call_id"),
+        "status": "failed",
+        "summary": detail,
+        "structured": {},
+        "evidence": {"kind": "input_validation", "verified": True},
+        "started_at": moment,
+        "finished_at": moment,
+        "retry_safe": retry_safe,
+        "error": {
+            "category": str(error.get("category") or "schema_validation"),
+            "detail": detail,
+        },
     }
 
 

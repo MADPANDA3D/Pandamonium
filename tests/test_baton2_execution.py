@@ -347,17 +347,98 @@ async def test_readonly_portal_health_call_reaches_executor_instead_of_unclassif
 
 
 @pytest.mark.asyncio
+async def test_optional_null_mcp_arguments_are_omitted_before_execution(monkeypatch, tmp_path):
+    manager = McpManager()
+    manager._connections["portal-fixture"] = {
+        "name": "MAD MCP Portal",
+        "status": "connected",
+    }
+    manager._tools["portal-fixture"] = [{
+        "name": "portal.find_tools",
+        "description": "Find configured MCP tools.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "service": {"type": "string"},
+                "category": {"type": "string"},
+                "risk": {"type": "string"},
+                "configuredOnly": {"type": "boolean"},
+                "includeLegacy": {"type": "boolean"},
+                "limit": {"type": "integer"},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True},
+    }]
+    provider_calls = 0
+    executed_arguments = []
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 1:
+            call = {
+                "id": "portal-find",
+                "name": "mcp__portal-fixture__portal.find_tools",
+                "arguments": json.dumps({
+                    "query": "",
+                    "service": None,
+                    "category": None,
+                    "risk": None,
+                    "configuredOnly": True,
+                    "includeLegacy": False,
+                    "limit": 10,
+                }),
+            }
+            yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
+        else:
+            yield 'data: {"delta":"The configured MCP tools are available."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    async def fake_execute(block, **_kwargs):
+        executed_arguments.append(json.loads(block.content))
+        return "portal", {"output": "configured tools", "exit_code": 0}
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda _owner: set())
+    monkeypatch.setattr(agent_loop, "authority_store", AuthorityStore(tmp_path / "authority.json"))
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "execute_tool_block", fake_execute)
+
+    events = await _events(
+        messages=[{"role": "user", "content": "What do you see in the MAD MCP Portal?"}],
+        relevant_tools={"mcp__portal-fixture__portal.find_tools"},
+        session_id="session-1",
+        owner="leo",
+        max_rounds=2,
+    )
+
+    assert provider_calls == 2
+    assert executed_arguments == [{
+        "query": "",
+        "configuredOnly": True,
+        "includeLegacy": False,
+        "limit": 10,
+    }]
+    output = next(event for event in events if event.get("type") == "tool_output")
+    assert output["status"] == "succeeded"
+    assert not any("INVALID ARGUMENTS" in event.get("tool", "") for event in events)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("call_name", "arguments", "executor_error", "expected_category"),
+    ("call_name", "arguments", "executor_error", "expected_category", "expected_calls"),
     [
-        ("mcp__portal-fixture__portal.unmounted", "{}", None, "unknown_capability"),
-        ("mcp__portal-fixture__portal.find_tools", "{}", None, "schema_validation"),
-        ("mcp__portal-fixture__portal.find_tools", '{"query":', None, "malformed_arguments"),
+        ("mcp__portal-fixture__portal.unmounted", "{}", None, "unknown_capability", 1),
+        ("mcp__portal-fixture__portal.find_tools", "{}", None, "schema_validation", 2),
+        ("mcp__portal-fixture__portal.find_tools", '{"query":', None, "malformed_arguments", 2),
         (
             "mcp__portal-fixture__portal.find_tools",
             '{"query":"recent Discord messages"}',
             "Portal transport failed",
             "failed",
+            1,
         ),
     ],
 )
@@ -368,6 +449,7 @@ async def test_native_mcp_failures_return_one_terminal_error_without_loop(
     arguments,
     executor_error,
     expected_category,
+    expected_calls,
 ):
     manager = McpManager()
     manager._connections["portal-fixture"] = {
@@ -420,23 +502,24 @@ async def test_native_mcp_failures_return_one_terminal_error_without_loop(
         max_tokens=2048,
     )
 
-    assert provider_calls == 1
+    assert provider_calls == expected_calls
     assert executions == ([call_name] if executor_error else [])
     output = next(event for event in events if event.get("type") == "tool_output")
-    assert output["status"] == ("failed" if executor_error else "denied")
+    assert output["status"] == "failed"
     terminal = [event["delta"] for event in events if "MCP request stopped" in event.get("delta", "")]
     assert len(terminal) == 1
     assert call_name in terminal[0]
     assert expected_category in terminal[0]
     if executor_error:
         assert executor_error in terminal[0]
+    assert len([event for event in events if event.get("type") == "agent_step"]) == expected_calls - 1
     assert not any(event.get("type") in {
-        "agent_step", "loop_breaker_triggered", "rounds_exhausted"
+        "loop_breaker_triggered", "rounds_exhausted"
     } for event in events)
 
 
 @pytest.mark.asyncio
-async def test_terminal_native_mcp_failure_stops_a_batch_and_threads_processed_prefix(
+async def test_native_mcp_schema_failure_gets_one_correction_round_then_stops(
     monkeypatch,
     tmp_path,
 ):
@@ -522,20 +605,23 @@ async def test_terminal_native_mcp_failure_stops_a_batch_and_threads_processed_p
         owner="leo",
         session_id="session-1",
         max_rounds=6,
-        max_tool_calls=1,
+        max_tool_calls=2,
         context_length=8208,
         max_tokens=2048,
     )
 
-    assert provider_calls == 1
+    assert provider_calls == 2
     assert executions == []
     assert threaded == {"call_ids": ["bad"], "result_count": 1}
     outputs = [event for event in events if event.get("type") == "tool_output"]
-    assert [(event["call_id"], event["status"]) for event in outputs] == [("bad", "denied")]
+    assert [(event["call_id"], event["status"]) for event in outputs] == [
+        ("bad", "failed"), ("bad", "failed")
+    ]
     assert len([event for event in events if "MCP request stopped" in event.get("delta", "")]) == 1
     assert not any(event.get("type") in {
-        "budget_exceeded", "agent_step", "loop_breaker_triggered", "rounds_exhausted"
+        "budget_exceeded", "loop_breaker_triggered", "rounds_exhausted"
     } for event in events)
+    assert len([event for event in events if event.get("type") == "agent_step"]) == 1
 
 
 def test_agent_facing_mcp_guidance_omits_unmounted_same_namespace_names():

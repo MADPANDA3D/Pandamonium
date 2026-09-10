@@ -81,12 +81,12 @@ following maintained platform capabilities.
   network policy, Workspace allowlist, and per-action capability/effect allowlist.
 - Native MCP connections route through their live handshake, catalog, and exact
   typed tool schemas instead of guessed REST paths or duplicate API identities.
-- Broker-style native MCP connections keep only compact service metadata in the
-  existing tool index, mount one request-specific downstream read schema, and
-  relay the call through the broker. Compact provider resource identifiers are
-  preserved across referential follow-ups without retaining result payloads.
-  Read-only calls require no approval, and any internal API credential remains
-  grouped beneath the single MCP identity.
+- Broker-style servers remain ordinary native MCP connections: Pandamonium
+  exposes the tools and workflow instructions they declare, validates their
+  exact schemas, and forwards the selected tool name and arguments unchanged.
+  It does not import downstream catalogs or synthesize provider-specific proxy
+  tools. Read-only calls require no approval, while effectful calls continue
+  through the shared authority gates.
 - Approval cards offer deny, approve once, and explicit narrow approve-always;
   persistent receipts remain inspectable and revocable, while target or argument
   changes require a new decision.

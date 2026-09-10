@@ -414,8 +414,12 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
     )
     normal_read_chain = {
         f"mcp__portal-fixture__{name}" for name in (
+            "portal.welcome",
+            "portal.list_services",
+            "portal.check_connection",
             "portal.find_tools",
             "portal.get_tool_reference",
+            "portal.preview_tool_call",
             "portal.call_read_tool",
         )
     }
@@ -484,20 +488,12 @@ async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monk
 
 
 @pytest.mark.asyncio
-async def test_prepared_portal_read_mounts_one_relay_and_removes_all_fallbacks(monkeypatch):
+async def test_generic_mcp_path_uses_declared_tools_without_server_specific_preparation(monkeypatch):
     manager = McpManager()
     manager._connections["portal-fixture"] = {
         "status": "connected",
         "name": "MAD MCP Portal",
         "server_info": {"name": "Fixture Broker"},
-        "portal_services": [{
-            "id": "qdrant",
-            "name": "QDRANT-MCP",
-            "configured": True,
-            "state": "configured",
-            "catalog_version": "qdrant-v2",
-        }],
-        "catalog_terms": ["Qdrant"],
     }
     manager._tools["portal-fixture"] = [
         {
@@ -513,53 +509,7 @@ async def test_prepared_portal_read_mounts_one_relay_and_removes_all_fallbacks(m
             "portal.call_read_tool",
         )
     ]
-    proxy = "mcp__portal-fixture__portal.read.qdrant.qdrant-list-points"
-    proxy_schema = {
-        "type": "function",
-        "function": {
-            "name": proxy,
-            "description": "One Portal-relayed Qdrant point read.",
-            "parameters": {
-                "type": "object",
-                "required": ["collection_name"],
-                "properties": {
-                    "collection_name": {"type": "string"},
-                    "limit": {"type": "integer"},
-                    "include_payload": {"type": "boolean"},
-                    "include_vectors": {"type": "boolean"},
-                },
-                "additionalProperties": False,
-            },
-        },
-    }
-
-    async def fake_prepare(latest_query, routing_query):
-        assert "jarvis-knowledgebase" in latest_query
-        assert "Qdrant" in routing_query
-        manager._portal_proxy_tools[proxy] = {
-            "server_id": "portal-fixture",
-            "service_id": "qdrant",
-            "tool_name": "qdrant-list-points",
-        }
-        return {
-            "qualified_name": proxy,
-            "schema": proxy_schema,
-            "service_id": "qdrant",
-            "tool_name": "qdrant-list-points",
-            "descriptor_hash": "descriptor-hash",
-            "catalog_version": "qdrant-v2",
-            "trace_events": [{
-                "tool": "mcp__portal-fixture__portal.find_tools",
-                "arguments": {
-                    "query": "collection contents",
-                    "service": "qdrant",
-                    "risk": "read",
-                },
-                "trace_id": "find-trace",
-            }],
-        }
-
-    manager.prepare_portal_read = fake_prepare
+    assert not hasattr(manager, "prepare_portal_read")
     rounds = {"count": 0}
     tool_payloads = []
 
@@ -568,14 +518,9 @@ async def test_prepared_portal_read_mounts_one_relay_and_removes_all_fallbacks(m
         tool_payloads.append(kwargs.get("tools") or [])
         if rounds["count"] == 1:
             call = {
-                "id": "portal-read",
-                "name": proxy,
-                "arguments": json.dumps({
-                    "collection_name": "jarvis-knowledgebase",
-                    "limit": 10,
-                    "include_payload": True,
-                    "include_vectors": False,
-                }),
+                "id": "portal-list",
+                "name": "mcp__portal-fixture__portal.list_services",
+                "arguments": "{}",
             }
             yield f'data: {json.dumps({"type": "tool_calls", "calls": [call]})}\n\n'
         else:
@@ -583,17 +528,12 @@ async def test_prepared_portal_read_mounts_one_relay_and_removes_all_fallbacks(m
         yield "data: [DONE]\n\n"
 
     async def fake_execute(block, **_kwargs):
-        assert block.tool_type == proxy
-        return "portal relay", {
-            "stdout": "10 items",
+        assert block.tool_type == "mcp__portal-fixture__portal.list_services"
+        return "portal", {
+            "stdout": "configured services",
             "stderr": "",
             "exit_code": 0,
-            "structured_content": {"data": {"items": list(range(10))}},
-            "portal_relay": {
-                "service_id": "qdrant",
-                "tool_name": "qdrant-list-points",
-                "trace_id": "read-trace",
-            },
+            "structured_content": {"data": {"items": [{"id": "qdrant"}]}},
         }
 
     monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: manager)
@@ -624,16 +564,23 @@ async def test_prepared_portal_read_mounts_one_relay_and_removes_all_fallbacks(m
         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]")
     ]
     assert rounds["count"] == 2
+    expected = {
+        f"mcp__portal-fixture__{name}" for name in (
+            "portal.list_services",
+            "portal.find_tools",
+            "portal.get_tool_reference",
+            "portal.call_read_tool",
+        )
+    }
     for payload in tool_payloads:
-        assert {
+        assert expected <= {
             schema["function"]["name"] for schema in payload
             if schema.get("function")
-        } == {proxy}
+        }
     metrics = next(event["data"] for event in events if event.get("type") == "metrics")
-    assert metrics["context_manifest"]["tools"]["mcp"]["names"] == [proxy]
-    assert metrics["context_manifest"]["tools"]["built_in"]["count"] == 0
-    assert metrics["portal_routing"]["trace_events"][0]["trace_id"] == "find-trace"
-    assert metrics["tool_events"][0]["portal_relay"]["trace_id"] == "read-trace"
+    assert set(metrics["context_manifest"]["tools"]["mcp"]["names"]) == expected
+    assert "portal_routing" not in metrics
+    assert "portal_relay" not in metrics["tool_events"][0]
     assert not any(event.get("type") == "authority_approval_required" for event in events)
 
 
@@ -743,254 +690,20 @@ async def test_collection_followup_keeps_portal_qdrant_chain_in_model_payload(mo
     }
     required = {
         f"mcp__portal-fixture__{name}" for name in (
+            "portal.welcome",
+            "portal.list_services",
             "portal.find_tools",
             "portal.get_tool_reference",
+            "portal.preview_tool_call",
             "portal.call_read_tool",
         )
     }
     assert {name for name in sent if name.startswith("mcp__portal-fixture__")} == required
     assert {"manage_mcp", "api_call", "app_api", "pipeline"}.isdisjoint(sent)
     visible_messages = json.dumps(captured["messages"])
-    assert "Listing collections does not answer what is inside one" in visible_messages
+    assert "Use the selected connection's exact qualified function schemas directly" in visible_messages
     assert "jarvis-knowledgebase" in visible_messages
     assert "Qdrant" in visible_messages
-
-
-def test_collection_followup_reuses_last_portal_collection_from_trusted_history():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
-        {
-            "role": "assistant",
-            "content": "I found three collections.",
-            "metadata": {
-                "tool_events": [{
-                    "tool": "mcp__mad-mcp-portal__portal.read.qdrant.qdrant-list-collections",
-                    "exit_code": 0,
-                    "portal_relay": {
-                        "service_id": "qdrant",
-                        "tool_name": "qdrant-list-collections",
-                        "context": {
-                            "collection_names": [
-                                "the-barn", "school", "jarvis-knowledgebase",
-                            ],
-                        },
-                    },
-                }],
-            },
-        },
-        {
-            "role": "user",
-            "content": "What information is inside that collection? Show me ten examples.",
-        },
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {"collection_name": "jarvis-knowledgebase"}
-
-
-def test_nounless_followup_reuses_only_resource_type_in_latest_portal_context():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
-        {
-            "role": "assistant",
-            "content": "I found three collections.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "qdrant",
-                    "tool_name": "qdrant-list-collections",
-                    "context": {
-                        "collection_names": [
-                            "the-barn", "school", "jarvis-knowledgebase",
-                        ],
-                    },
-                },
-            }]},
-        },
-        {"role": "user", "content": "What's in that? Show me ten examples."},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {"collection_name": "jarvis-knowledgebase"}
-
-
-def test_collection_followup_preserves_last_typed_identity_from_mixed_listing():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list collections."},
-        {
-            "role": "assistant",
-            "content": "I found the collections.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "memory",
-                    "tool_name": "list_collections",
-                    "context": {
-                        "collection_ids": ["collection-123", "collection-456"],
-                        "collection_names": ["general-memory"],
-                        "collection_refs": [
-                            {"id": "collection-123", "name": "general-memory"},
-                            {"id": "collection-456"},
-                        ],
-                    },
-                },
-            }]},
-        },
-        {"role": "user", "content": "What's in that collection?"},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {"collection_id": "collection-456"}
-
-
-def test_collection_followup_does_not_cross_latest_user_turn_boundary():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
-        {
-            "role": "assistant",
-            "content": "I found collection A.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "qdrant",
-                    "tool_name": "qdrant-list-collections",
-                    "context": {"collection_names": ["collection-a"]},
-                },
-            }]},
-        },
-        {"role": "user", "content": "Use Portal to list the collections again."},
-        {
-            "role": "assistant",
-            "content": "The current listing was empty.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "qdrant",
-                    "tool_name": "qdrant-list-collections",
-                    "context": {},
-                },
-            }]},
-        },
-        {"role": "user", "content": "What's in that collection?"},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {}
-
-
-def test_collection_followup_does_not_reuse_context_before_failed_relay():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list Qdrant collections."},
-        {
-            "role": "assistant",
-            "content": "The latest Portal read failed.",
-            "metadata": {"tool_events": [
-                {
-                    "exit_code": 0,
-                    "portal_relay": {
-                        "service_id": "qdrant",
-                        "tool_name": "qdrant-list-collections",
-                        "context": {"collection_names": ["stale-collection"]},
-                    },
-                },
-                {
-                    "exit_code": 1,
-                    "portal_relay": {
-                        "service_id": "qdrant",
-                        "tool_name": "qdrant-list-collections",
-                    },
-                },
-            ]},
-        },
-        {"role": "user", "content": "What's in that collection?"},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {}
-
-
-def test_channel_followup_preserves_a_name_for_native_portal_resolution():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},
-        {
-            "role": "assistant",
-            "content": "I found the channels.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "discord",
-                    "tool_name": "list_channels",
-                    "context": {"channel_names": ["general"]},
-                },
-            }]},
-        },
-        {"role": "user", "content": "Read that channel."},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {"channel_name": "general"}
-
-
-def test_channel_followup_preserves_last_identity_from_mixed_portal_listing():
-    messages = [
-        {"role": "user", "content": "Use MAD MCP Portal to list Discord channels."},
-        {
-            "role": "assistant",
-            "content": "I found the channels.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "discord",
-                    "tool_name": "list_channels",
-                    "context": {
-                        "channel_ids": ["1542679644640247860"],
-                        "channel_names": ["general", "announcements"],
-                        "channel_refs": [
-                            {"id": "1542679644640247860", "name": "general"},
-                            {"name": "announcements"},
-                        ],
-                    },
-                },
-            }]},
-        },
-        {"role": "user", "content": "Read that channel."},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {"channel_name": "announcements"}
-
-
-def test_channel_followup_prefers_actual_relay_argument_over_nested_result_refs():
-    messages = [
-        {"role": "user", "content": "Use Portal to read the general channel."},
-        {
-            "role": "assistant",
-            "content": "I read the channel.",
-            "metadata": {"tool_events": [{
-                "exit_code": 0,
-                "portal_relay": {
-                    "service_id": "discord",
-                    "tool_name": "read_messages",
-                    "arguments": {"channel_id": "1542679644640247860", "count": "5"},
-                    "context": {
-                        "channel_refs": [{"id": "999", "name": "nested-message-json"}],
-                    },
-                },
-            }]},
-        },
-        {"role": "user", "content": "Read that channel again."},
-    ]
-
-    assert agent_loop._portal_followup_fixed_arguments(
-        messages, messages[-1]["content"]
-    ) == {"channel_id": "1542679644640247860"}
 
 
 @pytest.mark.asyncio
