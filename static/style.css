@@ -8708,13 +8708,13 @@ button.hamburger {
 }
 
 /* Links */
-.msg a {
+:is(.msg, #message-editor) a {
   color: var(--hl-function, #5b8def);
   text-decoration: none;
   border-bottom: 1px solid rgba(91, 141, 239, 0.3);
   transition: border-color 0.15s;
 }
-.msg a:hover {
+:is(.msg, #message-editor) a:hover {
   border-bottom-color: var(--hl-function, #5b8def);
 }
 .msg a.is-loading {
