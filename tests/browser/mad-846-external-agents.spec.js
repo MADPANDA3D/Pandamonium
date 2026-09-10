@@ -891,7 +891,9 @@ test('catalog workers retain their own pins and project/task order across switch
   await selectWorkspace(page);
   await rows.nth(1).getByRole('button', { name: 'Pin empty task', exact: true }).click();
   if (!await page.locator('#session-context-panel').isVisible()) await page.locator('#session-context-toggle').click();
-  await expect(page.locator('#session-context-environment')).toContainText('Claude');
+  await page.locator('[data-context-view="environment"]').click();
+  await expect(page.locator('#session-context-drawer')).toContainText('Claude');
+  await page.locator('#session-context-drawer-close').click();
   await expect(page.locator('#session-context-environment')).toContainText('Build node');
   await expect(page.locator('#session-context-environment')).not.toContainText('Friday');
   await page.locator('#session-context-close').click();

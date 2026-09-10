@@ -72,9 +72,14 @@ following maintained platform capabilities.
   and configured node labels. Tailnet discovery probes selected nodes for model
   endpoints; installed Codex/Claude capabilities come from configured bridges,
   not from detecting arbitrary bare CLI installations.
-- **Details** shows available session environment, sources, tools, and outputs.
-  Codex activity covers the latest five turns; branch/model metadata is labeled
-  as recorded rather than claimed to be current filesystem state.
+- Selecting a native Codex task loads its recent conversation. **Load earlier messages**
+  pages older turns; continuing uses that same native task and the selected model/effort.
+  Task selection survives reload. Update the selected [Codex bridge](services/pc-codex-bridge/README.md)
+  together with Pandamonium for native history support.
+- **Details** keeps essential environment rows, three source previews, and short
+  tool/output previews compact. **View all** opens a themed sliding panel and
+  progressively reads earlier activity. Full paths remain available there; attachment
+  binaries stay on their originating node. Branch/model metadata is recorded state.
 - The model picker uses Codex's supported native reasoning efforts. The model-backed agent's
   **Agent work budget** controls maximum model/tool rounds: Low 8, Medium 12,
   High 20, Very high 40, Maximum 80. Reset uses the installation default.
@@ -85,6 +90,10 @@ following maintained platform capabilities.
   in one chronological disclosure above the final answer. The disclosure is
   collapsed after completion, expands in the page flow without a nested scroll
   region, and remains keyboard-accessible after reopening a saved conversation.
+
+Native history and Details demo views: [compact card](docs/screenshots/workspace-history-desktop.png),
+[full sources](docs/screenshots/workspace-sources-desktop.png), and
+[phone panel](docs/screenshots/workspace-sources-mobile.png).
 
 Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png)
 and [mobile preview](docs/screenshots/workspace-shared-mobile.png).

@@ -247,13 +247,17 @@ class CodexBridgeAdapter:
         response.raise_for_status()
         return response.json()
 
-    async def catalog_task_details(self, project_id: str, thread_id: str) -> dict[str, Any]:
+    async def catalog_task_details(self, project_id: str, thread_id: str, *, history: bool = False,
+                                   cursor: str | None = None, limit: int = 5) -> dict[str, Any]:
         if not self.enabled:
             raise WorkerUnavailable("codex_bridge_not_configured")
         if not _WORKSPACE_NAME.fullmatch(project_id) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", thread_id):
             raise ValueError("invalid_codex_task")
-        async with httpx.AsyncClient(timeout=35) as client:
-            response = await client.get(f"{self.url}/v1/catalog/projects/{project_id}/tasks/{thread_id}", headers=self._headers())
+        suffix = "/history" if history else ""
+        params = {"limit": limit, **({"cursor": cursor} if cursor else {})} if history else {}
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.get(f"{self.url}/v1/catalog/projects/{project_id}/tasks/{thread_id}{suffix}",
+                                       params=params, headers=self._headers())
         response.raise_for_status()
         return response.json()
 

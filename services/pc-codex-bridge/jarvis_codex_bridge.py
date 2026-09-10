@@ -317,31 +317,70 @@ def catalog_task(workspace: str, thread_id: str) -> dict:
     return safe
 
 
+def _turn_activity(turns: list[dict]) -> dict:
+    sources, tools, outputs = [], [], []
+    for turn in turns:
+        for item in turn.get("items") or []:
+            kind = item.get("type")
+            if kind == "userMessage":
+                for part in item.get("content") or []:
+                    path = part.get("path") or part.get("filename")
+                    if path:
+                        sources.append(str(path))
+            elif kind == "fileChange":
+                outputs.extend(str(change.get("path") or "") for change in item.get("changes") or [])
+            elif kind == "mcpToolCall":
+                tools.append(f"{item.get('server', '')}/{item.get('tool', '')}")
+            elif kind in {"commandExecution", "webSearch", "imageView"}:
+                tools.append({"commandExecution": "Terminal", "webSearch": "Web search", "imageView": "Image viewer"}[kind])
+    return {key: list(dict.fromkeys(filter(None, values))) for key, values in (
+        ("sources", sources), ("tools", tools), ("outputs", outputs),
+    )}
+
+
+def catalog_task_history(workspace: str, thread_id: str, *, cursor: str | None = None, limit: int = 5) -> dict:
+    task = catalog_task(workspace, thread_id)
+    if cursor is not None and (not isinstance(cursor, str) or len(cursor) > 2000):
+        raise ValueError("invalid_cursor")
+    params = {"threadId": thread_id, "limit": max(1, min(int(limit), 10)), "sortDirection": "desc", "itemsView": "full"}
+    if cursor:
+        params["cursor"] = cursor
+    page = _app_server_call("thread/turns/list", params)
+    turns = page.get("data") or []
+    messages = []
+    for turn in reversed(turns):
+        for index, item in enumerate(turn.get("items") or []):
+            kind = item.get("type")
+            if kind not in {"userMessage", "agentMessage"}:
+                continue
+            text = item.get("text", "") if kind == "agentMessage" else "\n\n".join(
+                part["text"] for part in item.get("content") or [] if isinstance(part.get("text"), str)
+            )
+            attachments = [str(part.get("path") or part.get("filename"))
+                           for part in item.get("content") or [] if part.get("path") or part.get("filename")]
+            if not text and not attachments:
+                continue
+            messages.append({
+                "id": f"{turn.get('id', '')}:{item.get('id') or index}",
+                "role": "user" if kind == "userMessage" else "assistant", "text": text,
+                "attachments": attachments, "phase": item.get("phase"),
+                "timestamp": turn.get("startedAt"),
+            })
+    return {"task": task, "items": messages, "activity": _turn_activity(turns), "next_cursor": page.get("nextCursor")}
+
+
 def catalog_task_details(workspace: str, thread_id: str) -> dict:
     task = catalog_task(workspace, thread_id)
-    sources, tools, outputs = [], [], []
     try:
         turns = _app_server_call("thread/turns/list", {
             "threadId": thread_id, "limit": 5, "sortDirection": "desc", "itemsView": "full",
         }).get("data") or []
-        for turn in turns:
-            for item in (turn.get("items") or [])[:500]:
-                kind = item.get("type")
-                if kind == "userMessage":
-                    for part in item.get("content") or []:
-                        path = part.get("path") or part.get("filename")
-                        if path:
-                            sources.append(Path(str(path)).name[:200])
-                elif kind == "fileChange":
-                    outputs.extend(str(change.get("path") or "")[:500] for change in item.get("changes") or [])
-                elif kind == "mcpToolCall":
-                    tools.append(f"{item.get('server', '')}/{item.get('tool', '')}"[:200])
-                elif kind in {"commandExecution", "webSearch", "imageView"}:
-                    tools.append({"commandExecution": "Terminal", "webSearch": "Web search", "imageView": "Image viewer"}[kind])
+        activity = _turn_activity(turns)
+        activity["sources"] = [Path(path).name for path in activity["sources"]]
+        task.update({key: values[:50] for key, values in activity.items()})
         task["activity_available"] = True
     except (RuntimeError, TimeoutError):
         task["activity_available"] = False
-    task.update(sources=list(dict.fromkeys(sources))[:50], tools=list(dict.fromkeys(tools))[:50], outputs=list(dict.fromkeys(filter(None, outputs)))[:50])
     return task
 
 
@@ -1064,6 +1103,16 @@ class Handler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
         parts = parsed.path.strip("/").split("/")
+        if len(parts) == 7 and parts[:3] == ["v1", "catalog", "projects"] and parts[4] == "tasks" and parts[6] == "history":
+            try:
+                params = parse_qs(parsed.query)
+                _json(self, 200, catalog_task_history(parts[3], parts[5],
+                    cursor=(params.get("cursor") or [None])[0], limit=int((params.get("limit") or [5])[0])))
+            except ValueError:
+                _json(self, 404, {"error": "codex_task_not_available_in_project"})
+            except Exception:
+                _json(self, 503, {"error": "codex_task_history_unavailable"})
+            return
         if len(parts) == 6 and parts[:3] == ["v1", "catalog", "projects"] and parts[4] == "tasks":
             try:
                 _json(self, 200, catalog_task_details(parts[3], parts[5]))

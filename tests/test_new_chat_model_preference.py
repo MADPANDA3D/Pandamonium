@@ -75,13 +75,13 @@ def test_blank_chat_preserves_the_active_target_and_chat_configuration():
     source = SESSIONS_JS.read_text(encoding="utf-8")
     blank = _slice(
         source,
-        "export function createBlankChat()",
+        "export function createBlankChat(",
         "export function createDirectChat",
     )
     prepare = _slice(
         source,
-        "function _prepareNewChat(pendingChat)",
-        "export function createBlankChat()",
+        "function _prepareNewChat(pendingChat,",
+        "export function createBlankChat(",
     )
 
     assert "preserveSelectedAgentForNewChat()" in blank

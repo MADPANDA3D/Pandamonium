@@ -29,6 +29,7 @@ const state = {
   projectRequest: 0,
   taskRequest: 0,
   transcriptRequest: 0,
+  nativePage: null,
 };
 const pendingAuthorityActions = new Map();
 const retryableRequestIds = new Map();
@@ -147,6 +148,7 @@ function renderReasoningOptions() {
 
 async function loadModels() {
   const request = ++modelRequest;
+  const saved = new URLSearchParams(window.location.search);
   const select = byId('codex-model');
   if (!select) return;
   select.disabled = true;
@@ -159,11 +161,16 @@ async function loadModels() {
       .filter(item => typeof item.model === 'string' && Array.isArray(item.reasoning_efforts));
     select.replaceChildren(new Option('Task / node default', ''),
       ...codexModels.map(item => new Option(item.display_name || item.model, item.model)));
-    if (codexModels.some(item => item.model === previous)) select.value = previous;
+    const desired = previous || saved.get('codex_model');
+    if (codexModels.some(item => item.model === desired)) select.value = desired;
     select.disabled = !codexModels.length;
     byId('codex-model-status').textContent = codexModels.length
       ? 'Model changes apply to the next turn.' : 'No Codex models are available.';
     renderReasoningOptions();
+    if ([...byId('codex-reasoning').options].some(option => option.value === saved.get('codex_effort'))) {
+      byId('codex-reasoning').value = saved.get('codex_effort');
+      document.dispatchEvent(new CustomEvent('odysseus:effort-options-changed'));
+    }
   } catch (error) {
     if (request !== modelRequest || state.mode !== 'codex') return;
     codexModels = [];
@@ -359,6 +366,13 @@ async function loadProjects({ append = false } = {}) {
     renderPinned();
     state.projectCursor = page.next_cursor || null;
     if (more) more.hidden = !state.projectCursor;
+    const saved = new URLSearchParams(window.location.search);
+    if (!state.selectedTask && saved.get('codex_task') && projects.some(project => project.project_id === saved.get('codex_project'))) {
+      const button = document.createElement('button');
+      Object.assign(button.dataset, { projectId: saved.get('codex_project'), taskId: saved.get('codex_task'), taskTitle: 'Codex task' });
+      await selectTask(button, { restore: true });
+      renderVisibleTasks();
+    }
   } catch (error) {
     if (requestId !== state.projectRequest || !list) return;
     list.replaceChildren(statusRow(error.message || 'The selected Codex connection is unavailable.', true));
@@ -408,6 +422,8 @@ async function loadTasks({ append = false } = {}) {
 
 function clearTranscript() {
   state.transcriptRequest += 1;
+  state.nativePage = null;
+  byId('codex-history-more')?.remove();
   document.querySelectorAll('[data-external-agent-transcript="true"]').forEach(node => node.remove());
 }
 
@@ -433,7 +449,7 @@ function clearExternalAuthorityUI({ denyPending = false } = {}) {
   });
 }
 
-function addTranscriptMessage(role, text, taskId) {
+function addTranscriptMessage(role, text, taskId, metadata = {}) {
   const visibleRole = role === 'user' ? 'user' : 'assistant';
   const prefix = role === 'system' || role === 'tool' ? `[${role}] ` : '';
   const message = window.chatModule?.addMessage?.(visibleRole, `${prefix}${String(text || '')}`, '', {
@@ -441,9 +457,101 @@ function addTranscriptMessage(role, text, taskId) {
     worker: state.target,
     task_id: taskId,
     character_name: state.targetLabel || 'External worker',
+    _fromHistory: true,
+    ...metadata,
   });
   if (message) message.dataset.externalAgentTranscript = 'true';
   return message;
+}
+
+function saveNativeLocation() {
+  if (state.mode !== 'codex' || !state.selectedTask) return;
+  const url = new URL(window.location.href);
+  for (const [key, value] of Object.entries({ codex_project: state.selectedProject, codex_task: state.selectedTask.taskId,
+    codex_model: byId('codex-model')?.value, codex_effort: byId('codex-reasoning')?.value })) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  history.replaceState(null, '', url);
+}
+
+function clearNativeLocation() {
+  const url = new URL(window.location.href);
+  for (const key of ['codex_project', 'codex_task', 'codex_model', 'codex_effort']) url.searchParams.delete(key);
+  history.replaceState(null, '', url);
+}
+
+async function loadNativeTranscript({ earlier = false } = {}) {
+  const task = state.selectedTask;
+  if (state.mode !== 'codex' || !task) return;
+  if (!earlier) {
+    clearTranscript();
+    byId('chat-history').replaceChildren();
+    state.nativePage = { cursor: null, ids: new Set(), cursors: new Set(), loading: false };
+    byId('current-meta').textContent = task.title;
+  }
+  const paging = state.nativePage;
+  if (!paging || paging.loading || (earlier && !paging.cursor)) return;
+  paging.loading = true;
+  const generation = state.transcriptRequest;
+  const box = byId('chat-history');
+  const previousHeight = box.scrollHeight;
+  const previousTop = box.scrollTop;
+  const anchor = box.firstChild;
+  let more = byId('codex-history-more');
+  if (!more) {
+    more = document.createElement('button');
+    more.id = 'codex-history-more'; more.type = 'button'; more.className = 'codex-browser-more';
+    more.addEventListener('click', () => loadNativeTranscript({ earlier: Boolean(paging.cursor) }));
+    box.prepend(more);
+  }
+  more.disabled = true;
+  more.textContent = 'Loading conversation…';
+  window.chatModule?.hideWelcomeScreen?.();
+  try {
+    const params = new URLSearchParams({ limit: '5' });
+    if (earlier) params.set('cursor', paging.cursor);
+    const page = await requestJson(`/api/codex/projects/${encodeURIComponent(task.projectId)}/tasks/${encodeURIComponent(task.taskId)}/history?${params}`);
+    if (generation !== state.transcriptRequest) return;
+    if (page.task?.task_id !== task.taskId || page.task?.project_id !== task.projectId || !Array.isArray(page.items)) throw new Error('The bridge returned history for an unverified task.');
+    if (page.next_cursor && paging.cursors.has(page.next_cursor)) throw new Error('History pagination stopped making progress.');
+    const fragment = document.createDocumentFragment();
+    for (const item of Array.isArray(page.items) ? page.items : []) {
+      if (!item.id || paging.ids.has(item.id)) continue;
+      paging.ids.add(item.id);
+      const node = addTranscriptMessage(item.role, item.text, task.taskId, {
+        timestamp: item.timestamp ? new Date(item.timestamp * 1000).toISOString() : undefined,
+      });
+      if (!node) continue;
+      node.dataset.nativeMessageId = item.id;
+      for (const path of item.attachments || []) {
+        const attachment = document.createElement('p');
+        attachment.className = 'codex-history-attachment'; attachment.textContent = `Attached: ${path.split(/[\\/]/).pop()}`;
+        attachment.title = path;
+        node.appendChild(attachment);
+      }
+      fragment.appendChild(node);
+    }
+    if (earlier) box.insertBefore(fragment, anchor);
+    else box.appendChild(fragment);
+    paging.cursor = page.next_cursor || null;
+    if (paging.cursor) paging.cursors.add(paging.cursor);
+    more.textContent = paging.cursor ? 'Load earlier messages' : paging.ids.size ? 'Conversation loaded' : 'This task has no messages yet.';
+    more.hidden = !paging.cursor && paging.ids.size > 0;
+    box.prepend(more);
+    if (page.task) { state.selectedTask.title = page.task.title; byId('current-meta').textContent = page.task.title; setComposerHint(); }
+    document.dispatchEvent(new CustomEvent('odysseus:codex-history-loaded', { detail: { ...page, earlier } }));
+    if (earlier) box.scrollTop = previousTop + box.scrollHeight - previousHeight;
+    else window.uiModule?.scrollHistoryInstant?.();
+  } catch (error) {
+    if (generation !== state.transcriptRequest) return;
+    more.textContent = `${error.message || 'Conversation unavailable'} — Retry`;
+    more.hidden = false;
+    document.dispatchEvent(new CustomEvent('odysseus:codex-history-failed', { detail: { message: error.message || 'Conversation unavailable' } }));
+  } finally {
+    paging.loading = false;
+    more.disabled = false;
+  }
 }
 
 async function loadExternalTranscript(taskId) {
@@ -579,8 +687,12 @@ function setComposerHint() {
 
 function clearSelection() {
   state.taskRequest += 1;
+  if (state.nativePage) {
+    window.chatModule?.detachCurrentStream?.(currentSessionId());
+    byId('chat-history')?.replaceChildren();
+  }
+  clearTranscript();
   if (state.mode === 'external') {
-    clearTranscript();
     clearExternalAuthorityUI({ denyPending: true });
   }
   state.selectedTask = null;
@@ -617,11 +729,12 @@ async function selectProject(projectId, displayName = '') {
   await Promise.all([loadTasks(), restoreCanonicalTask(currentSessionId())]);
 }
 
-async function selectTask(button) {
+async function selectTask(button, { restore = false } = {}) {
   if (state.selectedProject !== button.dataset.projectId) {
     await selectProject(button.dataset.projectId, projects.find(project => project.project_id === button.dataset.projectId)?.display_name);
   }
   if (state.selectedProject !== button.dataset.projectId) return;
+  if (state.mode === 'codex' && !restore) window.sessionModule?.createBlankChat?.({ preserveWorkspace: true });
   state.selectedTask = {
     taskId: button.dataset.taskId,
     projectId: button.dataset.projectId,
@@ -633,7 +746,11 @@ async function selectTask(button) {
   setComposerHint();
   byId('message')?.focus();
   if (state.mode === 'external') loadExternalTranscript(state.selectedTask.taskId);
-  else document.dispatchEvent(new CustomEvent('odysseus:codex-task-selected', { detail: state.selectedTask }));
+  else {
+    if (!restore) saveNativeLocation();
+    document.dispatchEvent(new CustomEvent('odysseus:codex-task-selected', { detail: state.selectedTask }));
+    loadNativeTranscript();
+  }
 }
 
 function open(detail = {}) {
@@ -706,6 +823,7 @@ function syncTarget(detail = {}) {
   // Catalog refreshes repeat the selected identity; keep its current task.
   if (state.mode === 'codex' && state.target === detail.target && state.available && detail.available !== false
       && !byId('codex-workspace-browser')?.hidden) return;
+  if (detail.target !== 'pc-codex') clearNativeLocation();
   if (detail.target === 'pc-codex' || detail.external === true) open(detail);
   else close();
 }
@@ -980,10 +1098,17 @@ async function handleExternalAuthorityDecision({ decisionId, choice, scope }) {
 function bind() {
   if (document.documentElement.dataset.codexWorkspaceBound === '1') return;
   document.documentElement.dataset.codexWorkspaceBound = '1';
-  byId('codex-model')?.addEventListener('change', renderReasoningOptions);
+  byId('codex-model')?.addEventListener('change', () => { renderReasoningOptions(); saveNativeLocation(); });
+  byId('codex-reasoning')?.addEventListener('change', saveNativeLocation);
+  window.addEventListener('odysseus:session-cleared', event => {
+    if (event.detail?.preserveWorkspace) return;
+    clearNativeLocation();
+    clearSelection();
+  });
+  window.addEventListener('odysseus:session-navigating', () => { clearNativeLocation(); clearSelection(); });
   byId('codex-project-list')?.addEventListener('click', event => {
     const button = event.target.closest('.codex-project-row[data-project-id]');
-    if (button && !button.disabled) selectProject(button.dataset.projectId, button.dataset.projectName);
+    if (button && !button.disabled) { clearNativeLocation(); selectProject(button.dataset.projectId, button.dataset.projectName); }
   });
   byId('codex-task-list')?.addEventListener('click', event => {
     const button = event.target.closest('.codex-task-row[data-task-id]');
@@ -1000,6 +1125,10 @@ function bind() {
     const sessionId = String(event.detail?.sessionId || '');
     if (!sessionId || sessionId === state.renderedSessionId) return;
     state.renderedSessionId = sessionId;
+    if (state.mode === 'codex' && state.selectedTask && new URLSearchParams(window.location.search).get('codex_task') === state.selectedTask.taskId) {
+      loadNativeTranscript();
+      return;
+    }
     clearTranscript();
     clearExternalAuthorityUI({ denyPending: true });
     restoreCanonicalTask(sessionId);

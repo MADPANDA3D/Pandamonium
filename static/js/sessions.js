@@ -1751,6 +1751,7 @@ export async function loadSessions() {
     _initialLoadComplete = true;
     // A slow preference/catalog read must not undo an explicit task selection.
     if (navigationAtStart !== _sessionNavToken) return;
+    if (new URLSearchParams(window.location.search).has('codex_task') && !hashId && !currentSessionId) return;
     const startFreshOnLoad = initialPageLoad && !hashId && !hasPendingChat;
     if (startFreshOnLoad) Storage.remove('lastSessionId');
     let targetId = null;
@@ -1873,6 +1874,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     clearPendingAgentTarget();
     _pendingChat = null;
     const navToken = ++_sessionNavToken;
+    if (window.location.hash !== '#' + id) window.dispatchEvent(new CustomEvent('odysseus:session-navigating'));
     const prevSessionId = currentSessionId;
     _clearHistoryPager();
     // Re-archive peeked session when navigating away
@@ -2212,8 +2214,10 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
 // Pending session — stored locally until the first message is sent
 let _pendingChat = null; // { url, modelId, endpointId }
 
-function _prepareNewChat(pendingChat) {
+function _prepareNewChat(pendingChat, { preserveWorkspace = false } = {}) {
   _sessionNavToken++;
+  _clearHistoryPager();
+  window.dispatchEvent(new CustomEvent('odysseus:session-cleared', { detail: { preserveWorkspace } }));
   // Detach any active stream so it doesn't interfere with the new chat
   if (window.chatModule && window.chatModule.detachCurrentStream) {
     window.chatModule.detachCurrentStream(currentSessionId);
@@ -2271,7 +2275,7 @@ function _prepareNewChat(pendingChat) {
   if (msgInput) { msgInput.disabled = false; msgInput.value = ''; msgInput.focus(); }
 }
 
-export function createBlankChat() {
+export function createBlankChat(options = {}) {
   const current = sessions.find(session => session.id === currentSessionId);
   preserveSelectedAgentForNewChat();
   _prepareNewChat(current?.endpoint_url && current?.model ? {
@@ -2279,7 +2283,7 @@ export function createBlankChat() {
     modelId: current.model,
     endpointId: current.endpoint_id || '',
     source: 'new_chat',
-  } : { source: 'discovering' });
+  } : { source: 'discovering' }, options);
 }
 
 export function createDirectChat(url, modelId, endpointId, source = '') {
@@ -2289,24 +2293,26 @@ export function createDirectChat(url, modelId, endpointId, source = '') {
 
 /** Actually create the session in the DB. Called on first message send. */
 export async function materializePendingSession() {
+  const navigationAtStart = _sessionNavToken;
   const pending = _pendingChat;
-  if (!pending || !pending.url || !pending.modelId) return false;
+  const native = getSelectedAgentTarget() === 'pc-codex' ? window.codexWorkspaceBrowser?.getSelectedContext?.() : null;
+  if (!native?.workspace && (!pending || !pending.url || !pending.modelId)) return false;
   _pendingChat = null;
 
   const incognitoChk = document.getElementById('incognito-toggle');
   const isIncognito = incognitoChk && incognitoChk.checked;
-  const base = (pending.modelId || 'model').split('/').pop();
-  const name = isIncognito ? 'Nobody' : `${base} ${new Date().toLocaleTimeString()}`;
+  const base = (pending?.modelId || 'Codex').split('/').pop();
+  const name = isIncognito ? 'Nobody' : native?.title || `${base} ${new Date().toLocaleTimeString()}`;
 
   const fd = new FormData();
   fd.append('name', name);
-  fd.append('endpoint_url', pending.url || '');
-  fd.append('model', pending.modelId || '');
+  fd.append('endpoint_url', pending?.url || '');
+  fd.append('model', pending?.modelId || 'Codex');
   fd.append('agent_target', getSelectedAgentTarget() || 'jarvis');
-  if (pending.url && pending.modelId) {
+  if (native?.workspace || (pending?.url && pending?.modelId)) {
     fd.append('skip_validation', 'true');
   }
-  if (pending.endpointId) {
+  if (pending?.endpointId) {
     fd.append('endpoint_id', pending.endpointId);
   }
 
@@ -2338,6 +2344,7 @@ export async function materializePendingSession() {
   if (window.documentModule?.clearSelection) {
     try { window.documentModule.clearSelection(); } catch {}
   }
+  if (navigationAtStart !== _sessionNavToken) return false;
   movePendingAgentTarget(payload.id);
   currentSessionId = payload.id;
   Storage.set('lastSessionId', payload.id);
@@ -2352,6 +2359,7 @@ export async function materializePendingSession() {
 }
 
 export function hasPendingChat() {
+  if (!currentSessionId && getSelectedAgentTarget() === 'pc-codex' && window.codexWorkspaceBrowser?.getSelectedContext?.()?.workspace) return true;
   return !!(_pendingChat && _pendingChat.url && _pendingChat.modelId);
 }
 export function getPendingChat() { return _pendingChat; }
