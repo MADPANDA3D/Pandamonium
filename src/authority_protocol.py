@@ -192,10 +192,26 @@ def redact_secret_text(value: str) -> str:
     return redacted
 
 
+_TOKEN_BUDGET_KEYS = frozenset(
+    {
+        "max_tokens", "max_context_tokens", "max_input_tokens", "max_output_tokens",
+        "max_completion_tokens", "token_budget", "context_token_budget",
+    }
+)
+
+
+def _is_credential_field(key: Any, value: Any) -> bool:
+    # Only known, nonnegative integer budgets are exempt. Strings, objects and
+    # arbitrary token-named fields still receive the existing credential gate.
+    if str(key).lower() in _TOKEN_BUDGET_KEYS and type(value) is int and value >= 0:
+        return False
+    return bool(_SECRET_KEY.search(str(key)))
+
+
 def redact_secrets(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
-            key: "[redacted]" if _SECRET_KEY.search(str(key)) else redact_secrets(item)
+            key: "[redacted]" if _is_credential_field(key, item) else redact_secrets(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -213,7 +229,7 @@ def safe_preview(value: Any, *, depth: int = 0) -> Any:
         return "[truncated]"
     if isinstance(value, Mapping):
         return {
-            str(key)[:100]: "[redacted]" if _SECRET_KEY.search(str(key)) else safe_preview(item, depth=depth + 1)
+            str(key)[:100]: "[redacted]" if _is_credential_field(key, item) else safe_preview(item, depth=depth + 1)
             for key, item in list(value.items())[:50]
         }
     if isinstance(value, list):
@@ -252,7 +268,7 @@ def _path_values(value: Any, *, key: str = ""):
 def _contains_credential_field(value: Any) -> bool:
     if isinstance(value, Mapping):
         return any(
-            _SECRET_KEY.search(str(key)) or _contains_credential_field(child)
+            _is_credential_field(key, child) or _contains_credential_field(child)
             for key, child in value.items()
         )
     if isinstance(value, (list, tuple)):

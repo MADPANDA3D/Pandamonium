@@ -1061,6 +1061,10 @@ _FORMATTER_HANDLED_KEYS = {
 
 def format_tool_result(description: str, result: Dict) -> str:
     """Format a tool result into text for feeding back to the LLM."""
+    if "structured_content" in result or description.startswith("mcp: "):
+        from src.tool_result_projection import format_mcp_result
+
+        return format_mcp_result(result)
     parts = [f"### {description}"]
 
     if "model_content" in result:

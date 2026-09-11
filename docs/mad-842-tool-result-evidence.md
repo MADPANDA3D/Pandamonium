@@ -95,3 +95,32 @@ Leo authorized scoped implementation and normal protected PR/release work in a
 fresh task. CT103 installation remains Leo-owned under the governing issue;
 read-only inspection is allowed. Friday gateway MAD-879 stays deferred.
 
+
+## Source repair and regression review
+
+The generic MCP formatter now emits compact, valid JSON. Structured content and
+JSON-only text responses use the same projection. Duplicate JSON text is compared
+after recursive secret redaction so an unredacted duplicate cannot restore a
+masked credential. Executable schemas remain complete when the context permits;
+if they cannot fit, the model receives an explicit whole-schema omission instead
+of a broken schema. Data pages retain complete prefix records, IDs/citations and
+original pagination, with an explicit instruction to reread a smaller page before
+advancing the cursor. The existing class and total context ceilings still apply.
+
+Numeric nonnegative integer token budgets are exempt from credential-key matching
+only for the enumerated generic budget fields. Strings, nested credential objects,
+and actual token/credential fields retain the existing approval and redaction
+behavior. Exact approval fingerprints and the one-shot read-validation correction
+remain unchanged.
+
+Review reproduced and fixed additional provisional defects: mounted-capability
+notice prefixes bypassing atomic trimming, minimum-budget notices exceeding their
+allowance, a colliding projection field causing an exception, and duplicate JSON
+text retaining a masked credential. Tests exercise the actual agent loop with the
+real MCP parsing/execution path and capture successive model requests: complete
+reference, precise invalid-argument feedback, one corrected read, and record data.
+The model and provider in that test are deterministic fixtures, not Jarvis acceptance.
+
+Configured-runtime acceptance remains open until Leo installs the published repair
+and Jarvis performs actual targeted/browse reads with matching record citations,
+plus the existing Discord read. No production installation is performed here.
