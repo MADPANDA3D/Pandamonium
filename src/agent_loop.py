@@ -3824,7 +3824,7 @@ async def stream_agent_loop(
             logger.info("[tool-rag] Selected native MCP tools: %s", sorted(_native_mcp_tools))
     _native_mcp_server_prefixes = {
         f"mcp__{name.split('__', 2)[1]}__"
-        for name in _native_mcp_tools
+        for name in (_native_mcp_tools | _mcp_discovery_tools)
         if len(name.split("__", 2)) == 3
     }
     # If this turn targets the open document, keep editing tools available
@@ -5940,7 +5940,7 @@ async def stream_agent_loop(
                 _effectful_used = True
 
             formatted = format_tool_result(desc, result)
-            if _native_mcp_tools and block.tool_type.startswith("mcp__"):
+            if (_native_mcp_tools or _mcp_discovery_tools) and block.tool_type.startswith("mcp__"):
                 formatted = _project_native_mcp_guidance_for_model(
                     formatted,
                     block.tool_type,
