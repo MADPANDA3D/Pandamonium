@@ -1312,7 +1312,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_jarvis_knowledge",
-            "description": "Search the curated Jarvis business knowledge corpus. Use this for background context; requests for current or latest status should also delegate a read-only PC Codex inspection.",
+            "description": "Search the internal Jarvis knowledge index for background context. This does not query an external database or a user-named collection. For a requested external source, use the configured MCP discovery and read tools and cite their actual returned records.",
             "parameters": {
                 "type": "object",
                 "properties": {

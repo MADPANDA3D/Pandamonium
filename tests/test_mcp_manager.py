@@ -545,3 +545,22 @@ def test_native_mcp_prompt_forbids_provider_substitution_and_generic_fallbacks()
     assert "Never substitute a different provider" in _NATIVE_MCP_DIRECT_RULES
     assert "Do not use manage_mcp, api_call, app_api, pipeline, shell, or curl" in _NATIVE_MCP_DIRECT_RULES
     assert "permission, service admission, or schema validation fails" in _NATIVE_MCP_DIRECT_RULES
+
+
+def test_discovery_does_not_require_hidden_service_or_broker_identity():
+    manager = McpManager()
+    manager._connections["broker"] = {
+        "status": "connected", "name": "Example Broker",
+        "instructions": "Use catalog.start then catalog.read; catalog.write changes data.",
+    }
+    manager._tools["broker"] = [
+        {"name": name, "annotations": {"readOnlyHint": readonly}}
+        for name, readonly in [("catalog.start", True), ("catalog.read", True), ("catalog.write", False), ("catalog.other", True)]
+    ]
+    assert manager.native_tool_names_for_request("Explore records in Qdrant") == set()
+    assert manager.native_discovery_tool_names() == {
+        "mcp__broker__catalog.start", "mcp__broker__catalog.read",
+    }
+    assert len(manager.native_discovery_tool_names(limit=1)) == 1
+    manager._connections["broker"]["status"] = "disconnected"
+    assert manager.native_discovery_tool_names() == set()

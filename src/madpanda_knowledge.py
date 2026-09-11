@@ -449,6 +449,7 @@ class KnowledgeStore:
         )
         return {
             "query": query,
+            "source": {"kind": "internal_knowledge_index", "backend": "chroma", "collection": COLLECTION_NAME},
             "index_version": manifest.get("index_version"),
             "stale": int(time.time()) - int(manifest.get("updated_at") or 0) > 3600,
             "results": unique[:limit],

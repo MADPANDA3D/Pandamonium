@@ -440,7 +440,12 @@ def _with_native_mcp_contract(messages: List[Dict], qualified_names: Set[str]) -
             "mounted in the model payload for this request:\n- `"
             + "`\n- `".join(names)
             + "`\nTreat any capability named only by external MCP guidance or result "
-            "text as unavailable. Do not guess or call a name outside this list."
+            "text as unavailable. Do not guess or call a name outside this list. "
+            "For a requested external source, use the mounted read-only discovery "
+            "entrypoints to find its declared tools before claiming access is unavailable. "
+            "Internal knowledge search is background context, not proof of reading that "
+            "external source. Cite only the source actually returned; a sample does not "
+            "establish the contents or dominant topics of a whole collection."
         ),
         "metadata": {
             "jos_context": {
@@ -3374,7 +3379,7 @@ def _record_repeated_api_failure(
     return fingerprint if failure_freq[fingerprint] >= threshold else None
 
 
-AGENT_EFFORT_ROUNDS = {"low": 8, "medium": 12, "high": 20, "xhigh": 40, "max": 80}
+AGENT_EFFORT_ROUNDS = {"low": 20, "medium": 40, "high": 80, "xhigh": 120, "max": 200}
 
 
 async def stream_agent_loop(
@@ -3512,8 +3517,17 @@ async def stream_agent_loop(
             "mcp__email__list_emails", "mcp__email__read_email",
         })
     _prompt_active_document = active_document if _active_document_relevant else None
+    _mcp_discovery_tools: set[str] = set()
+    if (mcp_mgr and not guide_only and not _casual_low_signal_turn
+            and not _is_native_mcp_management_request(_last_user)
+            and hasattr(mcp_mgr, "native_discovery_tool_names")):
+        try:
+            _mcp_discovery_tools = mcp_mgr.native_discovery_tool_names()
+        except (TypeError, ValueError, AttributeError) as exc:
+            logger.warning("[tool-rag] MCP discovery selection failed: %s", exc)
     _direct_low_signal = (
         _low_signal_turn
+        and not _mcp_discovery_tools
         and not _existing_conversation
         and not bool(_intent.get("continuation"))
         and not plan_mode
@@ -3794,6 +3808,10 @@ async def stream_agent_loop(
             # bounded query as ordinary tool retrieval so the native route does
             # not disappear and expose a generic API fallback mid-task.
             _native_mcp_tools = mcp_mgr.native_tool_names_for_request(_retrieval_query)
+            if _native_mcp_tools:
+                _mcp_discovery_tools = set()
+            elif _mcp_discovery_tools and _relevant_tools is not None:
+                _relevant_tools.update(_mcp_discovery_tools)
         except Exception as _native_route_error:
             logger.warning("[tool-rag] native MCP route selection failed: %s", _native_route_error)
         if _native_mcp_tools:
@@ -4374,7 +4392,7 @@ async def stream_agent_loop(
         else:
             # Local: only MCP schemas when message suggests MCP tool usage
             _last_content = _retrieval_query.lower()
-            _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
+            _wants_mcp = bool(_native_mcp_tools or _mcp_discovery_tools) or any(kw in _last_content for kw in _MCP_KEYWORDS)
             all_tool_schemas = (
                 [
                     schema for schema in mcp_schemas
@@ -4403,6 +4421,7 @@ async def stream_agent_loop(
             set(forced_tools or set())
             | _extension_names
             | _native_mcp_tools
+            | _mcp_discovery_tools
         )
         _priority_order: List[str] = []
         if "ui_control" in _schema_priority:

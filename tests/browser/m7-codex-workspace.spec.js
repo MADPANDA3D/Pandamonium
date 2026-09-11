@@ -440,7 +440,11 @@ test('Jarvis budget slider submits a work budget and resets to the installation 
   await expect(page.locator('#conversation-effort-label')).toHaveText('Agent work budget');
   await page.locator('#conversation-effort').focus();
   await page.locator('#conversation-effort').press('Home');
-  await expect(page.locator('#conversation-effort-help')).toContainText('Up to 8 rounds');
+  for (const budget of [20, 40, 80, 120, 200]) {
+    await expect(page.locator('#conversation-effort-help')).toContainText(`Up to ${budget} rounds`);
+    await page.locator('#conversation-effort').press('ArrowRight');
+  }
+  await page.locator('#conversation-effort').press('Home');
   await page.locator('#model-picker-btn').click();
   await page.locator('#message:visible').fill('Inspect the current state.');
   await page.locator('.send-btn:visible').click();

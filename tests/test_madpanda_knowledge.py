@@ -74,6 +74,7 @@ def test_canonical_knowledge_precedes_higher_scoring_generated_wiki(monkeypatch)
 
     result = store.search(agent, "architecture", limit=2, include_secondary=True)
 
+    assert result["source"] == {"kind": "internal_knowledge_index", "backend": "chroma", "collection": knowledge.COLLECTION_NAME}
     assert [row["source_id"] for row in result["results"]] == ["canonical", "wiki"]
 
 

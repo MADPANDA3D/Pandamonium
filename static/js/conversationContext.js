@@ -2,7 +2,7 @@ import { getSelectedAgentSelection } from './modelPicker.js';
 
 const byId = id => document.getElementById(id);
 const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
-const rounds = [8, 12, 20, 40, 80];
+const rounds = [20, 40, 80, 120, 200];
 const names = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Very high', max: 'Maximum', ultra: 'Ultra', minimal: 'Minimal', none: 'Off' };
 let agentEffort = '';
 let details = null;

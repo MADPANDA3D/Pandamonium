@@ -124,7 +124,8 @@ DEFAULT_SETTINGS = {
     # Tune via Settings or by editing data/settings.json.
     "research_run_timeout_seconds": 1800,
     "agent_max_tool_calls": 0,
-    "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
+    "agent_work_budget_version": 2,
+    "agent_max_rounds": 80,  # per-message agent step cap (clamped 1..200)
     # Soft input-token budget for the agent loop. The DEFAULT value (6000) is the
     # "auto" sentinel: it means "scale the budget to the model's context window"
     # (#1230) — so long-context models aren't capped at 6000. Set ANY OTHER value
@@ -255,7 +256,12 @@ def load_settings() -> dict:
             saved = json.load(f)
         if not isinstance(saved, dict):
             raise ValueError("settings must be an object")
+        # Upgrade the old materialized default once; retain other custom caps.
+        # Saving settings stamps version 2, so an explicit 20 remains available.
+        if saved.get("agent_work_budget_version", 1) == 1 and saved.get("agent_max_rounds") == 20:
+            saved["agent_max_rounds"] = DEFAULT_SETTINGS["agent_max_rounds"]
         merged = {**DEFAULT_SETTINGS, **saved}
+        merged["agent_work_budget_version"] = 2
     except (FileNotFoundError, PermissionError, json.JSONDecodeError, ValueError):
         merged = dict(DEFAULT_SETTINGS)
     _settings_cache = (now, merged)
@@ -265,7 +271,7 @@ def load_settings() -> dict:
 def save_settings(settings: dict):
     """Persist settings to disk (atomic; see core.atomic_io)."""
     from core.atomic_io import atomic_write_json
-    atomic_write_json(SETTINGS_FILE, settings, indent=2)
+    atomic_write_json(SETTINGS_FILE, {**settings, "agent_work_budget_version": 2}, indent=2)
     _invalidate_caches()
 
 
