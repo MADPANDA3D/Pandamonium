@@ -54,11 +54,15 @@ from final answers; private reasoning and raw tool arguments are never returned.
 
 Pandamonium preserves the selected native task and model/effort across reload and
 resumes that task when sending. Browsing does not start a model turn or replay tools.
-Attachment filenames and paths are listed; binary files remain on the native node.
+Recorded local images are returned as bounded image data after task/project
+verification and display as previews. Unavailable files retain an explicit label.
 Keep the existing private token, Codex home, project map and service environment
 when replacing the two-file bridge bundle. Restart the bridge only when its worker
 tasks are idle; keep the previous bundle for rollback. Older bridges continue to
 serve the existing catalog and task controls but cannot load native history.
+
+See [Agent gateway](../../docs/agent-gateway.md) for additive MCP configuration,
+bidirectional image delivery, native configuration preservation and limits.
 
 ## Desktop-owned continuation
 

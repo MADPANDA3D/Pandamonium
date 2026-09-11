@@ -43233,9 +43233,11 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 .native-work, .native-work[open] { background: transparent; border: 0; border-radius: 0; margin: 8px 0; padding: 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--fg) 14%, transparent); color: var(--fg); }
 .native-work > summary, .native-work > summary:hover { background: transparent; border: 0; padding: 0; cursor: pointer; color: color-mix(in srgb, var(--fg) 60%, transparent); font-size: 13px; }
 .native-work > p { font-size: 12px; overflow-wrap: anywhere; }
-.native-work .msg, .msg.native-final { border: 0; background: transparent; box-shadow: none; }
+.native-work .msg { border: 0; background: transparent; box-shadow: none; }
+.codex-history-image { display: block; max-width: min(100%, 520px); max-height: 420px; object-fit: contain; border-radius: 8px; }
+.codex-history-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .native-work .msg { margin: 8px 0; padding: 0; width: 100%; max-width: 100%; }
-.native-work .msg .role, .native-work .msg .msg-actions, .msg.native-final > .role { display: none; }
+.native-work .msg .role, .native-work .msg .msg-actions { display: none; }
 .msg[hidden] { display: none !important; }
 .conversation-effort-card.is-native { padding: 10px 0 0; border: 0; border-top: 1px solid color-mix(in srgb, var(--fg) 14%, transparent); border-radius: 0; background: transparent; }
 .conversation-effort-card.is-native > :not(#codex-model-controls) { display: none; }

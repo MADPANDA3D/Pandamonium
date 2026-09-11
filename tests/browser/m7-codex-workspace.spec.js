@@ -601,10 +601,12 @@ test('native task navigation discards late history and reports bridge errors wit
 
 
 test('native commentary collapses into one work disclosure while the final answer stays visible', async ({ page }) => {
+  const imageUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP8z4AATAxEcQAz0QEHOoQ+uAAAAABJRU5ErkJggg==';
   await mockShell(page, { onHistory: route => route.fulfill({ json: {
     task: { ...taskPage().items[0], cwd: '/work/disposable' },
     items: [
-      { id: 't:user', turn_id: 't', role: 'user', text: 'Fix it.' },
+      { id: 't:user', turn_id: 't', role: 'user', text: 'Fix it.', attachments: ['/tmp/photo.png'],
+        images: [{ path: '/tmp/photo.png', name: 'photo.png', data_url: imageUrl, unavailable: false }] },
       { id: 't:progress', turn_id: 't', role: 'assistant', phase: 'commentary', text: 'Checking the files.' },
       { id: 't:progress2', turn_id: 't', role: 'assistant', phase: 'commentary', text: 'Tests passed.' },
       { id: 't:final', turn_id: 't', role: 'assistant', phase: 'final_answer', text: 'Fixed and verified.' },
@@ -616,8 +618,15 @@ test('native commentary collapses into one work disclosure while the final answe
   await page.getByText('Disposable Test Project', { exact: true }).click();
   await page.getByText('Fixture resume task', { exact: true }).click();
   await expect(page.locator('.native-work')).toHaveCount(1);
+  await expect(page.locator('.codex-history-image')).toBeVisible();
+  await expect.poll(() => page.locator('.codex-history-image').evaluate(img => img.naturalWidth)).toBe(4);
+  await page.getByRole('button', { name: 'Open photo.png' }).click();
+  await expect(page.locator('.attach-lightbox img')).toHaveAttribute('src', imageUrl);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.attach-lightbox')).toHaveCount(0);
   await expect(page.locator('.native-work')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await expect(page.locator('.native-final > .role')).toBeHidden();
+  await expect(page.locator('.native-final > .role')).toBeVisible();
+  await expect(page.locator('.native-final')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   await expect(page.getByText('Checking the files.', { exact: true })).toBeHidden();
   await expect(page.locator('.native-final')).toHaveText(/Fixed and verified/);
   await page.getByText('Worked for 1m 8s', { exact: true }).click();

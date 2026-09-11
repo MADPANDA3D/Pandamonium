@@ -780,6 +780,7 @@ async def direct_hermes_turn(
     *,
     owner: str | None,
     workspace: str = "home-lab",
+    images: list[dict] | None = None,
 ) -> str:
     """Talk to Gordon directly without creating a Jarvis broker task."""
     identity = str(owner or "").strip()
@@ -800,6 +801,7 @@ async def direct_hermes_turn(
         session_id=f"odysseus-gordon-{scope}",
         session_key=f"odysseus:gordon:{scope}",
         message=prompt,
+        **({"images": images} if images else {}),
     )
 
 
@@ -814,6 +816,7 @@ async def direct_codex_turn(
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
     explicit_workspace: bool = False,
+    images: list[dict] | None = None,
 ) -> tuple[dict, str]:
     """Start or steer the one Codex task bound to this conversation."""
     active = find_active_task(session_id, "pc-codex", None, owner)
@@ -827,7 +830,7 @@ async def direct_codex_turn(
         return await task_action(
             active["task_id"],
             "steer",
-            {"prompt": prompt},
+            {"prompt": prompt, **({"images": images} if images else {})},
             persist_user_message=False,
             owner=owner,
         ), "steered"
@@ -846,12 +849,14 @@ async def direct_codex_turn(
         codex_model=codex_model,
         codex_reasoning_effort=codex_reasoning_effort,
         presenter=presenter,
+        images=images,
+        preserve_native_config=True,
     )
     if task.get("reused"):
         return await task_action(
             task["task_id"],
             "steer",
-            {"prompt": prompt},
+            {"prompt": prompt, **({"images": images} if images else {})},
             persist_user_message=False,
             owner=owner,
         ), "steered"
@@ -886,6 +891,8 @@ async def start_task(
     persist_result: bool = True,
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
+    images: list[dict] | None = None,
+    preserve_native_config: bool = False,
 ) -> dict:
     owner = str(owner or "").strip()
     if not owner:
@@ -961,6 +968,7 @@ async def start_task(
             "codex_thread_id": codex_thread_id,
             "codex_model": codex_model,
             "codex_reasoning_effort": codex_reasoning_effort,
+            "preserve_native_config": preserve_native_config,
             "thread_title": " ".join(str(thread_title or "").split())[:200] or None,
             "read_all_requested": asks_read_all(prompt),
             "request_id": str(request_id or "").strip()[:200] or None,
@@ -989,7 +997,7 @@ async def start_task(
             codex_thread_id=codex_thread_id,
         )
         try:
-            remote = await adapter.start(task)
+            remote = await adapter.start({**task, **({"images": images} if images else {})})
         except Exception as exc:
             _append_event(task["task_id"], {
                 "type": "error",

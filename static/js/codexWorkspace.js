@@ -2,6 +2,7 @@ import { getSelectedAgentSelection } from './modelPicker.js';
 import {
   renderAuthorityApprovalCard,
   renderAuthorityDecisionResolved,
+  _openImageLightbox,
 } from './chatRenderer.js';
 
 const PAGE_SIZE = 50;
@@ -526,7 +527,26 @@ async function loadNativeTranscript({ earlier = false } = {}) {
       });
       if (!node) continue;
       node.dataset.nativeMessageId = item.id;
+      const imagePaths = new Set();
+      for (const image of item.images || []) {
+        imagePaths.add(image.path);
+        const attachment = document.createElement('p');
+        attachment.className = 'codex-history-attachment';
+        if (!image.unavailable && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(image.data_url || '')) {
+          const preview = document.createElement('img');
+          preview.src = image.data_url; preview.alt = image.name || 'Attached image';
+          preview.loading = 'lazy'; preview.className = 'codex-history-image';
+          preview.addEventListener('error', () => { attachment.textContent = `${preview.alt} — image could not be decoded.`; });
+          const open = document.createElement('button');
+          open.type = 'button'; open.className = 'codex-history-preview';
+          open.setAttribute('aria-label', `Open ${preview.alt}`);
+          open.addEventListener('click', () => _openImageLightbox(image));
+          open.appendChild(preview); attachment.appendChild(open);
+        } else attachment.textContent = `${image.name || 'Image'} — image unavailable on the workstation or exceeds this page's image limit.`;
+        node.appendChild(attachment);
+      }
       for (const path of item.attachments || []) {
+        if (imagePaths.has(path)) continue;
         const attachment = document.createElement('p');
         attachment.className = 'codex-history-attachment'; attachment.textContent = `Attached: ${path.split(/[\\/]/).pop()}`;
         attachment.title = path;

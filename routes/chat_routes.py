@@ -94,13 +94,18 @@ async def _direct_selected_identity_turn(
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
     explicit_workspace: bool = False,
+    turn_context: dict | None = None,
 ) -> tuple[str, Any, str]:
     """Route non-Jarvis selections without sending them through Jarvis's model."""
     from src.jarvis_agent import direct_codex_turn, direct_hermes_turn
+    from src.agent_turn_context import contextual_prompt
+
+    message = contextual_prompt(message, turn_context)
 
     if worker == "hermes":
         return "response", await direct_hermes_turn(
             session_id, message, owner=owner, workspace=workspace,
+            **({"images": turn_context["images"]} if turn_context and turn_context.get("images") else {}),
         ), "completed"
     if worker == "pc-codex":
         task, action = await direct_codex_turn(
@@ -113,6 +118,7 @@ async def _direct_selected_identity_turn(
             codex_model=codex_model,
             codex_reasoning_effort=codex_reasoning_effort,
             explicit_workspace=explicit_workspace,
+            **({"images": turn_context["images"]} if turn_context and turn_context.get("images") else {}),
         )
         return "task", task, action
     raise ValueError("unsupported_conversation_target")
@@ -1036,6 +1042,7 @@ def setup_chat_routes(
             agent_mode=(chat_mode == "agent" and not hermes_agent_api),
             allow_tool_preprocessing=allow_tool_preprocessing,
             persist_user=not _authority_control,
+            native_agent_images=selected_agent_worker in {"pc-codex", "hermes"},
         )
         active_character_name = selected_agent_label or ctx.preset.character_name
 
@@ -1394,6 +1401,21 @@ def setup_chat_routes(
                 yield f'data: {json.dumps({"type": "model_info", "model": route_model, "character_name": selected_agent_label})}\n\n'
                 try:
                     session_manager.save_sessions()
+                    from src.agent_turn_context import build_agent_turn_context
+
+                    turn_context = build_agent_turn_context(
+                        session_id=session, presenter=selected_agent_label,
+                        workspace=selected_agent_workspace or "home-lab",
+                        attachment_ids=att_ids, upload_handler=upload_handler, owner=_user,
+                    )
+                    from src.agent_gateway import register_context
+
+                    turn_context["gateway_context_id"] = register_context(
+                        turn_context, owner=_user, workspace=workspace or None,
+                        tool_policy=tool_policy, extension_bridge=text_extension_bridge,
+                        active_document=active_doc, active_email=active_email_ctx,
+                        used_memories=ctx.used_memories, context_manifest=ctx.context_manifest,
+                    )
                     kind, payload, action = await _direct_selected_identity_turn(
                         selected_agent_worker,
                         session_id=session,
@@ -1405,6 +1427,7 @@ def setup_chat_routes(
                         codex_model=codex_model or None,
                         codex_reasoning_effort=codex_reasoning_effort or None,
                         explicit_workspace=bool(worker_workspace),
+                        turn_context=turn_context,
                     )
                     if kind == "response":
                         reply = str(payload or "").strip()

@@ -219,6 +219,8 @@ class CodexBridgeAdapter:
             "request_id": task.get("request_id"),
             "codex_model": task.get("codex_model"),
             "codex_reasoning_effort": task.get("codex_reasoning_effort"),
+            **({"images": task["images"]} if task.get("images") else {}),
+            "preserve_native_config": task.get("preserve_native_config") is True,
         }
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(f"{self.url}/v1/tasks", json=payload, headers=self._headers())
@@ -437,6 +439,7 @@ class HermesRunsAdapter:
         session_id: str,
         session_key: str,
         message: str,
+        images: list[dict] | None = None,
     ) -> str:
         """Run one persistent foreground turn through Gordon's native agent."""
         if not self.enabled:
@@ -446,7 +449,10 @@ class HermesRunsAdapter:
         headers["X-Hermes-Session-Key"] = session_key[:256]
         payload = {
             "model": "hermes-agent",
-            "messages": [{"role": "user", "content": message}],
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": message},
+                *[{"type": "image_url", "image_url": {"url": image["url"]}} for image in images],
+            ] if images else message}],
             "stream": False,
         }
         async with httpx.AsyncClient(timeout=300) as client:
