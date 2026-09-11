@@ -303,8 +303,9 @@ test('selected Friday project and task flow through the normal composer', async 
   let submitted = '';
   await mockShell(page, {
     sessions: [fridaySession],
-    onChat: route => {
+    onChat: async route => {
       submitted = route.request().postData() || '';
+      await expect(page.locator('.msg-ai .role').last()).toContainText('Friday');
       const task = {
         task_id: 'direct-friday-task', worker: 'pc-codex', presenter: 'Friday',
         session_id: 'friday-chat', workspace: 'test-project', status: 'running', codex_thread_id: THREAD_ID,
@@ -321,6 +322,7 @@ test('selected Friday project and task flow through the normal composer', async 
       });
     },
   });
+  await page.route('**/api/upload', route => route.fulfill({ json: { files: [{ id: 'photo-879', name: 'photo.png', mime: 'image/png', size: 73, width: 4, height: 4 }] } }));
   await page.goto('/static/index.html');
   await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule))).toBe(true);
   await page.evaluate(async () => {
@@ -348,10 +350,13 @@ test('selected Friday project and task flow through the normal composer', async 
     const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'https://github.com/MADPANDA3D/myinstants-api');
     input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
   });
+  await page.locator('#file-input').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP8z4AATAxEcQAz0QEHOoQ+uAAAAABJRU5ErkJggg==', 'base64') });
   await page.locator('.send-btn:visible').click();
 
   await expect.poll(() => submitted).toContain('worker_workspace');
   expect(submitted).toContain('test-project');
+  expect(submitted).toContain('photo-879');
+  expect(submitted).toContain('attachments');
   expect(submitted).toContain('https://github.com/MADPANDA3D/myinstants-api');
   await expect(page.locator('.msg-ai[data-task-id="direct-friday-task"]:visible')).toHaveCount(0);
   expect(submitted).toContain('worker_thread_id');

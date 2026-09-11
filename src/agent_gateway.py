@@ -43,7 +43,7 @@ def register_context(context: dict, *, owner: str, workspace=None, tool_policy=N
         if _contexts[key]["expires"] < now:
             del _contexts[key]
     if len(_contexts) >= 1024:
-        raise RuntimeError("Pandamonium gateway is at capacity; retry after an older context expires.")
+        del _contexts[next(iter(_contexts))]  # Oldest turn expires; new messages stay available.
     key = secrets.token_urlsafe(32)
     _contexts[key] = {
         "owner": owner, "expires": now + 24 * 60 * 60,
@@ -161,6 +161,11 @@ async def _execute(context_id: str, name: str, arguments: dict, *, read_only: bo
         )
         if decision["decision"] != "allow":
             return {"status": decision["decision"], "decision": redact_secrets(decision)}
+        document_id = (row["public"].get("active_document") or {}).get("id")
+        if not document_id and (name in {"edit_document", "update_document", "suggest_document"}
+                                or (name == "manage_documents" and call["arguments"].get("action") == "delete"
+                                    and not any(call["arguments"].get(key) for key in ("document_id", "id", "uid")))):
+            return {"status": "denied", "error": "Select a document in Pandamonium and send a new message first."}
         content = json.dumps(call["arguments"])
         bridge = row["extension_bridge"]
         extra_names = {schema["function"]["name"] for schema in bridge.get("extra_tool_schemas") or []}
@@ -176,6 +181,7 @@ async def _execute(context_id: str, name: str, arguments: dict, *, read_only: bo
             result = await execute_tool_block(
                 block, session_id=session, owner=row["owner"], workspace=row["workspace"],
                 tool_policy=row["tool_policy"], presenter=row["public"]["presenter"],
+                document_id=document_id,
             )
         description, output = result
         return {"description": description, "result": redact_secrets(output)}

@@ -809,6 +809,8 @@ def _handle_server_message(task: Task, message: dict) -> None:
         return
     method = message.get("method")
     params = message.get("params") or {}
+    if "id" in message and str(method).endswith("/requestApproval"):
+        raise RuntimeError("native_approval_required: open this task in Codex Desktop to approve and continue; no approval was granted by Pandamonium")
     if "id" in message and method == "item/tool/requestUserInput":
         task.pending_request_id = message["id"]
         questions = params.get("questions") or []
@@ -1064,6 +1066,9 @@ def _run_desktop_task(task: Task) -> bool:
         request = {"threadId": thread_id, "input": _native_input(task.data["prompt"], task.data.get("images")),
                    "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": _runtime_workspace_roots(task)} if _approved_workspace_write(task) else {"type": "readOnly"},
                    "approvalPolicy": "never"}
+        if task.data.get("preserve_native_config"):
+            request.pop("sandboxPolicy")
+            request.pop("approvalPolicy")
         if task.data.get("codex_model"):
             request["model"] = task.data["codex_model"]
         if task.data.get("codex_reasoning_effort"):
@@ -1112,9 +1117,8 @@ def _run_task(task: Task) -> None:
                     "threadId": resume_thread_id,
                     "cwd": task.data["cwd"],
                     "runtimeWorkspaceRoots": _runtime_workspace_roots(task),
-                    "sandbox": sandbox,
-                    "approvalPolicy": "never",
-                    **({} if task.data.get("preserve_native_config") else {"developerInstructions": developer_instructions}),
+                    **({} if task.data.get("preserve_native_config") else {
+                        "sandbox": sandbox, "approvalPolicy": "never", "developerInstructions": developer_instructions}),
                 },
             })
         else:
@@ -1124,10 +1128,9 @@ def _run_task(task: Task) -> None:
                 "params": {
                 "cwd": task.data["cwd"],
                 "runtimeWorkspaceRoots": _runtime_workspace_roots(task),
-                "sandbox": sandbox,
-                "approvalPolicy": "never",
                 "ephemeral": False,
-                **({} if task.data.get("preserve_native_config") else {"developerInstructions": developer_instructions}),
+                **({} if task.data.get("preserve_native_config") else {
+                    "sandbox": sandbox, "approvalPolicy": "never", "developerInstructions": developer_instructions}),
                 },
             })
         started = _read_until(task, 2)

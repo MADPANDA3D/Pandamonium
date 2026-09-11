@@ -156,10 +156,22 @@ def test_suggest_document_active_id_filters_to_calling_owner(monkeypatch):
 def test_document_tool_dispatch_forwards_owner():
     source = open("src/tool_execution.py", encoding="utf-8").read()
 
-    assert "_document_tool_dispatch(tool, content, session_id, owner)" in source
+    assert "_document_tool_dispatch(tool, content, session_id, owner, document_id)" in source
 
     # Also verify TOOL_HANDLERS has the expected entries
     for key in ("create_document", "update_document", "edit_document",
                 "suggest_document", "manage_documents"):
         assert key in TOOL_HANDLERS, f"TOOL_HANDLERS missing key: {key}"
         assert callable(TOOL_HANDLERS[key]), f"TOOL_HANDLERS[{key!r}] is not callable"
+
+
+def test_explicit_document_never_falls_back_to_another_document(monkeypatch):
+    from src.agent_tools import document_tools
+    query = _Query()
+    _install_database_stub(monkeypatch, "src.database", query)
+    monkeypatch.setattr(document_tools, "_get_owned_document", lambda *args: None)
+    def fallback(*args):
+        raise AssertionError("Explicit selection must never use another document")
+    monkeypatch.setattr(document_tools, "_most_recent_owned_document", fallback)
+    result = asyncio.run(TOOL_HANDLERS["update_document"]("new content", {"owner": "alice", "doc_id": "deleted-selection"}))
+    assert result["error"] == "No documents exist to update"

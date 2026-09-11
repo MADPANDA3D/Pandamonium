@@ -526,7 +526,8 @@ def test_bridge_private_profile_allows_only_preapproved_workspace_write(tmp_path
         bridge.TASKS.pop(task.task_id, None)
 
 
-def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypatch):
+@pytest.mark.parametrize("preserve", [False, True])
+def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypatch, preserve):
     class Process:
         def __init__(self):
             self.stdin = io.StringIO()
@@ -565,11 +566,15 @@ def test_bridge_private_profile_uses_workspace_write_sandbox(tmp_path, monkeypat
         "events": [],
     })
 
+    task.data["preserve_native_config"] = preserve
     bridge._run_task(task)
 
     messages = [json.loads(line) for line in process.stdin.getvalue().splitlines()]
     started = next(message for message in messages if message.get("id") == 2)
-    assert started["params"]["sandbox"] == "workspace-write"
+    if preserve:
+        assert not {"sandbox", "approvalPolicy", "developerInstructions"} & started["params"].keys()
+    else:
+        assert started["params"]["sandbox"] == "workspace-write"
     assert started["params"]["runtimeWorkspaceRoots"] == [str(source)]
 
 
@@ -1015,9 +1020,10 @@ def test_gateway_setup_verifies_endpoint_and_preserves_native_configuration(tmp_
         bridge.configure_gateway('http://remote.example/mcp/')
 
 
-def test_desktop_owner_routes_same_thread_without_resuming_a_second_writer(tmp_path, monkeypatch):
+@pytest.mark.parametrize("preserve", [False, True])
+def test_desktop_owner_routes_same_thread_without_resuming_a_second_writer(tmp_path, monkeypatch, preserve):
     task = _task(tmp_path)
-    task.data.update(codex_thread_id='selected', source_root=str(tmp_path), prompt='Continue', permission_mode='read_only', approved=False)
+    task.data.update(codex_thread_id='selected', source_root=str(tmp_path), prompt='Continue', permission_mode='read_only', approved=False, preserve_native_config=preserve)
     monkeypatch.setattr(bridge, 'catalog_task', lambda *_: {'task_id': 'selected', 'cwd': str(tmp_path)})
     calls = []
     def owner(method, params, **kwargs):
@@ -1034,7 +1040,10 @@ def test_desktop_owner_routes_same_thread_without_resuming_a_second_writer(tmp_p
     assert method == 'thread-follower-start-turn'
     assert kwargs['owner'] == 'owner'
     assert params['conversationId'] == params['turnStart']['request']['threadId'] == 'selected'
-    assert params['turnStart']['request']['sandboxPolicy'] == {'type': 'readOnly'}
+    if preserve:
+        assert not {'sandboxPolicy', 'approvalPolicy'} & params['turnStart']['request'].keys()
+    else:
+        assert params['turnStart']['request']['sandboxPolicy'] == {'type': 'readOnly'}
     assert params['turnStart']['request']['input'] == [{'type': 'text', 'text': 'Continue', 'text_elements': []}]
 
 
@@ -1138,3 +1147,9 @@ def test_desktop_watchdog_reports_observation_timeout_without_stopping_owner(tmp
     bridge._watch_task(task)
     assert task.data['status'] == 'failed'
     assert 'may still be running' in task.data['error']
+
+
+def test_native_approval_request_fails_visibly_in_headless_bridge(tmp_path):
+    task = _task(tmp_path)
+    with pytest.raises(RuntimeError, match="native_approval_required"):
+        bridge._handle_server_message(task, {"id": 42, "method": "item/commandExecution/requestApproval", "params": {}})

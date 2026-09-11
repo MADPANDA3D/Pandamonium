@@ -37,9 +37,12 @@ Already-open tasks retain their IDs and history; an already-loaded Desktop
 runtime does not pick up the new connection merely because the file changed.
 Other MCP-capable agents can use the same Streamable HTTP endpoint and bearer
 header through their native connection configuration. Their approval rules still
-apply. Merely forwarding the context text does not install callable tools.
+apply. Desktop-owned tasks display approvals in Codex. A headless bridge task
+that requests native approval stops visibly and must be continued in Codex; the
+bridge never grants or suppresses that approval. Merely forwarding the context text does not install callable tools.
 
-Context references expire after 24 hours or an application restart. Sending a new
+Context references expire after 24 hours, an application restart, or eviction
+from the 1,024 most recent turns. Sending a new
 message through Pandamonium renews context. The gateway remains unavailable to
 anonymous callers even when the normal app login middleware is bypassed for its
 MCP transport.
@@ -53,6 +56,8 @@ It does not run those images through the local model first. Up to 12 images and
 local image files, including for active-turn steering; it rejects caller-supplied
 workstation paths and remote image URLs.
 
+Private workstation history is available only to the installation operator
+(admin or explicitly configured single-user mode), not other app accounts.
 Native history returns actual bytes for exact recorded local image references
 only after verifying task/project membership. Each history page has a 15 MiB
 image budget. Missing, unsupported or oversized images show an explicit
