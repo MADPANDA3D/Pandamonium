@@ -193,7 +193,13 @@ def _truncate_message_to_token_budget(msg: Dict[str, Any], token_budget: int) ->
     out = dict(msg)
     content = out.get("content", "")
     if isinstance(content, str):
-        out["content"] = _truncate_text_to_token_budget(content, token_budget)
+        from src.tool_result_projection import trim_mcp_result
+
+        projected = trim_mcp_result(content, max(0, int((token_budget - 16) / 0.3)))
+        out["content"] = (
+            projected if projected is not None
+            else _truncate_text_to_token_budget(content, token_budget)
+        )
     elif isinstance(content, list):
         remaining = token_budget
         new_content = []
