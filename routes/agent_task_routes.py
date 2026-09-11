@@ -12,6 +12,7 @@ from core.models import ChatMessage
 from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
 from src.agent_identity import configured_agent_id
 from src.auth_helpers import require_user
+from src.tool_security import owner_is_admin_or_single_user
 from src.agent_worker_adapters import WORKER_IDS, WorkerUnavailable, adapters, require_worker_task_permission
 from src.external_agent_bridge import ExternalAgentBridgeError
 from src.authority_protocol import authority_store, operator_identity
@@ -433,6 +434,9 @@ def setup_agent_task_routes(session_manager):
                                  cursor: str | None = Query(default=None, max_length=2000),
                                  limit: int = Query(default=5, ge=1, le=10),
                                  _owner: str = Depends(require_user)):
+        # This catalog belongs to the private workstation, not every app account.
+        if not owner_is_admin_or_single_user(_owner):
+            raise HTTPException(403, "Native workstation history requires operator access")
         try:
             return await _codex_catalog_adapter().catalog_task_details(project_id, thread_id, history=True, cursor=cursor, limit=limit)
         except ValueError:

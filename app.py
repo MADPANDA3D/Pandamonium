@@ -293,6 +293,8 @@ if AUTH_ENABLED:
         "/api/health",
         "/api/version",
         "/api/knowledge/sync",
+        "/api/agent-gateway/mcp/",
+        "/api/agent-gateway/mcp",
         "/login",
     }
     # V1 handlers validate their own per-agent or internal bearer tokens.
@@ -1115,13 +1117,17 @@ async def runtime_info() -> Dict[str, object]:
     }
 
 # ========= LIFECYCLE =========
+from src.agent_gateway import authenticated_gateway, gateway as agent_gateway
+
+app.mount("/api/agent-gateway/mcp", authenticated_gateway)
 
 @asynccontextmanager
 async def _lifespan(app):
     """Modern lifespan context manager replacing deprecated @app.on_event."""
     # ── STARTUP ──
     await _startup_event()
-    yield
+    async with agent_gateway.session_manager.run():
+        yield
     # ── SHUTDOWN ──
     await _shutdown_event()
 

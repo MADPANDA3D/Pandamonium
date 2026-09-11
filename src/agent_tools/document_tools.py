@@ -454,7 +454,7 @@ class UpdateDocumentTool:
             doc = None
             if target_id:
                 doc = _get_owned_document(db, Document, target_id, owner)
-            if not doc:
+            if not doc and not ctx.get("doc_id"):
                 doc = _most_recent_owned_document(db, Document, owner)
                 if doc:
                     target_id = doc.id
@@ -530,7 +530,7 @@ class EditDocumentTool:
             doc = None
             if target_id:
                 doc = _get_owned_document(db, Document, target_id, owner)
-            if not doc:
+            if not doc and not ctx.get("doc_id"):
                 # Fallback: most recently updated document. Avoids "no active doc" errors
                 # after server restart or when the agent loses track of which doc to edit.
                 doc = _most_recent_owned_document(db, Document, owner)
@@ -805,7 +805,7 @@ class ManageDocumentTool:
                 }
 
             elif action == "delete":
-                doc_id = args.get("document_id") or args.get("id") or args.get("uid") or _active_document_id
+                doc_id = args.get("document_id") or args.get("id") or args.get("uid") or ctx.get("doc_id") or _active_document_id
                 doc = None
                 if doc_id:
                     doc = _get_owned_document(db, Document, doc_id, owner)

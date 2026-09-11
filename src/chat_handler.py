@@ -127,6 +127,7 @@ class ChatHandler:
         sess,
         auto_opened_docs: Optional[List[Dict[str, Any]]] = None,
         allow_tool_preprocessing: bool = True,
+        native_agent_images: bool = False,
     ) -> tuple:
         """
         Common preprocessing for both chat endpoints.
@@ -202,7 +203,7 @@ class ChatHandler:
         # so guide-only/no-tools turns must not reach it.
         vision_enabled = False
         main_is_vision = False
-        if effective_att_ids:
+        if effective_att_ids and not native_agent_images:
             from src.settings import get_setting
             vision_enabled = get_setting("vision_enabled", True)
             if vision_enabled:

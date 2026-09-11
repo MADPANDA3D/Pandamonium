@@ -234,8 +234,9 @@ export function updateMessageAttachments(msgWrap, attachments) {
 
 // Quick full-size preview when the user taps a chat photo thumbnail. Just an
 // overlay with the original image centered — no Gallery panel, no editor.
-function _openImageLightbox(att) {
-  if (!att?.id) return;
+export function _openImageLightbox(att) {
+  const inline = String(att?.data_url || '').startsWith('data:image/') ? safeDisplayImageSrc(att.data_url) : '';
+  if (!att?.id && !inline) return;
   const overlay = document.createElement('div');
   overlay.className = 'attach-lightbox';
   // Show the cached thumb immediately so the overlay doesn't sit blank
@@ -244,7 +245,7 @@ function _openImageLightbox(att) {
   // error label rather than a blank overlay forever.
   const img = document.createElement('img');
   img.alt = att.name || '';
-  img.src = `/api/upload/${att.id}?thumb=1`;
+  img.src = inline || `/api/upload/${att.id}?thumb=1`;
   overlay.appendChild(img);
   const full = new Image();
   full.addEventListener('load', () => { img.src = full.src; });
@@ -254,7 +255,7 @@ function _openImageLightbox(att) {
     err.textContent = 'Failed to load full-resolution image.';
     overlay.appendChild(err);
   });
-  full.src = `/api/upload/${att.id}`;
+  full.src = inline || `/api/upload/${att.id}`;
 
   const _onKey = (e) => { if (e.key === 'Escape') _close(); };
   const _close = () => {
