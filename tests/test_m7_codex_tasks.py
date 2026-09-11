@@ -746,6 +746,7 @@ async def test_native_history_route_requires_user_and_preserves_cursor(tmp_path,
     monkeypatch.setattr(agent_task_routes, 'adapters', lambda: {'pc-codex': adapter})
     monkeypatch.setattr(agent_task_routes, 'configure', lambda *_args: None)
     monkeypatch.setenv('AUTH_ENABLED', 'true')
+    monkeypatch.setattr(agent_task_routes, 'owner_is_admin_or_single_user', lambda owner: owner == 'alice')
     app = FastAPI()
     app.state.auth_manager = SimpleNamespace(is_configured=True)
     app.include_router(agent_task_routes.setup_agent_task_routes(SimpleNamespace()))
@@ -758,6 +759,8 @@ async def test_native_history_route_requires_user_and_preserves_cursor(tmp_path,
     async with original_client(transport=httpx.ASGITransport(app=app), base_url='http://app.test') as client:
         path = '/api/codex/projects/allowed/tasks/selected/history?cursor=opaque%2Bcursor&limit=5'
         assert (await client.get(path)).status_code == 401
+        assert requests == []
+        assert (await client.get(path, headers={'x-test-user': 'bob'})).status_code == 403
         assert requests == []
         response = await client.get(path, headers={'x-test-user': 'alice'})
         assert response.status_code == 200 and response.json()['next_cursor'] == 'more'
