@@ -310,6 +310,9 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
     monkeypatch.setattr(loop, "get_mcp_manager", lambda: manager)
     monkeypatch.setattr(execution, "get_mcp_manager", lambda: manager)
     monkeypatch.setattr(execution, "_owner_is_admin", lambda _: True)
+    # Earlier tests reload tool_execution; bind the real dispatcher from the
+    # same module whose manager/admin fixture is configured here.
+    monkeypatch.setattr(loop, "execute_tool_block", execution.execute_tool_block)
     monkeypatch.setattr(loop, "blocked_tools_for_owner", lambda _: set())
     monkeypatch.setattr(
         loop, "authority_store", AuthorityStore(tmp_path / "authority.json")
