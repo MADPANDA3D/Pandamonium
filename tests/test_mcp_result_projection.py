@@ -211,27 +211,31 @@ def test_error_detail_survives_large_data_page():
     assert payload["structured_content"]["error"] == original["error"]
 
 
+@pytest.mark.parametrize("endpoint, model_name", [("https://api.openai.com/v1", "gpt-4o"), ("http://localhost:8208/v1", "jarvis")])
+@pytest.mark.parametrize("prompt", [
+    "Use Fixture MCP to reference and search records.",
+    "Explore jarvis-knowledgebase in Qdrant and cite actual records.",
+])
 @pytest.mark.asyncio
-async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tmp_path):
+async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tmp_path, prompt, endpoint, model_name):
     from types import SimpleNamespace
 
     import src.agent_loop as loop
     import src.tool_execution as execution
     from src.authority_protocol import AuthorityStore
     from src.mcp_manager import McpManager
-    from tests.test_baton2_execution import _events
 
     manager = McpManager()
-    manager._connections["fixture"] = {"name": "Fixture MCP", "status": "connected"}
+    manager._connections["fixture"] = {"name": "Fixture MCP", "status": "connected", "instructions": "Use fixture.reference then fixture.search."}
     manager._tools["fixture"] = [
         {
-            "name": "reference",
+            "name": "fixture.reference",
             "description": "Read the executable search reference.",
             "input_schema": {"type": "object", "properties": {}},
             "annotations": {"readOnlyHint": True},
         },
         {
-            "name": "search",
+            "name": "fixture.search",
             "description": "Read matching records.",
             "input_schema": {
                 "type": "object",
@@ -243,6 +247,8 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
     ]
     wire_reads = []
     original = descriptor()
+    if model_name == "jarvis":
+        original["data"]["descriptor"]["inputSchema"]["$defs"]["Filter"]["description"] = "Filter semantics."
     page = {
         "items": [
             {
@@ -256,7 +262,7 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
     class Session:
         async def call_tool(self, name, arguments):
             wire_reads.append((name, arguments))
-            content = original if name == "reference" else page
+            content = original if name == "fixture.reference" else page
             return SimpleNamespace(
                 content=[SimpleNamespace(text=json.dumps(content))],
                 structuredContent=content,
@@ -267,12 +273,15 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
     rounds = []
 
     async def model(*args, **kwargs):
+        assert {"mcp__fixture__fixture.reference", "mcp__fixture__fixture.search"} <= {
+            schema["function"]["name"] for schema in kwargs["tools"]
+        }
         messages = args[1]
         rounds.append(messages)
         number = len(rounds)
         if number == 2:
             text = next(m["content"] for m in reversed(messages) if m["role"] == "tool")
-            assert payload_from(text)["structured_content"] == original
+            assert payload_from(text).get("structured_content") == original, text
         if number == 3:
             text = next(m["content"] for m in reversed(messages) if m["role"] == "tool")
             assert "arguments.query is required" in text
@@ -287,7 +296,7 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
                 + "\n\n"
             )
         else:
-            name = "reference" if number == 1 else "search"
+            name = "fixture.reference" if number == 1 else "fixture.search"
             arguments = {"query": "evidence"} if number == 3 else {}
             yield (
                 "data: "
@@ -318,11 +327,12 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
         loop, "authority_store", AuthorityStore(tmp_path / "authority.json")
     )
     monkeypatch.setattr(loop, "stream_llm_with_fallback", model)
-    events = await _events(
+    chunks = [chunk async for chunk in loop.stream_agent_loop(
+        endpoint, model_name,
         messages=[
             {
                 "role": "user",
-                "content": "Use Fixture MCP to reference and search records.",
+                "content": prompt,
             }
         ],
         owner="leo",
@@ -331,8 +341,9 @@ async def test_full_loop_preserves_schema_then_corrects_one_read(monkeypatch, tm
         max_rounds=6,
         max_tool_calls=6,
         max_tokens=2048,
-    )
-    assert wire_reads == [("reference", {}), ("search", {"query": "evidence"})]
+    )]
+    events = [json.loads(chunk[6:]) for chunk in chunks if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]"]
+    assert wire_reads == [("fixture.reference", {}), ("fixture.search", {"query": "evidence"})]
     assert len(rounds) == 4
     assert not any(e.get("type") == "authority_approval_required" for e in events)
 

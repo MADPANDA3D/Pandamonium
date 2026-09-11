@@ -426,6 +426,7 @@ async def test_optional_null_mcp_arguments_are_omitted_before_execution(monkeypa
     assert not any("INVALID ARGUMENTS" in event.get("tool", "") for event in events)
 
 
+@pytest.mark.parametrize("prompt", ["Use MAD MCP Portal to read Discord messages.", "Read records in Qdrant."])
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("call_name", "arguments", "executor_error", "expected_category", "expected_calls"),
@@ -450,12 +451,14 @@ async def test_native_mcp_failures_return_one_terminal_error_without_loop(
     executor_error,
     expected_category,
     expected_calls,
+    prompt,
 ):
     manager = McpManager()
     manager._connections["portal-fixture"] = {
         "name": "MAD MCP Portal",
         "status": "connected",
         "catalog_terms": ["Discord"],
+        "instructions": "Use portal.find_tools.",
     }
     manager._tools["portal-fixture"] = [{
         "name": "portal.find_tools",
@@ -493,7 +496,7 @@ async def test_native_mcp_failures_return_one_terminal_error_without_loop(
     events = await _events(
         messages=[{
             "role": "user",
-            "content": "Use the MAD MCP Portal to pull the last five Discord messages.",
+            "content": prompt,
         }],
         owner="leo",
         session_id="session-1",

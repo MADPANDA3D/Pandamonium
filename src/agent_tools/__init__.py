@@ -71,7 +71,7 @@ TOOL_HANDLERS.update(ADMIN_TOOL_HANDLERS)
 # Constants (re-exported for backward compatibility — single source of truth
 # is src.constants; always prefer importing from there for new code)
 # ---------------------------------------------------------------------------
-MAX_AGENT_ROUNDS = 50
+MAX_AGENT_ROUNDS = 80
 SHELL_TIMEOUT = 60
 PYTHON_TIMEOUT = 30
 

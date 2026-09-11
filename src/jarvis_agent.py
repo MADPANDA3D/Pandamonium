@@ -1350,7 +1350,7 @@ def search_knowledge(query: str, owner: str | None = None, client: str | None = 
             "mtime": meta.get("mtime"),
             "score": row.get("similarity"),
         })
-    return {"query": query, "client": client, "results": results}
+    return {"query": query, "client": client, "source": {"kind": "internal_knowledge_index", "backend": "rag_fallback"}, "results": results}
 
 
 def self_check() -> None:

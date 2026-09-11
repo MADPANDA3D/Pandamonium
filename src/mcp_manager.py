@@ -846,6 +846,25 @@ class McpManager:
     def get_server_tools(self, server_id: str) -> List[Dict]:
         return list(self._tools.get(server_id, []))
 
+    def native_discovery_tool_names(self, limit: int = 8) -> set[str]:
+        """Expose declared read entrypoints without requiring a broker name.
+
+        A service behind a broker need not occur in the connection identity.
+        Only live initialize references qualify; no provider catalog is copied.
+        """
+        selected: set[str] = set()
+        for server_id, tools in self._tools.items():
+            conn = self._connections.get(server_id, {})
+            if self.is_extension_server(server_id) or conn.get("status") != "connected":
+                continue
+            by_name = {str(tool.get("name") or ""): tool for tool in tools}
+            for name in re.findall(r"\b[a-zA-Z][\w-]*(?:\.[\w-]+)+\b", str(conn.get("instructions") or "")):
+                if name in by_name and mcp_tool_is_readonly(by_name[name]):
+                    selected.add(f"mcp__{server_id}__{name}")
+                    if len(selected) >= max(1, min(int(limit), 20)):
+                        return selected
+        return selected
+
     def native_tool_names_for_request(self, query: str, limit: int = 8) -> Set[str]:
         """Select a named connection's own typed discovery/read tools.
 

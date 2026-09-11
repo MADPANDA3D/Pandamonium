@@ -86,8 +86,10 @@ following maintained platform capabilities.
   progressively reads earlier activity. Full paths remain available there; attachment
   binaries stay on their originating node. Branch/model metadata is recorded state.
 - The model picker uses Codex's supported native reasoning efforts. The model-backed agent's
-  **Agent work budget** controls maximum model/tool rounds: Low 8, Medium 12,
-  High 20, Very high 40, Maximum 80. Reset uses the installation default.
+  **Agent work budget** controls maximum model/tool rounds: Low 20, Medium 40,
+  High 80, Very high 120, Maximum 200. Reset uses the installation default (80).
+  The previous saved default of 20 upgrades to 80 once; other custom caps remain.
+  After upgrading, saving 20 explicitly retains that lower cap.
   These are caps for the next text turn, not required loops or an intelligence
   setting: successful completion stops early and authority/verification gates
   still apply. Voice keeps its existing budget.
