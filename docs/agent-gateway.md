@@ -64,3 +64,8 @@ image budget. Missing, unsupported or oversized images show an explicit
 unavailable message. Image previews open the existing attachment lightbox.
 Final responses use normal chat bubbles; commentary and tool activity stay under
 the collapsed Worked disclosure.
+
+The browser regression fixture shows the restored Friday bubble and collapsed
+Worked activity (the tiny red square is the image decoding fixture):
+
+![Friday bubble and collapsed Worked activity](screenshots/friday-gateway-bubbles.png)
