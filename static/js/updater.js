@@ -597,6 +597,14 @@ function openModal({ checkNow = false, opener = null } = {}) {
   modalOpener = opener || document.activeElement || el('sidebar-update-check');
   modal.classList.remove('hidden');
   modal.removeAttribute('aria-hidden');
+  // Open docked to the right on desktop; still draggable off the edge.
+  // Imported at runtime so this module stays embeddable by the release-bridge
+  // harness, which evaluates the file from a data: URL (no relative imports).
+  if (window.innerWidth > 768) {
+    import('./modalSnap.js')
+      .then(snap => snap.applyRightDock(modal))
+      .catch(() => {});
+  }
   window.setTimeout(() => {
     if (el('styled-confirm-overlay')?.classList.contains('hidden') !== false) {
       el('close-updater-modal')?.focus();

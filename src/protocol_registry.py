@@ -90,7 +90,14 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str, str | None]:
         current_list = None
         if not key:
             return {}, text, "empty manifest key"
-        if value == "":
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            manifest[key] = (
+                [_strip_quotes(part.strip()) for part in inner.split(",") if part.strip()]
+                if inner
+                else []
+            )
+        elif value == "":
             manifest[key] = []
             current_list = key
         elif value == "[]":
@@ -201,12 +208,49 @@ def select_protocol_packs(
     return [pack for pack in load_protocol_packs(packs_dir) if pack.ok and pack.scope == scope]
 
 
-def render_protocol_block(packs: Iterable[ProtocolPack]) -> str:
-    mounted = [pack for pack in packs if pack.ok]
-    if not mounted:
+def select_duty_protocol_packs(
+    domains: Iterable[str] | None, *, packs_dir: Path | str | None = None
+) -> list[ProtocolPack]:
+    wanted = {str(domain).strip().lower() for domain in (domains or []) if str(domain).strip()}
+    if not wanted:
+        return []
+    return [
+        pack
+        for pack in select_protocol_packs(DUTY_SCOPE, packs_dir=packs_dir)
+        if wanted.intersection({domain.lower() for domain in pack.domains})
+    ]
+
+
+def mounted_protocol_packs(
+    domains: Iterable[str] | None = None, *, packs_dir: Path | str | None = None
+) -> list[ProtocolPack]:
+    return select_protocol_packs(CORE_SCOPE, packs_dir=packs_dir) + select_duty_protocol_packs(
+        domains, packs_dir=packs_dir
+    )
+
+
+def mounted_protocol_references(
+    domains: Iterable[str] | None = None, *, packs_dir: Path | str | None = None
+) -> list[dict[str, str]]:
+    return [pack.reference() for pack in mounted_protocol_packs(domains, packs_dir=packs_dir)]
+
+
+def render_protocol_block(
+    packs: Iterable[ProtocolPack], *, max_tokens: int | None = None
+) -> str:
+    valid = [pack for pack in packs if pack.ok]
+    if not valid:
         return ""
+    selected: list[ProtocolPack] = []
+    used = 0
+    for pack in valid:
+        cost = max(int(pack.token_budget or 0), 0)
+        if max_tokens is not None and selected and used + cost > max_tokens:
+            break
+        selected.append(pack)
+        used += cost
     sections = [_RENDER_HEADER]
-    for pack in mounted:
+    for pack in selected:
         label = pack.protocol or pack.id
         sections.append(f"### {label} — {pack.title} (v{pack.version})\n{pack.body}")
     body = "\n\n".join(sections).strip()
@@ -225,12 +269,24 @@ def strip_protocol_block(text: str) -> str:
     return (text[:start].rstrip() + "\n\n" + text[end:].lstrip()).strip()
 
 
-def core_protocol_block(
-    *, settings: Mapping[str, Any] | None = None, packs_dir: Path | str | None = None
+def mounted_protocol_block(
+    domains: Iterable[str] | None = None,
+    *,
+    max_tokens: int | None = None,
+    settings: Mapping[str, Any] | None = None,
+    packs_dir: Path | str | None = None,
 ) -> str:
     if not protocol_layer_enabled(settings):
         return ""
-    return render_protocol_block(select_protocol_packs(CORE_SCOPE, packs_dir=packs_dir))
+    return render_protocol_block(
+        mounted_protocol_packs(domains, packs_dir=packs_dir), max_tokens=max_tokens
+    )
+
+
+def core_protocol_block(
+    *, settings: Mapping[str, Any] | None = None, packs_dir: Path | str | None = None
+) -> str:
+    return mounted_protocol_block(None, settings=settings, packs_dir=packs_dir)
 
 
 def core_protocol_references(
