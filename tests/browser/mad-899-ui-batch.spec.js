@@ -157,3 +157,31 @@ test('Add Local Models offers STT and TTS types (MAD-901)', async ({ page }) => 
   const values = await page.locator('#adm-epLocalType option').evaluateAll(options => options.map(option => option.value));
   expect(values).toEqual(['llm', 'image', 'stt', 'tts']);
 });
+
+test('bucket headers stay flush left at rest and reveal the drag handle on hover', async ({ page }) => {
+  await page.route('**/api/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/auth/status') {
+      return route.fulfill({ json: { username: 'leo', is_admin: true, privileges: {} } });
+    }
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await expect(page.locator('#tools-section')).toBeVisible();
+
+  const sectionBox = await page.locator('#tools-section').boundingBox();
+  const title = page.locator('#tools-section .section-title');
+  const restBox = await title.boundingBox();
+  // No reserved handle column: the label sits at the section's left padding.
+  expect(restBox.x - sectionBox.x).toBeLessThanOrEqual(16);
+  expect(await page.locator('#tools-section .section-drag-handle').evaluate(el => getComputedStyle(el).opacity)).toBe('0');
+
+  await page.locator('#tools-section .section-header-flex').hover();
+  await expect.poll(() => title.evaluate(el => getComputedStyle(el).transform)).not.toBe('none');
+  await expect.poll(() => page.locator('#tools-section .section-drag-handle').evaluate(el => Number(getComputedStyle(el).opacity))).toBeGreaterThan(0.5);
+  const hoverBox = await title.boundingBox();
+  expect(hoverBox.x).toBeGreaterThan(restBox.x + 10);
+
+  // The Projects empty-state copy is gone.
+  expect(await page.locator('#projects-empty').count()).toBe(0);
+});
