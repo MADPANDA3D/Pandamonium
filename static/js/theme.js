@@ -433,16 +433,29 @@ export function applyFontDensity(font, density) {
 
 // UI text-size scale (accessibility). Global and independent of the active
 // theme, so the chosen size persists across theme switches. Stored as a plain
-// percentage string ('100' | '110' | '125' | '150').
-const UI_SCALE_KEY = 'odysseus-ui-scale';
+// percentage string ('90' | '100' | '110' | '125' | '140').
+export const UI_SCALE_KEY = 'odysseus-ui-scale';
 const DEFAULT_UI_SCALE = '100';
+const UI_SCALE_CLASSES = ['ui-scale-90', 'ui-scale-110', 'ui-scale-125', 'ui-scale-140', 'ui-scale-150'];
 
 export function applyUiScale(scale) {
-  const s = scale || DEFAULT_UI_SCALE;
-  // Only one non-default scale ('125'). Remove any legacy classes too so an
-  // older stored value can't leave a stale zoom applied.
-  document.documentElement.classList.remove('ui-scale-110', 'ui-scale-125', 'ui-scale-140');
-  if (s === '125') document.documentElement.classList.add('ui-scale-125');
+  const s = String(scale || DEFAULT_UI_SCALE);
+  // Remove every step so a stale class can't leave an older zoom applied.
+  document.documentElement.classList.remove(...UI_SCALE_CLASSES);
+  const cls = 'ui-scale-' + s;
+  if (UI_SCALE_CLASSES.includes(cls)) {
+    document.documentElement.classList.add(cls);
+  }
+}
+
+// UI icon-size scale (accessibility). Independent of text size and theme.
+export const UI_ICON_SCALE_KEY = 'odysseus-ui-icon-scale';
+const DEFAULT_UI_ICON_SCALE = '100';
+
+export function applyIconScale(scale) {
+  const n = Number(scale);
+  const pct = Number.isFinite(n) && n >= 50 && n <= 200 ? n : Number(DEFAULT_UI_ICON_SCALE);
+  document.documentElement.style.setProperty('--ui-icon-scale', String(pct / 100));
 }
 
 const _BG_CLASSES = ['bg-pattern-dots',
@@ -1217,6 +1230,18 @@ export function initThemeUI() {
     nts.addEventListener('change', () => {
       applyUiScale(nts.value);
       try { localStorage.setItem(UI_SCALE_KEY, nts.value); } catch (e) {}
+    });
+  }
+  const iconSizeSelect = document.getElementById('theme-icon-size-select');
+  if (iconSizeSelect) {
+    const nis = iconSizeSelect.cloneNode(true); iconSizeSelect.parentNode.replaceChild(nis, iconSizeSelect);
+    let initIconScale = DEFAULT_UI_ICON_SCALE;
+    try { initIconScale = localStorage.getItem(UI_ICON_SCALE_KEY) || DEFAULT_UI_ICON_SCALE; } catch (e) {}
+    nis.value = initIconScale;
+    applyIconScale(initIconScale);
+    nis.addEventListener('change', () => {
+      applyIconScale(nis.value);
+      try { localStorage.setItem(UI_ICON_SCALE_KEY, nis.value); } catch (e) {}
     });
   }
   if (patternSelect) {

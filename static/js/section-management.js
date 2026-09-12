@@ -126,10 +126,10 @@ export function initSectionDrag(Storage, loadUIVis) {
   const sidebarInner = sidebar ? sidebar.querySelector('.sidebar-inner') : null;
   if (!sidebarInner) return;
 
-  // Disable draggable on mobile to prevent scroll interference
+  // Disable drag on touch devices to prevent scroll interference
   if ('ontouchstart' in window) {
-    document.querySelectorAll('.section[draggable]').forEach(s => {
-      s.setAttribute('draggable', 'false');
+    document.querySelectorAll('.section[data-section-reorder="true"]').forEach(s => {
+      s.setAttribute('data-section-reorder', 'false');
     });
   }
 
@@ -138,17 +138,13 @@ export function initSectionDrag(Storage, loadUIVis) {
   let offsetY = 0;
 
   function getSections() {
-    return Array.from(sidebar.querySelectorAll('.section[draggable="true"]'));
+    return Array.from(sidebar.querySelectorAll('.section[data-section-reorder="true"]'));
   }
 
   function onMouseDown(e) {
-    if (!e.target.classList.contains('drag-handle')) return;
+    if (!e.target.closest('.section-drag-handle, .drag-handle')) return;
 
-    // Check if drag reorder is enabled
-    const uiState = loadUIVis();
-    if (uiState['section-drag-reorder'] === false) return;
-
-    const section = e.target.closest('.section[draggable="true"]');
+    const section = e.target.closest('.section[data-section-reorder="true"]');
     if (!section) return;
 
     e.preventDefault();

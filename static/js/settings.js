@@ -4,7 +4,8 @@
 import uiModule from './ui.js';
 import searchModule from './search.js';
 import { makeWindowDraggable } from './windowDrag.js';
-import { clearDockSide } from './modalSnap.js';
+import { clearDockSide, applyRightDock } from './modalSnap.js';
+import { applyUiScale, applyIconScale, UI_SCALE_KEY, UI_ICON_SCALE_KEY } from './theme.js';
 import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
@@ -2045,6 +2046,22 @@ function initAppearance() {
   syncAppearanceCheckboxes();
   syncPrivacyCheckboxes();
 
+  // Display size — text zoom (theme-independent key) and sidebar icon scale.
+  var textSizeSelect = el('set-text-size');
+  if (textSizeSelect) {
+    textSizeSelect.addEventListener('change', function() {
+      applyUiScale(textSizeSelect.value);
+      try { localStorage.setItem(UI_SCALE_KEY, textSizeSelect.value); } catch (_) {}
+    });
+  }
+  var iconSizeSelect = el('set-icon-size');
+  if (iconSizeSelect) {
+    iconSizeSelect.addEventListener('change', function() {
+      applyIconScale(iconSizeSelect.value);
+      try { localStorage.setItem(UI_ICON_SCALE_KEY, iconSizeSelect.value); } catch (_) {}
+    });
+  }
+
   modalEl.querySelectorAll('[data-ui-key]').forEach(function(chk) {
     chk.addEventListener('change', async function() {
       var key = chk.dataset.uiKey;
@@ -2124,6 +2141,12 @@ function syncAppearanceCheckboxes() {
     var key = chk.dataset.uiKey;
     chk.checked = key in s ? s[key] !== false : !defaultOff.has(key);
   });
+  try {
+    var ts = el('set-text-size');
+    if (ts) ts.value = localStorage.getItem(UI_SCALE_KEY) || '100';
+    var is = el('set-icon-size');
+    if (is) is.value = localStorage.getItem(UI_ICON_SCALE_KEY) || '100';
+  } catch (_) {}
 }
 
 function syncPrivacyCheckboxes() {
@@ -6081,6 +6104,11 @@ export function open(tab) {
     resetWindowPlacement();
   }
   modalEl.classList.remove('hidden');
+  // Open docked to the right on desktop (same edge-dock the user can drag
+  // away from); mobile keeps the full-sheet layout.
+  if (window.innerWidth > 768) {
+    try { applyRightDock(modalEl); } catch (_) {}
+  }
   syncAdminVisibility();
   const content = modalEl.querySelector('.settings-modal-content');
   if (tab) {
