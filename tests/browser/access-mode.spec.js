@@ -23,15 +23,15 @@ async function installMockRoutes(page, captured) {
   });
 }
 
-test('access-mode button sits left of Jarvis sphere and persists selection', async ({ page }) => {
+test('access-mode button sits right of More tools and persists selection', async ({ page }) => {
   const captured = [];
   await installMockRoutes(page, captured);
   await page.goto('/static/index.html');
   await expect(page.locator('#access-mode-btn')).toBeVisible();
 
-  const sphereBox = await page.locator('#jarvis-input-sphere').boundingBox();
+  const plusBox = await page.locator('#overflow-plus-btn').boundingBox();
   const btnBox = await page.locator('#access-mode-btn').boundingBox();
-  expect(btnBox.x + btnBox.width <= sphereBox.x + 1).toBe(true);
+  expect(btnBox.x >= plusBox.x + plusBox.width - 1).toBe(true);
 
   // Loaded state: default mode applied (GET /api/prefs/access_mode).
   await expect(page.locator('#access-mode-btn')).toHaveAttribute('data-access-mode', 'ask_for_approval');

@@ -26,10 +26,11 @@ def access_mode_js():
     return (_STATIC / "js" / "accessMode.js").read_text()
 
 
-def test_access_button_is_left_of_jarvis_sphere(index_html):
+def test_access_button_sits_right_of_more_tools(index_html):
+    plus = index_html.index('id="overflow-plus-btn"')
     btn = index_html.index('id="access-mode-btn"')
-    sphere = index_html.index('id="jarvis-input-sphere"')
-    assert btn < sphere, "the access-mode button must sit left of the Jarvis sphere"
+    assert plus < btn, "the access-mode button must sit right of the More tools chevron"
+    assert index_html.index('id="workspace-indicator-btn"') > btn
 
 
 def test_access_menu_has_exact_three_options(index_html):
