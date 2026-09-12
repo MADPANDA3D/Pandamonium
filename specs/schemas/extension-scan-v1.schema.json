@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis-os.dev/schemas/extension-scan-v1.schema.json",
+  "title": "JOS Extension Static Scan v1",
+  "description": "Bounded static repository assessment. Repository-provided build, install, and lifecycle commands are never executed; executed_repo_commands must stay empty.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scan_version", "source_url", "source_revision", "stage", "repo_class",
+    "capabilities", "dependencies", "licenses", "findings", "draft_manifest",
+    "bounds", "executed_repo_commands", "artifact_digest"
+  ],
+  "properties": {
+    "scan_version": {"const": "jos-extension-scan.v1"},
+    "source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+    "source_revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+    "stage": {"enum": ["fetch", "classify", "extract", "audit", "report"]},
+    "repo_class": {
+      "enum": ["skill_bundle", "mcp_server", "python_cli", "node_cli", "web_app", "openapi", "unknown"]
+    },
+    "capabilities": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/capability"}},
+    "dependencies": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dependency"}},
+    "licenses": {
+      "type": "array", "maxItems": 32,
+      "items": {"type": "string", "minLength": 1, "maxLength": 200}
+    },
+    "findings": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/finding"}},
+    "draft_manifest": {"type": ["object", "null"]},
+    "bounds": {"$ref": "#/$defs/bounds"},
+    "executed_repo_commands": {"type": "array", "maxItems": 0},
+    "artifact_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "relativePath": {
+      "type": "string", "minLength": 1, "maxLength": 500,
+      "not": {"pattern": "^(?:/|.*(?:^|/)\\.\\.(?:/|$))"}
+    },
+    "permission": {
+      "enum": [
+        "read_only", "bounded_write", "external_side_effect",
+        "destructive", "controlled_administrative"
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "descriptor", "evidence_path"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"},
+        "kind": {"enum": ["tool", "skill", "endpoint"]},
+        "descriptor": {"enum": ["inline", "live_catalog", "mcp", "openapi", "skill_bundle"]},
+        "permission_mode": {"$ref": "#/$defs/permission"},
+        "evidence_path": {"$ref": "#/$defs/relativePath"}
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ecosystem", "name"],
+      "properties": {
+        "ecosystem": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "version": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "severity", "category", "title"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+        "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
+        "category": {
+          "enum": [
+            "secret", "dangerous_pattern", "postinstall", "license",
+            "dependency", "oversized_blob", "network_egress", "privilege"
+          ]
+        },
+        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+        "evidence": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files_scanned", "bytes_scanned", "duration_ms"],
+      "properties": {
+        "files_scanned": {"type": "integer", "minimum": 0, "maximum": 50000},
+        "bytes_scanned": {"type": "integer", "minimum": 0, "maximum": 536870912},
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 600000}
+      }
+    }
+  }
+}

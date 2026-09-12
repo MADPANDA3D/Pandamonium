@@ -138,6 +138,11 @@ def _normalize_tools(value: Any) -> list[dict[str, Any]]:
     return tools
 
 
+def normalize_tool_schema(raw: Any) -> dict[str, Any]:
+    """Public strict tool-schema normalizer for inventory and mount contracts."""
+    return _normalize_tool_schema(raw)
+
+
 def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
     """Return a normalized strict v1 manifest without performing I/O."""
     value = _object(manifest, "extension_manifest_invalid")

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis-os.dev/schemas/extension-capability-inventory-v1.schema.json",
+  "title": "JOS Extension Capability Inventory v1",
+  "description": "Revision-bound advisory capability metadata for one installed extension. Never execution authority; the JOS registry enabled state remains authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "inventory_version", "extension_id", "extension_version", "source_revision",
+    "manifest_digest", "descriptor", "capabilities", "inventory_digest"
+  ],
+  "properties": {
+    "inventory_version": {"const": "jos-extension-capability-inventory.v1"},
+    "extension_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "extension_version": {"type": "string", "minLength": 1, "maxLength": 80},
+    "source_revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+    "manifest_digest": {"$ref": "#/$defs/digest"},
+    "descriptor": {"enum": ["inline", "live_catalog", "mcp", "openapi", "skill_bundle"]},
+    "capabilities": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/capability"}},
+    "inventory_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "permission": {
+      "enum": [
+        "read_only", "bounded_write", "external_side_effect",
+        "destructive", "controlled_administrative"
+      ]
+    },
+    "relativePath": {
+      "type": "string", "minLength": 1, "maxLength": 500,
+      "not": {"pattern": "^(?:/|.*(?:^|/)\\.\\.(?:/|$))"}
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_path", "owner_scope", "platforms", "requires_toolsets"],
+      "properties": {
+        "source_path": {"$ref": "#/$defs/relativePath"},
+        "owner_scope": {"type": "string", "minLength": 1, "maxLength": 200},
+        "platforms": {
+          "type": "array", "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 200}
+        },
+        "requires_toolsets": {
+          "type": "array", "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 200}
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "permission_mode", "descriptor"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"},
+        "kind": {"enum": ["tool", "skill", "endpoint"]},
+        "permission_mode": {"$ref": "#/$defs/permission"},
+        "descriptor": {"enum": ["inline", "live_catalog", "mcp", "openapi", "skill_bundle"]},
+        "schema": {"type": "object"},
+        "skill": {"$ref": "#/$defs/skill"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "skill"}}},
+          "then": {"required": ["skill"]},
+          "else": {"not": {"required": ["skill"]}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "tool"}}},
+          "then": {"required": ["schema"]},
+          "else": {"not": {"required": ["schema"]}}
+        }
+      ]
+    }
+  }
+}
