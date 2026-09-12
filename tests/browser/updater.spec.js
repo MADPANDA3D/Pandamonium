@@ -54,8 +54,8 @@ for (const [scenario, bridgeReload] of [
   const sourceUpdater = bridgeReload ? RELEASED_V1021_UPDATER : CURRENT_UPDATER;
   const sourceWorker = bridgeReload ? RELEASED_WORKER : CURRENT_WORKER;
   const targetWorker = bridgeReload ? CURRENT_WORKER : FUTURE_WORKER;
-  const sourceCache = bridgeReload ? 'pandamonium-v387' : 'pandamonium-v399';
-  const targetCache = bridgeReload ? 'pandamonium-v399' : 'pandamonium-v400';
+  const sourceCache = bridgeReload ? 'pandamonium-v387' : 'pandamonium-v400';
+  const targetCache = bridgeReload ? 'pandamonium-v400' : 'pandamonium-v401';
   let finishInitialStatus;
   let applied = false;
   let applyCalls = 0;
