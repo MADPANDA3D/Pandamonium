@@ -9,13 +9,17 @@ import ipaddress
 import json
 import logging
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from urllib.parse import urlparse
 
 import httpx
 
-from src.context_budget import context_class_budget_percent
+from core.atomic_io import atomic_write_json
+from core.constants import DATA_DIR
+from src.context_budget import configured_model_window, context_class_budget_percent
 
 logger = logging.getLogger(__name__)
 
@@ -300,18 +304,13 @@ def budget_context_for_model(endpoint_url: str, model: str, *, fallback: int = 0
         return fallback
 
 
-def _lookup_known(model: str) -> Optional[int]:
-    """Check known context windows by substring match.
+def _table_context_window(model: str) -> Optional[int]:
+    """Built-in known-window table lookup.
 
     Picks the LONGEST matching key so a short key never shadows a more specific
     one. Without this, 'o1' (200k) precedes 'o1-mini' (128k) in the table and a
     first-match return would report o1-mini's window as 200k.
     """
-    from src.context_budget import configured_model_window
-
-    operator_window = configured_model_window(model)
-    if operator_window:
-        return operator_window
     name = model.lower()
     basename = name.split("/")[-1] if "/" in name else name
     basename = basename.split(":")[0]  # strip :free, :extended etc.
@@ -322,6 +321,14 @@ def _lookup_known(model: str) -> Optional[int]:
             if best_key is None or len(key) > len(best_key):
                 best_key, best_ctx = key, ctx
     return best_ctx
+
+
+def _lookup_known(model: str) -> Optional[int]:
+    """Operator override first, then the built-in known-window table."""
+    operator_window = configured_model_window(model)
+    if operator_window:
+        return operator_window
+    return _table_context_window(model)
 
 
 def _model_ctx_from_entry(m: dict) -> Optional[int]:
@@ -392,6 +399,105 @@ def _freetoken_runtime_context(base_url: str, model: str) -> Optional[int]:
 # lookup because a large catalog is expensive; caching the whole map lets us
 # pay that download at most once per endpoint instead of once per model.
 _catalog_ctx_cache: Dict[str, Dict[str, int]] = {}
+_CATALOG_STORE_FILE = Path(DATA_DIR) / "model_context_catalog.json"
+_persisted_catalog_cache: Optional[Dict[str, Dict[str, int]]] = None
+
+
+def _load_persisted_catalog() -> Dict[str, Dict[str, int]]:
+    """Load the per-endpoint discovered catalog store (fail-soft)."""
+    global _persisted_catalog_cache
+    if _persisted_catalog_cache is not None:
+        return _persisted_catalog_cache
+    data: Dict[str, Dict[str, int]] = {}
+    try:
+        raw = json.loads(_CATALOG_STORE_FILE.read_text(encoding="utf-8"))
+        endpoints = raw.get("endpoints") if isinstance(raw, dict) else None
+        if isinstance(endpoints, dict):
+            for endpoint, models in endpoints.items():
+                if not isinstance(models, dict):
+                    continue
+                clean: Dict[str, int] = {}
+                for mid, ctx in models.items():
+                    if isinstance(mid, str) and isinstance(ctx, int) and ctx > 0:
+                        clean[mid] = ctx
+                if clean:
+                    data[str(endpoint)] = clean
+    except (OSError, ValueError):
+        data = {}
+    _persisted_catalog_cache = data
+    return data
+
+
+def _persist_catalog(endpoint_url: str, catalog: Dict[str, int]) -> None:
+    """Persist discovered windows for one endpoint (ids and windows only)."""
+    global _persisted_catalog_cache
+    if not endpoint_url or not catalog:
+        return
+    store = _load_persisted_catalog()
+    merged = dict(store.get(endpoint_url) or {})
+    merged.update(
+        {mid: ctx for mid, ctx in catalog.items() if isinstance(ctx, int) and ctx > 0}
+    )
+    payload = {
+        "version": 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "endpoints": {**store, endpoint_url: merged},
+    }
+    try:
+        atomic_write_json(_CATALOG_STORE_FILE, payload, indent=2)
+    except Exception as exc:
+        logger.debug(f"Failed to persist model catalog: {exc}")
+        return
+    _persisted_catalog_cache = payload["endpoints"]
+
+
+def _persisted_window(endpoint_url: str, model: str) -> Optional[int]:
+    """Previously discovered window for this endpoint+model, if any."""
+    models = _load_persisted_catalog().get(endpoint_url) or {}
+    if not models:
+        return None
+    if model in models:
+        return models[model]
+    base = model.split("/")[-1]
+    for mid, ctx in models.items():
+        if mid.split("/")[-1] == base:
+            return ctx
+    return None
+
+
+def _reset_catalog_state() -> None:
+    """Test helper: clear in-memory catalog caches."""
+    global _persisted_catalog_cache
+    _catalog_ctx_cache.clear()
+    _persisted_catalog_cache = None
+
+
+def _live_catalog_window(endpoint_url: str, model: str) -> Optional[int]:
+    """Fetch the endpoint catalog, persist windows, and return this model's."""
+    from src.endpoint_resolver import build_models_url
+
+    try:
+        r = httpx.get(build_models_url(endpoint_url), timeout=REQUEST_TIMEOUT)
+        if not r.is_success:
+            return None
+        catalog: Dict[str, int] = {}
+        for m in (r.json().get("data") or []):
+            mid = m.get("id") if isinstance(m, dict) else None
+            ctx = _model_ctx_from_entry(m) if mid else None
+            if mid and ctx:
+                catalog[mid] = ctx
+        if catalog:
+            _catalog_ctx_cache[endpoint_url] = catalog
+            _persist_catalog(endpoint_url, catalog)
+        if model in catalog:
+            return catalog[model]
+        base = model.split("/")[-1]
+        for mid, ctx in catalog.items():
+            if mid.split("/")[-1] == base:
+                return ctx
+    except Exception as e:
+        logger.debug(f"Failed to query context length for {model}: {e}")
+    return None
 
 
 def _proxy_catalog_context(endpoint_url: str, model: str) -> Optional[int]:
@@ -424,6 +530,7 @@ def _proxy_catalog_context(endpoint_url: str, model: str) -> Optional[int]:
             logger.debug(f"Failed to parse proxy catalog for context length: {e}")
             return None
         _catalog_ctx_cache[endpoint_url] = cat
+        _persist_catalog(endpoint_url, cat)
 
     if model in cat:
         return cat[model]
@@ -439,25 +546,30 @@ def _proxy_catalog_context(endpoint_url: str, model: str) -> Optional[int]:
 def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
     """Query the model API for context length. Returns (context_length, known) where
     ``known`` is False only for the bare DEFAULT_CONTEXT fallback."""
-    known = _lookup_known(model)
+    operator_window = configured_model_window(model)
+    if operator_window:
+        return operator_window, True
+    persisted = _persisted_window(endpoint_url, model)
+    if persisted:
+        logger.info(f"Using persisted catalog window for {model}: {persisted}")
+        return persisted, True
+    known = _table_context_window(model)
     api_ctx = None
     configured_kind = _configured_endpoint_kind(endpoint_url)
 
     # Large OpenAI-compatible proxies can make /models expensive. If the
     # endpoint is explicitly configured as API/proxy, prefer known context
-    # metadata (or the default) over downloading the full catalog.
+    # metadata when the model is unknown, but let the provider's own catalog
+    # win when it reports a window — a stale table entry must not shadow the
+    # connected model's real window.
     if configured_kind in ("api", "proxy"):
-        if known:
-            logger.info(f"Using known context window for {model}: {known}")
-            return known, True
-        # Not in the known table: read the real window from the catalog (cached
-        # once per endpoint) instead of capping every unknown model at the
-        # default — that under-reported large windows on aggregators like
-        # OpenRouter (issue #4886).
         api_ctx = _proxy_catalog_context(endpoint_url, model)
         if api_ctx:
             logger.info(f"Proxy catalog reports context window for {model}: {api_ctx}")
             return api_ctx, True
+        if known:
+            logger.info(f"Using known context window for {model}: {known}")
+            return known, True
         return DEFAULT_CONTEXT, False
 
     # Try llama.cpp /slots endpoint first — reports actual serving context
@@ -495,22 +607,7 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
             return known, True
         return DEFAULT_CONTEXT, False
 
-    from src.endpoint_resolver import build_models_url
-
-    models_url = build_models_url(endpoint_url)
-    try:
-        r = httpx.get(models_url, timeout=REQUEST_TIMEOUT)
-        if r.is_success:
-            data = r.json()
-            models_list = data.get("data") or []
-
-            for m in models_list:
-                mid = m.get("id", "")
-                if mid == model or mid.split("/")[-1] == model.split("/")[-1]:
-                    api_ctx = _model_ctx_from_entry(m)
-                    break
-    except Exception as e:
-        logger.debug(f"Failed to query context length for {model}: {e}")
+    api_ctx = _live_catalog_window(endpoint_url, model)
 
     # For local/self-hosted endpoints, trust the API value (user set --max-model-len)
     # For cloud APIs, use the larger value (API can report low defaults)
