@@ -738,13 +738,24 @@ async def build_chat_context(
     # The stream path uses enhanced_message (with CoT/preprocessing applied),
     # the sync path uses text_for_context.
     _ctx_msg = preprocessed.enhanced_message if use_enhanced_message else preprocessed.text_for_context
+    from src.action_intents import classify_tool_intent
+
+    _chat_intent = classify_tool_intent(_ctx_msg)
+    _chat_domains = (
+        [_chat_intent.category] if _chat_intent.needs_tools and _chat_intent.category else []
+    )
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
         use_web=use_web and not skip_web,
         use_memory=mem_enabled,
         time_filter=time_filter,
-        preset_system_prompt=agent_system_prompt(preset.system_prompt, model=sess.model, trace_surface="chat"),
+        preset_system_prompt=agent_system_prompt(
+            preset.system_prompt,
+            model=sess.model,
+            trace_surface="chat",
+            protocol_domains=_chat_domains,
+        ),
         owner=user,
         character_name=preset.character_name,
         agent_mode=agent_mode,
