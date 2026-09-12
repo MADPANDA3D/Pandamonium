@@ -3465,6 +3465,7 @@ async def stream_agent_loop(
     persist_worker_results: bool = True,
     worker_workspace: Optional[str] = None,
     worker_target: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -3639,6 +3640,7 @@ async def stream_agent_loop(
                 timeout=int(get_setting("agent_stream_timeout_seconds", 300) or 300),
                 session_id=session_id,
                 workload=workload,
+                reasoning_effort=reasoning_effort,
             ):
                 if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                     try:
@@ -4725,6 +4727,7 @@ async def stream_agent_loop(
                 timeout=agent_stream_timeout,
                 session_id=session_id,
                 workload=workload,
+                reasoning_effort=reasoning_effort,
             )
         async for chunk in _model_chunks:
             if not _round_first_event_logged:
@@ -5066,6 +5069,7 @@ async def stream_agent_loop(
                     _raw = await llm_call_async(
                         url=endpoint_url, model=model, messages=_synth_messages,
                         headers=headers, temperature=0.3, max_tokens=max_tokens, timeout=60,
+                        reasoning_effort=reasoning_effort,
                     )
                     _synth = _strip_think_blocks(strip_tool_blocks(_raw or "")).strip()
                 except Exception as _e:

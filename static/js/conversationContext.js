@@ -5,6 +5,7 @@ const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
 const rounds = [20, 40, 80, 120, 200];
 const names = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Very high', max: 'Maximum', ultra: 'Ultra', minimal: 'Minimal', none: 'Off' };
 let agentEffort = '';
+let reasoningMode = false;
 let details = null;
 let activity = { sources: [], tools: [], outputs: [] };
 let request = 0;
@@ -20,9 +21,33 @@ function sessionId() { return window.sessionModule?.getCurrentSessionId?.() || '
 function currentSession() { return window.sessionModule?.getSessions?.().find(session => session.id === sessionId()) || {}; }
 function target() { return getSelectedAgentSelection()?.target || currentSession().agent_target || 'jarvis'; }
 
+// Reasoning-effort support for the active model (MAD-900). The models payload
+// carries a per-endpoint `reasoning_levels` map for API reasoning models; when
+// the selected model has one, the composer control switches from the rounds
+// work budget to a reasoning selector.
+function activeModelReasoningLevels() {
+  try {
+    const session = currentSession();
+    const pending = window.sessionModule?.getPendingChat?.();
+    const modelId = String(session.model || pending?.modelId || window.sessionModule?.getCurrentModel?.() || '').trim();
+    const url = String(session.endpoint_url || pending?.url || '').replace(/\/+$/, '');
+    if (!modelId) return [];
+    for (const item of (window.modelsModule?.getCachedItems?.() || [])) {
+      if (url && String(item.url || '').replace(/\/+$/, '') !== url) continue;
+      const models = (item.models || []).concat(item.models_extra || []);
+      if (!models.includes(modelId)) continue;
+      const levelList = item.reasoning_levels && item.reasoning_levels[modelId];
+      return Array.isArray(levelList) ? levelList.filter(level => names[level]) : [];
+    }
+  } catch (_) { /* the work-budget control remains available */ }
+  return [];
+}
+
 function renderEffort() {
   const native = target() === 'pc-codex';
   const applicable = native || target() === 'jarvis';
+  const reasoningLevels = native ? [] : activeModelReasoningLevels();
+  reasoningMode = !native && applicable && reasoningLevels.length > 0;
   const card = byId('conversation-effort-card');
   card.hidden = !applicable;
   card.classList.toggle('is-native', native);
@@ -32,15 +57,17 @@ function renderEffort() {
   byId('codex-model-controls').hidden = !native;
   byId('codex-reasoning').hidden = !native;
   const range = byId('conversation-effort');
-  const options = native ? [...byId('codex-reasoning').options].map(option => option.value).filter(Boolean) : levels;
-  const chosen = native ? byId('codex-reasoning').value : agentEffort;
+  const options = native
+    ? [...byId('codex-reasoning').options].map(option => option.value).filter(Boolean)
+    : reasoningMode ? reasoningLevels : levels;
+  const chosen = native ? byId('codex-reasoning').value : (reasoningMode && !reasoningLevels.includes(agentEffort) ? '' : agentEffort);
   const index = Math.max(0, options.indexOf(chosen));
   range.max = String(Math.max(0, options.length - 1));
-  range.value = String(chosen ? index : native ? 0 : 2);
+  range.value = String(chosen ? index : native ? 0 : Math.min(2, Math.max(0, options.length - 1)));
   range.disabled = !options.length;
   range.style.setProperty('--effort-fill', `${Number(range.max) ? Number(range.value) / Number(range.max) * 100 : 0}%`);
   const label = names[chosen] || chosen || 'Default';
-  const controlLabel = native ? 'Reasoning effort' : 'Agent work budget';
+  const controlLabel = native || reasoningMode ? 'Reasoning effort' : 'Agent work budget';
   byId('conversation-effort-label').textContent = controlLabel;
   byId('conversation-effort-value').textContent = label;
   const chipValue = byId('composer-effort-value');
@@ -49,10 +76,14 @@ function renderEffort() {
     chip.title = `${controlLabel}: ${label}`;
     chip.setAttribute('aria-label', `${controlLabel}: ${label}. Click to change.`);
   }
-  range.setAttribute('aria-valuetext', native ? label : chosen ? `${label}, up to ${rounds[index]} rounds` : 'Installation default');
+  range.setAttribute('aria-valuetext', native || reasoningMode
+    ? (chosen ? label : 'Model default')
+    : chosen ? `${label}, up to ${rounds[index]} rounds` : 'Installation default');
   byId('conversation-effort-help').textContent = native
     ? options.length ? 'Codex reasoning for the next turn.' : byId('codex-model-status').textContent.includes('unavailable') ? byId('codex-model-status').textContent : 'Choose a Codex model to adjust reasoning. Default keeps the task or node setting.'
-    : `${chosen ? `Up to ${rounds[index]} rounds` : 'Uses the installation default'}. A round asks the model, runs its requested tools, and returns their results. Stops when finished. Applies to the next text turn.`;
+    : reasoningMode
+      ? chosen ? `Sends ${label.toLowerCase()} reasoning to the selected model for the next text turn.` : `Uses the selected model's own reasoning default for the next text turn.`
+      : `${chosen ? `Up to ${rounds[index]} rounds` : 'Uses the installation default'}. A round asks the model, runs its requested tools, and returns their results. Stops when finished. Applies to the next text turn.`;
   renderPanel();
 }
 
@@ -287,6 +318,7 @@ function bind() {
   byId('codex-reasoning').addEventListener('change', renderEffort);
   document.addEventListener('odysseus:effort-options-changed', renderEffort);
   document.addEventListener('odysseus:conversation-target-changed', () => { loadHistory(); renderEffort(); });
+  document.addEventListener('odysseus:model-picked', renderEffort);
   document.addEventListener('odysseus:codex-task-selected', () => {
     request += 1; details = null; resetActivity(); renderPanel();
     byId('session-context-status').textContent = 'Loading session details…';
@@ -304,7 +336,7 @@ function bind() {
   });
   document.addEventListener('odysseus:workspace-context-changed', loadHistory);
   document.addEventListener('odysseus:codex-history-failed', event => { byId('session-context-status').textContent = event.detail.message; });
-  window.addEventListener('odysseus:session-rendered', loadHistory);
+  window.addEventListener('odysseus:session-rendered', () => { loadHistory(); renderEffort(); });
   window.addEventListener('odysseus:session-activity', event => {
     if (event.detail.sessionId !== sessionId()) return;
     if (event.detail.tool) activity.tools.push(event.detail.tool);
@@ -317,6 +349,9 @@ function bind() {
   loadHistory();
 }
 
-window.conversationContext = { getAgentEffort: () => target() === 'jarvis' ? agentEffort : '' };
+window.conversationContext = {
+  getAgentEffort: () => (!reasoningMode && target() === 'jarvis' ? agentEffort : ''),
+  getReasoningEffort: () => (reasoningMode && target() === 'jarvis' ? agentEffort : ''),
+};
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
 else bind();

@@ -1242,6 +1242,70 @@ def _supports_thinking(model: str) -> bool:
     m = model.lower()
     return any(p in m for p in _THINKING_MODEL_PATTERNS)
 
+
+# ── Reasoning-effort control for API reasoning models (MAD-900) ──
+# The composer offers a reasoning selector when the selected endpoint/model
+# supports one. `apply_reasoning_effort` maps the chosen level onto the
+# provider's own field; unsupported providers/models are left untouched so a
+# chat turn never 400s on an unknown parameter.
+REASONING_EFFORT_LEVELS = ("low", "medium", "high")
+
+# Reasoning-capable model families per reasoning-effort provider. Matching is
+# substring-based on the lowercased model id, mirroring _THINKING_MODEL_PATTERNS.
+_OPENAI_REASONING_PATTERNS = ("o1", "o3", "o4", "gpt-5")
+_OPENROUTER_REASONING_PATTERNS = (
+    "deepseek-r1", "deepseek-reasoner", "deepseek-v3.1", "deepseek-v3.2",
+    "deepseek-v4", "qwen3", "qwq", "glm-4.5", "glm-4.6", "glm-5",
+    "kimi-k2-thinking", "minimax", "m2-reap", "grok-3-mini", "grok-4",
+    "gemini-2.5", "gemini-3", "o1", "o3", "o4", "gpt-5",
+)
+
+
+def _model_matches_any(model: str, patterns) -> bool:
+    m = str(model or "").lower()
+    return any(p in m for p in patterns)
+
+
+def reasoning_levels(provider: str, model: str) -> tuple:
+    """Reasoning-effort levels offered for a provider/model pair.
+
+    Empty tuple means the composer keeps its existing work-budget control.
+    """
+    if not model:
+        return ()
+    if provider == "openrouter":
+        return REASONING_EFFORT_LEVELS if _model_matches_any(model, _OPENROUTER_REASONING_PATTERNS) else ()
+    if provider == "openai":
+        return REASONING_EFFORT_LEVELS if _model_matches_any(model, _OPENAI_REASONING_PATTERNS) else ()
+    if provider == "mistral":
+        return REASONING_EFFORT_LEVELS if _supports_thinking(model) else ()
+    return ()
+
+
+def reasoning_levels_for_url(url: str, model: str) -> tuple:
+    """Reasoning levels for an endpoint URL plus model id (provider-detected)."""
+    return reasoning_levels(_detect_provider(url), model)
+
+
+def apply_reasoning_effort(payload: Dict, provider: str, model: str, effort: Optional[str]) -> bool:
+    """Apply an explicit operator reasoning level to an OpenAI-compat payload.
+
+    Returns True when the level was applied. No-op for unknown levels or
+    provider/model pairs without a reasoning-effort contract.
+    """
+    level = str(effort or "").strip().lower()
+    if level not in REASONING_EFFORT_LEVELS:
+        return False
+    if not reasoning_levels(provider, model):
+        return False
+    if provider == "openrouter":
+        payload["reasoning"] = {"effort": level}
+        return True
+    if provider in {"openai", "mistral"}:
+        payload["reasoning_effort"] = level
+        return True
+    return False
+
 def _normalize_mistral_content(content):
     """Mistral returns content as a structured array when reasoning is on:
         [{"type": "thinking", "thinking": [{"type": "text", "text": "..."}], "closed": true},
@@ -1761,7 +1825,8 @@ def normalize_model_id(
 
 def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
              max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None, 
-             timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None) -> str:
+             timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None,
+             reasoning_effort: Optional[str] = None) -> str:
     """Synchronous LLM call with optional prompt type enhancement."""
     h = _provider_headers(_detect_provider(url))
     # Tolerate headers that arrive as a JSON string (some sessions stored them
@@ -1825,6 +1890,8 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
         _apply_local_generation_stability(payload, target_url, model)
         if provider == "mistral" and _supports_thinking(model):
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
+        if reasoning_effort:
+            apply_reasoning_effort(payload, provider, model, reasoning_effort)
     try:
         note_model_activity(target_url, model)
         r = httpx_post_kimi_aware(target_url, h, json=payload, timeout=timeout)
@@ -1933,6 +2000,7 @@ async def llm_call_async(
     prompt_type: Optional[str] = None,
     session_id: Optional[str] = None,
     workload: str = "foreground",
+    reasoning_effort: Optional[str] = None,
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
     provider = _detect_provider(url)
@@ -2040,6 +2108,8 @@ async def llm_call_async(
                 payload["reasoning_effort"] = "none"
         if provider == "mistral" and _supports_thinking(model):
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
+        if reasoning_effort:
+            apply_reasoning_effort(payload, provider, model, reasoning_effort)
         _apply_local_cache_affinity(payload, url, session_id)
         _apply_local_generation_stability(payload, target_url, model)
 
@@ -2112,7 +2182,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                      tools: Optional[List[Dict]] = None, session_id: Optional[str] = None,
-                     tool_choice_none: bool = False, workload: str = "foreground"):
+                     tool_choice_none: bool = False, workload: str = "foreground",
+                     reasoning_effort: Optional[str] = None):
     target_url = _stream_target_url(url)
     async with _local_model_slot(target_url, model, workload):
         async for chunk in _stream_llm_inner(
@@ -2127,6 +2198,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             tools=tools,
             session_id=session_id,
             tool_choice_none=tool_choice_none,
+            reasoning_effort=reasoning_effort,
         ):
             yield chunk
 
@@ -2135,7 +2207,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                             max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                             timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                             tools: Optional[List[Dict]] = None, session_id: Optional[str] = None,
-                            tool_choice_none: bool = False):
+                            tool_choice_none: bool = False,
+                            reasoning_effort: Optional[str] = None):
     """Stream LLM responses with improved error handling.
 
     Yields SSE chunks:
@@ -2203,6 +2276,10 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         # (high / medium / low / none); default "high".
         if provider == "mistral" and _supports_thinking(model):
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
+        # Explicit operator reasoning level (MAD-900) outranks the provider
+        # default above.
+        if reasoning_effort:
+            apply_reasoning_effort(payload, provider, model, reasoning_effort)
         # For Ollama's OpenAI-compat /v1 endpoint with thinking models (qwen3,
         # gemma4, etc.), suppress thinking so tool calls aren't swallowed inside
         # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
