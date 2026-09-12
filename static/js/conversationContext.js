@@ -22,9 +22,13 @@ function target() { return getSelectedAgentSelection()?.target || currentSession
 
 function renderEffort() {
   const native = target() === 'pc-codex';
+  const applicable = native || target() === 'jarvis';
   const card = byId('conversation-effort-card');
-  card.hidden = !native && target() !== 'jarvis';
+  card.hidden = !applicable;
   card.classList.toggle('is-native', native);
+  const chip = byId('composer-effort-btn');
+  if (chip) chip.hidden = !applicable;
+  if (!applicable) closeEffortPopover();
   byId('codex-model-controls').hidden = !native;
   byId('codex-reasoning').hidden = !native;
   const range = byId('conversation-effort');
@@ -36,13 +40,27 @@ function renderEffort() {
   range.disabled = !options.length;
   range.style.setProperty('--effort-fill', `${Number(range.max) ? Number(range.value) / Number(range.max) * 100 : 0}%`);
   const label = names[chosen] || chosen || 'Default';
-  byId('conversation-effort-label').textContent = native ? 'Reasoning effort' : 'Agent work budget';
+  const controlLabel = native ? 'Reasoning effort' : 'Agent work budget';
+  byId('conversation-effort-label').textContent = controlLabel;
   byId('conversation-effort-value').textContent = label;
+  const chipValue = byId('composer-effort-value');
+  if (chipValue) chipValue.textContent = label;
+  if (chip) {
+    chip.title = `${controlLabel}: ${label}`;
+    chip.setAttribute('aria-label', `${controlLabel}: ${label}. Click to change.`);
+  }
   range.setAttribute('aria-valuetext', native ? label : chosen ? `${label}, up to ${rounds[index]} rounds` : 'Installation default');
   byId('conversation-effort-help').textContent = native
     ? options.length ? 'Codex reasoning for the next turn.' : byId('codex-model-status').textContent.includes('unavailable') ? byId('codex-model-status').textContent : 'Choose a Codex model to adjust reasoning. Default keeps the task or node setting.'
     : `${chosen ? `Up to ${rounds[index]} rounds` : 'Uses the installation default'}. A round asks the model, runs its requested tools, and returns their results. Stops when finished. Applies to the next text turn.`;
   renderPanel();
+}
+
+function closeEffortPopover() {
+  const wrap = byId('model-picker-wrap');
+  if (!wrap || !wrap.classList.contains('effort-open')) return;
+  wrap.classList.remove('effort-open');
+  byId('composer-effort-btn')?.setAttribute('aria-expanded', 'false');
 }
 
 function list(id, values, empty) {
@@ -232,7 +250,25 @@ function bind() {
   byId('session-context-toggle').addEventListener('click', () => setOpen(byId('session-context-panel').hidden));
   byId('session-context-close').addEventListener('click', () => { setOpen(false); byId('session-context-toggle').focus(); });
   byId('session-context-panel').addEventListener('keydown', event => { if (event.key === 'Escape') byId('session-context-close').click(); });
-  byId('model-picker-btn').addEventListener('click', () => { if (window.innerWidth < 1250) setOpen(false); });
+  byId('model-picker-btn').addEventListener('click', () => {
+    if (window.innerWidth < 1250) setOpen(false);
+    closeEffortPopover();
+  });
+  byId('composer-effort-btn')?.addEventListener('click', event => {
+    event.stopPropagation();
+    const wrap = byId('model-picker-wrap');
+    if (!wrap) return;
+    const open = !wrap.classList.contains('effort-open');
+    wrap.classList.toggle('effort-open', open);
+    event.currentTarget.setAttribute('aria-expanded', String(open));
+  });
+  document.addEventListener('click', event => {
+    const wrap = byId('model-picker-wrap');
+    if (!wrap || !wrap.classList.contains('effort-open')) return;
+    if (wrap.contains(event.target)) return;
+    closeEffortPopover();
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeEffortPopover(); });
   byId('conversation-effort-card').addEventListener('click', event => event.stopPropagation());
   byId('conversation-effort').addEventListener('input', event => {
     const index = Number(event.target.value);

@@ -2380,7 +2380,18 @@ def _build_system_prompt(
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
 
-    agent_prompt = agent_system_prompt(agent_prompt, model=model, trace_surface="agent")
+    from src.action_intents import classify_tool_intent
+
+    _turn_intent = classify_tool_intent(_extract_last_user_message(messages))
+    _protocol_domains = (
+        [_turn_intent.category] if _turn_intent.needs_tools and _turn_intent.category else []
+    )
+    agent_prompt = agent_system_prompt(
+        agent_prompt,
+        model=model,
+        trace_surface="agent",
+        protocol_domains=_protocol_domains,
+    )
 
     # Dynamic parts that change per request
     mcp_schemas = []

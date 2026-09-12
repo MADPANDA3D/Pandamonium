@@ -337,13 +337,14 @@ test('selected Friday project and task flow through the normal composer', async 
   await page.locator('#model-picker-refresh-btn').click();
   await expect(page.locator('#message:visible')).toHaveAttribute('placeholder', /Fixture resume task/);
   await expect(page.locator('#session-context-environment dd[title="/work/disposable"]')).toHaveCount(1);
+  await page.locator('#composer-effort-btn').click();
   await page.locator('#codex-model').selectOption('fixture-model');
   await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
   await page.locator('#codex-reasoning').selectOption('high');
   await expect(page.locator('#codex-reasoning')).toHaveValue('high');
   await expect(page.locator('#conversation-effort-value')).toHaveText('High');
   await page.screenshot({ path: test.info().outputPath('friday-model-selection.png'), animations: 'disabled' });
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await page.locator('#message:visible').fill('Inspect the selected project. ');
   await page.locator('#message').evaluate(input => {
     input.setSelectionRange(input.value.length, input.value.length);
@@ -371,12 +372,13 @@ test('selected Friday project and task flow through the normal composer', async 
   if (!await page.locator('#sidebar').evaluate(sidebar => sidebar.classList.contains('hidden'))) await page.locator('#hamburger-btn').click();
   await page.locator('#model-picker-btn').click();
   await expect(page.locator('#session-context-panel')).toBeHidden();
-  await page.locator('#codex-reasoning').selectOption('medium');
-  await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
   const bounds = await page.locator('#model-picker-menu').boundingBox();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.y).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  await page.locator('#composer-effort-btn').click();
+  await page.locator('#codex-reasoning').selectOption('medium');
+  await expect(page.locator('#codex-reasoning')).toHaveValue('medium');
   const composer = await page.locator('.chat-input-bar:visible').boundingBox();
   expect(composer.x).toBeGreaterThanOrEqual(0);
   expect(composer.x + composer.width).toBeLessThanOrEqual(391);
@@ -436,7 +438,7 @@ test('Jarvis budget slider submits a work budget and resets to the installation 
     module.setCurrentSessionId('budget-chat');
     module.updateModelPicker();
   });
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await expect(page.locator('#conversation-effort-label')).toHaveText('Agent work budget');
   await page.locator('#conversation-effort').focus();
   await page.locator('#conversation-effort').press('Home');
@@ -445,12 +447,12 @@ test('Jarvis budget slider submits a work budget and resets to the installation 
     await page.locator('#conversation-effort').press('ArrowRight');
   }
   await page.locator('#conversation-effort').press('Home');
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await page.locator('#message:visible').fill('Inspect the current state.');
   await page.locator('.send-btn:visible').click();
   await expect.poll(() => submitted).toContain('agent_effort');
   expect(submitted).toMatch(/name="agent_effort"\r?\n\r?\nlow/);
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await page.locator('#conversation-effort-reset').click();
   await expect(page.locator('#conversation-effort-value')).toHaveText('Default');
 });
@@ -460,7 +462,7 @@ test('rounded workspace controls follow theme colors on desktop and phone', asyn
   await mockShell(page);
   await page.goto('/static/index.html');
   await selectFriday(page);
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await page.locator('#codex-model').selectOption('fixture-model');
   await page.locator('#codex-reasoning').selectOption('high');
   await expect(page.locator('#conversation-effort-value')).toHaveText('High');
@@ -528,10 +530,10 @@ test('native history opens recent messages, pages without duplicates, and restor
   await expect(page.locator('[data-native-message-id]')).toHaveCount(3);
   await expect(page.locator('[data-native-message-id]').first()).toContainText('Older native request');
   await expect(page.locator('[data-native-message-id="answer"]')).toHaveCount(1);
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await page.locator('#codex-model').selectOption('fixture-model');
   await page.locator('#codex-reasoning').selectOption('high');
-  await page.locator('#model-picker-btn').click();
+  await page.locator('#composer-effort-btn').click();
   await page.reload();
   await expect(page.locator('[data-native-message-id]')).toHaveCount(2);
   await expect(page.locator('#message')).toHaveAttribute('placeholder', /Fixture resume task/);
