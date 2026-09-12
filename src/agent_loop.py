@@ -2351,7 +2351,7 @@ def _build_system_prompt(
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
 
-    agent_prompt = agent_system_prompt(agent_prompt, model=model)
+    agent_prompt = agent_system_prompt(agent_prompt, model=model, trace_surface="agent")
 
     # Dynamic parts that change per request
     mcp_schemas = []

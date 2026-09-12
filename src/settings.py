@@ -40,6 +40,10 @@ DEFAULT_SETTINGS = {
         "hidden prompts, scratchpads, or private chain-of-thought."
     ),
     "agent_constitution_version": "1",
+    # Protocol layer: mount the versioned JOS protocol packs into the agent
+    # system prompt. The constitution above stays the light operator-editable
+    # layer; disabling this restores the exact prior prompt composition.
+    "protocol_layer_enabled": True,
     # Agent email safety: when True, the MCP send_email / reply_to_email
     # tools don't SMTP directly. They stage the composed message into the
     # scheduled_emails table with status='agent_draft' and return a

@@ -954,7 +954,7 @@ def _voice_character_name(voice_session: dict[str, Any]) -> str:
 def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
     if voice_session.get("target") in {"friday", "pc-codex"}:
         return FRIDAY_VOICE_SYSTEM_PROMPT
-    prompt = agent_system_prompt(VOICE_SYSTEM_PROMPT)
+    prompt = agent_system_prompt(VOICE_SYSTEM_PROMPT, trace_surface="voice")
     agent_name = configured_agent_name()
     if not voice_session.get("oracle_protocol_active"):
         return prompt + f"\nORACLE protocol is offline. You are {agent_name}; ORACLE is a tool harness, not another agent or model."

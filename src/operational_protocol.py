@@ -347,3 +347,39 @@ def record_operational_event(**values: Any) -> dict[str, Any] | None:
         return events.record(**values)
     except Exception:
         return None
+
+
+def record_protocol_mount(
+    *,
+    surface: str,
+    packs: Any,
+    request_id: str | None = None,
+    session_id: str | None = None,
+    operator_id: str | None = None,
+    agent_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Record the mounted protocol set for one turn (JOS-P7, fail-soft)."""
+    mounted: list[str] = []
+    for pack in packs or []:
+        if isinstance(pack, Mapping):
+            pack_id = str(pack.get("id") or "").strip()
+            version = str(pack.get("version") or "").strip()
+        else:
+            pack_id = str(pack).strip()
+            version = ""
+        if not pack_id:
+            continue
+        mounted.append(f"{pack_id}@{version}" if version else pack_id)
+    if not mounted:
+        return None
+    return record_operational_event(
+        request_id=request_id,
+        session_id=session_id,
+        operator_id=operator_id,
+        agent_id=agent_id,
+        actor="pandamonium",
+        component="protocol-registry",
+        event_type="started",
+        status="running",
+        metadata={"mounted_protocols": mounted, "surface": str(surface)[:40]},
+    )

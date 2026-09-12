@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from src.protocol_registry import core_protocol_block, core_protocol_references
 from src.settings import DEFAULT_SETTINGS, load_settings
 
 
@@ -79,8 +80,13 @@ def runtime_model_fact(model: Any) -> str:
     )
 
 
-def agent_system_prompt(preset_prompt: str | None = None, *, model: Any = None) -> str:
-    """Mount the configured identity and preserve the active behavior preset."""
+def agent_system_prompt(
+    preset_prompt: str | None = None,
+    *,
+    model: Any = None,
+    trace_surface: str | None = None,
+) -> str:
+    """Mount the configured identity, the protocol layer, and the active preset."""
     identity = resolve_agent_identity()
     prompt = (
         f"Your persistent agent identity is {identity['agent_display_name']} "
@@ -91,9 +97,29 @@ def agent_system_prompt(preset_prompt: str | None = None, *, model: Any = None) 
         "operator asks about the backend, describe the current model or provider separately and only from "
         f"runtime facts available to you.\n\n{identity['agent_constitution']}"
     )
+    try:
+        protocol_block = core_protocol_block()
+        protocol_refs = core_protocol_references() if protocol_block else []
+    except Exception:
+        protocol_block = ""
+        protocol_refs = []
+    sections: list[str] = []
     if model is not None:
-        prompt = f"{runtime_model_fact(model)}\n\n{prompt}"
-    return f"{prompt}\n\n{preset_prompt}" if preset_prompt else prompt
+        sections.append(runtime_model_fact(model))
+    sections.append(prompt)
+    if protocol_block:
+        sections.append(protocol_block)
+    if preset_prompt:
+        sections.append(preset_prompt)
+    result = "\n\n".join(sections)
+    if trace_surface and protocol_refs:
+        try:
+            from src.operational_protocol import record_protocol_mount
+
+            record_protocol_mount(surface=trace_surface, packs=protocol_refs)
+        except Exception:
+            pass
+    return result
 
 
 def agent_identity_status() -> dict[str, Any]:
