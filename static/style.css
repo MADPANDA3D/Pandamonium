@@ -43510,3 +43510,27 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
+
+/* ── Projects (MAD-902) ────────────────────────────────────────────
+   Pandamonium agent-workstation project rows: folder icon + name, and a
+   hover-only + that starts a session bound to that project. */
+.project-item .project-item-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+.project-item .project-session-btn {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.project-item:hover .project-session-btn,
+.project-item:focus-within .project-session-btn {
+  opacity: 0.85;
+}
+.project-item.project-unavailable {
+  opacity: 0.55;
+}
+.project-item.project-unavailable .project-session-btn {
+  pointer-events: none;
+}
