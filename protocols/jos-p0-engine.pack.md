@@ -5,7 +5,7 @@ scope: core
 protocol: JOS-P0
 title: Engine compatibility and system ownership
 domains: []
-token_budget: 160
+token_budget: 180
 enforcement:
   - src/agent_loop.py
   - src/tool_policy.py

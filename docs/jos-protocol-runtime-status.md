@@ -79,3 +79,35 @@ onboarding, and an explicitly selected distribution strategy are complete.
 - Deployment and live acceptance are separate operator-selected work because
   the production CT103 tree has known source divergence and requires narrow,
   backup-first changes.
+
+## Mounted protocol packs (2026-09-12)
+
+The JOS specifications now mount at runtime as versioned packs:
+
+- `protocols/*.pack.md` carry a strict frontmatter manifest (`id`, `version`,
+  `scope`, `protocol`, `domains`, `token_budget`, `enforcement`) plus a compact
+  body; `src/protocol_registry.py` validates and renders them.
+- Core packs (`JOS-P0`, `JOS-P1`) mount in every chat, agent, and voice turn.
+  Duty packs (`JOS-P2`–`JOS-P7`, `JOS-IPAV`) mount by the deterministic intent
+  domain map in `src/action_intents.py`; trivial chat mounts core only.
+- The renderer enforces declared budgets. Under context pressure the agent loop
+  strips the protocol layer before input-budget trimming, so tool evidence is
+  never evicted by advisory text.
+- JOS-P7 records the mounted `{id, version}` set per turn
+  (`record_protocol_mount`).
+- Operators control the layer in Settings → AI → Protocols (layer toggle,
+  per-pack enable/disable, model window/budget maps, restore defaults).
+  Disabled packs stay diagnosable but never mount.
+- `GET /api/diagnostics/protocol/packs` lists pack versions, scopes, budgets,
+  disabled state, and manifest errors.
+- Model budgets follow the connected model: operator overrides
+  (`model_context_windows`, `model_input_token_budgets`) outrank persisted
+  provider catalog windows (`data/model_context_catalog.json`), the live
+  catalog, and the built-in table.
+- Enforcement parity is asserted by `tests/test_protocol_parity.py`: every pack
+  must declare at least one module that exists.
+- Deterministic benchmark (`scripts/protocol_benchmark.py --engine stub`): all
+  four scenarios pass; protocol blocks render 621 tokens (trivial chat) to
+  1,180 tokens (web research), including 91–148 tokens of render scaffolding,
+  with every measured pack body at or under its declared budget. Live
+  tool-selection, completion, and latency comparison remains operator-run.

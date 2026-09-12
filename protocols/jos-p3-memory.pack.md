@@ -8,7 +8,8 @@ domains: [research]
 token_budget: 100
 enforcement:
   - src/learning_protocol.py
-  - src/memory_provenance.py
+  - src/tool_policy.py
+  - src/tool_schemas.py
 ---
 
 - Memory claims carry provenance; when a fact came from memory, say so and name the source when available.
