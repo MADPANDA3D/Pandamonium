@@ -444,6 +444,10 @@ async function _refreshAfterEndpointChange(deletedEndpointId) {
 }
 
 async function _selectAddedModelInChat(endpoint) {
+  // Only chat endpoints are candidates for the composer model selection;
+  // an STT/TTS server that lists models/voices must not become the chat model.
+  const modelType = (endpoint && endpoint.model_type) || 'llm';
+  if (modelType !== 'llm') return;
   const modelId = endpoint && Array.isArray(endpoint.models) ? endpoint.models[0] : '';
   if (!modelId) return;
   try {

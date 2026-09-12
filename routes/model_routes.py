@@ -51,6 +51,18 @@ _ENDPOINT_FALLBACK_FIELDS = {
     "vision_model_fallbacks":  "Vision Model Fallbacks",
 }
 
+# Model types an endpoint may be configured as. Chat model selection only
+# consumes "llm" (static/js/models.js), "image" powers Gallery, and "stt"/"tts"
+# configure local speech servers (selected via the endpoint:<id> voice
+# providers). Unknown values are rejected instead of being stored.
+MODEL_ENDPOINT_TYPES = ("llm", "image", "stt", "tts")
+
+
+def normalize_model_endpoint_type(value) -> str:
+    """Return a validated endpoint model type, or "" when unsupported."""
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in MODEL_ENDPOINT_TYPES else ""
+
 
 def _speech_settings_using_endpoint(settings: dict, ep_id: str) -> list:
     """Return speech settings that reference a model endpoint."""
@@ -1887,6 +1899,9 @@ def setup_model_routes(model_discovery):
         base_url = _normalize_base(base_url)
         if not base_url:
             raise HTTPException(400, "Base URL is required")
+        model_type = normalize_model_endpoint_type(model_type or "llm")
+        if not model_type:
+            raise HTTPException(400, "Unsupported model type")
         # Resolve hostname via Tailscale if DNS fails
         from src.endpoint_resolver import resolve_url
         base_url = resolve_url(base_url)
@@ -2004,6 +2019,7 @@ def setup_model_routes(model_discovery):
                     "existing": True,
                     "endpoint_kind": existing_kind,
                     "category": _classify_endpoint(existing.base_url, existing_kind),
+                    "model_type": getattr(existing, "model_type", None) or "llm",
                 }
         finally:
             _db_dedup.close()
@@ -2034,7 +2050,7 @@ def setup_model_routes(model_discovery):
                 base_url=base_url,
                 api_key=api_key.strip() or None,
                 is_enabled=True,
-                model_type=model_type.strip() if model_type else "llm",
+                model_type=model_type,
                 endpoint_kind=requested_kind,
                 model_refresh_mode=refresh_mode,
                 model_refresh_interval=refresh_interval,
@@ -2064,7 +2080,7 @@ def setup_model_routes(model_discovery):
                 current_default_ep = db.query(ModelEndpoint).filter(
                     ModelEndpoint.id == current_default_id
                 ).first()
-            if _default_endpoint_needs_assignment(
+            if model_type == "llm" and _default_endpoint_needs_assignment(
                 current_default_id,
                 enabled_ids,
                 current_default_endpoint=current_default_ep,
@@ -2091,6 +2107,7 @@ def setup_model_routes(model_discovery):
             "online": bool(model_ids) or bool(_pinned) or bool(ping.get("reachable")),
             "status": "online" if (model_ids or _pinned) else ("loading" if ping.get("loading") else ("empty" if ping.get("reachable") else "offline")),
             "ping_error": ping.get("error") if ping else None,
+            "model_type": model_type,
             "endpoint_kind": requested_kind,
             "category": _classify_endpoint(base_url, requested_kind),
         }
@@ -2403,7 +2420,10 @@ def setup_model_routes(model_discovery):
                 if "name" in body and isinstance(body["name"], str):
                     ep.name = body["name"].strip() or ep.name
                 if "model_type" in body and isinstance(body["model_type"], str):
-                    ep.model_type = body["model_type"].strip() or ep.model_type
+                    requested_type = normalize_model_endpoint_type(body["model_type"])
+                    if body["model_type"].strip() and not requested_type:
+                        raise HTTPException(400, "Unsupported model type")
+                    ep.model_type = requested_type or ep.model_type
                 if "pinned_models" in body:
                     _pinned = _normalize_model_ids(body["pinned_models"])
                     ep.pinned_models = json.dumps(_pinned) if _pinned else None
