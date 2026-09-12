@@ -1,5 +1,3 @@
-import { applyRightDock } from './modalSnap.js';
-
 let pollTimer = null;
 let pollInFlight = false;
 let lastRelease = null;
@@ -600,8 +598,12 @@ function openModal({ checkNow = false, opener = null } = {}) {
   modal.classList.remove('hidden');
   modal.removeAttribute('aria-hidden');
   // Open docked to the right on desktop; still draggable off the edge.
+  // Imported at runtime so this module stays embeddable by the release-bridge
+  // harness, which evaluates the file from a data: URL (no relative imports).
   if (window.innerWidth > 768) {
-    try { applyRightDock(modal); } catch (_) {}
+    import('./modalSnap.js')
+      .then(snap => snap.applyRightDock(modal))
+      .catch(() => {});
   }
   window.setTimeout(() => {
     if (el('styled-confirm-overlay')?.classList.contains('hidden') !== false) {
