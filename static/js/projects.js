@@ -63,15 +63,8 @@ function _renderRow(project) {
 
 function _render() {
   const list = document.getElementById('projects-list');
-  const empty = document.getElementById('projects-empty');
   if (!list) return;
   list.replaceChildren(..._projects.map(_renderRow));
-  if (empty) {
-    empty.hidden = _projects.length > 0;
-    if (!_projects.length) {
-      empty.textContent = 'No projects yet — use + to create one or add an existing folder.';
-    }
-  }
 }
 
 function _guardAvailable(project) {
@@ -168,7 +161,6 @@ function _bindAddMenu() {
 }
 
 export async function refreshProjects() {
-  const empty = document.getElementById('projects-empty');
   try {
     const response = await fetch(`${API_BASE}/api/projects`, { credentials: 'same-origin' });
     if (!response.ok) throw new Error(`projects_${response.status}`);
@@ -178,10 +170,6 @@ export async function refreshProjects() {
   } catch (_) {
     _projects = [];
     _render();
-    if (empty) {
-      empty.hidden = false;
-      empty.textContent = 'Projects are unavailable right now.';
-    }
   }
 }
 

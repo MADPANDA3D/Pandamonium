@@ -143,3 +143,37 @@ def catalog_entries(
             entry["mounted"] = name in mounted_set
         entries.append(entry)
     return entries
+
+
+def resolve_tool_mounts(
+    requested: Iterable[str],
+    disabled: Iterable[str] = (),
+) -> Dict[str, List[str]]:
+    """Split requested tool ids into mountable, unknown, and disabled.
+
+    The result is the contract `manage_settings action=load_tools` exposes to
+    the agent loop: only `mounted_tools` are unlocked, and unknown or disabled
+    names are reported instead of silently dropped.
+    """
+    disabled_set = set(disabled or ())
+    known = builtin_tool_names()
+    mounted: List[str] = []
+    unknown: List[str] = []
+    blocked: List[str] = []
+    seen: Set[str] = set()
+    for raw in requested or ():
+        name = str(raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        if name in disabled_set:
+            blocked.append(name)
+        elif name in known:
+            mounted.append(name)
+        else:
+            unknown.append(name)
+    return {
+        "mounted_tools": sorted(mounted),
+        "unknown_tools": sorted(unknown),
+        "disabled_tools": sorted(blocked),
+    }
