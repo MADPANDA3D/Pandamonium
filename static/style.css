@@ -2837,6 +2837,7 @@ body.bg-pattern-sparkles {
       gap: 8px;
       align-items: center;
       flex-shrink: 0;
+      position: relative;
     }
     .input-icon-btn {
       background: none;
@@ -42093,6 +42094,87 @@ body.theme-frosted .modal {
   opacity: 0.42;
   cursor: not-allowed;
   filter: saturate(0.55);
+}
+.chat-input-right {
+  position: relative;
+}
+.access-mode-btn {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, #d9e2ff 22%, transparent);
+  border-radius: 50%;
+  background: #020203;
+  color: color-mix(in srgb, #d9e2ff 72%, #556);
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.access-mode-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, #9db8ff 40%, transparent);
+  color: #cfe0ff;
+}
+.access-mode-btn.access-mode-auto {
+  color: #6fd3a5;
+  border-color: color-mix(in srgb, #6fd3a5 48%, transparent);
+  box-shadow: 0 0 10px rgba(111, 211, 165, 0.18);
+}
+.access-mode-btn.access-mode-full {
+  color: #ffb85c;
+  border-color: color-mix(in srgb, #ffb85c 52%, transparent);
+  box-shadow: 0 0 12px rgba(255, 184, 92, 0.22);
+}
+.access-mode-menu {
+  position: fixed;
+  display: none;
+  width: 264px;
+  z-index: 500;
+  background: #0b0c10;
+  border: 1px solid color-mix(in srgb, #d9e2ff 24%, transparent);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+}
+.access-mode-menu:not([hidden]) {
+  display: block;
+}
+.access-mode-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  line-height: 1.35;
+  padding: 9px 10px;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #dbe4ff;
+  cursor: pointer;
+}
+.access-mode-option:hover {
+  background: rgba(157, 184, 255, 0.09);
+}
+.access-mode-option.active {
+  background: rgba(111, 211, 165, 0.1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #6fd3a5 42%, transparent);
+}
+.access-mode-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.access-mode-desc {
+  font-size: 10.5px;
+  opacity: 0.62;
+  line-height: 1.35;
 }
 .send-btn:disabled.dictation-paused:hover {
   transform: none;
