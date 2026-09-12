@@ -46,6 +46,11 @@ RELEASES_API = "https://api.github.com/repos/MADPANDA3D/Pandamonium/releases"
 SCHEMA = "pandamonium.release.v1"
 STATE_SCHEMA = "pandamonium.update-state.v1"
 REQUEST_SCHEMA = "pandamonium.update-request.v1"
+# Rollback snapshots kept after a successful update. Older `update-*` backup
+# directories are pruned automatically so a long-lived install cannot fill the
+# disk with hundreds of rollback copies (observed on CT103: 35 snapshots,
+# ~9.5 GB). Task/issue snapshots (`mad-*`, `baton*`) are never touched here.
+BACKUP_RETENTION = 2
 ALLOWED_DOWNLOAD_HOSTS = {
     "github.com",
     "api.github.com",
@@ -886,6 +891,46 @@ class UpdateExecutor:
         if (current / ".env").is_file():
             shutil.copy2(current / ".env", candidate / ".env")
 
+    def _prune_old_backups(self) -> list[str]:
+        """Keep only the newest ``BACKUP_RETENTION`` update rollback snapshots.
+
+        Runs after a successful activation and health check, so the snapshot
+        for the just-completed update is always among the kept set. Only
+        ``update-*`` directories directly under the configured backup root are
+        considered; task/issue snapshots and anything outside that directory
+        are left untouched. Failures are non-fatal — the update already
+        succeeded and retention must never fail it.
+        """
+        root = self.config.backup_root
+        try:
+            resolved_root = root.resolve(strict=True)
+        except OSError:
+            return []
+        candidates: list[Path] = []
+        try:
+            for entry in root.iterdir():
+                if not entry.is_dir() or entry.is_symlink():
+                    continue
+                if not entry.name.startswith("update-"):
+                    continue
+                try:
+                    if entry.resolve().parent != resolved_root:
+                        continue
+                except OSError:
+                    continue
+                candidates.append(entry)
+        except OSError:
+            return []
+        candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        removed: list[str] = []
+        for path in candidates[BACKUP_RETENTION:]:
+            try:
+                shutil.rmtree(path)
+                removed.append(path.name)
+            except OSError:
+                continue
+        return removed
+
     def _backup(
         self, previous: Path, candidate: Path, manifest: dict[str, Any]
     ) -> tuple[Path, Path]:
@@ -1243,6 +1288,7 @@ class UpdateExecutor:
                     "version": manifest["version"],
                     "commit": manifest["commit"],
                     "backup_location": str(self._backup_dir),
+                    "pruned_backups": self._prune_old_backups(),
                 }
             )
             return write_update_state(
