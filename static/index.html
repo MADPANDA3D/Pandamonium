@@ -96,6 +96,13 @@
         var _us = localStorage.getItem('odysseus-ui-scale');
         if (_us && _us !== '100') document.documentElement.classList.add('ui-scale-' + _us);
       } catch(e){}
+      // Apply UI icon-size scale early too (same reason).
+      try {
+        var _is = parseInt(localStorage.getItem('odysseus-ui-icon-scale'), 10);
+        if (_is >= 50 && _is <= 200 && _is !== 100) {
+          document.documentElement.style.setProperty('--ui-icon-scale', String(_is / 100));
+        }
+      } catch(e){}
       // Apply background pattern on body once available
       if (t && t.bgPattern && t.bgPattern !== 'none') {
         document.addEventListener('DOMContentLoaded', function() {
@@ -619,8 +626,20 @@
           <div class="theme-fd-group">
             <label class="theme-fd-label">Text size</label>
             <select id="theme-text-size-select" class="theme-fd-select" aria-label="Text size">
+              <option value="90">Smaller</option>
               <option value="100">Default</option>
-              <option value="125">Larger</option>
+              <option value="110">Larger</option>
+              <option value="125">Much larger</option>
+              <option value="140">Extra large</option>
+            </select>
+          </div>
+          <div class="theme-fd-group">
+            <label class="theme-fd-label">Icon size</label>
+            <select id="theme-icon-size-select" class="theme-fd-select" aria-label="Icon size">
+              <option value="100">Default</option>
+              <option value="115">Large</option>
+              <option value="130">Larger</option>
+              <option value="150">Extra large</option>
             </select>
           </div>
           <div class="theme-fd-group" id="theme-frosted-group">
@@ -745,8 +764,9 @@
            assistant session is still maintained for log_to_assistant()
            writes from scheduled tasks. -->
 
-      <div class="section" id="sessions-section">
+      <div class="section" id="sessions-section" data-section-reorder="true">
         <div class="section-header-flex">
+          <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
           <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
           <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
             <button type="button" class="section-header-btn list-item-plus-btn chats-manage-btn" id="chats-library-btn" title="Manage Chats (Library)">
@@ -826,8 +846,9 @@
         </div>
       </div>
 
-      <div class="section" id="email-section">
+      <div class="section" id="email-section" data-section-reorder="true">
         <div class="section-header-flex">
+          <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
           <span class="section-title" id="email-section-title" style="cursor:pointer;" title="Open email inbox"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>Email</span></span>
           <button type="button" class="section-header-btn list-item-plus-btn" id="email-compose-btn" title="Compose email">
             <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -842,8 +863,9 @@
         </div>
       </div>
 
-      <div class="section" id="models-section">
+      <div class="section" id="models-section" data-section-reorder="true">
         <div class="section-header-flex">
+          <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
           <span class="section-title"> Models</span>
           <div style="position:relative; display:inline-block;">
             <button type="button" class="section-header-btn" id="model-sort-btn" title="Sort models">
@@ -871,8 +893,9 @@
         </div>
       </div>
 
-      <div class="section" id="tools-section">
+      <div class="section" id="tools-section" data-section-reorder="true">
         <div class="section-header-flex">
+          <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
           <span class="section-title"><svg class="section-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Tools</span>
         </div>
         <div class="list-item" id="tool-mad-mcp-btn" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="mad-mcp-modal">
@@ -978,8 +1001,9 @@
         </div>
       </div>
 
-      <div class="section" id="plugins-section">
+      <div class="section" id="plugins-section" data-section-reorder="true">
         <div class="section-header-flex">
+          <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
           <span class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8Z"/></svg>Plugins</span>
           <button type="button" class="section-header-btn list-item-plus-btn marketplace-launcher" id="add-plugins-btn" title="Browse plugins" aria-label="Browse plugins" aria-haspopup="dialog" aria-controls="marketplace-modal">
             <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1158,6 +1182,11 @@
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Choose who to talk to" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Choose who</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="composer-effort-btn" id="composer-effort-btn" aria-haspopup="dialog" aria-expanded="false" title="Reasoning effort" hidden>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/><circle cx="19" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
+            <span id="composer-effort-value">Default</span>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
+          </button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <div class="model-picker-heading" id="model-picker-heading">Select a model</div>
             <div class="model-picker-search-row">
@@ -1172,19 +1201,19 @@
               </button>
             </div>
             <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured conversation identities"></div>
-            <div id="conversation-effort-card" class="conversation-effort-card" hidden>
-              <div class="effort-card-heading"><label for="conversation-effort" id="conversation-effort-label">Reasoning</label><button type="button" id="conversation-effort-reset" title="Use the default effort" aria-label="Reset effort">↺</button></div>
-              <output id="conversation-effort-value" for="conversation-effort">Default</output>
-              <div id="codex-model-controls" class="codex-model-controls" hidden>
-                <label for="codex-model" class="sr-only">Codex model</label>
-                <select id="codex-model" disabled><option value="">Loading models…</option></select>
-                <select id="codex-reasoning" aria-label="Codex reasoning effort" hidden disabled><option value="">Task default</option></select>
-                <span id="codex-model-status" role="status"></span>
-              </div>
-              <input id="conversation-effort" type="range" min="0" max="4" value="2" step="1" aria-describedby="conversation-effort-help">
-              <div class="effort-endpoints" aria-hidden="true"><span>Less</span><span>More</span></div>
-              <p id="conversation-effort-help"></p>
+          </div>
+          <div id="conversation-effort-card" class="conversation-effort-card composer-effort-popover" hidden>
+            <div class="effort-card-heading"><label for="conversation-effort" id="conversation-effort-label">Reasoning</label><button type="button" id="conversation-effort-reset" title="Use the default effort" aria-label="Reset effort">↺</button></div>
+            <output id="conversation-effort-value" for="conversation-effort">Default</output>
+            <div id="codex-model-controls" class="codex-model-controls" hidden>
+              <label for="codex-model" class="sr-only">Codex model</label>
+              <select id="codex-model" disabled><option value="">Loading models…</option></select>
+              <select id="codex-reasoning" aria-label="Codex reasoning effort" hidden disabled><option value="">Task default</option></select>
+              <span id="codex-model-status" role="status"></span>
             </div>
+            <input id="conversation-effort" type="range" min="0" max="4" value="2" step="1" aria-describedby="conversation-effort-help">
+            <div class="effort-endpoints" aria-hidden="true"><span>Less</span><span>More</span></div>
+            <p id="conversation-effort-help"></p>
           </div>
         </div>
       </div>
@@ -1244,7 +1273,7 @@
             </div>
           </div>
           <button type="button" class="access-mode-btn" id="access-mode-btn" data-access-mode="ask_for_approval" title="Agent access: Ask for approval" aria-label="Agent access: Ask for approval" aria-expanded="false">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </button>
           <!-- Workspace indicator (hidden until a folder is set) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Workspace - click to clear" id="workspace-indicator-btn" aria-label="Clear workspace" style="display:none;">
@@ -2105,6 +2134,31 @@
 
         <!-- ═══ APPEARANCE TAB ═══ -->
         <div data-settings-panel="appearance" class="settings-appearance-panel hidden">
+          <div class="admin-card" style="padding-bottom:6px;">
+            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>Display size</h2>
+            <div class="theme-fd-row" style="gap:12px;">
+              <div class="theme-fd-group" style="flex:1 1 0;">
+                <label class="theme-fd-label" for="set-text-size">Text size</label>
+                <select id="set-text-size" class="theme-fd-select" aria-label="Text size">
+                  <option value="90">Smaller</option>
+                  <option value="100" selected>Default</option>
+                  <option value="110">Larger</option>
+                  <option value="125">Much larger</option>
+                  <option value="140">Extra large</option>
+                </select>
+              </div>
+              <div class="theme-fd-group" style="flex:1 1 0;">
+                <label class="theme-fd-label" for="set-icon-size">Icon size</label>
+                <select id="set-icon-size" class="theme-fd-select" aria-label="Icon size">
+                  <option value="100" selected>Default</option>
+                  <option value="115">Large</option>
+                  <option value="130">Larger</option>
+                  <option value="150">Extra large</option>
+                </select>
+              </div>
+            </div>
+            <p class="admin-toggle-sub" style="margin:8px 0 0 2px;">Scales app text and sidebar/navigation icons. Saved for this browser.</p>
+          </div>
           <div class="admin-card" style="padding-bottom:6px;">
             <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>Sidebar<span style="flex:1"></span><button type="button" class="vis-reset-btn" data-vis-reset title="Reset this section to defaults" aria-label="Reset Sidebar to defaults" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:inherit;opacity:0.55;display:inline-flex;align-items:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></h2>
             <div class="vis-toggles">

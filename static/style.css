@@ -165,35 +165,80 @@ html {
 /* ── UI text-size scale (accessibility) ──
    Density only changes the root font-size, which can't move the many
    hard-coded px sizes. `zoom` scales the whole UI uniformly (px text
-   included) while keeping layout intact, unlike `transform: scale`. */
-:root.ui-scale-125 { zoom: 1.25; }
+   included) while keeping layout intact, unlike `transform: scale`.
+   Each step sets --ui-zoom; the shared rules below derive body/modal
+   compensation from it so every step gets the same fixes the original
+   1.25x scale needed. */
+:root { --ui-zoom: 1; }
+:root.ui-scale-90  { --ui-zoom: 0.9; }
+:root.ui-scale-110 { --ui-zoom: 1.1; }
+:root.ui-scale-125 { --ui-zoom: 1.25; }
+:root.ui-scale-140 { --ui-zoom: 1.4; }
+:root.ui-scale-150 { --ui-zoom: 1.5; }
+:root[class*="ui-scale-"] { zoom: var(--ui-zoom); }
 /* `zoom` makes the 100dvh shell render taller than the real viewport, which
    pushes the bottom-pinned sidebar account/settings row below the fold (and
    body's overflow:hidden then clips it). Shrink the shell by the same factor
    so it fits the viewport exactly. */
-:root.ui-scale-125 body { height: calc(100dvh / 1.25); }
-/* Modals/panels under the 1.25x scale: zoom renders a centred, viewport-sized
-   panel ~1.25x taller, pushing its draggable header + close button off-screen
-   (a catch-22 — you can't reach the control to turn the size back down). Divide
-   each max-height by the same factor to keep the original on-screen footprint.
+:root[class*="ui-scale-"] body { height: calc(100dvh / var(--ui-zoom)); }
+/* Modals/panels under zoom: zoom renders a centred, viewport-sized panel
+   taller, pushing its draggable header + close button off-screen (a catch-22
+   — you can't reach the control to turn the size back down). Divide each
+   max-height by the same factor to keep the original on-screen footprint.
    Desktop only — the mobile `!important` full-sheet rules win on small screens
    and stay top-anchored, so their headers are already visible. */
-:root.ui-scale-125 .modal-content          { max-height: calc(85dvh / 1.25); }
-:root.ui-scale-125 .cal-modal-content      { max-height: calc(88dvh / 1.25); }
-:root.ui-scale-125 .settings-modal-content { max-height: calc(85dvh / 1.25); }
-:root.ui-scale-125 #theme-popup            { max-height: min(calc(85dvh / 1.25), 480px); }
+:root[class*="ui-scale-"] .modal-content          { max-height: calc(85dvh / var(--ui-zoom)); }
+:root[class*="ui-scale-"] .cal-modal-content      { max-height: calc(88dvh / var(--ui-zoom)); }
+:root[class*="ui-scale-"] .settings-modal-content { max-height: calc(85dvh / var(--ui-zoom)); }
+:root[class*="ui-scale-"] #theme-popup            { max-height: min(calc(85dvh / var(--ui-zoom)), 480px); }
 /* Cookbook is the one modal that set its height inline (94vh), which beat the
    .modal-content compensation above and overflowed the viewport at 1.25x
    (header + close button pushed off-screen). Own its height here so the same
    zoom compensation applies. */
 #cookbook-modal .modal-content             { height: 94vh; max-height: 94vh; }
-:root.ui-scale-125 #cookbook-modal .modal-content { height: calc(94dvh / 1.25); max-height: calc(94dvh / 1.25); }
+:root[class*="ui-scale-"] #cookbook-modal .modal-content { height: calc(94dvh / var(--ui-zoom)); max-height: calc(94dvh / var(--ui-zoom)); }
 /* PDF export modal also set its height inline (86vh) at v1.0; that inline cap
    beat the .modal-content compensation above and shifted ~1vh at Default when
    removed. Own its height here so Default is byte-for-byte 86vh and the same
-   1.25x compensation applies. */
+   zoom compensation applies. */
 .pdf-export-overlay .modal-content { max-height: 86vh; }
-:root.ui-scale-125 .pdf-export-overlay .modal-content { max-height: calc(86dvh / 1.25); }
+:root[class*="ui-scale-"] .pdf-export-overlay .modal-content { max-height: calc(86dvh / var(--ui-zoom)); }
+
+/* ── Icon-size scale (accessibility) ──
+   Sidebar/navigation glyphs are sized in CSS here so the scale var can win
+   over the inline width/height attributes on individual SVGs. */
+:root { --ui-icon-scale: 1; }
+.section-icon { width: calc(13px * var(--ui-icon-scale)); height: calc(13px * var(--ui-icon-scale)); }
+#sidebar .section-header-btn svg { width: calc(14px * var(--ui-icon-scale)); height: calc(14px * var(--ui-icon-scale)); }
+#sidebar .list-item > svg { width: calc(15px * var(--ui-icon-scale)); height: calc(15px * var(--ui-icon-scale)); }
+#sidebar .list-item .list-item-plus-icon { width: calc(11px * var(--ui-icon-scale)); height: calc(11px * var(--ui-icon-scale)); }
+#sidebar .user-bar-btn svg { width: calc(15px * var(--ui-icon-scale)); height: calc(15px * var(--ui-icon-scale)); }
+#sidebar .section-drag-handle svg { width: calc(12px * var(--ui-icon-scale)); height: calc(12px * var(--ui-icon-scale)); }
+
+/* ── Sidebar bucket reorder handle ──
+   Explicit handle so dragging a section never fights text selection or a
+   click-to-collapse. Visible on hover (always) and in rearrange mode. */
+.section-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.section-header-flex:hover .section-drag-handle { opacity: 0.75; }
+.section-drag-handle:focus-visible { opacity: 0.9; outline: 1px solid var(--red); border-radius: 3px; }
+.section-drag-handle:active { cursor: grabbing; }
+body.rearrange-mode .section-drag-handle { opacity: 0.75; }
+@media (max-width: 768px) { .section-drag-handle { display: none; } }
 
 /* ── Background Patterns ── */
 
@@ -482,13 +527,12 @@ body.bg-pattern-sparkles {
       display: flex;
       flex-direction: column;
       align-items: stretch;
-      gap: 7px;
-      margin: 8px 12px 0;
-      padding: 9px 10px;
-      min-height: 44px;
+      gap: 5px;
+      margin: 6px 12px 0;
+      padding: 7px 9px;
       flex-shrink: 0;
       border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
-      border-radius: 9px;
+      border-radius: 8px;
       background: color-mix(in srgb, var(--fg) 3%, transparent);
     }
 
@@ -496,7 +540,7 @@ body.bg-pattern-sparkles {
       display: flex;
       flex-direction: column;
       min-width: 0;
-      gap: 2px;
+      gap: 1px;
     }
 
     .sidebar-update-version {
@@ -536,29 +580,35 @@ body.bg-pattern-sparkles {
       color: var(--fg);
       font-size: 10px;
       line-height: 1.35;
-      opacity: 0.48;
-      overflow-wrap: anywhere;
+      opacity: 0.45;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      overflow-wrap: normal;
     }
 
     .sidebar-update-actions {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 5px;
+      display: flex;
+      gap: 4px;
     }
 
     .sidebar-update-action {
-      width: 100%;
-      min-height: 34px;
-      padding: 8px 10px;
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 26px;
+      padding: 5px 8px;
       border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
       border-radius: 6px;
       background: color-mix(in srgb, var(--fg) 5%, transparent);
       color: var(--fg);
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 650;
       line-height: 1;
       text-decoration: none;
       cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .sidebar-update-action.is-primary {
@@ -42099,9 +42149,9 @@ body.theme-frosted .modal {
   position: relative;
 }
 .access-mode-btn {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
   padding: 0;
   position: relative;
   display: inline-flex;
@@ -43249,6 +43299,66 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 }
 
 /* Conversation controls share the existing theme and native input behavior. */
+/* Composer effort control (MAD-898) — compact chip + popover. The effort card
+   now sits beside the picker instead of inside the switching menu, so the
+   selected identity and the effort control are both visible while collapsed. */
+.model-picker-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.composer-effort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 21px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.composer-effort-btn[hidden] { display: none; }
+.composer-effort-btn:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+.composer-effort-btn[aria-expanded="true"] {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+.composer-effort-btn svg { flex-shrink: 0; opacity: 0.55; }
+.composer-effort-btn #composer-effort-value {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-effort-popover {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 14px);
+  right: 0;
+  z-index: 249;
+  width: min(320px, calc(100vw - 24px));
+  margin: 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+}
+.model-picker-wrap.effort-open .composer-effort-popover:not([hidden]) { display: block; }
+@media (max-width: 768px) {
+  .composer-effort-popover {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12vh;
+    width: auto;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+}
 .conversation-effort-card { padding: 14px; margin: 8px 0 0; border-radius: 22px; background: color-mix(in srgb, var(--red) 4%, var(--panel)); border: 1px solid color-mix(in srgb, var(--border) 35%, transparent); }
 .conversation-effort-card[hidden], .session-context-panel[hidden] { display: none; }
 .effort-card-heading, .session-context-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -43369,17 +43479,18 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   font-weight: 700;
   flex: 0 0 auto;
 }
-.model-picker-menu .conversation-effort-card {
+.model-picker-menu .conversation-effort-card { display: none; } /* legacy guard: effort card moved to the composer popover (MAD-898) */
+.composer-effort-popover {
   margin-top: 10px;
   padding: 12px;
   border-radius: 14px;
   background: color-mix(in srgb, var(--red) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 18%, transparent);
 }
-.model-picker-menu .effort-card-heading { margin-bottom: 4px; }
-.model-picker-menu #conversation-effort-value { font-size: 12px; opacity: 0.75; }
-.model-picker-menu .effort-endpoints { font-size: 10.5px; }
-.model-picker-menu #conversation-effort-help {
+.composer-effort-popover .effort-card-heading { margin-bottom: 4px; }
+.composer-effort-popover #conversation-effort-value { font-size: 12px; opacity: 0.75; }
+.composer-effort-popover .effort-endpoints { font-size: 10.5px; }
+.composer-effort-popover #conversation-effort-help {
   font-size: 10.5px;
   line-height: 1.4;
   margin-top: 6px;
@@ -43388,11 +43499,11 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.model-picker-menu #conversation-effort {
+.composer-effort-popover #conversation-effort {
   height: 4px;
   border-radius: 999px;
 }
-.model-picker-menu #conversation-effort::-webkit-slider-thumb {
+.composer-effort-popover #conversation-effort::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;

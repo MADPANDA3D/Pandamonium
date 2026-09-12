@@ -1,3 +1,5 @@
+import { applyRightDock } from './modalSnap.js';
+
 let pollTimer = null;
 let pollInFlight = false;
 let lastRelease = null;
@@ -597,6 +599,10 @@ function openModal({ checkNow = false, opener = null } = {}) {
   modalOpener = opener || document.activeElement || el('sidebar-update-check');
   modal.classList.remove('hidden');
   modal.removeAttribute('aria-hidden');
+  // Open docked to the right on desktop; still draggable off the edge.
+  if (window.innerWidth > 768) {
+    try { applyRightDock(modal); } catch (_) {}
+  }
   window.setTimeout(() => {
     if (el('styled-confirm-overlay')?.classList.contains('hidden') !== false) {
       el('close-updater-modal')?.focus();
