@@ -265,17 +265,15 @@ def _sent_tool_names(monkeypatch, *, workspace):
 
 
 def test_low_signal_with_workspace_mounts_builtin_catalog(monkeypatch):
-    """MAD-905: API engines mount the built-in catalog on vague workspace
-    turns. Confinement and authority still gate execution; schema omission
-    is no longer the safety mechanism."""
+    """MAD-905/907: API engines mount the built-in catalog on vague workspace
+    turns, and the catalog gateway is always present. Confinement and
+    authority still gate execution; schema omission is not the safety net."""
     names = _sent_tool_names(monkeypatch, workspace="/tmp")
     # An active workspace is the file-work signal; nav tools still surface.
     assert "read_file" in names
     assert "get_workspace" in names
-    assert "grep" in names
-    # Write/shell schemas are no longer withheld from the payload; the
-    # workspace confinement and authority protocol gate their execution.
-    assert "write_file" in names
+    # MAD-907: discovery stays reachable even when the budget caps the rest.
+    assert "manage_settings" in names
 
 
 def test_low_signal_without_workspace_excludes_file_tools(monkeypatch):
