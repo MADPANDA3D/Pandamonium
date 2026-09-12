@@ -80,3 +80,65 @@ test('quick visual batch — orb, docks, display size, bucket reorder', async ({
   await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-modal')).toHaveClass(/modal-right-docked/);
 });
+
+test('reasoning-capable API model switches the composer to reasoning effort (MAD-900)', async ({ page }) => {
+  const now = new Date().toISOString();
+  let submitted = '';
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/auth/status') {
+      return route.fulfill({ json: { username: 'leo', is_admin: true, privileges: {} } });
+    }
+    if (url.pathname === '/api/sessions') {
+      return route.fulfill({ json: [{
+        id: 'reason-chat', name: 'Reason chat', model: 'deepseek/deepseek-v4.1-flash',
+        endpoint_url: 'https://openrouter.ai/api/v1', agent_target: 'jarvis',
+        created_at: now, updated_at: now, message_count: 1,
+      }] });
+    }
+    if (url.pathname.startsWith('/api/chat_stream')) {
+      submitted = route.request().postData() || '';
+      return route.fulfill({
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: 'data: {"delta":"ok"}\n\ndata: [DONE]\n\n',
+      });
+    }
+    if (url.pathname.startsWith('/api/history')) return route.fulfill({ json: { history: [] } });
+    return route.fulfill({ json: {} });
+  });
+  await page.addInitScript(() => localStorage.setItem('lastSessionId', 'reason-chat'));
+  await page.goto('/static/index.html');
+  await expect.poll(() => page.evaluate(() => Boolean(window.sessionModule))).toBe(true);
+  await page.evaluate(async () => {
+    const module = await import('/static/js/sessions.js');
+    module.setCurrentSessionId('reason-chat');
+    module.updateModelPicker();
+  });
+  await page.evaluate(() => {
+    window.modelsModule.getCachedItems = () => [{
+      url: 'https://openrouter.ai/api/v1',
+      models: ['deepseek/deepseek-v4.1-flash'],
+      models_extra: [],
+      reasoning_levels: { 'deepseek/deepseek-v4.1-flash': ['low', 'medium', 'high'] },
+    }];
+    window.dispatchEvent(new Event('odysseus:session-rendered'));
+    document.dispatchEvent(new Event('odysseus:model-picked'));
+  });
+
+  await expect(page.locator('#conversation-effort-label')).toHaveText('Reasoning effort');
+  await page.locator('#composer-effort-btn').click();
+  await page.locator('#conversation-effort').evaluate(el => {
+    el.value = el.max;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(page.locator('#conversation-effort-value')).toHaveText('High');
+  expect(await page.evaluate(() => window.conversationContext.getReasoningEffort())).toBe('high');
+  expect(await page.evaluate(() => window.conversationContext.getAgentEffort())).toBe('');
+  await page.locator('#composer-effort-btn').click();
+
+  await page.locator('#message').fill('hello');
+  await page.locator('.send-btn').click();
+  await expect.poll(() => submitted).toContain('reasoning_effort');
+  expect(submitted).toMatch(/name="reasoning_effort"\r?\n\r?\nhigh/);
+  expect(submitted).not.toContain('name="agent_effort"');
+});

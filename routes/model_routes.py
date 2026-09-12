@@ -20,7 +20,7 @@ from core.database import SessionLocal, ModelEndpoint, Session as DbSession
 from core.log_safety import redact_url as _redact_url_for_log
 from core.middleware import require_admin
 from src.constants import COOKBOOK_STATE_FILE
-from src.llm_core import _detect_provider, _host_match, ANTHROPIC_MODELS
+from src.llm_core import _detect_provider, _host_match, ANTHROPIC_MODELS, reasoning_levels
 from src.tls_overrides import llm_verify
 from src.settings import load_settings as _load_settings, save_settings as _save_settings
 from src.endpoint_resolver import (
@@ -1434,6 +1434,14 @@ def setup_model_routes(model_discovery):
                     if m not in curated:
                         curated.append(m)
                 extra = [m for m in extra if m not in pinned]
+                # Per-model reasoning-effort support (MAD-900): only models with
+                # a provider reasoning contract get an entry, so the picker can
+                # hide its reasoning selector for everything else.
+                reasoning = {}
+                for mid in list(curated) + list(extra):
+                    levels = reasoning_levels(provider, mid)
+                    if levels:
+                        reasoning[mid] = list(levels)
                 items.append({
                     "host": "custom",
                     "port": 0,
@@ -1447,6 +1455,7 @@ def setup_model_routes(model_discovery):
                     "category": category,
                     "endpoint_kind": kind,
                     "model_type": ep_model_type,
+                    "reasoning_levels": reasoning,
                 })
             else:
                 # Endpoint unreachable but still show it greyed out

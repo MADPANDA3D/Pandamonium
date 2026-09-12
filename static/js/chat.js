@@ -1236,6 +1236,8 @@ import { getSelectedAgentSelection } from './modelPicker.js';
       if (streamAgentTarget) fd.append('agent_target', streamAgentTarget);
       const agentEffort = window.conversationContext?.getAgentEffort?.();
       if (agentEffort && (!streamAgentTarget || streamAgentTarget === 'jarvis')) fd.append('agent_effort', agentEffort);
+      const reasoningEffort = window.conversationContext?.getReasoningEffort?.();
+      if (reasoningEffort && (!streamAgentTarget || streamAgentTarget === 'jarvis')) fd.append('reasoning_effort', reasoningEffort);
       if (streamAgentTarget === 'pc-codex') {
         const currentContext = window.codexWorkspaceBrowser?.getSelectedContext?.();
         if (selectedCodexContext?.workspace !== currentContext?.workspace || selectedCodexContext?.codexThreadId !== currentContext?.codexThreadId) {
