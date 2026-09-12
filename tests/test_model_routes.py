@@ -1800,3 +1800,75 @@ def test_manual_refresh_timeout_keeps_cached_models_and_warns(monkeypatch):
     assert db.commits == 0
     assert response.headers["X-Model-Refresh-Status"] == "failed"
     assert "kept cached models" in response.headers["X-Model-Refresh-Warning"]
+
+
+# ── speech endpoint types (MAD-901) ──
+
+def test_post_accepts_stt_and_tts_endpoint_types(monkeypatch):
+    for model_type in ("stt", "tts"):
+        db = _RouteDb([])
+        _patch_create_deps(monkeypatch, db)
+        create = _get_route("/api/model-endpoints", "POST")
+
+        result = create(
+            _PinnedFakeRequest(),
+            base_url=f"http://speech-{model_type}:9000/v1",
+            **_create_form_kwargs(model_type=model_type),
+        )
+
+        assert result["model_type"] == model_type
+        assert db.added[0].model_type == model_type
+
+
+def test_post_rejects_unknown_endpoint_type(monkeypatch):
+    db = _RouteDb([])
+    _patch_create_deps(monkeypatch, db)
+    create = _get_route("/api/model-endpoints", "POST")
+
+    with pytest.raises(HTTPException) as exc:
+        create(
+            _PinnedFakeRequest(),
+            base_url="http://host:1234/v1",
+            **_create_form_kwargs(model_type="bogus"),
+        )
+
+    assert exc.value.status_code == 400
+    assert db.added == []
+
+
+def test_patch_validates_and_accepts_endpoint_type(monkeypatch):
+    ep = _make_endpoint()
+    db = _PinnedFakeDb([ep])
+    monkeypatch.setattr(model_routes, "SessionLocal", lambda: db)
+    monkeypatch.setattr(model_routes, "require_admin", lambda request: None)
+    endpoint = _get_route("/api/model-endpoints/{ep_id}", "PATCH")
+
+    good = _PinnedFakeRequest(
+        body={"model_type": "tts"}, headers={"content-length": "20"},
+    )
+    result = asyncio.run(endpoint("ep1", good))
+    assert result["model_type"] == "tts"
+
+    bad = _PinnedFakeRequest(
+        body={"model_type": "bogus"}, headers={"content-length": "20"},
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(endpoint("ep1", bad))
+    assert exc.value.status_code == 400
+    assert ep.model_type == "tts"
+
+
+def test_speech_endpoints_are_not_chat_default_candidates(monkeypatch):
+    """Creating an stt endpoint must not seed it as the default chat model."""
+    db = _RouteDb([])
+    settings = _patch_create_deps(monkeypatch, db)
+    create = _get_route("/api/model-endpoints", "POST")
+
+    create(
+        _PinnedFakeRequest(),
+        base_url="http://whisper:9000/v1",
+        **_create_form_kwargs(model_type="stt"),
+    )
+
+    assert settings["default_endpoint_id"] == "exists"
+    assert "default_model" not in settings

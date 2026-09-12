@@ -341,6 +341,7 @@ function _firstAvailableModel() {
   const items = window.modelsModule.getCachedItems() || [];
   for (const item of items) {
     if (item.offline) continue;
+    if ((item.model_type || 'llm') !== 'llm') continue;
     const models = (item.models || []).concat(item.models_extra || []);
     if (!models.length) continue;
     return {
@@ -803,6 +804,7 @@ function _initModelPickerDropdown() {
     let match = null;
     for (const item of items) {
       if (item.offline) continue;
+      if ((item.model_type || 'llm') !== 'llm') continue;
       if (targetEndpointId && String(item.endpoint_id || '') !== targetEndpointId) continue;
       const models = (item.models || []).concat(item.models_extra || []);
       const displays = (item.models_display || []).concat(item.models_extra_display || []);
@@ -971,6 +973,7 @@ export function updateModelPicker() {
     const allAvailable = [];
     items.forEach(item => {
       if (item.offline) return;
+      if ((item.model_type || 'llm') !== 'llm') return;
       (item.models || []).concat(item.models_extra || []).forEach(m => allAvailable.push(m));
     });
     if (allAvailable.length > 0 && !allAvailable.includes(modelId)) {

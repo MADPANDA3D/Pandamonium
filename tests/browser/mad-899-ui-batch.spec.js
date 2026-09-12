@@ -142,3 +142,18 @@ test('reasoning-capable API model switches the composer to reasoning effort (MAD
   expect(submitted).toMatch(/name="reasoning_effort"\r?\n\r?\nhigh/);
   expect(submitted).not.toContain('name="agent_effort"');
 });
+
+test('Add Local Models offers STT and TTS types (MAD-901)', async ({ page }) => {
+  await page.route('**/api/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/auth/status') {
+      return route.fulfill({ json: { username: 'leo', is_admin: true, privileges: {} } });
+    }
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open('services'));
+  await expect(page.locator('#settings-modal')).toBeVisible();
+  const values = await page.locator('#adm-epLocalType option').evaluateAll(options => options.map(option => option.value));
+  expect(values).toEqual(['llm', 'image', 'stt', 'tts']);
+});
