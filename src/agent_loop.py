@@ -810,7 +810,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_documents": "- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
     "manage_books": "- ```manage_books``` — Read the current user's private Books catalog or search indexed book text. Args (JSON): {\"action\":\"list|search\", \"query\":\"...\", \"limit\":5}. Use list for title/indexing/OCR status; use search for content and cite returned title/page. Never use filesystem tools or guessed paths for Books.",
     "manage_research": "- ```manage_research``` — List, read/open, or delete saved DEEP RESEARCH results from the Library. Args (JSON): {\"action\": \"list|read|delete\", \"id\": \"<id>\", \"search\": \"...\"}. `list` returns rows like `[query](#research-<id>) — N sources` MOST-RECENT FIRST; the user clicks to open. `read` (aliases: open/view/get) takes `id` and returns the report text + sources. Use when the user says \"open/read/find/delete my research\" or \"that report\". This IS how you read a finished report: when the user refers to a just-completed deep-research job (\"check it out\", \"read that report\", \"summarize the research\") WITHOUT giving an id, call `manage_research` with `action:list` to get the most-recent id, then `action:read` with that id, and answer from the returned text. Do NOT `web_fetch`/`app_api` the `/api/research/report/{id}` URL — that endpoint renders HTML for the browser, not clean text — and do NOT start a fresh `web_search`/`trigger_research` just to read an existing report. To START new research, use trigger_research instead.",
-    "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks/notes/calendar/email), list disabled: `{\"action\":\"list_tools\"}`.",
+    "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks/notes/calendar/email), list the whole built-in catalog with categories, descriptions, and enabled state: `{\"action\":\"list_tools\"}` — inspect this before claiming a tool is missing or counting what you have.",
     "manage_notes": """\
 ```manage_notes
 {"action": "add", "title": "<short todo>", "due_date": "<natural language or ISO datetime>"}
@@ -1041,12 +1041,6 @@ _API_HOSTS = frozenset([
 ])
 _MCP_KEYWORDS = frozenset(["mcp", "browse", "browser", "website", "calendar", "event", "email",
                            "gmail", "screenshot", "navigate", "click", "miniflux", "rss", "feed"])
-_ADMIN_SCHEMA_NAMES = frozenset([
-    "manage_session", "manage_skills", "manage_tasks",
-    "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
-    "create_session", "list_sessions", "send_to_session", "pipeline",
-    "ask_teacher", "list_models", "search_chats",
-])
 _TOOL_SELECTION_TIMEOUT_SECONDS = 1.5
 
 
@@ -3805,6 +3799,11 @@ async def stream_agent_loop(
                 _relevant_tools.update(tools)
         logger.info(f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
 
+    # MAD-905: API engines mount the full built-in catalog. Intent clamps
+    # below still prune tools they deliberately steer away from; track those
+    # removals so "uncapped" never means "ignores a per-turn clamp".
+    _intent_pruned_tools: Set[str] = set()
+
     # If deterministic domain detection fired, seed the corresponding domain
     # tools into the selected tool set. This is not direct prompt-pack
     # injection: `_assemble_prompt()` still derives domain rules from the final
@@ -3822,11 +3821,13 @@ async def stream_agent_loop(
             # and editor-document tools out of explicit Books turns so the
             # model cannot fall back to guessed local paths. Explicit source-
             # code work about the Books service still retains worker tools.
-            _relevant_tools.difference_update(
+            _books_pruned_tools = (
                 _DOMAIN_TOOL_MAP["files"]
                 | _DOMAIN_TOOL_MAP["documents"]
                 | _DOMAIN_TOOL_MAP["workers"]
             )
+            _intent_pruned_tools.update(_books_pruned_tools)
+            _relevant_tools.difference_update(_books_pruned_tools)
             _relevant_tools.add("manage_books")
         if "cookbook" in (_intent.get("domains") or set()):
             _relevant_tools.update({
@@ -3870,6 +3871,7 @@ async def stream_agent_loop(
                 _relevant_tools = set(ALWAYS_AVAILABLE)
             _relevant_tools.update(_native_mcp_tools)
             _relevant_tools.difference_update({"manage_mcp", "api_call", "app_api", "pipeline"})
+            _intent_pruned_tools.update({"manage_mcp", "api_call", "app_api", "pipeline"})
             _needs_admin = False
             logger.info("[tool-rag] Selected native MCP tools: %s", sorted(_native_mcp_tools))
     _native_mcp_server_prefixes = {
@@ -3892,6 +3894,7 @@ async def stream_agent_loop(
                 "list_email_accounts", "list_emails", "read_email",
                 "mcp__email__list_emails", "mcp__email__read_email",
             }
+            _intent_pruned_tools.update(_email_fetch_tools)
             removed = sorted(_relevant_tools & _email_fetch_tools)
             if removed:
                 _relevant_tools.difference_update(_email_fetch_tools)
@@ -4006,6 +4009,7 @@ async def stream_agent_loop(
             "run_shell",
             "write_file",
         }
+        _intent_pruned_tools.update(_doc_irrelevant_file_tools)
         _removed_doc_file_tools = sorted(_relevant_tools & _doc_irrelevant_file_tools)
         if _removed_doc_file_tools:
             _relevant_tools.difference_update(_doc_irrelevant_file_tools)
@@ -4035,6 +4039,13 @@ async def stream_agent_loop(
                 sorted(_relevant_tools - _network_clamped_tools),
             )
             _relevant_tools = _network_clamped_tools
+        if "network_inspection" in _intent_domains:
+            # The clamp is an allowlist. Keep it authoritative for the API
+            # catalog too: anything known but not allowed stays unmounted.
+            from src.tool_policy import known_tool_names as _known_network_tools
+            _intent_pruned_tools.update(
+                _known_network_tools() - set(_network_clamped_tools)
+            )
         _release_clamped_tools = _clamp_release_self_knowledge_tools(
             bool(_intent.get("release_self_knowledge")),
             _relevant_tools,
@@ -4043,6 +4054,9 @@ async def stream_agent_loop(
             logger.info(
                 "[agent-intent] release self-knowledge clamp removed web tools=%s",
                 sorted(_relevant_tools - _release_clamped_tools),
+            )
+            _intent_pruned_tools.update(
+                set(WEB_TOOL_NAMES) - set(_release_clamped_tools)
             )
             _relevant_tools = _release_clamped_tools
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
@@ -4436,38 +4450,27 @@ async def stream_agent_loop(
             # write the answer instead of flailing further.
             all_tool_schemas = []
         elif _is_api_model:
-            # Filter schemas by RAG-selected tools (if available)
-            if _relevant_tools:
-                # _build_base_prompt unions _ADMIN_TOOLS into the prompt
-                # sections when admin intent fires — the schema list must
-                # offer the same names, or the model reads prose describing
-                # tools it cannot call and substitutes the nearest schema
-                # it does have (e.g. manage_memory for manage_skills).
-                _schema_names = set(_relevant_tools)
-                if _needs_admin:
-                    _schema_names |= _ADMIN_TOOLS
-                base_schemas = [
-                    _effective_builtin_schema(s, context_extensions)
-                    for s in FUNCTION_TOOL_SCHEMAS
-                    if s.get("function", {}).get("name") in _schema_names
-                ]
-                _mcp_filtered = [
-                    s for s in mcp_schemas
-                    if s.get("function", {}).get("name") in _relevant_tools
-                ]
-                _extra_filtered = [
-                    s for s in extra_tool_schemas
-                    if s.get("function", {}).get("name") in _relevant_tools
-                ]
-                all_tool_schemas = base_schemas + _mcp_filtered + _extra_filtered
-            else:
-                base_schemas = [
-                    _effective_builtin_schema(s, context_extensions)
-                    for s in FUNCTION_TOOL_SCHEMAS
-                    if _needs_admin
-                    or s.get("function", {}).get("name") not in _ADMIN_SCHEMA_NAMES
-                ]
-                all_tool_schemas = base_schemas + mcp_schemas + extra_tool_schemas
+            # MAD-905: API engines mount the complete enabled built-in
+            # catalog every round. RAG still narrows MCP/extension schemas,
+            # but built-ins are no longer silently withheld — the measured
+            # tool-catalog budget below (cap_tool_schemas) is the only cap,
+            # and `_relevant_tools` is ranked first when it has to trim.
+            base_schemas = [
+                _effective_builtin_schema(s, context_extensions)
+                for s in FUNCTION_TOOL_SCHEMAS
+                if s.get("function", {}).get("name") not in _intent_pruned_tools
+            ]
+            _mcp_filtered = [
+                s for s in mcp_schemas
+                if not _relevant_tools
+                or s.get("function", {}).get("name") in _relevant_tools
+            ]
+            _extra_filtered = [
+                s for s in extra_tool_schemas
+                if not _relevant_tools
+                or s.get("function", {}).get("name") in _relevant_tools
+            ]
+            all_tool_schemas = base_schemas + _mcp_filtered + _extra_filtered
             if _ody_qwen_finetune_model:
                 all_tool_schemas = []
             if disabled_tools:
@@ -4509,10 +4512,15 @@ async def stream_agent_loop(
             | _extension_names
             | _native_mcp_tools
             | _mcp_discovery_tools
+            | set(_relevant_tools or ())
         )
         _priority_order: List[str] = []
         if "ui_control" in _schema_priority:
             _priority_order.append("ui_control")
+        if workspace and "get_workspace" in _schema_priority:
+            # Tiny discovery schema first: capping must never leave the model
+            # able to read files but unable to resolve "this project".
+            _priority_order.append("get_workspace")
         _priority_order.extend(
             name for name in (
                 schema.get("function", {}).get("name")
@@ -4526,6 +4534,18 @@ async def stream_agent_loop(
                 for schema in mcp_schemas
             )
             if name and name in _native_mcp_tools and name not in _priority_order
+        )
+        # Retrieved/domain tools keep their catalog (source) order ahead of
+        # non-priority schemas. Sorting these alphabetically made greedy
+        # budget capping drop small earlier tools and reorder the payload
+        # between identical turns — source order is both fairer and
+        # prompt-cache stable.
+        _priority_order.extend(
+            name for name in (
+                schema.get("function", {}).get("name")
+                for schema in all_tool_schemas
+            )
+            if name and name in _schema_priority and name not in _priority_order
         )
         _priority_order.extend(
             name for name in sorted(_schema_priority)
