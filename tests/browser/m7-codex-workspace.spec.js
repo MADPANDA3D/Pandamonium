@@ -330,7 +330,9 @@ test('selected Friday project and task flow through the normal composer', async 
     module.setCurrentSessionId('friday-chat');
     module.updateModelPicker();
   });
-  await expect(page.locator('#codex-workspace-browser')).toBeVisible();
+  // Workspace discovery lands asynchronously after the picker refresh; CI
+  // under load can exceed the 5s default (repeated flake), so allow 15s.
+  await expect(page.locator('#codex-workspace-browser')).toBeVisible({ timeout: 15000 });
   await page.getByText('Disposable Test Project', { exact: true }).click();
   await page.getByText('Fixture resume task', { exact: true }).click();
   await page.locator('#model-picker-btn').click();
