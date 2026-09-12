@@ -30,6 +30,7 @@ from src.model_context import (
     estimate_tool_schema_tokens,
 )
 from src.agent_identity import agent_system_prompt, configured_agent_id
+from src.action_intents import is_release_self_knowledge
 from src.action_protocol import (
     build_action_result,
     classify_target,
@@ -657,6 +658,18 @@ def _clamp_network_inspection_tools(
     selected = set(tool_names) & allowed
     if not allow_file_mutation:
         selected.difference_update(_NETWORK_FILE_MUTATION_TOOLS)
+    return selected
+
+
+def _clamp_release_self_knowledge_tools(
+    release_self_knowledge: bool,
+    tool_names: set[str],
+) -> set[str]:
+    """Keep release self-knowledge turns on local state, not public search."""
+    if not release_self_knowledge:
+        return set(tool_names)
+    selected = set(tool_names) - WEB_TOOL_NAMES
+    selected.add("get_runtime_status")
     return selected
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -1667,6 +1680,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
             "low_signal": True,
             "continuation": False,
             "domains": set(),
+            "release_self_knowledge": False,
             "retrieval_query": text,
         }
 
@@ -1836,11 +1850,23 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     ):
         domains.add("platform")
 
+    # The installation owns its release truth. Questions about Pandamonium's
+    # version, updates, repository, or release notes answer from local release
+    # state, so the generic web/cookbook keyword matches must not drag the turn
+    # into public search results or model-serving state. An explicit "research"
+    # request keeps its deep-research intent (MAD-887).
+    _release_self_knowledge = is_release_self_knowledge(retrieval_query)
+    if _release_self_knowledge:
+        domains.add("platform")
+        domains.discard("web")
+        domains.discard("cookbook")
+
     low_signal = not continuation and not domains
     return {
         "low_signal": low_signal,
         "continuation": continuation,
         "domains": domains,
+        "release_self_knowledge": _release_self_knowledge,
         "retrieval_query": retrieval_query,
     }
 
@@ -4007,6 +4033,16 @@ async def stream_agent_loop(
                 sorted(_relevant_tools - _network_clamped_tools),
             )
             _relevant_tools = _network_clamped_tools
+        _release_clamped_tools = _clamp_release_self_knowledge_tools(
+            bool(_intent.get("release_self_knowledge")),
+            _relevant_tools,
+        )
+        if _release_clamped_tools != _relevant_tools:
+            logger.info(
+                "[agent-intent] release self-knowledge clamp removed web tools=%s",
+                sorted(_relevant_tools - _release_clamped_tools),
+            )
+            _relevant_tools = _release_clamped_tools
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
     prep_timings["tool_selection"] = time.time() - _t1
