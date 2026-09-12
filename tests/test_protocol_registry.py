@@ -37,6 +37,16 @@ def test_core_block_renders_protocol_ids_and_rule_text():
     assert "replaceable reasoning engine" in block
     assert "Evidence before outcome" in block
     assert "Precedence" in block
+    assert registry.PROTOCOL_BEGIN in block and registry.PROTOCOL_END in block
+
+
+def test_strip_protocol_block_preserves_surrounding_sections():
+    text = "fact\n\nidentity\n\n" + registry.core_protocol_block() + "\n\npreset"
+    stripped = registry.strip_protocol_block(text)
+    assert "Operating protocols" not in stripped
+    assert registry.PROTOCOL_BEGIN not in stripped
+    assert stripped == "fact\n\nidentity\n\npreset"
+    assert registry.strip_protocol_block("plain text") == "plain text"
 
 
 def test_malformed_pack_surfaces_error_and_is_not_rendered(tmp_path: Path):

@@ -24,6 +24,8 @@ PROTOCOL_SCOPES = frozenset({CORE_SCOPE, DUTY_SCOPE, EXTENSION_SCOPE})
 _REQUIRED_KEYS = ("id", "version", "scope", "title", "token_budget")
 _LIST_KEYS = frozenset({"domains", "enforcement"})
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+PROTOCOL_BEGIN = "[[JOS-PROTOCOLS]]"
+PROTOCOL_END = "[[/JOS-PROTOCOLS]]"
 _RENDER_HEADER = (
     "## Operating protocols\n\n"
     "The following versioned protocols are mounted for this turn. Follow them, "
@@ -207,7 +209,20 @@ def render_protocol_block(packs: Iterable[ProtocolPack]) -> str:
     for pack in mounted:
         label = pack.protocol or pack.id
         sections.append(f"### {label} — {pack.title} (v{pack.version})\n{pack.body}")
-    return "\n\n".join(sections).strip()
+    body = "\n\n".join(sections).strip()
+    return f"{PROTOCOL_BEGIN}\n{body}\n{PROTOCOL_END}"
+
+
+def strip_protocol_block(text: str) -> str:
+    """Remove the mounted protocol section so evidence can win the budget."""
+    if not isinstance(text, str) or PROTOCOL_BEGIN not in text:
+        return text
+    start = text.find(PROTOCOL_BEGIN)
+    end = text.find(PROTOCOL_END, start)
+    if end < 0:
+        return text[:start].rstrip()
+    end += len(PROTOCOL_END)
+    return (text[:start].rstrip() + "\n\n" + text[end:].lstrip()).strip()
 
 
 def core_protocol_block(
