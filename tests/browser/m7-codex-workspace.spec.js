@@ -471,7 +471,7 @@ test('rounded workspace controls follow theme colors on desktop and phone', asyn
   ];
   for (const [index, colors] of themes.entries()) {
     await page.evaluate(async colors => (await import('/static/js/theme.js')).applyColors(colors), colors);
-    await expect(page.locator('#model-picker-menu')).toHaveCSS('border-radius', '24px');
+    await expect(page.locator('#model-picker-menu')).toHaveCSS('border-radius', '18px');
     await expect(page.locator('#codex-model')).toHaveCSS('border-radius', '10px');
     const expected = await page.evaluate(colors => {
       const probe = document.createElement('span');
