@@ -814,12 +814,18 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
 
             if action == "list_tools":
                 current = get_setting("disabled_tools", []) or []
+                from src.tool_catalog import catalog_entries
+                entries = catalog_entries(disabled=current)
+                enabled_count = sum(1 for entry in entries if entry["enabled"])
                 return {
                     "response": (
-                        f"Currently disabled: {', '.join(current) if current else '(none)'}.\n"
-                        "Common toggles: shell (bash), search (web_search), browser, documents, "
-                        "memory, skills, images, tasks, notes, calendar, email."
+                        f"{enabled_count}/{len(entries)} built-in tools enabled. "
+                        "Full catalog is in `tools` (id, category, description, enabled). "
+                        f"Currently disabled: {', '.join(current) if current else '(none)'}."
                     ),
+                    "tools": entries,
+                    "count": len(entries),
+                    "enabled_count": enabled_count,
                     "disabled": list(current),
                     "exit_code": 0,
                 }
