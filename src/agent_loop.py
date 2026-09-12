@@ -306,6 +306,12 @@ _DOMAIN_RULES = {
 - For web lookup/search/latest/current requests, use `web_search` or `web_fetch`.
 - Do not use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
 - "Research X" means `trigger_research`, not a one-off `web_search`, unless the user explicitly asks for a quick lookup.""",
+    "research": """\
+## Deep research rules
+- "Research X", "look into Y", "investigate Z", and "deep dive on W" start a deep-research job with `trigger_research`; do not answer them with a single `web_search`.
+- The job streams progress in the Deep Research sidebar and produces a full report; tell the user it is running there.
+- To read an existing report use `manage_research` with `action=list` then `action=read` and the id; never `web_fetch` the report URL.
+- Use `web_search` only for quick single-fact lookups mid-task.""",
     "documents": """\
 ## Document rules
 - For long code/content (>15 lines), use `create_document` instead of pasting into chat.
@@ -400,6 +406,10 @@ _DOMAIN_TOOL_MAP = {
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
     "network_inspection": {"inspect_network"},
+    # Deep research is an agent-decided capability, not a user toggle: when
+    # research intent fires, seed the job starter and the report reader so the
+    # model can start/read research without the legacy per-message flag.
+    "research": {"trigger_research", "manage_research"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"manage_mcp", "api_call"},
@@ -1696,6 +1706,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("web")
     if has(r"\b(research|deep dive|investigate|look into)\b"):
         domains.add("web")
+        domains.add("research")
     if has(r"\b(open|show|toggle|turn on|turn off|disable|enable|switch model|change model|settings|theme|panel)\b"):
         domains.add("ui")
     if has(r"\b(session|chat history|rename chat|delete chat|archive chat|fork chat|list chats)\b"):

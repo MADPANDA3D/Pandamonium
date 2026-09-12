@@ -41,6 +41,7 @@ try:
         _append_tool_results,
         _insert_before_latest_user,
         _MCP_KEYWORDS,
+        _DOMAIN_TOOL_MAP,
     )
     _IMPORTED_AGENT_LOOP = sys.modules.get("src.agent_loop")
 finally:
@@ -72,6 +73,20 @@ def test_polish_internet_search_request_classifies_as_web():
 
     assert intent["low_signal"] is False
     assert "web" in intent["domains"]
+
+
+def test_research_requests_classify_as_research_domain_and_seed_tools():
+    for prompt in (
+        "Do deep research on the best CRM for small businesses",
+        "Research the latest Pandamonium release",
+        "Look into whether we should switch search providers",
+        "Investigate the failing updater service",
+    ):
+        intent = _classify_agent_request([], prompt)
+        assert intent["low_signal"] is False, prompt
+        assert "research" in intent["domains"], prompt
+    tools = _DOMAIN_TOOL_MAP.get("research") or set()
+    assert {"trigger_research", "manage_research"} <= tools
 
 
 def test_explicit_run_command_request_classifies_as_files():
