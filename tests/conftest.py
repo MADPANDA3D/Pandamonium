@@ -6,6 +6,8 @@ import importlib.util
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Importing core.database below runs init_db() at import time, and its default
@@ -103,3 +105,27 @@ def pytest_collection_modifyitems(config, items):
         path = getattr(item, "path", None) or item.fspath
         for marker_name in markers_for_path(path):
             item.add_marker(getattr(pytest.mark, marker_name))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_catalog_store(tmp_path):
+    """Keep provider-catalog persistence per-test and out of the repo data dir.
+
+    Deliberately does not request ``monkeypatch``: adding a second consumer of the
+    shared monkeypatch fixture changes fixture teardown order for tests that rely
+    on env restoration ordering.
+    """
+    try:
+        import src.model_context as model_context
+    except ImportError:
+        yield
+        return
+    previous = getattr(model_context, "_CATALOG_STORE_FILE", None)
+    model_context._CATALOG_STORE_FILE = tmp_path / "model_context_catalog.json"
+    if hasattr(model_context, "_reset_catalog_state"):
+        model_context._reset_catalog_state()
+    yield
+    if previous is not None:
+        model_context._CATALOG_STORE_FILE = previous
+    if hasattr(model_context, "_reset_catalog_state"):
+        model_context._reset_catalog_state()
