@@ -1338,6 +1338,41 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "Generate an AI image from a text prompt. The saved image is attached to the conversation. Optionally choose the model, size, and quality.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "What to draw."},
+                    "model": {"type": "string", "description": "Optional image model id."},
+                    "size": {"type": "string", "description": "Optional size, e.g. 1024x1024."},
+                    "quality": {"type": "string", "description": "Optional quality (standard|high)."},
+                },
+                "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_research",
+            "description": "List, read/open, or delete saved deep-research reports from the Library. To START new research use trigger_research.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "read", "delete"]},
+                    "id": {"type": "string", "description": "Research report id (for read/delete)."},
+                    "search": {"type": "string", "description": "Optional filter for list."},
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 # Keep the schema declaration literal so source-only parity checks can inspect it
