@@ -118,6 +118,14 @@ def setup_prefs_routes():
         user = get_current_user(request)
         if key in PROTECTED_PREF_KEYS:
             raise HTTPException(403, "CalDAV connections must be changed through Calendar Integrations")
+        if key == "access_mode":
+            from src.authority_protocol import ACCESS_MODES
+            value = body.get("value")
+            if value not in ACCESS_MODES:
+                raise HTTPException(
+                    400,
+                    f"Invalid access_mode '{value}'. Expected one of: {', '.join(sorted(ACCESS_MODES))}.",
+                )
         prefs = _load_for_user(user)
         prefs[key] = body.get("value")
         _save_for_user(user, prefs)

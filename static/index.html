@@ -1286,6 +1286,23 @@
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
           </button>
+          <button type="button" class="access-mode-btn" id="access-mode-btn" data-access-mode="ask_for_approval" title="Agent access: Ask for approval" aria-label="Agent access: Ask for approval" aria-expanded="false">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </button>
+          <div class="access-mode-menu" id="access-mode-menu" hidden>
+            <button type="button" class="access-mode-option" data-access-value="ask_for_approval">
+              <span class="access-mode-name">Ask for approval</span>
+              <span class="access-mode-desc">Always ask to edit external files and use the internet</span>
+            </button>
+            <button type="button" class="access-mode-option" data-access-value="approve_for_me">
+              <span class="access-mode-name">Approve for me</span>
+              <span class="access-mode-desc">Only ask for actions detected as potentially unsafe</span>
+            </button>
+            <button type="button" class="access-mode-option" data-access-value="full_access">
+              <span class="access-mode-name">Full access</span>
+              <span class="access-mode-desc">Unrestricted access to the internet and any file on your computer</span>
+            </button>
+          </div>
           <button type="button" class="jarvis-input-sphere" id="jarvis-input-sphere" title="Pandamonium live call" aria-label="Pandamonium live call">
             <span class="jarvis-sphere-core" aria-hidden="true"></span>
           </button>

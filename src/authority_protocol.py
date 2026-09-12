@@ -23,6 +23,38 @@ from core.constants import DATA_DIR
 
 AUTHORITY_FILE = Path(DATA_DIR) / "authority_receipts.json"
 APPROVAL_SCOPES = frozenset({"once", "session", "time_bounded", "persistent"})
+
+# Operator access levels (MAD-885). The approval-card workflow is unchanged;
+# these only change the DEFAULT decision for gated actions.
+ACCESS_MODES = frozenset({"ask_for_approval", "approve_for_me", "full_access"})
+# Effects auto-allowed under "approve for me": the routine internet/file work
+# the operator does not want to approve every time. Everything outside this set
+# (destructive, credential/auth, privilege, purchase) still prompts, and
+# unclassified capabilities stay denied under every mode.
+_APPROVE_FOR_ME_SAFE_EFFECTS = frozenset({
+    "read",
+    "reversible_write",
+    "external_publication_or_communication",
+    "outside_workspace_boundary",
+})
+
+
+def access_mode_for(operator: str | None) -> str:
+    """Resolve the operator's stored access mode, defaulting to ask-for-approval.
+
+    Unknown or unreadable values fall back to the safe default. Resolved once
+    per request by `decide` so every authority surface (chat, voice, gateway,
+    extensions, tasks) honors the same per-user setting.
+    """
+    identity = str(operator or "").strip()
+    if not identity:
+        return "ask_for_approval"
+    try:
+        from routes.prefs_routes import _load_for_user
+        mode = str((_load_for_user(identity) or {}).get("access_mode") or "")
+        return mode if mode in ACCESS_MODES else "ask_for_approval"
+    except Exception:
+        return "ask_for_approval"
 NATURAL_APPROVAL_REPLIES = {
     "yes": "approve",
     "yeah": "approve",
@@ -710,6 +742,7 @@ class AuthorityStore:
         operator = str(operator_id or "").strip()
         agent_id = str(call.get("agent_id") or configured_agent_id())
         session = str(session_id or "")
+        access_mode = access_mode_for(operator)
         classified_call = dict(call)
         if configured_workspace:
             policy = dict(call.get("capability_policy") or {})
@@ -732,6 +765,13 @@ class AuthorityStore:
             decision, basis = "deny", disabled_reason
         elif effect == "unclassified":
             decision, basis = "deny", "unclassified_capability"
+        # Operator access level (MAD-885). Resolved from the operator's stored
+        # pref; only the authority gate's default changes — hard policy denies
+        # above and the approval-card workflow below are untouched.
+        elif access_mode == "full_access":
+            decision, basis = "allow", "access_mode:full_access"
+        elif access_mode == "approve_for_me" and effect in _APPROVE_FOR_ME_SAFE_EFFECTS:
+            decision, basis = "allow", "access_mode:approve_for_me"
         elif effect == "read":
             decision, basis = "allow", "owner_scoped_read"
         elif native_approval_gate:
@@ -800,6 +840,7 @@ class AuthorityStore:
             "action_effect": effect,
             "gate_reason": effect if effect in SEPARATE_GATE_EFFECTS else None,
             "permission_mode": mode,
+            "access_mode": access_mode,
             "decision": decision,
             "policy_basis": basis,
             "receipt_id": receipt_id,
