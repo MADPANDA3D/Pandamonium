@@ -922,6 +922,11 @@ import { getSelectedAgentSelection } from './modelPicker.js';
     // Capture session ID for background stream detection
     const streamSessionId = sessionModule.getCurrentSessionId();
     const streamAgentTarget = sessionModule?.getChatAgentTarget?.() || '';
+    // Adaptive routing removed the old chat/agent mode flag, but the loading
+    // text, spinner, and timeout messages still branch on "agent turn". An
+    // agent turn is any send with a selected agent/worker target. Declared
+    // outside the try block because the catch path reads it too.
+    const _isAgent = !!streamAgentTarget;
     _streamSessionId = streamSessionId;
     const streamQuery = msg;
     _lastReaderActivity = Date.now();
@@ -952,6 +957,10 @@ import { getSelectedAgentSelection } from './modelPicker.js';
     let timeoutId = null;
     let responseTimeoutCleared = false;
     let clearResponseTimeout = () => {};
+    // Streaming TTS is declared outside the try block so the catch path can
+    // stop it (streamingTTS && aiTTSManager.stop()) without a ReferenceError
+    // masking the real stream failure. Initialized after the reader is ready.
+    let streamingTTS = false;
     let firstTokenWaitTimers = [];
     const clearFirstTokenWaitTimers = () => {
       firstTokenWaitTimers.forEach(t => { try { clearTimeout(t); } catch (_) {} });
@@ -1456,7 +1465,7 @@ import { getSelectedAgentSelection } from './modelPicker.js';
       let isThinking = false;
       let thinkingStartTime = null;
       // Streaming TTS: synthesize sentence-by-sentence during streaming
-      const streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
+      streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // One assistant turn owns every visible round and tool lifecycle entry.
       let roundHolder = holder;
