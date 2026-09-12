@@ -35,6 +35,13 @@ def setup_diagnostics_routes(
         from src.operational_protocol import protocol_status
         return protocol_status()
 
+    @router.get("/api/diagnostics/protocol/packs")
+    async def get_protocol_pack_status(request: Request) -> Dict[str, Any]:
+        """Versioned pack registry: ids, versions, budgets, disabled state, errors."""
+        require_admin(request)
+        from src.protocol_registry import protocol_status
+        return protocol_status()
+
     @router.get("/api/diagnostics/model-budget")
     async def get_model_budget(request: Request, endpoint: str, model: str) -> Dict[str, Any]:
         """Resolved context window and effective input budget for one model."""

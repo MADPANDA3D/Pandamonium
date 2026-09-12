@@ -1832,6 +1832,30 @@
               </div>
             </div>
           </div>
+          <div class="admin-card admin-only" id="set-protocolCard">
+            <h2 style="display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+              Protocols
+              <span id="set-protocolStatus" class="identity-status-badge">Loading</span>
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:10px">Versioned operating protocols mounted into agent turns. Disabled packs stay diagnosable but never mount. Model windows and budgets below are keyed by model id (exact match first, then substring); discovered provider windows are used automatically.</div>
+            <div class="settings-col">
+              <label class="settings-row" style="align-items:center;gap:8px;">
+                <input type="checkbox" id="set-protocolLayerEnabled">
+                <span class="settings-label" style="margin:0;">Mount the protocol layer</span>
+              </label>
+              <div id="set-protocolPackList" class="settings-col"></div>
+              <label class="settings-label" for="set-modelContextWindows">Model context windows (JSON)</label>
+              <textarea id="set-modelContextWindows" rows="3" autocomplete="off" spellcheck="false" class="settings-select" placeholder='{"deepseek/deepseek-v4.1-flash": 1048576}'></textarea>
+              <label class="settings-label" for="set-modelInputTokenBudgets">Model input token budgets (JSON)</label>
+              <textarea id="set-modelInputTokenBudgets" rows="3" autocomplete="off" spellcheck="false" class="settings-select" placeholder='{"deepseek/deepseek-v4.1-flash": 200000}'></textarea>
+              <div class="identity-settings-actions">
+                <span id="set-protocolMsg" class="identity-settings-message" role="status" aria-live="polite"></span>
+                <button type="button" class="admin-btn-add" id="set-protocolReset">Restore defaults</button>
+                <button type="button" class="admin-btn-add" id="set-protocolSave">Save protocols</button>
+              </div>
+            </div>
+          </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Default Chat Model</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">The model used when creating a new chat session.</div>

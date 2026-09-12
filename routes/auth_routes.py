@@ -22,6 +22,7 @@ from src.settings import (
     load_features as _load_features,
     save_features as _save_features,
     sanitize_model_number_map,
+    sanitize_protocol_pack_ids,
     DEFAULT_SETTINGS,
 )
 from src.agent_identity import agent_identity_status, validate_agent_identity_setting
@@ -713,6 +714,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             if key in {"model_context_windows", "model_input_token_budgets"}:
                 try:
                     val = sanitize_model_number_map(val)
+                except ValueError as exc:
+                    raise HTTPException(400, f"{key}: {exc}") from exc
+            if key == "disabled_protocol_packs":
+                try:
+                    val = sanitize_protocol_pack_ids(val)
                 except ValueError as exc:
                     raise HTTPException(400, f"{key}: {exc}") from exc
             current[key] = val

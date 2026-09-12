@@ -6,6 +6,7 @@ All modules should import from here instead of accessing files directly.
 """
 
 import json
+import re
 import time
 import logging
 from typing import Any
@@ -44,6 +45,9 @@ DEFAULT_SETTINGS = {
     # system prompt. The constitution above stays the light operator-editable
     # layer; disabling this restores the exact prior prompt composition.
     "protocol_layer_enabled": True,
+    # Protocol pack ids the operator disabled in Settings. Disabled packs stay
+    # diagnosable but are never mounted.
+    "disabled_protocol_packs": [],
     # Agent email safety: when True, the MCP send_email / reply_to_email
     # tools don't SMTP directly. They stage the composed message into the
     # scheduled_emails table with status='agent_draft' and return a
@@ -393,4 +397,24 @@ def sanitize_model_number_map(
         if number <= 0 or number > max_value:
             raise ValueError(f"value out of range for {key.strip()[:60]}")
         sanitized[key.strip()[:200]] = number
+    return sanitized
+
+
+def sanitize_protocol_pack_ids(value: Any) -> list[str]:
+    """Validate an operator list of disabled protocol pack ids."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("must be a list")
+    if len(value) > 100:
+        raise ValueError("must contain at most 100 entries")
+    sanitized: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("entries must be non-empty strings")
+        pack_id = item.strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", pack_id):
+            raise ValueError(f"invalid pack id: {pack_id[:60]}")
+        if pack_id not in sanitized:
+            sanitized.append(pack_id)
     return sanitized
