@@ -778,7 +778,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             save_settings(s)
             return {"response": f"Reset {key} to default ({DEFAULT_SETTINGS[key]}).", "exit_code": 0}
 
-        elif action in ("disable_tool", "enable_tool", "list_tools"):
+        elif action in ("disable_tool", "enable_tool", "list_tools", "load_tools", "mount_tools"):
             # Tool-toggle actions. These edit settings.json:disabled_tools
             # (the global list read on every chat request) rather than
             # prefs.json. Friendly aliases accepted: "shell" -> "bash",
@@ -827,6 +827,51 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
                     "count": len(entries),
                     "enabled_count": enabled_count,
                     "disabled": list(current),
+                    "exit_code": 0,
+                }
+
+            if action in ("load_tools", "mount_tools"):
+                # MAD-907: mount an enabled built-in for the remainder of this
+                # request. The loop unions `mounted_tools` into its selection so
+                # the next round's schemas include it; `tool_sections` carries
+                # the exact fenced-block usage for text/local engines.
+                from src.tool_catalog import resolve_tool_mounts
+                raw = args.get("tools") or args.get("tool") or args.get("names") or []
+                if isinstance(raw, str):
+                    raw = [part for part in raw.replace(",", " ").split() if part]
+                elif isinstance(raw, (list, tuple, set)):
+                    raw = list(raw)
+                else:
+                    raw = [raw]
+                current = get_setting("disabled_tools", []) or []
+                resolved = resolve_tool_mounts(raw, disabled=current)
+                sections = ""
+                if resolved["mounted_tools"]:
+                    try:
+                        from src.agent_loop import tool_prompt_sections
+                        sections = tool_prompt_sections(set(resolved["mounted_tools"]))
+                    except Exception:
+                        sections = ""
+                parts = []
+                if resolved["mounted_tools"]:
+                    parts.append(
+                        "Mounted for the rest of this request: "
+                        + ", ".join(resolved["mounted_tools"]) + "."
+                    )
+                    if sections:
+                        parts.append("Exact usage:\n\n" + sections)
+                else:
+                    parts.append("No tools were mounted.")
+                if resolved["unknown_tools"]:
+                    parts.append("Unknown: " + ", ".join(resolved["unknown_tools"]) + ".")
+                if resolved["disabled_tools"]:
+                    parts.append("Disabled: " + ", ".join(resolved["disabled_tools"]) + ".")
+                return {
+                    "response": " ".join(parts),
+                    "mounted_tools": resolved["mounted_tools"],
+                    "unknown_tools": resolved["unknown_tools"],
+                    "disabled_tools": resolved["disabled_tools"],
+                    "tool_sections": sections,
                     "exit_code": 0,
                 }
 
