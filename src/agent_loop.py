@@ -652,6 +652,10 @@ def _clamp_network_inspection_tools(
     from src.tool_index import ALWAYS_AVAILABLE
 
     allowed = set(ALWAYS_AVAILABLE)
+    # MAD-907: keep the catalog/discovery gateway out of narrow network
+    # inspection turns — the allowlist stays authoritative there, and mounted
+    # tools remain blocked by the clamp's prune tracking.
+    allowed.discard("manage_settings")
     for domain in domains:
         allowed.update(_DOMAIN_TOOL_MAP.get(domain, set()))
     allowed.update(preserved_readers or set())
@@ -810,7 +814,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_documents": "- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
     "manage_books": "- ```manage_books``` — Read the current user's private Books catalog or search indexed book text. Args (JSON): {\"action\":\"list|search\", \"query\":\"...\", \"limit\":5}. Use list for title/indexing/OCR status; use search for content and cite returned title/page. Never use filesystem tools or guessed paths for Books.",
     "manage_research": "- ```manage_research``` — List, read/open, or delete saved DEEP RESEARCH results from the Library. Args (JSON): {\"action\": \"list|read|delete\", \"id\": \"<id>\", \"search\": \"...\"}. `list` returns rows like `[query](#research-<id>) — N sources` MOST-RECENT FIRST; the user clicks to open. `read` (aliases: open/view/get) takes `id` and returns the report text + sources. Use when the user says \"open/read/find/delete my research\" or \"that report\". This IS how you read a finished report: when the user refers to a just-completed deep-research job (\"check it out\", \"read that report\", \"summarize the research\") WITHOUT giving an id, call `manage_research` with `action:list` to get the most-recent id, then `action:read` with that id, and answer from the returned text. Do NOT `web_fetch`/`app_api` the `/api/research/report/{id}` URL — that endpoint renders HTML for the browser, not clean text — and do NOT start a fresh `web_search`/`trigger_research` just to read an existing report. To START new research, use trigger_research instead.",
-    "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks/notes/calendar/email), list the whole built-in catalog with categories, descriptions, and enabled state: `{\"action\":\"list_tools\"}` — inspect this before claiming a tool is missing or counting what you have.",
+    "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks/notes/calendar/email), list the whole built-in catalog with categories, descriptions, and enabled state: `{\"action\":\"list_tools\"}` — inspect this before claiming a tool is missing or counting what you have. If the catalog lists a tool your prompt lacks, mount it for this request: `{\"action\":\"load_tools\",\"tools\":[\"grep\",\"generate_image\"]}` — the exact usage comes back in the result and the tool stays available for the rest of the request.",
     "manage_notes": """\
 ```manage_notes
 {"action": "add", "title": "<short todo>", "due_date": "<natural language or ISO datetime>"}
@@ -1012,6 +1016,32 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
 
     parts.append(_AGENT_RULES)
     parts.extend(_domain_rules_for_tools(included))
+    return "\n\n".join(parts)
+
+
+def tool_prompt_sections(tool_names: set) -> str:
+    """Exact fenced-block prompt text for the named tools.
+
+    MAD-907: `manage_settings action=load_tools` returns this so a text/local
+    engine can format the mounted call immediately instead of waiting for a
+    rebuilt system prompt.
+    """
+    names = {str(name) for name in (tool_names or set())}
+    full_blocks = []
+    one_liners = []
+    for name, default_section in TOOL_SECTIONS.items():
+        if name not in names:
+            continue
+        section = _section_text(name, default_section)
+        if section.startswith("- "):
+            one_liners.append(section)
+        elif section.startswith("```"):
+            full_blocks.append(section)
+    parts = []
+    if full_blocks:
+        parts.append("\n\n".join(full_blocks))
+    if one_liners:
+        parts.append("## Additional tools\n" + "\n".join(one_liners))
     return "\n\n".join(parts)
 
 
@@ -4363,6 +4393,9 @@ async def stream_agent_loop(
     # signatures + consecutive no-text tool rounds to bail early.
     _recent_call_sigs = collections.deque(maxlen=6)
     _stuck_rounds = 0
+    # MAD-907: tools mounted mid-request via manage_settings load_tools.
+    # Kept front-of-line when the measured budget caps the catalog.
+    _mounted_tools: Set[str] = set()
     # Frequency of each exact call signature (tool + args), for the runaway
     # backstop. Counting identical repeats — not distinct same-tool calls —
     # lets a legit batch (e.g. 18 calendar events at once) through.
@@ -4514,6 +4547,9 @@ async def stream_agent_loop(
             | _mcp_discovery_tools
             | set(_relevant_tools or ())
         )
+        # MAD-907: the discovery gateway must survive any budget cap so a
+        # capped engine can always list and mount what it needs.
+        _schema_priority.add("manage_settings")
         _priority_order: List[str] = []
         if "ui_control" in _schema_priority:
             _priority_order.append("ui_control")
@@ -4521,6 +4557,10 @@ async def stream_agent_loop(
             # Tiny discovery schema first: capping must never leave the model
             # able to read files but unable to resolve "this project".
             _priority_order.append("get_workspace")
+        for _mounted_name in sorted(_mounted_tools):
+            # Explicitly mounted tools win the budget cap over incidental ones.
+            if _mounted_name in _schema_priority and _mounted_name not in _priority_order:
+                _priority_order.append(_mounted_name)
         _priority_order.extend(
             name for name in (
                 schema.get("function", {}).get("name")
@@ -4535,6 +4575,10 @@ async def stream_agent_loop(
             )
             if name and name in _native_mcp_tools and name not in _priority_order
         )
+        # MAD-907: the discovery gateway ranks after explicitly requested MCP
+        # tools but ahead of incidental retrieval, so it survives the cap.
+        if "manage_settings" in _schema_priority and "manage_settings" not in _priority_order:
+            _priority_order.append("manage_settings")
         # Retrieved/domain tools keep their catalog (source) order ahead of
         # non-priority schemas. Sorting these alphabetically made greedy
         # budget capping drop small earlier tools and reorder the payload
@@ -5705,6 +5749,32 @@ async def stream_agent_loop(
                                 break
                     except Exception as _e:
                         logger.debug(f"skill requires_toolsets unlock skipped: {_e}")
+
+            # MAD-907: `manage_settings action=load_tools` results carry
+            # `mounted_tools`. Unlock them for the NEXT round so a capped or
+            # text-only engine can pull any enabled built-in into reach. The
+            # tool result already includes the exact fenced-block usage for
+            # text engines; this hook makes the native schema list catch up.
+            if _relevant_tools is not None and isinstance(result, dict):
+                _mounted_raw = result.get("mounted_tools")
+                if isinstance(_mounted_raw, (list, tuple, set)):
+                    from src.tool_policy import known_tool_names as _known_mount_names
+                    _known_mounts = _known_mount_names()
+                    _new_mounts = {
+                        str(_name)
+                        for _name in _mounted_raw
+                        if str(_name) in _known_mounts
+                        and str(_name) not in disabled_tools
+                        and str(_name) not in _intent_pruned_tools
+                        and str(_name) not in _relevant_tools
+                    }
+                    if _new_mounts:
+                        _relevant_tools.update(_new_mounts)
+                        _mounted_tools.update(_new_mounts)
+                        logger.info(
+                            "[tool-rag] mounted tools for the remainder of the request: %s",
+                            sorted(_new_mounts),
+                        )
 
             # Extract structured web sources from web_search tool output.
             # web_search returns {"output": ..., "exit_code": 0}; check "output"
