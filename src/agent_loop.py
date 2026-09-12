@@ -390,8 +390,8 @@ _DOMAIN_RULES = {
 - If no matching configured worker/workspace is mounted, say that the requested route is unavailable instead of guessing.""",
     "platform": """\
 ## Pandamonium platform truth rules
-- Questions about Pandamonium's own architecture, releases, or protocols require evidence. Use `get_runtime_status` for live model/runtime facts and this installation's release state (canonical repository, update status, curated notes), `manage_mcp action=inventory` for current tool/integration inventory, and a configured read-only worker for source-code inspection when available.
-- Report the running `application_version` and release state from `get_runtime_status`; never infer version, repository, or release notes from a worker, model alias, package, fork, or public search result. If the release channel check reports unavailable, say so precisely.
+- Questions about Pandamonium's own architecture or protocols require evidence. Use `get_runtime_status` for live model/runtime facts, `manage_mcp action=inventory` for current tool/integration inventory, and a configured read-only worker for source-code inspection when available.
+- Report the running `application_version` from `get_runtime_status`; never infer a Pandamonium version from a worker, model alias, package, or stale source file.
 - For local-model memory or context-capacity explanations, distinguish parameter weights from KV cache, sliding-window-attention cache, and MoE expert cache. Mention a component only when runtime/log/source evidence reports it; never invent an embedding-matrix allocation.
 - Do not extrapolate frameworks, databases, message buses, isolation boundaries, or capabilities from generic software patterns. Distinguish verified runtime facts, verified source facts, and unverified design intent.""",
 }
@@ -861,7 +861,7 @@ For a RECURRING event pass `rrule` as an iCalendar RRULE string, e.g. `"FREQ=WEE
 If the user asks for a reminder/alarm before the event, pass `reminder_minutes` as an integer; do not write reminder text into the event description and do NOT also call `manage_notes` for the same reminder because calendar reminders are routed through Notes automatically. \
 `calendar` accepts a name ("Main") or short-id prefix.""",
     "read_calendar": "- ```read_calendar``` — Admin-only: refresh and read the authenticated user's Calendar without event mutations. Args (JSON): {\"action\":\"list_events|list_calendars\", \"start\":\"ISO datetime\"?, \"end\":\"ISO datetime\"?, \"calendar\":\"name or id\"?, \"max_results\":50?}. `list_events` requires explicit start/end no more than 366 days apart. Results are owner-scoped and bounded; if freshness could not be confirmed, say so explicitly. This tool is unavailable in plan mode because its CalDAV pull may update the local cache.",
-    "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version and this installation's release state (canonical repository, update status, curated notes) plus server-verified model, context, voice, and configured-worker runtime facts. Use for version/release/update questions; never infer app version, repository, or release notes from a worker alias or public search result.",
+    "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version plus server-verified model, context, voice, and configured-worker runtime facts. Use this for claims about what is actually running; do not infer application version, provider, or architecture from a worker/model display alias.",
     "inspect_network": "- ```inspect_network``` — Collect the network view visible to the running Pandamonium service with fixed, bounded, read-only interface, route, neighbor, and optional Tailscale probes. Takes no arguments. Use the returned evidence for current-network claims and say when the wider topology remains unobserved.",
     "start_agent_task": """\
 ```start_agent_task

@@ -86,9 +86,6 @@ def test_release_question_routes_to_platform_tools_without_web():
     assert "research" not in intent["domains"]
     selected = _selected_tools(intent)
     assert "get_runtime_status" in selected
-    rules = agent_loop._domain_rules_for_tools(selected)
-    assert any("canonical repository" in rule for rule in rules)
-    assert any("reports unavailable" in rule for rule in rules)
 
 
 def test_release_clamp_removes_retrieved_web_tools():
@@ -322,10 +319,12 @@ async def test_release_turn_schema_catalog_excludes_web_and_includes_release_too
     }
     assert "get_runtime_status" in tool_names
     assert tool_names.isdisjoint({"web_search", "web_fetch"})
-    assert any(
-        "canonical repository" in str(message.get("content") or "")
-        for message in captured["messages"]
+    release_schema = next(
+        schema["function"]
+        for schema in captured["tools"]
+        if schema.get("function", {}).get("name") == "get_runtime_status"
     )
+    assert "release" in release_schema["description"].lower()
 
 
 def test_get_runtime_status_schema_keeps_release_args_optional():
