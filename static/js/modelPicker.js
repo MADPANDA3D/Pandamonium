@@ -638,6 +638,23 @@ function _initModelPickerDropdown() {
       epSpan.textContent = _epDisplay;
       row.appendChild(epSpan);
 
+      // Mark the current selection (MAD-888): identity rows by target, model
+      // rows by the session's active model. The check is the compact-selector
+      // selected affordance; behavior and routing are unchanged.
+      const _selectedNow = _selectedAgent();
+      const _sessionModel = (_deps.getSessions().find(s => s.id === _deps.getCurrentSessionId()) || {}).model || '';
+      const _isSelected = (m.target && _selectedNow?.target === m.target)
+        || (!m.target && !!m.mid && m.mid === _sessionModel);
+      row.setAttribute('aria-selected', _isSelected ? 'true' : 'false');
+      if (_isSelected) {
+        row.classList.add('is-selected');
+        const check = document.createElement('span');
+        check.className = 'model-switch-check';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+        row.appendChild(check);
+      }
+
       row.addEventListener('click', () => _pick(m));
       row.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') {
