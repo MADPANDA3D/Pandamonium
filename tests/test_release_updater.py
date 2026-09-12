@@ -695,3 +695,42 @@ def test_release_archive_strips_group_and_other_write_bits(tmp_path):
     assert extracted.stat().st_mode & 0o777 == 0o755
     assert extracted.joinpath("config.py").stat().st_mode & 0o777 == 0o644
     assert extracted.joinpath("run").stat().st_mode & 0o777 == 0o755
+
+
+def test_prune_old_backups_keeps_newest_two_and_ignores_other_snapshots(tmp_path):
+    root = tmp_path / "backups"
+    root.mkdir()
+    made = []
+    for index in range(4):
+        path = root / f"update-1.0.{index}-{'a' * 8}-2026091{index}T000000Z"
+        path.mkdir()
+        (path / "data.tar.gz").write_bytes(b"x")
+        os.utime(path, (1000 + index, 1000 + index))
+        made.append(path)
+    task = root / "mad999-task-snapshot"
+    task.mkdir()
+    stray_file = root / "update-not-a-dir"
+    stray_file.write_text("x", encoding="utf-8")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    link = root / "update-symlink"
+    link.symlink_to(outside, target_is_directory=True)
+
+    removed = release_updater.UpdateExecutor._prune_old_backups(
+        SimpleNamespace(config=SimpleNamespace(backup_root=root))
+    )
+
+    # Newest two kept (indexes 3 and 2); older two pruned oldest-last.
+    assert removed == [made[1].name, made[0].name]
+    assert not made[0].exists() and not made[1].exists()
+    assert made[2].exists() and made[3].exists()
+    assert task.exists()
+    assert stray_file.exists()
+    assert link.is_symlink()
+
+
+def test_prune_old_backups_missing_root_is_safe(tmp_path):
+    removed = release_updater.UpdateExecutor._prune_old_backups(
+        SimpleNamespace(config=SimpleNamespace(backup_root=tmp_path / "nope"))
+    )
+    assert removed == []
