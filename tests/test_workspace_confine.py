@@ -255,6 +255,7 @@ def _sent_tool_names(monkeypatch, *, workspace):
             "https://api.openai.com/v1", "gpt-test",
             [{"role": "user", "content": "look at the local project"}],
             max_rounds=1, relevant_tools=None, owner="admin", workspace=workspace,
+            context_length=200_000,
         )
         return [c async for c in gen]
 
@@ -263,17 +264,18 @@ def _sent_tool_names(monkeypatch, *, workspace):
     return {t["function"]["name"] for t in schemas if isinstance(t, dict) and "function" in t}
 
 
-def test_low_signal_with_workspace_surfaces_readonly_file_tools(monkeypatch):
+def test_low_signal_with_workspace_mounts_builtin_catalog(monkeypatch):
+    """MAD-905: API engines mount the built-in catalog on vague workspace
+    turns. Confinement and authority still gate execution; schema omission
+    is no longer the safety mechanism."""
     names = _sent_tool_names(monkeypatch, workspace="/tmp")
-    # read-only nav tools surface so the agent can explore
+    # An active workspace is the file-work signal; nav tools still surface.
     assert "read_file" in names
     assert "get_workspace" in names
     assert "grep" in names
-    # write/shell tools do NOT surface on a vague message
-    assert "write_file" not in names
-    assert "edit_file" not in names
-    assert "bash" not in names
-    assert "python" not in names
+    # Write/shell schemas are no longer withheld from the payload; the
+    # workspace confinement and authority protocol gate their execution.
+    assert "write_file" in names
 
 
 def test_low_signal_without_workspace_excludes_file_tools(monkeypatch):
