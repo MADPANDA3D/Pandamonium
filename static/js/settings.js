@@ -1984,6 +1984,166 @@ async function initAgentIdentitySettings() {
   });
 }
 
+/* ── Protocol layer (AI tab, admin only) ── */
+async function initProtocolSettings() {
+  const card = el('set-protocolCard');
+  const layerToggle = el('set-protocolLayerEnabled');
+  const packList = el('set-protocolPackList');
+  const windowsInput = el('set-modelContextWindows');
+  const budgetsInput = el('set-modelInputTokenBudgets');
+  const saveBtn = el('set-protocolSave');
+  const resetBtn = el('set-protocolReset');
+  const status = el('set-protocolStatus');
+  const msg = el('set-protocolMsg');
+  if (!card || !layerToggle || !packList || !saveBtn) return;
+
+  let disabledIds = [];
+  let packs = [];
+
+  function renderPacks() {
+    packList.innerHTML = '';
+    const disabled = new Set(disabledIds);
+    packs.forEach(pack => {
+      const row = document.createElement('label');
+      row.className = 'settings-row';
+      row.style.cssText = 'align-items:center;gap:8px;';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !disabled.has(pack.id);
+      box.dataset.packId = pack.id;
+      box.addEventListener('change', () => {
+        if (box.checked) {
+          disabledIds = disabledIds.filter(id => id !== pack.id);
+        } else if (!disabledIds.includes(pack.id)) {
+          disabledIds = [...disabledIds, pack.id];
+        }
+      });
+      const text = document.createElement('span');
+      text.className = 'settings-label';
+      text.style.margin = '0';
+      text.textContent = `${pack.protocol || pack.id} — ${pack.title} (v${pack.version}, ${pack.token_budget} tokens)`;
+      row.append(box, text);
+      if (pack.status === 'error') {
+        const warn = document.createElement('span');
+        warn.style.cssText = 'color:var(--red);font-size:11px;';
+        warn.textContent = `invalid pack: ${pack.error || 'malformed manifest'}`;
+        row.append(warn);
+      }
+      packList.appendChild(row);
+    });
+  }
+
+  function renderStatus(data) {
+    if (!status) return;
+    const degraded = data && data.status !== 'healthy';
+    status.textContent = data ? (degraded ? 'Degraded' : 'Ready') : 'Unknown';
+    status.classList.toggle('configured', Boolean(data) && !degraded);
+  }
+
+  try {
+    const [settingsRes, packsRes] = await Promise.all([
+      fetch('/api/auth/settings', { credentials: 'same-origin' }),
+      fetch('/api/diagnostics/protocol/packs', { credentials: 'same-origin' }),
+    ]);
+    if (!settingsRes.ok) throw new Error('Protocol settings are available to admins only');
+    const settings = await settingsRes.json();
+    layerToggle.checked = settings.protocol_layer_enabled !== false;
+    disabledIds = Array.isArray(settings.disabled_protocol_packs)
+      ? [...settings.disabled_protocol_packs]
+      : [];
+    const windows = settings.model_context_windows || {};
+    const budgets = settings.model_input_token_budgets || {};
+    windowsInput.value = Object.keys(windows).length ? JSON.stringify(windows, null, 2) : '';
+    budgetsInput.value = Object.keys(budgets).length ? JSON.stringify(budgets, null, 2) : '';
+    if (packsRes.ok) {
+      const data = await packsRes.json();
+      packs = Array.isArray(data.packs) ? data.packs : [];
+      renderStatus(data);
+    } else {
+      renderStatus(null);
+    }
+    renderPacks();
+  } catch (error) {
+    if (msg) {
+      msg.textContent = error.message || 'Protocol settings could not be loaded';
+      msg.style.color = 'var(--red)';
+    }
+  }
+
+  function parseMap(input, label) {
+    const text = input.value.trim();
+    if (!text) return {};
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch (error) {
+      throw new Error(`${label} must be a JSON object`);
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`${label} must be a JSON object`);
+    }
+    return value;
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    let payload;
+    try {
+      payload = {
+        protocol_layer_enabled: layerToggle.checked,
+        disabled_protocol_packs: [...disabledIds],
+        model_context_windows: parseMap(windowsInput, 'Model context windows'),
+        model_input_token_budgets: parseMap(budgetsInput, 'Model input token budgets'),
+      };
+    } catch (error) {
+      if (msg) {
+        msg.textContent = error.message;
+        msg.style.color = 'var(--red)';
+      }
+      return;
+    }
+    saveBtn.disabled = true;
+    if (msg) {
+      msg.textContent = 'Saving…';
+      msg.style.color = '';
+    }
+    try {
+      const res = await fetch('/api/auth/settings', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || 'Protocol settings could not be saved');
+      }
+      if (msg) {
+        msg.textContent = 'Saved';
+        msg.style.color = 'var(--green)';
+      }
+    } catch (error) {
+      if (msg) {
+        msg.textContent = error.message || 'Protocol settings could not be saved';
+        msg.style.color = 'var(--red)';
+      }
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+    layerToggle.checked = true;
+    disabledIds = [];
+    windowsInput.value = '';
+    budgetsInput.value = '';
+    renderPacks();
+    if (msg) {
+      msg.textContent = 'Defaults restored locally — save to apply';
+      msg.style.color = '';
+    }
+  });
+}
+
 /* ── Agent Settings (AI tab) ── */
 async function initAgentSettings() {
   var toolsInput = el('set-agentMaxTools');
@@ -2670,6 +2830,7 @@ function initAll() {
   initResearchSettings();
   initResearchSearchSettings();
   initAgentIdentitySettings();
+  initProtocolSettings();
   initAgentSettings();
   initContextBudgetSettings();
   initAppearance();

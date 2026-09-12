@@ -6,6 +6,7 @@ All modules should import from here instead of accessing files directly.
 """
 
 import json
+import re
 import time
 import logging
 from typing import Any
@@ -44,6 +45,9 @@ DEFAULT_SETTINGS = {
     # system prompt. The constitution above stays the light operator-editable
     # layer; disabling this restores the exact prior prompt composition.
     "protocol_layer_enabled": True,
+    # Protocol pack ids the operator disabled in Settings. Disabled packs stay
+    # diagnosable but are never mounted.
+    "disabled_protocol_packs": [],
     # Agent email safety: when True, the MCP send_email / reply_to_email
     # tools don't SMTP directly. They stage the composed message into the
     # scheduled_emails table with status='agent_draft' and return a
@@ -66,11 +70,13 @@ DEFAULT_SETTINGS = {
     "tts_provider": "disabled",
     "tts_model": "tts-1",
     "tts_voice": "alloy",
-    "tts_agent_voices": {
-        "Jarvis": "jarvis_chatterbox",
-        "Gordon": "gordon_chatterbox",
-        "Friday": "friday_chatterbox",
-    },
+    # Optional per-identity TTS voice overrides keyed by the installation's
+    # configured agent or worker display names (for example the value of
+    # ODYSSEUS_PC_CODEX_LABEL). Ships empty: private installation identities
+    # such as Friday or Gordon must never be public defaults. An installation
+    # that configures names adds its own entries, and the generic tts_voice
+    # remains the fallback for every identity without an override.
+    "tts_agent_voices": {},
     "tts_speed": "1",
     "stt_enabled": False,
     "stt_provider": "disabled",
@@ -393,4 +399,49 @@ def sanitize_model_number_map(
         if number <= 0 or number > max_value:
             raise ValueError(f"value out of range for {key.strip()[:60]}")
         sanitized[key.strip()[:200]] = number
+    return sanitized
+
+
+def sanitize_protocol_pack_ids(value: Any) -> list[str]:
+    """Validate an operator list of disabled protocol pack ids."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("must be a list")
+    if len(value) > 100:
+        raise ValueError("must contain at most 100 entries")
+    sanitized: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("entries must be non-empty strings")
+        pack_id = item.strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", pack_id):
+            raise ValueError(f"invalid pack id: {pack_id[:60]}")
+        if pack_id not in sanitized:
+            sanitized.append(pack_id)
+    return sanitized
+
+
+def sanitize_tts_agent_voices(value: Any) -> dict[str, str]:
+    """Normalize an installation-owned display-name -> voice-code map.
+
+    Keys are installation-configured agent or worker display names, so the
+    map starts empty and this helper never injects built-in names. Invalid
+    entries are dropped rather than corrected.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("must be an object")
+    sanitized: dict[str, str] = {}
+    for agent, voice in value.items():
+        if not isinstance(agent, str) or not isinstance(voice, str):
+            continue
+        name = " ".join(agent.split())
+        if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+            continue
+        code = voice.strip()[:128]
+        if not code:
+            continue
+        sanitized[name] = code
     return sanitized
