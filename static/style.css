@@ -217,27 +217,40 @@ html {
 
 /* ── Sidebar bucket reorder handle ──
    Explicit handle so dragging a section never fights text selection or a
-   click-to-collapse. Visible on hover (always) and in rearrange mode. */
+   click-to-collapse. It overlays the header instead of reserving layout
+   space, so bucket icons stay flush left at rest; hovering the header
+   slides the label right to reveal the handle (also in rearrange mode and
+   for keyboard focus). */
+.section-header-flex { position: relative; }
 .section-drag-handle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
   width: 16px;
   height: 16px;
-  margin-right: 2px;
   padding: 0;
   border: 0;
   background: none;
   color: color-mix(in srgb, var(--fg) 55%, transparent);
   cursor: grab;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
-.section-header-flex:hover .section-drag-handle { opacity: 0.75; }
+.section-title { transition: transform 0.14s ease; }
+.section-header-flex:hover .section-drag-handle,
+.section-header-flex:focus-within .section-drag-handle,
+body.rearrange-mode .section-drag-handle { opacity: 0.75; pointer-events: auto; }
+.section-header-flex:hover .section-title,
+.section-header-flex:focus-within .section-title,
+body.rearrange-mode .section-title { transform: translateX(17px); }
 .section-drag-handle:focus-visible { opacity: 0.9; outline: 1px solid var(--red); border-radius: 3px; }
 .section-drag-handle:active { cursor: grabbing; }
-body.rearrange-mode .section-drag-handle { opacity: 0.75; }
 @media (max-width: 768px) { .section-drag-handle { display: none; } }
 
 /* ── Background Patterns ── */
