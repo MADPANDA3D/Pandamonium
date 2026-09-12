@@ -70,11 +70,13 @@ DEFAULT_SETTINGS = {
     "tts_provider": "disabled",
     "tts_model": "tts-1",
     "tts_voice": "alloy",
-    "tts_agent_voices": {
-        "Jarvis": "jarvis_chatterbox",
-        "Gordon": "gordon_chatterbox",
-        "Friday": "friday_chatterbox",
-    },
+    # Optional per-identity TTS voice overrides keyed by the installation's
+    # configured agent or worker display names (for example the value of
+    # ODYSSEUS_PC_CODEX_LABEL). Ships empty: private installation identities
+    # such as Friday or Gordon must never be public defaults. An installation
+    # that configures names adds its own entries, and the generic tts_voice
+    # remains the fallback for every identity without an override.
+    "tts_agent_voices": {},
     "tts_speed": "1",
     "stt_enabled": False,
     "stt_provider": "disabled",
@@ -417,4 +419,29 @@ def sanitize_protocol_pack_ids(value: Any) -> list[str]:
             raise ValueError(f"invalid pack id: {pack_id[:60]}")
         if pack_id not in sanitized:
             sanitized.append(pack_id)
+    return sanitized
+
+
+def sanitize_tts_agent_voices(value: Any) -> dict[str, str]:
+    """Normalize an installation-owned display-name -> voice-code map.
+
+    Keys are installation-configured agent or worker display names, so the
+    map starts empty and this helper never injects built-in names. Invalid
+    entries are dropped rather than corrected.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("must be an object")
+    sanitized: dict[str, str] = {}
+    for agent, voice in value.items():
+        if not isinstance(agent, str) or not isinstance(voice, str):
+            continue
+        name = " ".join(agent.split())
+        if not name or len(name) > 80 or any(ord(char) < 32 for char in name):
+            continue
+        code = voice.strip()[:128]
+        if not code:
+            continue
+        sanitized[name] = code
     return sanitized

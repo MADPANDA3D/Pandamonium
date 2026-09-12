@@ -23,6 +23,7 @@ from src.settings import (
     save_features as _save_features,
     sanitize_model_number_map,
     sanitize_protocol_pack_ids,
+    sanitize_tts_agent_voices,
     DEFAULT_SETTINGS,
 )
 from src.agent_identity import agent_identity_status, validate_agent_identity_setting
@@ -685,15 +686,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except ValueError as exc:
                     raise HTTPException(400, str(exc)) from exc
             if key == "tts_agent_voices":
-                if not isinstance(val, dict):
-                    raise HTTPException(400, "tts_agent_voices must be an object")
-                allowed_agents = {"Jarvis", "Gordon", "Friday"}
-                sanitized = {
-                    agent: str(voice).strip()[:128]
-                    for agent, voice in val.items()
-                    if agent in allowed_agents and isinstance(voice, str)
-                }
-                val = {**DEFAULT_SETTINGS["tts_agent_voices"], **sanitized}
+                try:
+                    val = sanitize_tts_agent_voices(val)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
             if key == "context_class_budget_percent":
                 if not isinstance(val, dict):
                     raise HTTPException(400, "context_class_budget_percent must be an object")
