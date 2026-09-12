@@ -74,6 +74,61 @@ def test_voice_worker_defaults_are_public_and_neutral():
     assert labels["subscription"] == "ChatGPT Subscription"
 
 
+def test_tts_agent_voice_defaults_ship_without_installation_names():
+    assert settings.DEFAULT_SETTINGS["tts_agent_voices"] == {}
+    serialized = json.dumps(settings.DEFAULT_SETTINGS["tts_agent_voices"]).casefold()
+    for forbidden in ("friday", "gordon", "jarvis"):
+        assert forbidden not in serialized
+
+
+def test_tts_agent_voice_sanitizer_keeps_installation_names_and_drops_junk():
+    assert settings.sanitize_tts_agent_voices({
+        " Friday ": " friday_chatterbox ",
+        "Atlas": "atlas_voice",
+        "Gordon": "",
+        "": "voice",
+        "bad\x01name": "voice",
+        "x" * 81: "voice",
+        5: "voice",
+        "LongVoice": "v" * 200,
+        "NotAString": None,
+    }) == {
+        "Friday": "friday_chatterbox",
+        "Atlas": "atlas_voice",
+        "LongVoice": "v" * 128,
+    }
+    with pytest.raises(ValueError):
+        settings.sanitize_tts_agent_voices(["not", "a", "map"])
+
+
+def test_clean_install_never_materializes_private_agent_voice_names(tmp_path, monkeypatch, request):
+    request.addfinalizer(settings._invalidate_caches)
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(settings, "SETTINGS_FILE", str(settings_file))
+    settings._invalidate_caches()
+
+    loaded = settings.load_settings()
+
+    assert loaded["tts_agent_voices"] == {}
+    for forbidden in ("Friday", "Gordon", "Jarvis"):
+        assert forbidden not in loaded["tts_agent_voices"]
+
+
+def test_saved_installation_agent_voice_map_is_preserved(tmp_path, monkeypatch, request):
+    request.addfinalizer(settings._invalidate_caches)
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(json.dumps({
+        "tts_agent_voices": {"Friday": "friday_chatterbox", "Gordon": "gordon_chatterbox"},
+    }), encoding="utf-8")
+    monkeypatch.setattr(settings, "SETTINGS_FILE", str(settings_file))
+    settings._invalidate_caches()
+
+    assert settings.load_settings()["tts_agent_voices"] == {
+        "Friday": "friday_chatterbox",
+        "Gordon": "gordon_chatterbox",
+    }
+
+
 @pytest.mark.parametrize(
     "value",
     ["not-json", "[]", '{"unknown":["project"]}', '{"pc-codex":["../project"]}'],
