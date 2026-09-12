@@ -947,10 +947,40 @@ async def _execute_tool_block_impl(
             result = {"error": "MCP manager not available", "exit_code": 1}
     elif tool == "get_runtime_status":
         from src.jarvis_agent import runtime_status
+        from src.update_status import release_facts
 
         desc = "get_runtime_status"
-        runtime = await runtime_status(owner=owner)
-        result = {**runtime, "output": json.dumps(runtime, ensure_ascii=False), "exit_code": 0}
+        args: Dict[str, Any] = {}
+        if content and str(content).strip():
+            try:
+                parsed = json.loads(content)
+            except (TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                args = parsed
+        runtime = runtime_status(owner=owner)
+        if args.get("release") is not False:
+            # The model-endpoint probe and the release-channel check are
+            # independent; run them together so a release question pays the
+            # slower of the two, not their sum.
+            runtime_payload, release_payload = await asyncio.gather(
+                runtime,
+                release_facts(
+                    notes_version=args.get("release_notes_version") or None,
+                    include_notes=True,
+                ),
+            )
+            payload: Dict[str, Any] = {
+                **runtime_payload,
+                "release": release_payload,
+            }
+        else:
+            payload = dict(await runtime)
+        result = {
+            **payload,
+            "output": json.dumps(payload, ensure_ascii=False),
+            "exit_code": 0,
+        }
     elif tool == "start_agent_task":
         from src.jarvis_agent import start_task
 

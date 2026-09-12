@@ -1184,6 +1184,15 @@ def setup_chat_routes(
                 disabled_tools.update(WEB_TOOL_NAMES)
         elif _search_enabled:
             disabled_tools.difference_update(WEB_TOOL_NAMES)
+        # Release/version/update self-knowledge comes from the installation's
+        # local release state (version, updater, curated notes). Disable web
+        # tools for that turn so it cannot drift to public forks or unrelated
+        # projects even when the operator phrases it as a web search.
+        _explicit_release_intent = bool(
+            _tool_intent and _tool_intent.category == "release"
+        )
+        if _explicit_release_intent:
+            disabled_tools.update(WEB_TOOL_NAMES)
 
         # Nobody/incognito mode: deny tools that would expose the user's
         # persistent memory, past chats, or other identity-linked data.
