@@ -2351,7 +2351,7 @@ def _build_system_prompt(
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
 
-    agent_prompt = agent_system_prompt(agent_prompt, model=model)
+    agent_prompt = agent_system_prompt(agent_prompt, model=model, trace_surface="agent")
 
     # Dynamic parts that change per request
     mcp_schemas = []
@@ -4197,6 +4197,30 @@ async def stream_agent_loop(
                 hard_max=hard_max,
             )
             _effective_input_budget = max(effective_budget - reserve_tokens, 64)
+            # Advisory protocol text yields to tool evidence under pressure.
+            if before_trim_tokens > _effective_input_budget:
+                try:
+                    from src.protocol_registry import PROTOCOL_BEGIN, strip_protocol_block
+
+                    stripped_messages = [
+                        {**message, "content": strip_protocol_block(message["content"])}
+                        if message.get("role") == "system"
+                        and isinstance(message.get("content"), str)
+                        and PROTOCOL_BEGIN in message["content"]
+                        else message
+                        for message in messages
+                    ]
+                    stripped_tokens = estimate_tokens(stripped_messages)
+                    if stripped_tokens < before_trim_tokens:
+                        logger.info(
+                            "[agent] dropped protocol layer under context pressure: %s -> %s tokens",
+                            before_trim_tokens,
+                            stripped_tokens,
+                        )
+                        messages = stripped_messages
+                        before_trim_tokens = stripped_tokens
+                except Exception as strip_error:
+                    logger.warning("[agent] protocol layer strip skipped: %s", strip_error)
             trimmed_messages = trim_for_context(
                 messages,
                 effective_budget,
