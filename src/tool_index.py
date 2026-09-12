@@ -122,7 +122,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
     "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). Resolve today/tomorrow using the Current date and time context, then use ISO datetimes in the user's local wall time; supports all-day events. Use rrule only for explicit recurrence; for update_event pass rrule='' to remove repeats. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
     "read_calendar": "Read-only calendar access for voice and agent answers. Pulls the authenticated owner's connected CalDAV calendar first, then lists calendars or events. Never creates, updates, or deletes events; reports when freshness could not be confirmed.",
-    "get_runtime_status": "Read the configured Jarvis voice runtime and connected-worker status. Use only when the user asks what model, voice provider, runtime, or worker is actually active; do not guess from prompts.",
+    "get_runtime_status": "Read the running Pandamonium application version and local release state (canonical repository, updater status, curated release notes) plus server-verified model, context, voice, and configured-worker runtime facts. Use for version, release, update, release-notes, or repository questions about this installation; do not web-search for Pandamonium's own releases and do not guess from prompts.",
     "start_agent_task": "Delegate a bounded read-only task to one configured worker and allowlisted workspace. Worker execution continues in the background and returns a task ID for progress and cancellation. Never request write permission or caller preapproval.",
     "read_agent_task": "Read the authenticated owner's worker task status, progress, and terminal result by task ID. Use after start_agent_task when a current result is needed; never invent completion.",
     "search_jarvis_knowledge": "Search the authenticated owner's curated Jarvis knowledge for private background context. This is read-only and must not replace live-source inspection for current or changing facts.",
@@ -345,6 +345,14 @@ class ToolIndex:
 
     # Keyword hints: if the query mentions these words, force-include the tools.
     _KEYWORD_HINTS = {
+        # This installation's release truth (issue #894): release/version
+        # questions surface the local release-state tool even when embedding
+        # retrieval misses or times out.
+        frozenset({"release notes", "changelog", "what version", "which version",
+                   "up to date", "update available", "latest release",
+                   "latest version", "pandamonium repo", "pandamonium repository",
+                   "pandamonium release", "pandamonium version"}):
+            {"get_runtime_status"},
         # NOTE: "tell" was removed from this set. It fired on any "tell me ..."
         # request (e.g. "visit <url> and tell me the title"), force-including the
         # whole email toolset and crowding out the relevant tools — the model then

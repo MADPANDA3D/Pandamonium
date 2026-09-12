@@ -1270,8 +1270,21 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_runtime_status",
-            "description": "Return the running Pandamonium application version and server-verified runtime facts including the actual brain model, architecture, quantization, context allocation, reported cache evidence, TTS provider, and worker availability. Use this whenever the operator asks what version, model, or runtime is active.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            "description": "Return the running Pandamonium application version, server-verified runtime facts (brain model, architecture, quantization, context allocation, cache evidence, TTS provider, workers), and this installation's release state. Use this for any version, release, update, or release-notes question. The release block names the canonical repository, reports the signed release channel and persisted updater status, and includes the curated release notes for the installed or requested version.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "release": {
+                        "type": "boolean",
+                        "description": "Include local release state and curated release notes (default true).",
+                    },
+                    "release_notes_version": {
+                        "type": "string",
+                        "description": "Exact release version whose curated notes to read, e.g. '1.0.47'. Defaults to the installed version.",
+                    },
+                },
+                "additionalProperties": False,
+            },
         },
     },
     {

@@ -64,6 +64,41 @@ _PANEL = (
     r"settings|cookbook|sessions?|chats?|skills|memories|memory|brain)"
 )
 
+# This installation's own release/version/update state is local truth. These
+# patterns win over the generic web/research patterns below so a question about
+# Pandamonium releases (even one phrased as "search the web for ...") answers
+# from `/api/version`, the updater state, and the curated `.github/releases`
+# notes instead of drifting to unrelated public results. An explicit
+# self-reference keeps another project's changelog/release notes on the web
+# path.
+_RELEASE_SELF_REFERENCE = r"\b(?:pandamonium|odysseus|jarvis[-\s]?os)\b"
+_RELEASE_TERMS = (
+    r"\b(?:releases?|release\s+notes?|changelog|versions?|updates?|"
+    r"up(?: |-)?to(?: |-)?date|latest\s+build)\b"
+)
+_RELEASE_FIRST_PERSON = (
+    r"\b(?:what|which)\s+version\b.{0,60}\b(?:am i|are you|is\s+(?:this|the)\s+(?:app|install|installation|build))\b|"
+    r"\bam i\s+(?:on|running)\s+(?:the\s+)?latest\b|"
+    r"\bis\s+(?:pandamonium|odysseus|jarvis[-\s]?os)\s+up(?: |-)?to(?: |-)?date\b|"
+    r"\b(?:is there|are there|check(?: for)?)\s+(?:an?\s+)?updates?\b(?:\s+(?:available|now|please))?\s*[?.!]*\s*$|"
+    r"\bupdates?\s+available\s*[?.!]*\s*$"
+)
+_RELEASE_SELF_KNOWLEDGE = re.compile(
+    rf"(?:{_RELEASE_SELF_REFERENCE}.{{0,80}}{_RELEASE_TERMS}|"
+    rf"{_RELEASE_TERMS}.{{0,80}}{_RELEASE_SELF_REFERENCE}|"
+    rf"{_RELEASE_SELF_REFERENCE}.{{0,40}}\b(?:repo(?:sitory)?|github)\b|"
+    rf"\bwhat(?:'s| is)\s+new\b.{{0,40}}{_RELEASE_SELF_REFERENCE}|"
+    rf"\brelease\s+notes?\b.{{0,60}}\b(?:installed|current|this)\s+(?:version|build|install(?:ation)?|release)\b|"
+    rf"\b(?:installed|current|this)\s+(?:version|build|install(?:ation)?|release)\b.{{0,60}}\brelease\s+notes?\b|"
+    rf"{_RELEASE_FIRST_PERSON})",
+    re.I,
+)
+
+
+def is_release_self_knowledge(text: str) -> bool:
+    """Return True when a message asks about this installation's release state."""
+    return bool(text and _RELEASE_SELF_KNOWLEDGE.search(text))
+
 _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
     (category, reason, re.compile(pattern, re.I))
     for category, reason, pattern in (
@@ -117,6 +152,12 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("integrations", "live integration health request",
          r"\b(?:check|show|report|summari[sz]e|what(?:'s| is))\b.{0,100}\b(?:integration|plugin|mcp|portal)s?\b.{0,100}\b(?:health|status|working|connected|available)\b|"
          r"\b(?:health|status)\b.{0,100}\b(?:all\s+|my\s+|configured\s+)?(?:integration|plugin|mcp|portal)s?\b"),
+
+        # This installation's release/version/update state is local truth.
+        # Must stay ahead of the web/research patterns below so release
+        # questions answer from the installed release channel and curated
+        # notes instead of public search results or stale forks.
+        ("release", "release/version self-knowledge request", _RELEASE_SELF_KNOWLEDGE.pattern),
 
         # Deep research jobs, not quick conceptual mentions of research.
         ("web", "explicit web search request", rf"{_PLEASE}(?:do|run|use|perform|make)\s+(?:a\s+)?(?:web\s+search|search\s+the\s+web)\b.+"),

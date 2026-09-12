@@ -30,6 +30,7 @@ from src.model_context import (
     estimate_tool_schema_tokens,
 )
 from src.agent_identity import agent_system_prompt, configured_agent_id
+from src.action_intents import is_release_self_knowledge
 from src.action_protocol import (
     build_action_result,
     classify_target,
@@ -391,6 +392,9 @@ _DOMAIN_RULES = {
 ## Pandamonium platform truth rules
 - Questions about Pandamonium's own architecture or protocols require evidence. Use `get_runtime_status` for live model/runtime facts, `manage_mcp action=inventory` for current tool/integration inventory, and a configured read-only worker for source-code inspection when available.
 - Report the running `application_version` from `get_runtime_status`; never infer a Pandamonium version from a worker, model alias, package, or stale source file.
+- For any release, version, update, or release-notes question, call `get_runtime_status` with `release=true` (add `release_notes_version` to read another exact version). Its release block is this installation's truth: running version and commit, the canonical repository URL, the signed release channel status, the persisted updater state, and the curated release notes. Answer from that block and name the canonical repository `MADPANDA3D/Pandamonium`.
+- Never present a public fork, mirror, or unrelated project as this installation's repository or release notes, and do not web-search for Pandamonium's own releases unless the operator explicitly asks for external commentary.
+- If the release check reports the channel unavailable, say exactly that with the reported reason; do not fabricate a version or fill the gap with unrelated public results.
 - For local-model memory or context-capacity explanations, distinguish parameter weights from KV cache, sliding-window-attention cache, and MoE expert cache. Mention a component only when runtime/log/source evidence reports it; never invent an embedding-matrix allocation.
 - Do not extrapolate frameworks, databases, message buses, isolation boundaries, or capabilities from generic software patterns. Distinguish verified runtime facts, verified source facts, and unverified design intent.""",
 }
@@ -659,6 +663,18 @@ def _clamp_network_inspection_tools(
         selected.difference_update(_NETWORK_FILE_MUTATION_TOOLS)
     return selected
 
+
+def _clamp_release_self_knowledge_tools(
+    release_self_knowledge: bool,
+    tool_names: set[str],
+) -> set[str]:
+    """Keep release self-knowledge turns on local state, not public search."""
+    if not release_self_knowledge:
+        return set(tool_names)
+    selected = set(tool_names) - WEB_TOOL_NAMES
+    selected.add("get_runtime_status")
+    return selected
+
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
     names = set(tool_names or set())
     rules = []
@@ -848,7 +864,7 @@ For a RECURRING event pass `rrule` as an iCalendar RRULE string, e.g. `"FREQ=WEE
 If the user asks for a reminder/alarm before the event, pass `reminder_minutes` as an integer; do not write reminder text into the event description and do NOT also call `manage_notes` for the same reminder because calendar reminders are routed through Notes automatically. \
 `calendar` accepts a name ("Main") or short-id prefix.""",
     "read_calendar": "- ```read_calendar``` — Admin-only: refresh and read the authenticated user's Calendar without event mutations. Args (JSON): {\"action\":\"list_events|list_calendars\", \"start\":\"ISO datetime\"?, \"end\":\"ISO datetime\"?, \"calendar\":\"name or id\"?, \"max_results\":50?}. `list_events` requires explicit start/end no more than 366 days apart. Results are owner-scoped and bounded; if freshness could not be confirmed, say so explicitly. This tool is unavailable in plan mode because its CalDAV pull may update the local cache.",
-    "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version plus server-verified model, context, voice, and configured-worker runtime facts. Use this for claims about what is actually running; do not infer application version, provider, or architecture from a worker/model display alias.",
+    "get_runtime_status": "- ```get_runtime_status``` — Read the running Pandamonium application version, this installation's local release state (canonical repository, signed channel/update status, updater state, curated release notes), plus server-verified model, context, voice, and configured-worker runtime facts. Args (JSON, optional): {\"release\": true?, \"release_notes_version\": \"1.0.47\"?}. Use this for any version, release, update, or release-notes question; never infer application version, repository, or release notes from a worker/model display alias or public search result.",
     "inspect_network": "- ```inspect_network``` — Collect the network view visible to the running Pandamonium service with fixed, bounded, read-only interface, route, neighbor, and optional Tailscale probes. Takes no arguments. Use the returned evidence for current-network claims and say when the wider topology remains unobserved.",
     "start_agent_task": """\
 ```start_agent_task
@@ -1667,6 +1683,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
             "low_signal": True,
             "continuation": False,
             "domains": set(),
+            "release_self_knowledge": False,
             "retrieval_query": text,
         }
 
@@ -1836,11 +1853,23 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     ):
         domains.add("platform")
 
+    # The installation owns its release truth. Questions about Pandamonium's
+    # version, updates, repository, or release notes answer from local release
+    # state, so the generic web/cookbook keyword matches must not drag the turn
+    # into public search results or model-serving state. An explicit "research"
+    # request keeps its deep-research intent (MAD-887).
+    _release_self_knowledge = is_release_self_knowledge(retrieval_query)
+    if _release_self_knowledge:
+        domains.add("platform")
+        domains.discard("web")
+        domains.discard("cookbook")
+
     low_signal = not continuation and not domains
     return {
         "low_signal": low_signal,
         "continuation": continuation,
         "domains": domains,
+        "release_self_knowledge": _release_self_knowledge,
         "retrieval_query": retrieval_query,
     }
 
@@ -3996,6 +4025,16 @@ async def stream_agent_loop(
                 sorted(_relevant_tools - _network_clamped_tools),
             )
             _relevant_tools = _network_clamped_tools
+        _release_clamped_tools = _clamp_release_self_knowledge_tools(
+            bool(_intent.get("release_self_knowledge")),
+            _relevant_tools,
+        )
+        if _release_clamped_tools != _relevant_tools:
+            logger.info(
+                "[agent-intent] release self-knowledge clamp removed web tools=%s",
+                sorted(_relevant_tools - _release_clamped_tools),
+            )
+            _relevant_tools = _release_clamped_tools
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
     prep_timings["tool_selection"] = time.time() - _t1
