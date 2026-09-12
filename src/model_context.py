@@ -17,8 +17,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-from core.atomic_io import atomic_write_json
-from core.constants import DATA_DIR
 from src.context_budget import configured_model_window, context_class_budget_percent
 
 logger = logging.getLogger(__name__)
@@ -399,8 +397,23 @@ def _freetoken_runtime_context(base_url: str, model: str) -> Optional[int]:
 # lookup because a large catalog is expensive; caching the whole map lets us
 # pay that download at most once per endpoint instead of once per model.
 _catalog_ctx_cache: Dict[str, Dict[str, int]] = {}
-_CATALOG_STORE_FILE = Path(DATA_DIR) / "model_context_catalog.json"
+_CATALOG_STORE_FILE: Optional[Path] = None
 _persisted_catalog_cache: Optional[Dict[str, Dict[str, int]]] = None
+
+
+def _catalog_store_path() -> Path:
+    """Resolve the persisted catalog path without importing core at module load.
+
+    ``core/__init__`` imports ``src.llm_core``, which imports this module, so a
+    top-level ``core`` import here creates an import cycle for any entry point
+    that loads ``src.model_context`` first.
+    """
+    global _CATALOG_STORE_FILE
+    if _CATALOG_STORE_FILE is None:
+        from core.constants import DATA_DIR
+
+        _CATALOG_STORE_FILE = Path(DATA_DIR) / "model_context_catalog.json"
+    return _CATALOG_STORE_FILE
 
 
 def _load_persisted_catalog() -> Dict[str, Dict[str, int]]:
@@ -410,7 +423,7 @@ def _load_persisted_catalog() -> Dict[str, Dict[str, int]]:
         return _persisted_catalog_cache
     data: Dict[str, Dict[str, int]] = {}
     try:
-        raw = json.loads(_CATALOG_STORE_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(_catalog_store_path().read_text(encoding="utf-8"))
         endpoints = raw.get("endpoints") if isinstance(raw, dict) else None
         if isinstance(endpoints, dict):
             for endpoint, models in endpoints.items():
@@ -444,7 +457,9 @@ def _persist_catalog(endpoint_url: str, catalog: Dict[str, int]) -> None:
         "endpoints": {**store, endpoint_url: merged},
     }
     try:
-        atomic_write_json(_CATALOG_STORE_FILE, payload, indent=2)
+        from core.atomic_io import atomic_write_json
+
+        atomic_write_json(_catalog_store_path(), payload, indent=2)
     except Exception as exc:
         logger.debug(f"Failed to persist model catalog: {exc}")
         return

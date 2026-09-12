@@ -5,7 +5,7 @@ scope: core
 protocol: JOS-P1
 title: Identity and constitution
 domains: []
-token_budget: 260
+token_budget: 380
 enforcement:
   - src/agent_identity.py
   - src/prompt_security.py
