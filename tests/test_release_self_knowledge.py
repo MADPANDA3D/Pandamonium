@@ -88,7 +88,7 @@ def test_release_question_routes_to_platform_tools_without_web():
     assert "get_runtime_status" in selected
     rules = agent_loop._domain_rules_for_tools(selected)
     assert any("canonical repository" in rule for rule in rules)
-    assert any("channel unavailable" in rule for rule in rules)
+    assert any("reports unavailable" in rule for rule in rules)
 
 
 def test_release_clamp_removes_retrieved_web_tools():
