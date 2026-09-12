@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
-from src.protocol_registry import core_protocol_block, core_protocol_references
+from src.protocol_registry import (
+    mounted_protocol_block,
+    mounted_protocol_references,
+    protocol_layer_enabled,
+)
 from src.settings import DEFAULT_SETTINGS, load_settings
 
 
@@ -85,6 +89,7 @@ def agent_system_prompt(
     *,
     model: Any = None,
     trace_surface: str | None = None,
+    protocol_domains: Iterable[str] | None = None,
 ) -> str:
     """Mount the configured identity, the protocol layer, and the active preset."""
     identity = resolve_agent_identity()
@@ -98,8 +103,13 @@ def agent_system_prompt(
         f"runtime facts available to you.\n\n{identity['agent_constitution']}"
     )
     try:
-        protocol_block = core_protocol_block()
-        protocol_refs = core_protocol_references() if protocol_block else []
+        if protocol_layer_enabled():
+            protocol_block = mounted_protocol_block(protocol_domains)
+            protocol_refs = (
+                mounted_protocol_references(protocol_domains) if protocol_block else []
+            )
+        else:
+            protocol_block, protocol_refs = "", []
     except Exception:
         protocol_block = ""
         protocol_refs = []
