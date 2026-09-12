@@ -14,6 +14,7 @@ const API_BASE = window.location.origin;
 const _FOLDER_SVG = '<svg class="workspace-row-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
 let _modal = null;
 let _curPath = '';
+let _pickerResolve = null;
 
 export function getWorkspace() {
   return Storage.get(KEYS.WORKSPACE, '') || '';
@@ -164,8 +165,18 @@ function _getModal() {
     }
   });
   _modal.querySelector('#workspace-use').addEventListener('click', () => {
-    setWorkspace(_curPath);
-    if (uiModule && uiModule.showToast) uiModule.showToast(`Workspace set: ${_basename(_curPath)}`);
+    const chosen = _curPath;
+    if (_pickerResolve) {
+      // Folder-picker mode (e.g. adding a project): hand the path back
+      // without touching the chat workspace binding.
+      const resolve = _pickerResolve;
+      _pickerResolve = null;
+      resolve(chosen);
+      _modal.style.display = 'none';
+      return;
+    }
+    setWorkspace(chosen);
+    if (uiModule && uiModule.showToast) uiModule.showToast(`Workspace set: ${_basename(chosen)}`);
     closeWorkspaceBrowser();
   });
   const content = _modal.querySelector('.modal-content');
@@ -184,8 +195,24 @@ export async function openWorkspaceBrowser() {
   }
 }
 
+/**
+ * Open the folder browser as a picker and resolve with the chosen path
+ * (or '' when cancelled). Never binds the chat workspace.
+ */
+export async function pickFolder() {
+  return new Promise((resolve) => {
+    _pickerResolve = resolve;
+    openWorkspaceBrowser();
+  });
+}
+
 export function closeWorkspaceBrowser() {
   if (_modal) _modal.style.display = 'none';
+  if (_pickerResolve) {
+    const resolve = _pickerResolve;
+    _pickerResolve = null;
+    resolve('');
+  }
 }
 
 export function initWorkspace() {
@@ -197,4 +224,4 @@ export function initWorkspace() {
   if (pill) pill.addEventListener('click', clearWorkspace);
 }
 
-export default { initWorkspace, openWorkspaceBrowser, getWorkspace, setWorkspace, vetAndSetWorkspace, clearWorkspace, syncWorkspaceIndicator, applyMode };
+export default { initWorkspace, openWorkspaceBrowser, pickFolder, getWorkspace, setWorkspace, vetAndSetWorkspace, clearWorkspace, syncWorkspaceIndicator, applyMode };

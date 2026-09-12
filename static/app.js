@@ -6,6 +6,7 @@ import Storage from './js/storage.js';
 import { initComposerLinks } from './js/composerLinks.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
+import projectsModule from './js/projects.js';
 import accessModeModule from './js/accessMode.js';
 import fileHandlerModule from './js/fileHandler.js';
 import modelsModule from './js/models.js?v=20260711-model-cleanup2';
@@ -2071,6 +2072,7 @@ function initializeEventListeners() {
   setupToggle('web-toggle-btn', 'web-toggle', 'web');
   setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
   try { workspaceModule.initWorkspace(); } catch (_) {}
+  try { projectsModule.initProjects(); } catch (_) {}
   try { accessModeModule.initAccessMode(); } catch (_) {}
 
   // Document editor toggle (special: uses module panel, not a checkbox)

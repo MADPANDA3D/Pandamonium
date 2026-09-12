@@ -830,6 +830,31 @@
           </div>
         </section>
       </div>
+
+      <div class="section" id="projects-section" data-section-reorder="true">
+        <div class="section-header-flex">
+          <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
+          <span class="section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Projects</span>
+          <div style="position:relative; display:inline-flex;">
+            <button type="button" class="section-header-btn list-item-plus-btn" id="projects-add-btn" title="Add a project" aria-label="Add a project" aria-haspopup="menu" aria-expanded="false">
+              <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <div id="projects-add-menu" class="dropdown">
+              <div class="dropdown-item" id="project-create-option" role="menuitem" tabindex="0">
+                <h4>New project</h4>
+                <p>Create a working folder for Pandamonium</p>
+              </div>
+              <div class="dropdown-item" id="project-import-option" role="menuitem" tabindex="0">
+                <h4>Add existing folder</h4>
+                <p>Use a folder that already exists</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="projects-list"></div>
+        <div id="projects-empty" class="list-item" hidden><span class="grow" style="opacity:0.55;">No projects yet</span></div>
+      </div>
+
       <!-- Hidden dropdown for session actions -->
       <div id="session-actions-dropdown" class="dropdown hidden">
         <div class="dropdown-item" id="rename-session-option">
