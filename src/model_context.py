@@ -307,6 +307,11 @@ def _lookup_known(model: str) -> Optional[int]:
     one. Without this, 'o1' (200k) precedes 'o1-mini' (128k) in the table and a
     first-match return would report o1-mini's window as 200k.
     """
+    from src.context_budget import configured_model_window
+
+    operator_window = configured_model_window(model)
+    if operator_window:
+        return operator_window
     name = model.lower()
     basename = name.split("/")[-1] if "/" in name else name
     basename = basename.split(":")[0]  # strip :free, :extended etc.
@@ -874,4 +879,45 @@ def build_context_manifest(
         ),
         "tools": _tool_catalog_report(tool_catalog),
         "extensions": safe_extensions,
+    }
+
+
+def model_budget_snapshot(endpoint_url: str, model: str) -> Dict[str, Any]:
+    """Resolved input-budget facts for the selected model (diagnostics only)."""
+    from src.context_budget import (
+        DEFAULT_BUDGET,
+        DEFAULT_HARD_MAX,
+        budget_is_explicit,
+        compute_input_token_budget,
+        configured_model_window,
+        model_input_token_budget,
+    )
+    from src.settings import get_setting
+
+    override_window = configured_model_window(model)
+    if override_window:
+        context_window, known, source = override_window, True, "settings"
+    else:
+        context_window, known = get_context_length_known(endpoint_url, model)
+        source = "discovered" if known else "unknown"
+    override_budget = model_input_token_budget(model)
+    try:
+        configured = int(get_setting("agent_input_token_budget", DEFAULT_BUDGET) or 0)
+    except (TypeError, ValueError):
+        configured = DEFAULT_BUDGET
+    if override_budget > 0:
+        configured = override_budget
+    explicit = override_budget > 0 or budget_is_explicit(configured)
+    effective = compute_input_token_budget(
+        configured, context_window if known else 0, explicit, hard_max=DEFAULT_HARD_MAX
+    )
+    return {
+        "model": str(model or ""),
+        "endpoint": str(endpoint_url or ""),
+        "context_window": context_window if known else 0,
+        "known": bool(known),
+        "source": source,
+        "configured_input_budget": configured,
+        "explicit": bool(explicit),
+        "effective_input_budget": effective,
     }
