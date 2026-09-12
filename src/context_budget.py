@@ -10,6 +10,8 @@ the user has NOT set an explicit budget, while still honouring an explicit setti
 exactly (clamped to the window). Pure and side-effect free so it is unit-testable.
 """
 
+from typing import Any, Mapping
+
 # Generous ceiling so long-context models are unblocked without sending a
 # pathologically large prompt every agent turn. Tunable; chosen to fully cover
 # 128K models and give 1M models a large but bounded budget.
@@ -118,3 +120,48 @@ def context_class_budget_percent(value=None) -> dict[str, int]:
             continue
         result[name] = max(1, min(percent, 100))
     return result
+
+
+def _operator_settings() -> Mapping[str, Any]:
+    """Read installation settings fail-soft so budgeting can never crash a turn."""
+    try:
+        from src.settings import load_settings
+
+        return load_settings()
+    except Exception:
+        return {}
+
+
+def match_model_config(model: str, table: Any) -> int:
+    """Resolve a model against an operator config map.
+
+    Exact model id wins; otherwise the longest substring key wins so a short
+    key never shadows a more specific one. Invalid entries are ignored.
+    """
+    if not isinstance(table, Mapping):
+        return 0
+    name = str(model or "").strip().lower()
+    if not name:
+        return 0
+    basename = name.split("/")[-1].split(":")[0]
+    for key, raw in table.items():
+        if str(key).strip().lower() == name:
+            return _int_or_zero(raw)
+    best_key = ""
+    best_value = 0
+    for key, raw in table.items():
+        lowered = str(key).strip().lower()
+        if lowered and (lowered in basename or lowered in name):
+            if len(lowered) > len(best_key):
+                best_key, best_value = lowered, _int_or_zero(raw)
+    return best_value
+
+
+def configured_model_window(model: str) -> int:
+    """Operator-pinned context window for a model, or 0 when unset."""
+    return match_model_config(model, _operator_settings().get("model_context_windows", {}))
+
+
+def model_input_token_budget(model: str) -> int:
+    """Operator-pinned input-token budget for a model, or 0 when unset."""
+    return match_model_config(model, _operator_settings().get("model_input_token_budgets", {}))

@@ -4166,10 +4166,13 @@ async def stream_agent_loop(
     _t3 = time.time()
     try:
         from src.context_compactor import trim_for_context
-        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX, DEFAULT_BUDGET, budget_is_explicit as _budget_is_explicit
+        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX, DEFAULT_BUDGET, budget_is_explicit as _budget_is_explicit, model_input_token_budget
         from src.model_context import budget_context_for_model
 
         soft_budget = int(get_setting("agent_input_token_budget", DEFAULT_BUDGET) or 0)
+        model_budget_override = model_input_token_budget(model)
+        if model_budget_override > 0:
+            soft_budget = model_budget_override
         if soft_budget > 0:
             before_trim_tokens = estimate_tokens(messages)
             reserve_tokens = min(max(max_tokens or 1024, 512), 2048)
@@ -4185,7 +4188,7 @@ async def stream_agent_loop(
             # Default value = auto sentinel (scale to the window); any other value =
             # explicit cap. Value-based, not presence-based, because the save path
             # materializes defaults so a persisted default must still read as auto (#4121).
-            budget_is_explicit = _budget_is_explicit(soft_budget)
+            budget_is_explicit = _budget_is_explicit(soft_budget) or model_budget_override > 0
             # Scale only off a window we actually discovered, bound to the value it
             # proves (else 0) — not the passed-in context_length, which can be stale
             # or unset for some callers (#4122 review).

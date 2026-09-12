@@ -35,6 +35,15 @@ def setup_diagnostics_routes(
         from src.operational_protocol import protocol_status
         return protocol_status()
 
+    @router.get("/api/diagnostics/model-budget")
+    async def get_model_budget(request: Request, endpoint: str, model: str) -> Dict[str, Any]:
+        """Resolved context window and effective input budget for one model."""
+        require_admin(request)
+        if len(endpoint) > 2048 or len(model) > 200:
+            raise HTTPException(400, "endpoint or model too long")
+        from src.model_context import model_budget_snapshot
+        return model_budget_snapshot(endpoint, model)
+
     @router.get("/api/diagnostics/protocol/events")
     async def get_protocol_events(
         request: Request,

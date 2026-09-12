@@ -147,6 +147,12 @@ DEFAULT_SETTINGS = {
     # want to actually use (e.g. 900_000 to fill a 1M-context model). See
     # `compute_input_token_budget`.
     "agent_input_token_hard_max": 200_000,
+    # Per-model context windows and input-token budgets, keyed by model id (exact
+    # match first, then longest substring). Operator overrides for API and
+    # self-hosted models; they outrank endpoint discovery and the built-in known
+    # table so the budget follows the selected model, not the agent or preset.
+    "model_context_windows": {},
+    "model_input_token_budgets": {},
     # Independent ceilings within the usable input budget. They do not need to
     # sum to 100; unused room stays available to current intent and active state.
     "context_class_budget_percent": {
@@ -362,3 +368,29 @@ def save_features(features: dict):
     from core.atomic_io import atomic_write_json
     atomic_write_json(FEATURES_FILE, features, indent=2)
     _invalidate_caches()
+
+
+def sanitize_model_number_map(
+    value: Any, *, max_keys: int = 200, max_value: int = 10_000_000
+) -> dict[str, int]:
+    """Validate an operator model -> positive-integer settings map."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("must be an object")
+    if len(value) > max_keys:
+        raise ValueError(f"must contain at most {max_keys} entries")
+    sanitized: dict[str, int] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("keys must be non-empty strings")
+        if isinstance(raw, bool):
+            raise ValueError("values must be integers")
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid value for {key.strip()[:60]}")
+        if number <= 0 or number > max_value:
+            raise ValueError(f"value out of range for {key.strip()[:60]}")
+        sanitized[key.strip()[:200]] = number
+    return sanitized
