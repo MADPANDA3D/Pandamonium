@@ -11,6 +11,7 @@ import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
+import sshConnectionsModule from './sshConnections.js';
 
 let initialized = false;
 let modalEl = null;
@@ -118,6 +119,7 @@ function initTabs() {
       document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
       syncAppearanceOpacity(tab === 'appearance');
       if (tab === 'ai') refreshAiModelEndpoints();
+      if (tab === 'ssh') sshConnectionsModule.open();
     });
   });
 }
@@ -6120,6 +6122,7 @@ export function open(tab) {
   document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
+  if (activeTab === 'ssh') sshConnectionsModule.open();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }

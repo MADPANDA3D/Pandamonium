@@ -16097,6 +16097,72 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 .admin-user-row.admin-ep-disabled .admin-btn-sm,
 .admin-user-row.admin-ep-disabled .admin-btn-delete,
 .admin-user-row.admin-ep-disabled .admin-badge-off { opacity: 1; }
+
+/* SSH Connections tab (MAD-935). Reuses the admin row/button language. */
+.ssh-row .ssh-meta {
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 3px;
+  word-break: break-all;
+}
+.ssh-row .ssh-note {
+  font-size: 11px;
+  opacity: 0.65;
+  margin-top: 4px;
+}
+.ssh-chip {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  opacity: 0.9;
+}
+.ssh-chip-ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+.ssh-chip-bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+.ssh-chip-idle { opacity: 0.55; }
+.ssh-chip-key { color: var(--accent, var(--red)); border-color: color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border)); }
+.ssh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ssh-actions .admin-btn-delete { margin-left: auto; }
+.ssh-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ssh-detail.hidden { display: none; }
+.ssh-field-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+}
+.ssh-key {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+.ssh-key-input { font-size: 10px; font-family: 'Fira Code', monospace; resize: vertical; }
+.ssh-check { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 8px; }
+.ssh-editor-form { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 10px; }
+.ssh-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 /* Local / API subsection labels inside the Endpoints card */
 .adm-ep-section-head {
   display: flex;
