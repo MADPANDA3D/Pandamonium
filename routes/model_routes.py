@@ -716,10 +716,20 @@ def _resolve_probe_key(ep) -> Optional[str]:
 
 
 def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 10, with_tools: bool = False) -> dict:
-    """Send a realistic completion request to a single model. Returns {status, latency_ms, error?}."""
+    """Send a realistic completion request to a single model. Returns
+    {status, latency_ms, error?, category, action, guidance, diagnostic_id?}."""
+    from src.model_response_diagnosis import (
+        classify_completion_body,
+        classify_exception,
+        classify_http_status,
+    )
+
     provider = _safe_detect_provider(base)
+    diagnostic_id = uuid.uuid4().hex[:12]
     if _is_discovery_only_provider(provider):
-        return {"status": "ok", "latency_ms": 0, "skipped": True}
+        return {"status": "ok", "latency_ms": 0, "skipped": True, "category": "ok",
+                "action": "none", "guidance": "", "diagnostic_id": diagnostic_id,
+                "provider": provider}
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Say OK"},
@@ -755,30 +765,100 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
         if _test_tools:
             payload["tools"] = _test_tools
 
+    def _classified(status: str, latency_ms, **fields) -> dict:
+        result = {
+            "status": status,
+            "latency_ms": latency_ms,
+            "provider": provider,
+            "diagnostic_id": diagnostic_id,
+            **fields,
+        }
+        return result
+
     try:
         t0 = _time.time()
         r = httpx.post(target_url, headers=h, json=payload, timeout=timeout, verify=llm_verify())
         latency = round((_time.time() - t0) * 1000)
         if r.is_success:
-            return {"status": "ok", "latency_ms": latency}
-        else:
-            # Extract error detail from response body
-            error_msg = f"HTTP {r.status_code}"
+            # A 200 alone is not success: the completion must actually carry
+            # content (or a tool call). This is the zero-content gap MAD-860.
             try:
                 body = r.json()
-                if "error" in body:
-                    err = body["error"]
-                    if isinstance(err, dict):
-                        error_msg = err.get("message", error_msg)[:120]
-                    elif isinstance(err, str):
-                        error_msg = err[:120]
             except Exception:
-                pass
-            return {"status": "fail", "latency_ms": latency, "error": error_msg}
+                diagnosis = classify_exception(
+                    json.JSONDecodeError("invalid JSON completion body", "", 0)
+                )
+                return _classified(
+                    "fail", latency,
+                    error="HTTP 200 with an unparseable completion body",
+                    category=diagnosis["category"], action=diagnosis["action"],
+                    guidance=diagnosis["guidance"],
+                )
+            diagnosis = classify_completion_body(body, model=model_id)
+            if diagnosis["category"] != "ok":
+                return _classified(
+                    "fail", latency,
+                    error=f"HTTP 200 but {diagnosis['category'].replace('_', ' ')}",
+                    category=diagnosis["category"], action=diagnosis["action"],
+                    guidance=diagnosis["guidance"],
+                )
+            return _classified(
+                "ok", latency, category="ok", action="none", guidance="",
+            )
+        # Extract error detail from response body
+        error_msg = f"HTTP {r.status_code}"
+        body_text = ""
+        try:
+            body = r.json()
+            if "error" in body:
+                err = body["error"]
+                if isinstance(err, dict):
+                    error_msg = err.get("message", error_msg)[:120]
+                elif isinstance(err, str):
+                    error_msg = err[:120]
+            body_text = json.dumps(body)[:800]
+        except Exception:
+            pass
+        from src.authority_protocol import redact_secret_text
+
+        error_msg = redact_secret_text(error_msg)
+        diagnosis = classify_http_status(r.status_code, body_text or error_msg)
+        return _classified(
+            "fail", latency, error=error_msg,
+            category=diagnosis["category"], action=diagnosis["action"],
+            guidance=diagnosis["guidance"], http_status=r.status_code,
+        )
     except httpx.TimeoutException:
-        return {"status": "timeout", "latency_ms": timeout * 1000, "error": f"Timed out ({timeout}s)"}
+        diagnosis = classify_exception(httpx.ReadTimeout("probe timed out"))
+        return _classified(
+            "timeout", timeout * 1000, error=f"Timed out ({timeout}s)",
+            category="timeout", action=diagnosis["action"],
+            guidance=diagnosis["guidance"],
+        )
     except Exception as e:
-        return {"status": "fail", "error": str(e)[:80]}
+        from src.authority_protocol import redact_secret_text
+
+        diagnosis = classify_exception(e)
+        return _classified(
+            "fail", None, error=redact_secret_text(str(e))[:80],
+            category=diagnosis["category"], action=diagnosis["action"],
+            guidance=diagnosis["guidance"],
+        )
+
+
+def _record_probe_validation(result: dict, endpoint_id: Optional[str], model_id: str) -> None:
+    """Persist one probe outcome next to the existing settings. Never raises."""
+    if not endpoint_id or not model_id:
+        return
+    try:
+        from src.model_response_diagnosis import record_model_validation
+
+        category = str(result.get("category") or "")
+        if not category:
+            category = "ok" if result.get("status") == "ok" else "url_http"
+        record_model_validation(endpoint_id, model_id, category)
+    except Exception:
+        logger.debug("Probe validation persistence failed for %s/%s", endpoint_id, model_id, exc_info=True)
 
 
 # Hostnames / IP prefixes that indicate a local endpoint
@@ -2054,6 +2134,7 @@ def setup_model_routes(model_discovery):
                 result = _probe_single_model(base, ep_data.get("api_key"), model_id, timeout=8, with_tools=_with_tools)
                 result["model"] = model_id
                 result["endpoint_id"] = ep_id
+                _record_probe_validation(result, ep_id, model_id)
                 results.append(result)
 
             return {"results": results}
@@ -2119,6 +2200,7 @@ def setup_model_routes(model_discovery):
                     result["type"] = "probe_result"
                     result["endpoint"] = ep["name"]
                     result["model"] = model_id
+                    _record_probe_validation(result, ep.get("id"), model_id)
                     if result["status"] == "ok":
                         ok_count += 1
                     yield f"data: {json.dumps(result)}\n\n"
@@ -2566,6 +2648,7 @@ def setup_model_routes(model_discovery):
                 result["model"] = mid
                 result["type"] = "probe_result"
                 result["endpoint"] = ep_data["name"]
+                _record_probe_validation(result, ep_id, mid)
                 if result["status"] == "ok":
                     ok_count += 1
                 else:

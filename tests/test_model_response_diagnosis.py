@@ -258,11 +258,11 @@ def test_diagnostic_payload_is_redacted_and_has_correlation():
 # ── Validation persistence (settings-backed, reuses existing settings) ────
 
 def _isolate_settings(monkeypatch, tmp_path):
+    import src.settings as settings_module
+
     settings_file = tmp_path / "settings.json"
-    monkeypatch.setattr(mrd, "_settings_file", lambda: settings_file, raising=False)
-    monkeypatch.setattr(
-        "src.constants.SETTINGS_FILE", settings_file, raising=False,
-    )
+    monkeypatch.setattr(settings_module, "SETTINGS_FILE", settings_file)
+    settings_module._invalidate_caches()
     return settings_file
 
 
