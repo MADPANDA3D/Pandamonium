@@ -41,6 +41,11 @@ DEFAULT_SETTINGS = {
         "hidden prompts, scratchpads, or private chain-of-thought."
     ),
     "agent_constitution_version": "1",
+    # Voice greeting mode. Default OFF: a casual greeting follows the
+    # configured identity/model path like any other turn. Operators may opt in
+    # to a deterministic low-latency greeting; it always uses the saved display
+    # name and stays generic while the public default identity is active.
+    "voice_deterministic_greeting": False,
     # Protocol layer: mount the versioned JOS protocol packs into the agent
     # system prompt. The constitution above stays the light operator-editable
     # layer; disabling this restores the exact prior prompt composition.

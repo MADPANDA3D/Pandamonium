@@ -322,12 +322,15 @@ async def test_do_it_again_without_a_recent_task_asks_for_context(monkeypatch):
 
 
 @pytest.mark.parametrize("band", ["morning", "afternoon", "evening"])
-def test_explicit_greeting_etiquette_matches_leos_words(band):
+def test_explicit_greeting_etiquette_is_generic_by_default(band):
+    # MAD-861: the deterministic greeting is opt-in and uses the saved display
+    # name; the public default copy must not carry a private name.
     text = f"Good {band}, Jarvis."
     assert _is_casual_greeting(text)
-    assert voice_routes._casual_greeting_reply(text, {"turns": []}) == (
-        f"Good {band}, Leo. What are we working on?"
-    )
+    reply = voice_routes._casual_greeting_reply(text, {"turns": []})
+    assert f"Good {band}" in reply
+    assert "Jarvis" not in reply
+    assert "Leo" not in reply
 
 
 def test_casual_greeting_and_approval_guards_are_deterministic():
@@ -423,8 +426,10 @@ async def test_yalls_greeting_does_not_dispatch_or_steer_an_active_worker(monkey
         )
     ]
 
-    assert [event["type"] for event in events] == ["assistant_delta", "final"]
-    assert events[-1]["diagnostics"]["guard_reason"] == "casual_greeting"
+    # MAD-861: with the deterministic greeting off (the default) a casual
+    # greeting is not a server-authored router turn; it follows the
+    # identity/model path instead of dispatching or steering a worker.
+    assert events == []
 
 
 @pytest.mark.asyncio
@@ -625,8 +630,8 @@ async def test_jarvis_selected_ask_hermes_stays_background_brokered(monkeypatch)
 @pytest.mark.parametrize(
     ("text", "expected_reply"),
     [
-        ("Beautiful Jarvis. Great work.", "You’re back with Jarvis."),
-        ("Good evening, Jarvis.", "Good evening, Leo. What are we working on?"),
+        ("Beautiful Jarvis. Great work.", f"You’re back with {voice_routes.configured_agent_name()}."),
+        ("Good evening, Jarvis.", "Good evening. What would you like to work on?"),
     ],
 )
 async def test_direct_jarvis_address_returns_from_selected_worker_without_task(text, expected_reply, monkeypatch):
