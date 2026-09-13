@@ -203,14 +203,22 @@ def test_replay_is_skipped_when_a_tool_has_run(monkeypatch):
     import src.llm_core as llm_core
     monkeypatch.setattr(llm_core, "llm_call_async", _fake_replay)
 
-    rounds = iter(["```bash\necho hi\n```", ""])
-    hold = {"n": 0}
+    rounds = iter([True, False])
 
     async def _fake_stream(_candidates, messages, **kwargs):
-        text = rounds[min(hold["n"], 1)]
-        hold["n"] += 1
-        if text:
-            yield f'data: {json.dumps({"delta": text})}\n\n'
+        if next(rounds, False):
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "tool_calls",
+                    "calls": [{
+                        "id": "c1",
+                        "name": "bash",
+                        "arguments": json.dumps({"command": "echo hi"}),
+                    }],
+                })
+                + "\n\n"
+            )
         yield "data: [DONE]\n\n"
 
     monkeypatch.setattr(al, "stream_llm_with_fallback", _fake_stream, raising=False)
@@ -220,6 +228,18 @@ def test_replay_is_skipped_when_a_tool_has_run(monkeypatch):
         [{"role": "user", "content": "run it"}],
         max_rounds=2,
         relevant_tools={"bash"},
+        extra_tool_schemas=[{
+            "type": "function",
+            "function": {
+                "name": "bash",
+                "description": "b",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            },
+        }],
     ))
     events = _events(chunks)
     assert calls == [], "a replay after a tool ran could duplicate its side effect"

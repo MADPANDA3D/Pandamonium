@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from src.llm_core import (
     stream_llm,
     stream_llm_with_fallback,
+    _detect_provider,
     _is_ollama_native_url,
 )
 from src.model_context import (
@@ -3325,10 +3326,63 @@ async def _run_verifier_subagent(
     return [r.strip() for r in reasons.split(";") if r.strip()]
 
 
+async def _bounded_empty_recovery(
+    endpoint_url: str,
+    model: str,
+    messages: list,
+    headers: Optional[Dict],
+    *,
+    temperature: float,
+    max_tokens: int,
+    timeout: int,
+    reasoning_effort: Optional[str],
+) -> tuple:
+    """One side-effect-free replay for a zero-content turn.
+
+    Returns ``(recovered_text, failure_category, diagnostic_id)``. The caller
+    must only invoke this when no tool has run in the request: replaying a
+    prompt that already executed a tool could duplicate an external side
+    effect.
+    """
+    from src.model_response_diagnosis import classify_exception
+
+    diagnostic_id = str(uuid.uuid4())[:12]
+    try:
+        from src.llm_core import llm_call_async
+
+        recovery_messages = list(messages) + [{
+            "role": "system",
+            "content": (
+                "Your previous turn produced no user-facing answer. Answer the "
+                "user's request now in plain text. Do not call any tools."
+            ),
+        }]
+        raw = await llm_call_async(
+            url=endpoint_url,
+            model=model,
+            messages=recovery_messages,
+            headers=headers,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            reasoning_effort=reasoning_effort,
+        )
+        recovered = _strip_think_blocks(strip_tool_blocks(raw or "")).strip()
+        if recovered:
+            return recovered, "", diagnostic_id
+    except Exception as exc:
+        logger.warning("[agent] bounded empty-response recovery failed: %s", exc)
+        return "", classify_exception(exc)["category"], diagnostic_id
+    return "", "zero_content_completion", diagnostic_id
+
+
 def _empty_response_fallback(
     full_response: str,
     round_reasoning: str,
     tool_events: list,
+    *,
+    category: Optional[str] = None,
+    request_id: str = "",
 ) -> tuple:
     """Return (final_response, sse_chunk_or_none) for the end-of-loop empty-response guard.
 
@@ -3336,6 +3390,11 @@ def _empty_response_fallback(
     content=""), full_response is empty but round_reasoning has content.
     The reasoning was already streamed as {thinking:true} chunks — do not
     re-emit it as a normal delta.  Just persist it and yield nothing.
+
+    Otherwise the caller has already tried its one bounded, side-effect-free
+    recovery. This returns exactly one actionable result naming the recovery
+    action (validate settings / change model / change endpoint mode / retry /
+    inspect a redacted diagnostic) — never a repeated generic card.
 
     Returns:
         (final_response: str, chunk: str | None)
@@ -3346,12 +3405,20 @@ def _empty_response_fallback(
     if tool_events:
         _error_msg = (
             "The tool call completed, but the model returned no final answer. "
-            "Please retry the request."
+            "Retry the request — the tool already ran, so it is not replayed "
+            "automatically."
         )
+        if category:
+            from src.model_response_diagnosis import recovery_guidance
+
+            _error_msg = f"{_error_msg} {recovery_guidance(category, request_id)}"
         return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
     if round_reasoning.strip():
         return round_reasoning, None
-    _error_msg = "The model returned an empty response. Please try again or switch to a different model."
+    from src.model_response_diagnosis import recovery_guidance
+
+    _guidance = recovery_guidance(category or "zero_content_completion", request_id)
+    _error_msg = f"The model returned an empty response. {_guidance}"
     return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
 
 
@@ -3701,14 +3768,46 @@ async def stream_agent_loop(
                     yield chunk
         except Exception as _direct_err:
             logger.warning("[agent] direct low-signal path failed: %s", _direct_err)
-            fallback = "Hey."
-            direct_response += fallback
-            yield f"data: {json.dumps({'delta': fallback})}\n\n"
 
+        _direct_finish_category = "ok"
         if not direct_response.strip():
-            fallback = "Hey."
-            direct_response = fallback
-            yield f"data: {json.dumps({'delta': fallback})}\n\n"
+            # No tools were offered on this path, so one bounded replay cannot
+            # duplicate a side effect.
+            from src.model_response_diagnosis import diagnostic_payload, recovery_guidance
+
+            _direct_recovered, _direct_failure, _direct_diag = await _bounded_empty_recovery(
+                endpoint_url,
+                model,
+                direct_messages,
+                headers,
+                temperature=temperature,
+                max_tokens=min(max_tokens or 128, 128),
+                timeout=int(get_setting("agent_stream_timeout_seconds", 300) or 300),
+                reasoning_effort=reasoning_effort,
+            )
+            if _direct_recovered:
+                direct_response = _direct_recovered
+                _direct_finish_category = "recovered"
+                yield f"data: {json.dumps({'delta': _direct_recovered})}\n\n"
+            else:
+                _direct_finish_category = _direct_failure or "zero_content_completion"
+                _provider_slug = ""
+                try:
+                    _provider_slug = str(_detect_provider(endpoint_url) or "")
+                except Exception:
+                    _provider_slug = ""
+                yield "data: " + json.dumps(diagnostic_payload(
+                    _direct_finish_category,
+                    request_id=_direct_diag,
+                    provider=_provider_slug,
+                    model=model,
+                )) + "\n\n"
+                fallback = (
+                    "The model returned an empty response. "
+                    + recovery_guidance(_direct_finish_category, _direct_diag)
+                )
+                direct_response = fallback
+                yield f"data: {json.dumps({'delta': fallback})}\n\n"
 
         duration = time.time() - direct_start
         metrics = {
@@ -3731,9 +3830,15 @@ async def stream_agent_loop(
             actor=f"engine:{direct_actual_model}",
             component="engine",
             event_type="response",
-            status="succeeded",
+            status="succeeded" if _direct_finish_category in ("ok", "recovered") else "degraded",
             duration=time.monotonic() - _request_trace_started,
             usage={"input_tokens": metrics["input_tokens"], "output_tokens": metrics["output_tokens"], "tool_rounds": 0},
+            metadata={
+                "finish_category": _direct_finish_category,
+                "diagnostic_id": _direct_diag if _direct_finish_category not in ("ok", "recovered") else _action_request_id,
+                "provider": str(_detect_provider(endpoint_url) or ""),
+                "streamed": True,
+            },
         )
         yield "data: [DONE]\n\n"
         return
@@ -6396,10 +6501,57 @@ async def stream_agent_loop(
         logger.info("[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds)
         yield f'data: {json.dumps({"type": "rounds_exhausted", "rounds": max_rounds})}\n\n'
 
-    # If the response is completely empty and no tools were executed,
-    # yield a fallback message so the user is not left hanging.
+    # ── One truthful result for a zero-content turn (MAD-860) ──────────────
+    # If the turn produced no text, no reasoning, and ran no tool, replaying
+    # the conversation cannot duplicate a tool or external side effect, so one
+    # bounded non-streaming retry is safe. If a tool did run, never replay —
+    # surface an explicit retry instead. Either way the client gets exactly
+    # one chronological result, not repeated generic empty-response cards.
+    _finish_category = "ok"
+    _diagnostic_id = ""
+    _provider_slug = ""
+    try:
+        _provider_slug = str(_detect_provider(endpoint_url) or "")
+    except Exception:
+        _provider_slug = ""
+    if (
+        not full_response.strip()
+        and not tool_events
+        and not round_reasoning.strip()
+    ):
+        from src.model_response_diagnosis import diagnostic_payload
+
+        _recovered, _recovery_failure_category, _diagnostic_id = await _bounded_empty_recovery(
+            endpoint_url,
+            model,
+            messages,
+            headers,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=int(get_setting("agent_stream_timeout_seconds", 300) or 300),
+            reasoning_effort=reasoning_effort,
+        )
+        if _recovered:
+            full_response = _recovered
+            _finish_category = "recovered"
+            yield f'data: {json.dumps({"delta": _recovered})}\n\n'
+        else:
+            _finish_category = _recovery_failure_category or "zero_content_completion"
+            yield "data: " + json.dumps(diagnostic_payload(
+                _finish_category,
+                request_id=_diagnostic_id,
+                provider=_provider_slug,
+                model=model,
+            )) + "\n\n"
+
+    # If the response is still completely empty, yield one actionable
+    # fallback result so the user is not left hanging.
     full_response, _fallback_chunk = _empty_response_fallback(
-        full_response, round_reasoning, tool_events
+        full_response,
+        round_reasoning,
+        tool_events,
+        category=_finish_category if _finish_category != "ok" else None,
+        request_id=_diagnostic_id,
     )
     if _fallback_chunk:
         yield _fallback_chunk
@@ -6459,6 +6611,8 @@ async def stream_agent_loop(
     _request_status = "succeeded"
     if _exhausted_rounds:
         _request_status = "degraded"
+    if _finish_category not in ("ok", "recovered"):
+        _request_status = "degraded"
     for _event in tool_events:
         _status = (_event.get("action_result") or {}).get("status")
         if _status in {"unknown", "timed_out", "cancelled", "denied", "failed"}:
@@ -6479,8 +6633,14 @@ async def stream_agent_loop(
             "tool_rounds": metrics.get("agent_rounds"),
             "tool_calls": metrics.get("tool_calls"),
         },
+        metadata={
+            "finish_category": _finish_category,
+            "diagnostic_id": _diagnostic_id or _action_request_id,
+            "provider": _provider_slug,
+            "streamed": True,
+        },
         evidence_refs=[{"tool_event_ids": [event.get("operational_event_id") for event in tool_events if event.get("operational_event_id")]}],
-        error=None if _request_status == "succeeded" else {"category": _request_status, "detail": "request did not complete normally"},
+        error=None if _request_status == "succeeded" else {"category": _finish_category if _finish_category not in ("ok", "recovered") else _request_status, "detail": "request did not complete normally"},
     )
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 
