@@ -58,6 +58,11 @@ SKILLS_DIR = os.path.join(DATA_DIR, "skills")
 GALLERY_DIR = os.path.join(DATA_DIR, "gallery")
 GALLERY_UPLOADS_DIR = os.path.join(DATA_DIR, "gallery_uploads")
 MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
+# Operator-configured SSH nodes (MAD-935). Only the pinned known_hosts file
+# persists here; private keys stay encrypted in the DB and are materialized to
+# this managed directory only for the duration of a keygen/derive/test command.
+SSH_CONNECTIONS_DIR = os.path.join(DATA_DIR, "ssh_connections")
+SSH_AUDIT_FILE = os.path.join(DATA_DIR, "ssh_connections_audit.jsonl")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
 MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))

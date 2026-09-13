@@ -538,6 +538,42 @@ class ProviderAuthSession(TimestampMixin, Base):
     last_refresh = Column(DateTime, nullable=True)
     auth_mode = Column(String, nullable=True)
 
+class SshConnection(TimestampMixin, Base):
+    """Operator-configured SSH nodes for direct node access (MAD-935).
+
+    Key material never lives in plaintext columns: ``private_key`` is
+    transparently encrypted at rest (EncryptedText). ``public_key`` and the
+    pinned host key are not secrets and are safe to display. Status fields
+    cache the last user-initiated test so the list can show an honest state
+    without re-dialing the node on every render.
+    """
+    __tablename__ = "ssh_connections"
+
+    id = Column(String, primary_key=True, index=True)
+    label = Column(String, nullable=False)
+    host = Column(String, nullable=False)
+    user = Column(String, nullable=False, default="")
+    port = Column(Integer, nullable=False, default=22)
+    # Keyless (preset-key) connections use the stored managed key instead of
+    # ambient agent/default keys. Disabling it keeps the stored key so the
+    # operator can re-enable without re-generating.
+    keyless = Column(Boolean, default=False)
+    private_key = Column(EncryptedText, nullable=True)
+    public_key = Column(Text, nullable=True)
+    # Pinned host key as a managed known_hosts line (or lines) plus the
+    # preferred fingerprint shown to the operator.
+    host_key = Column(Text, nullable=True)
+    host_key_fingerprint = Column(String, nullable=True)
+    host_key_type = Column(String, nullable=True)
+    # Last user-initiated connection test result, redacted human copy only.
+    last_status = Column(String, nullable=True)
+    last_status_reason = Column(String, nullable=True)
+    last_status_message = Column(Text, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    # Installation-level by default (admin-configured). Null means shared.
+    owner = Column(String, nullable=True, index=True)
+
+
 class McpServer(TimestampMixin, Base):
     """Admin-configured MCP (Model Context Protocol) tool servers."""
     __tablename__ = "mcp_servers"

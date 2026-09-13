@@ -850,6 +850,10 @@ app.include_router(setup_cookbook_routes())
 from routes.workspace_routes import setup_workspace_routes
 app.include_router(setup_workspace_routes())
 
+# SSH connections (MAD-935: Settings-managed node access with keyless preset keys)
+from routes.ssh_routes import setup_ssh_routes
+app.include_router(setup_ssh_routes())
+
 # Pandamonium agent workstation projects (MAD-902)
 from routes.project_routes import setup_project_routes
 app.include_router(setup_project_routes())
