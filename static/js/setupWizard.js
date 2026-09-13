@@ -164,6 +164,13 @@ function _laneRows(status, isAdmin) {
   const connectedGalleries = Number(gallery.connected || 0);
 
   const managed = 'Managed by your administrator';
+  const modelState = String(
+    model.state || (model.usable
+      ? 'validated'
+      : (Number(model.endpoints || 0) > 0
+        ? (Number(model.models || 0) > 0 ? 'discovered' : 'configured')
+        : 'unconfigured'))
+  );
   const rows = [
     {
       key: 'identity',
@@ -180,8 +187,14 @@ function _laneRows(status, isAdmin) {
       label: 'Model engine',
       done: Boolean(model.usable),
       state: model.usable
-        ? `Ready — ${model.models || 0} model${model.models === 1 ? '' : 's'} available`
-        : 'Required — connect a model engine',
+        ? `Ready — ${model.models || 0} model${model.models === 1 ? '' : 's'} validated`
+        : modelState === 'failed'
+          ? `Needs attention — ${(model.last_failure && model.last_failure.category) || 'model test failed'}`
+          : modelState === 'discovered'
+            ? 'Models found — run the model test'
+            : modelState === 'configured'
+              ? 'Endpoint saved — add or discover a model'
+              : 'Required — connect a model engine',
       optional: false,
       action: isAdmin ? { label: 'Connect', run: () => { _view = { name: 'step', step: 'model' }; render(); } } : null,
     },
@@ -476,8 +489,10 @@ function renderModel(panel, status) {
   const copy = el('div', 'setup-lane-copy');
   copy.append(el('strong', 'setup-lane-label', 'Model engine'));
   copy.append(el('span', 'setup-lane-state', status.model?.usable
-    ? `Connected — ${status.model.models} model${status.model.models === 1 ? '' : 's'} available`
-    : 'Not connected yet'));
+    ? `Validated — ${status.model.models} model${status.model.models === 1 ? '' : 's'} passed the model test`
+    : (status.model?.last_failure?.guidance
+      || status.model?.guidance
+      || 'Not connected yet')));
   state.append(mark, copy);
   panel.append(state);
 
