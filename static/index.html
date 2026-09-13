@@ -1122,14 +1122,14 @@
       </div>
       <iframe id="extension-surface-frame" class="extension-surface-frame" title="Extension surface" referrerpolicy="no-referrer" allow="fullscreen; camera 'none'; microphone 'none'; display-capture 'none'"></iframe>
     </section>
-    <section id="jarvis-call-panel" class="jarvis-call-panel" data-state="idle" hidden aria-label="Jarvis live voice">
+    <section id="jarvis-call-panel" class="jarvis-call-panel" data-state="idle" hidden aria-label="Live voice">
       <div id="jarvis-agent-workspace" class="jarvis-agent-workspace" aria-label="Agent task workspace">
         <div class="jarvis-agent-selector">
           <button type="button" id="jarvis-agent-chip" class="jarvis-agent-chip" aria-haspopup="menu" aria-expanded="false" aria-controls="jarvis-agent-menu">
             <span id="jarvis-agent-state" class="jarvis-agent-state is-connected" aria-hidden="true"></span>
             <span class="jarvis-agent-chip-copy">
-              <span id="jarvis-agent-name" class="jarvis-agent-name">Jarvis</span>
-              <span id="jarvis-agent-meta" class="jarvis-agent-meta">Self-hosted · home-lab · ready</span>
+              <span id="jarvis-agent-name" class="jarvis-agent-name">Assistant</span>
+              <span id="jarvis-agent-meta" class="jarvis-agent-meta">Self-hosted · workspace unbound · ready</span>
             </span>
             <svg class="jarvis-agent-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
@@ -1155,7 +1155,7 @@
         </div>
       </div>
       <div class="jarvis-call-actions">
-        <button type="button" id="jarvis-call-talk" class="jarvis-call-talk" title="Speak to Jarvis" aria-label="Speak to Jarvis"></button>
+        <button type="button" id="jarvis-call-talk" class="jarvis-call-talk" title="Speak to Assistant" aria-label="Speak to Assistant"></button>
         <button type="button" id="jarvis-call-view-chat" class="jarvis-call-view-chat" title="View chat — voice stays active" aria-label="View chat — voice stays active">View chat</button>
         <button type="button" id="jarvis-call-close" class="jarvis-call-close" title="End voice — task continues" aria-label="End voice — task continues"></button>
       </div>
@@ -2022,7 +2022,7 @@
               <div id="set-ttsAgentVoicesRow" style="display:flex;align-items:flex-start;gap:0.75rem;">
                 <label class="settings-label" style="padding-top:5px;">Agent voices</label>
                 <div style="display:flex;flex:1;flex-direction:column;gap:0.35rem;">
-                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span style="width:52px;">Jarvis</span><select id="set-ttsJarvisVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
+                  <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span id="set-ttsAgentVoiceLabel" style="width:90px;">Assistant</span><select id="set-ttsJarvisVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
                   <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span id="set-ttsHermesLabel" style="width:90px;">Hermes</span><select id="set-ttsGordonVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
                   <label style="display:flex;align-items:center;gap:0.5rem;font-size:12px;"><span id="set-ttsPcCodexLabel" style="width:90px;">PC Codex</span><select id="set-ttsFridayVoiceSelect" class="settings-select"><option value="">Use default</option></select></label>
                 </div>

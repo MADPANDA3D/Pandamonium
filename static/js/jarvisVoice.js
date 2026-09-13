@@ -5,7 +5,6 @@ import markdownModule from './markdown.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import { renderAuthorityApprovalCard, restorePendingAuthorityDecision } from './chatRenderer.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
-import { getBrandName } from './brand.js';
 
 let sessionId = null;
 let mediaRecorder = null;
@@ -115,7 +114,7 @@ const VOICE_PROTOCOL_CONTROL_ALLOWLIST = new Set([
   'extension_protocol_command',
 ]);
 const WORKER_LABELS = {
-  jarvis: 'Jarvis',
+  jarvis: 'Assistant',
   'pc-codex': 'PC Codex',
   hermes: 'Hermes',
   'vps-codex': 'VPS Codex',
@@ -134,9 +133,17 @@ function $(id) {
   return document.getElementById(id);
 }
 
+function agentDisplayName() {
+  const fromStatus = String(window._agentIdentityStatus?.display_name || '').trim();
+  if (fromStatus) return fromStatus;
+  const fromCatalog = String(workerCatalog?.jarvis?.label || '').trim();
+  if (fromCatalog && fromCatalog !== 'Jarvis') return fromCatalog;
+  return 'Assistant';
+}
+
 function voiceTargetLabel(target = voiceTarget) {
   return workerCatalog[target]?.label
-    || (target === 'jarvis' ? getBrandName() : (VOICE_TARGET_LABELS[target] || target));
+    || (target === 'jarvis' ? agentDisplayName() : (VOICE_TARGET_LABELS[target] || target));
 }
 
 function isCurrentVoiceCall(callGeneration) {
@@ -1677,7 +1684,7 @@ function renderWorkerResult(event, task, replaceMessage = null) {
       source: 'agent_worker',
       worker: event.worker || task?.worker,
       task_id: taskId,
-      character_name: task?.presenter || 'Jarvis',
+      character_name: task?.presenter || agentDisplayName(),
     }) || null;
   }
   if (result && replaceMessage && replaceMessage !== result) {
@@ -1944,7 +1951,7 @@ function renderWorkerSummary(event, task) {
     worker: event.worker,
     task_id: event.task_id,
     worker_event_id: eventId,
-    character_name: task.presenter || 'Jarvis',
+    character_name: task.presenter || agentDisplayName(),
   }) || null;
   if (summary && eventId) summary.dataset.workerEventId = eventId;
   if (summary) summary.dataset.summaryType = 'progress';
@@ -2299,7 +2306,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
       if (event.type === 'assistant_delta') {
         if (isCurrentVoiceCall(callGeneration)) {
           const delta = event.text || '';
-          appendLiveAssistant(delta, event.model || 'Jarvis', turnTasks[0] || null);
+          appendLiveAssistant(delta, event.model || agentDisplayName(), turnTasks[0] || null);
           if (timings.chat_assistant_first_render_ms == null) timings.chat_assistant_first_render_ms = performance.now() - turnStarted;
         }
       }
@@ -2411,13 +2418,13 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
         }
         if (isCurrentVoiceCall(callGeneration)) applyLiveTaskMetadata(liveAssistantMessage, task);
       }
-      else if (event.type === 'error') throw new Error(event.text || 'Jarvis brain request failed');
+      else if (event.type === 'error') throw new Error(event.text || `${agentDisplayName()} brain request failed`);
     }
     if (done) break;
   }
-  if (!final) throw new Error('Jarvis returned no final response.');
+  if (!final) throw new Error(`${agentDisplayName()} returned no final response.`);
   if (!turnAudioPromise && !isCurrentVoiceCall(callGeneration)) turnAudioPromise = Promise.resolve();
-  if (!turnAudioPromise) throw new Error('Jarvis returned no audio stream.');
+  if (!turnAudioPromise) throw new Error(`${agentDisplayName()} returned no audio stream.`);
   return { ...final, audioPromise: turnAudioPromise, voiceSessionId: turnSessionId };
 }
 
@@ -3310,6 +3317,11 @@ function bind() {
     });
   });
   window.addEventListener('instance-brand-changed', () => {
+    refreshAgentControl();
+    refreshVoiceIdentity(true);
+  });
+  window.addEventListener('pandamonium-identity-updated', (event) => {
+    window._agentIdentityStatus = event.detail || window._agentIdentityStatus;
     refreshAgentControl();
     refreshVoiceIdentity(true);
   });

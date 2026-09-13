@@ -1035,10 +1035,23 @@ async function initTtsSettings() {
   var speedSelect = el('set-ttsSpeedSelect');
   var speedRow = el('set-ttsSpeedRow');
   var agentVoicesRow = el('set-ttsAgentVoicesRow');
+  // Agent-voice overrides are keyed by the identity that voice diagnostics
+  // actually report: the saved installation display name for the direct
+  // agent, and the visible worker labels for workers. Never a hardcoded
+  // private name.
+  var _directAgentLabel = el('set-ttsAgentVoiceLabel');
+  if (_directAgentLabel) {
+    _directAgentLabel.textContent = String(window._agentIdentityStatus?.display_name || 'Assistant');
+  }
+  function _agentVoiceKey(labelId, fallback) {
+    var node = el(labelId);
+    var text = node ? String(node.textContent || '').trim() : '';
+    return text || fallback;
+  }
   var agentVoiceSelects = {
-    Jarvis: el('set-ttsJarvisVoiceSelect'),
-    Gordon: el('set-ttsGordonVoiceSelect'),
-    Friday: el('set-ttsFridayVoiceSelect'),
+    [_agentVoiceKey('set-ttsAgentVoiceLabel', 'Assistant')]: el('set-ttsJarvisVoiceSelect'),
+    [_agentVoiceKey('set-ttsHermesLabel', 'Hermes')]: el('set-ttsGordonVoiceSelect'),
+    [_agentVoiceKey('set-ttsPcCodexLabel', 'PC Codex')]: el('set-ttsFridayVoiceSelect'),
   };
   var ttsMsg = el('set-ttsSettingsMsg');
   var ttsEnabledToggle = el('set-ttsEnabledToggle');
