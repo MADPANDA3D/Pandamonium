@@ -454,6 +454,26 @@ def test_add_connection_never_returns_key_material(ssh_env, router, monkeypatch)
     assert '"private_key"' not in json.dumps(result)
 
 
+def test_add_connection_keygen_failure_degrades_to_non_keyless(ssh_env, router, monkeypatch):
+    def _boom(connection_id):
+        raise HTTPException(500, "Could not generate the SSH keypair.")
+
+    monkeypatch.setattr(ssh_connections, "generate_keypair", _boom)
+
+    endpoint = _route(router, "/api/ssh/connections", "POST")
+    result = endpoint(
+        _admin_request(), label="Broken Node", host="203.0.113.9", user="operator", port="22", keyless=True
+    )
+
+    assert result["keyless"] is False
+    assert result["has_private_key"] is False
+    assert "could not be generated" in result["message"]
+    with ssh_env.SessionLocal() as session:
+        row = session.query(database.SshConnection).filter_by(id=result["id"]).one()
+        assert row.keyless is False
+        assert row.private_key is None
+
+
 def test_host_change_clears_pinned_host_key(ssh_env, router):
     _insert_connection(ssh_env.SessionLocal)
 

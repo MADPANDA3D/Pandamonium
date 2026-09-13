@@ -89,18 +89,27 @@ def setup_ssh_routes() -> APIRouter:
             session.commit()
             session.refresh(row)
             if enabled:
-                pair = ssh.generate_keypair(row.id)
-                row.private_key = pair["private_key"]
-                row.public_key = pair["public_key"]
                 try:
-                    entries = ssh.scan_host_key(row.host, int(row.port or ssh.DEFAULT_SSH_PORT))
-                    ssh.store_host_key(row, entries)
-                    message = "Connection added. Install the public key on the node."
-                except ssh.SshScanError:
+                    pair = ssh.generate_keypair(row.id)
+                except HTTPException as exc:
+                    # Fail closed: no key means no keyless claim.
+                    row.keyless = False
                     message = (
-                        "Connection added with a new key. The node could not be reached "
-                        "to pin its host key; scan and pin it when the node is online."
+                        "Connection added, but the keypair could not be generated. "
+                        f"{exc.detail} Try again from the connection's Generate key button."
                     )
+                else:
+                    row.private_key = pair["private_key"]
+                    row.public_key = pair["public_key"]
+                    try:
+                        entries = ssh.scan_host_key(row.host, int(row.port or ssh.DEFAULT_SSH_PORT))
+                        ssh.store_host_key(row, entries)
+                        message = "Connection added. Install the public key on the node."
+                    except ssh.SshScanError:
+                        message = (
+                            "Connection added with a new key. The node could not be reached "
+                            "to pin its host key; scan and pin it when the node is online."
+                        )
                 session.commit()
                 session.refresh(row)
             payload = ssh.connection_payload(row)
