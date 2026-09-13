@@ -5,6 +5,14 @@ import {
   connectDetectedEndpoint,
   connectResultMessage,
 } from './modelConnect.js';
+import { startVoicePreview } from './voicePreview.js';
+import {
+  connectPortal,
+  portalUrlIssue,
+  portalMasterKeyIssue,
+  portalConnectFailureMessage,
+  portalConnectSuccessMessage,
+} from './portalConnect.js';
 
 let API_BASE = '';
 let _handlers = {};
@@ -14,8 +22,10 @@ let _gallery = null;
 let _view = { name: 'home', step: null };
 let _notice = '';
 let _busy = false;
+let _skips = null;
 
 const DISMISS_KEY = 'pandamonium-setup-wizard-dismissed';
+const SKIPS_KEY = 'pandamonium-setup-wizard-skips';
 const STATUS_TTL_MS = 30_000;
 
 export function init(apiBase, handlers = {}) {
@@ -49,6 +59,26 @@ function _isDismissed() {
 
 function _dismissForever() {
   Storage.set(DISMISS_KEY, '1');
+}
+
+function _loadSkips() {
+  if (_skips) return _skips;
+  try {
+    const parsed = JSON.parse(Storage.get(SKIPS_KEY) || '{}');
+    _skips = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    _skips = {};
+  }
+  return _skips;
+}
+
+function _isSkipped(key) {
+  return _loadSkips()[key] === true;
+}
+
+function _markSkipped(key) {
+  _loadSkips()[key] = true;
+  Storage.set(SKIPS_KEY, JSON.stringify(_loadSkips()));
 }
 
 function _isStatusPayload(payload) {
@@ -85,6 +115,31 @@ async function _fetchGallery() {
     /* gallery discovery is optional */
   }
   return _gallery;
+}
+
+async function _fetchVoiceStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/voice/status`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('voice status unavailable');
+    const payload = await res.json();
+    return payload && typeof payload === 'object' ? payload : { unavailable: true };
+  } catch (_) {
+    return { unavailable: true };
+  }
+}
+
+async function _fetchPortalStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/mcp/portal/status`, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error('portal status unavailable');
+    const payload = await res.json();
+    return payload && typeof payload === 'object' ? payload : { unavailable: true };
+  } catch (_) {
+    return { unavailable: true };
+  }
 }
 
 function _focusPrimary(modal) {
@@ -153,6 +208,16 @@ function _runTour() {
   _handlers.runChatCommand?.('/tour');
 }
 
+function _runGuide() {
+  close();
+  _handlers.runChatCommand?.('/setup');
+}
+
+function _openStep(step) {
+  _view = { name: 'step', step };
+  render();
+}
+
 function _laneRows(status, isAdmin) {
   const identity = status.identity || {};
   const model = status.model || {};
@@ -191,7 +256,7 @@ function _laneRows(status, isAdmin) {
       done: Boolean(voice.ready),
       state: voice.ready ? `Ready — ${voice.provider || 'configured'}` : 'Optional — talk to your assistant',
       optional: true,
-      action: isAdmin ? { label: 'Set up', run: () => _openSettings('ai') } : null,
+      action: isAdmin ? { label: 'Set up', run: () => _openStep('voice') } : null,
     },
     {
       key: 'integrations',
@@ -203,7 +268,7 @@ function _laneRows(status, isAdmin) {
           ? `Ready — ${integrations.configured} service${integrations.configured === 1 ? '' : 's'} connected`
           : 'Optional — email, calendar, and more',
       optional: true,
-      action: isAdmin ? { label: 'Connect', run: () => _openSettings('integrations') } : null,
+      action: isAdmin ? { label: 'Connect', run: () => _openStep('integrations') } : null,
     },
     {
       key: 'extensions',
@@ -213,7 +278,7 @@ function _laneRows(status, isAdmin) {
         ? `Ready — ${extensions.enabled} active`
         : 'Optional — add capabilities',
       optional: true,
-      action: isAdmin ? { label: 'Browse', run: () => { close(); _handlers.openMarketplace?.(); } } : null,
+      action: isAdmin ? { label: 'Browse', run: () => _openStep('plugins') } : null,
     },
     {
       key: 'gallery',
@@ -223,7 +288,7 @@ function _laneRows(status, isAdmin) {
         ? `Ready — ${connectedGalleries} source${connectedGalleries === 1 ? '' : 's'} connected`
         : 'Optional — connect photos and media',
       optional: true,
-      action: isAdmin ? { label: 'Connect', run: () => { close(); _handlers.openGallery?.(); } } : null,
+      action: isAdmin ? { label: 'Connect', run: () => _openStep('gallery') } : null,
     },
   ];
 
@@ -237,9 +302,15 @@ function _laneRows(status, isAdmin) {
         ? `Version ${update.version || 'unknown'}`
         : `Update ${state}`,
       optional: true,
-      action: null,
+      action: { label: 'View', run: () => _openStep('updates') },
     });
   }
+
+  rows.forEach((row) => {
+    if (row.optional && !row.done && _isSkipped(row.key)) {
+      row.state = 'Skipped — set this up anytime';
+    }
+  });
 
   rows.forEach((row) => {
     if (!isAdmin && !row.done) {
@@ -293,16 +364,28 @@ async function renderHome(panel, status) {
   _laneRows(status, isAdmin).forEach((row) => lanes.append(_renderLane(row)));
   panel.append(lanes);
 
+  const next = el('div', 'setup-wizard-head');
+  next.append(el('h3', null, "What's next"));
+  next.append(el('p', null, 'Keep going whenever you are ready — these replays stay available from the guide.'));
+  panel.append(next);
+
+  const nextLinks = el('div', 'setup-wizard-footer');
+  const tour = el('button', 'setup-wizard-secondary', 'Take the product tour');
+  tour.type = 'button';
+  tour.addEventListener('click', _runTour);
+  nextLinks.append(tour);
+
+  const guide = el('button', 'setup-wizard-secondary', 'Replay the setup guide');
+  guide.type = 'button';
+  guide.addEventListener('click', _runGuide);
+  nextLinks.append(guide);
+  panel.append(nextLinks);
+
   const footer = el('div', 'setup-wizard-footer');
   const done = el('button', 'setup-wizard-primary', 'Done');
   done.type = 'button';
   done.addEventListener('click', close);
   footer.append(done);
-
-  const tour = el('button', 'setup-wizard-secondary', 'Take the tour');
-  tour.type = 'button';
-  tour.addEventListener('click', _runTour);
-  footer.append(tour);
 
   if (isAdmin) {
     const dismiss = el('button', 'setup-wizard-quiet', "Don't show this at startup");
@@ -632,6 +715,301 @@ function renderModel(panel, status) {
   });
 }
 
+function _startStep(panel, title, copy) {
+  panel.replaceChildren();
+  panel.className = 'setup-wizard';
+  const head = el('div', 'setup-wizard-head');
+  head.append(el('h3', null, title));
+  if (copy) head.append(el('p', null, copy));
+  panel.append(head);
+}
+
+function _stateLane(label, state, done) {
+  const lane = el('div', `setup-lane${done ? ' done' : ''}`);
+  const mark = el('span', 'setup-lane-mark', done ? '✓' : '·');
+  mark.setAttribute('aria-hidden', 'true');
+  const copy = el('div', 'setup-lane-copy');
+  copy.append(el('strong', 'setup-lane-label', label));
+  copy.append(el('span', 'setup-lane-state', state));
+  lane.append(mark, copy);
+  return lane;
+}
+
+function _messageNode(panel) {
+  const message = el('p', 'setup-wizard-message');
+  panel.append(message);
+  return {
+    set(text, isError) {
+      message.textContent = text;
+      message.className = `setup-wizard-message${isError ? ' is-error' : ''}`;
+    },
+  };
+}
+
+function _skipButton(key, notice) {
+  const skip = el('button', 'setup-wizard-secondary', 'Skip for now');
+  skip.type = 'button';
+  skip.addEventListener('click', () => {
+    _markSkipped(key);
+    _notice = notice;
+    _view = { name: 'home', step: null };
+    render();
+  });
+  return skip;
+}
+
+function _updateStateCopy(state) {
+  if (state === 'idle') return 'No update in progress';
+  if (state === 'failed' || state === 'error') {
+    return 'The last update did not finish — an administrator can check the Updater';
+  }
+  return `Update in progress — ${state}`;
+}
+
+async function renderVoice(panel, status) {
+  _startStep(panel, 'Give it a voice', 'Voice lets you talk to your assistant out loud and hear it answer. It is optional — chat works without it.');
+  const voice = await _fetchVoiceStatus();
+  const setup = (voice && voice.setup) || {};
+  const ready = Boolean(setup.core_ready);
+  const tts = (voice && voice.tts) || {};
+  panel.append(_stateLane('Voice', ready ? 'Ready — voice setup is complete' : 'Not ready yet', ready));
+
+  const message = _messageNode(panel);
+
+  if (voice.unavailable) {
+    message.set("We couldn't check voice right now. Try again in a moment.", true);
+  } else if (!ready) {
+    const guidance = Array.isArray(setup.guidance) ? setup.guidance : [];
+    if (guidance.length) {
+      guidance.forEach((line) => panel.append(el('p', 'setup-wizard-note', line)));
+    } else {
+      panel.append(el('p', 'setup-wizard-note', 'Enable a speech-to-text and text-to-speech provider in Voice settings, then come back.'));
+    }
+  }
+
+  const canTest = !voice.unavailable && tts.available !== false && String(tts.provider || 'disabled') !== 'disabled';
+  const footer = el('div', 'setup-wizard-footer');
+  const test = el('button', `setup-wizard-${canTest ? 'primary' : 'secondary'}`, 'Test voice');
+  test.type = 'button';
+  test.disabled = !canTest;
+  test.addEventListener('click', async () => {
+    if (_busy) return;
+    _busy = true;
+    test.disabled = true;
+    message.set('Playing a voice sample…', false);
+    try {
+      const preview = startVoicePreview({
+        apiBase: API_BASE,
+        provider: tts.provider || '',
+        model: voice.model_override || '',
+        voice: tts.voice || '',
+        speed: tts.speed || 1,
+        onPhase: (phase) => {
+          if (phase === 'playing') message.set('Playing a voice sample…', false);
+        },
+      });
+      await preview.done;
+      message.set("That's your assistant's voice. If you heard it, voice is ready to go.", false);
+    } catch (error) {
+      message.set(error instanceof Error ? error.message : "We couldn't play the sample. Check the voice settings and try again.", true);
+    } finally {
+      _busy = false;
+      test.disabled = false;
+    }
+  });
+  footer.append(test);
+
+  const settings = el('button', 'setup-wizard-secondary', 'Voice settings');
+  settings.type = 'button';
+  settings.addEventListener('click', () => _openSettings('ai'));
+  footer.append(settings);
+  footer.append(_skipButton('voice', 'No problem — set up voice whenever you like from the guide or Settings.'));
+  footer.append(_backRow(panel));
+  panel.append(footer);
+}
+
+async function renderIntegrations(panel, status) {
+  _startStep(panel, 'Connect your services', 'MAD MCP Portal links your assistant to the services and tools in your Portal account. It is optional.');
+  if (!status.is_admin) {
+    panel.append(el('p', 'setup-wizard-note', 'Only an administrator can connect services on this installation, so this is managed for you.'));
+    const footer = el('div', 'setup-wizard-footer');
+    footer.append(_skipButton('integrations', 'No problem — services stay managed by your administrator.'));
+    footer.append(_backRow(panel));
+    panel.append(footer);
+    return;
+  }
+
+  const portal = await _fetchPortalStatus();
+  const connected = portal.status === 'connected' && portal.configured === true;
+  const tools = Number(portal.tool_count || 0);
+  panel.append(_stateLane('MAD MCP Portal', connected
+    ? `Ready — ${tools} tool${tools === 1 ? '' : 's'} available`
+    : (portal.unavailable ? "We couldn't check Portal right now" : 'Not connected yet'), connected));
+
+  const message = _messageNode(panel);
+  const footer = el('div', 'setup-wizard-footer');
+
+  if (!connected) {
+    const urlField = el('label', 'setup-wizard-field');
+    urlField.append(el('span', null, 'Portal MCP URL'));
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text';
+    urlInput.autocomplete = 'off';
+    urlInput.spellcheck = false;
+    urlInput.placeholder = 'https://portal.example.com/api/mcp';
+    if (portal.portal_url) urlInput.value = portal.portal_url;
+    urlField.append(urlInput);
+    panel.append(urlField);
+
+    const keyField = el('label', 'setup-wizard-field');
+    keyField.append(el('span', null, 'Master key'));
+    const keyInput = document.createElement('input');
+    keyInput.type = 'password';
+    keyInput.autocomplete = 'off';
+    keyInput.spellcheck = false;
+    keyField.append(keyInput);
+    panel.append(keyField);
+
+    const connect = el('button', 'setup-wizard-primary', 'Connect');
+    connect.type = 'button';
+    connect.addEventListener('click', async () => {
+      if (_busy) return;
+      const issue = portalUrlIssue(urlInput.value) || portalMasterKeyIssue(keyInput.value);
+      if (issue) {
+        message.set(issue, true);
+        return;
+      }
+      _busy = true;
+      connect.disabled = true;
+      message.set('Connecting to your Portal…', false);
+      try {
+        const result = await connectPortal({
+          apiBase: API_BASE,
+          portalUrl: urlInput.value,
+          masterKey: keyInput.value,
+        });
+        keyInput.value = '';
+        if (!result.ok) {
+          message.set(portalConnectFailureMessage(result), true);
+          return;
+        }
+        _notice = portalConnectSuccessMessage(result.payload);
+        await fetchStatus(true);
+        _view = { name: 'home', step: null };
+        render();
+      } finally {
+        _busy = false;
+        connect.disabled = false;
+      }
+    });
+    footer.append(connect);
+  }
+
+  const more = el('button', 'setup-wizard-secondary', 'Other services');
+  more.type = 'button';
+  more.addEventListener('click', () => _openSettings('integrations'));
+  footer.append(more);
+  footer.append(_skipButton('integrations', 'No problem — connect your Portal whenever you like.'));
+  footer.append(_backRow(panel));
+  panel.append(footer);
+}
+
+function renderPlugins(panel, status) {
+  const isAdmin = Boolean(status.is_admin);
+  const extensions = status.extensions || {};
+  const installed = Number(extensions.installed || 0);
+  const enabled = Number(extensions.enabled || 0);
+  _startStep(panel, 'Add plugins', 'Plugins add new capabilities to your assistant. Install and manage them anytime from Add Plugins.');
+  panel.append(_stateLane('Plugins', installed > 0
+    ? `Installed — ${installed} plugin${installed === 1 ? '' : 's'}, ${enabled} active`
+    : 'Nothing installed yet', installed > 0));
+
+  if (!isAdmin) {
+    panel.append(el('p', 'setup-wizard-note', 'Only an administrator can add plugins on this installation, so this is managed for you.'));
+  }
+
+  const footer = el('div', 'setup-wizard-footer');
+  if (isAdmin) {
+    const add = el('button', 'setup-wizard-primary', 'Add Plugins');
+    add.type = 'button';
+    add.addEventListener('click', () => { close(); _handlers.openMarketplace?.(); });
+    footer.append(add);
+  }
+  footer.append(_skipButton('extensions', 'No problem — browse plugins whenever you like.'));
+  footer.append(_backRow(panel));
+  panel.append(footer);
+}
+
+async function renderGallery(panel, status) {
+  _startStep(panel, 'Connect your gallery', 'Gallery brings your photos and media into chat. It is optional.');
+  if (!status.is_admin) {
+    panel.append(el('p', 'setup-wizard-note', 'Only an administrator can connect gallery sources on this installation, so this is managed for you.'));
+    const footer = el('div', 'setup-wizard-footer');
+    footer.append(_skipButton('gallery', 'No problem — gallery stays managed by your administrator.'));
+    footer.append(_backRow(panel));
+    panel.append(footer);
+    return;
+  }
+
+  const gallery = await _fetchGallery();
+  const message = _messageNode(panel);
+  if (!gallery) {
+    panel.append(_stateLane('Gallery', "We couldn't check gallery sources right now", false));
+    message.set('Try again in a moment, or open Gallery settings to connect a source.', true);
+  } else {
+    const connected = Number(gallery.connected || 0);
+    panel.append(_stateLane('Gallery', connected > 0
+      ? `Ready — ${connected} source${connected === 1 ? '' : 's'} connected`
+      : 'No sources connected yet', connected > 0));
+    const sources = Array.isArray(gallery.sources) ? gallery.sources : [];
+    sources.slice(0, 5).forEach((source) => {
+      const label = source.label || source.provider || 'Gallery source';
+      const location = source.location || source.server_url || '';
+      const stateCopy = source.state === 'connected'
+        ? 'Connected'
+        : source.state === 'disabled'
+          ? 'Turned off'
+          : 'Available';
+      panel.append(_stateLane(label, `${stateCopy}${location ? ` — ${location}` : ''}`, source.state === 'connected'));
+    });
+    if (sources.length > 5) {
+      panel.append(el('p', 'setup-wizard-note', `And ${sources.length - 5} more source${sources.length - 5 === 1 ? '' : 's'} in Gallery settings.`));
+    }
+  }
+
+  const footer = el('div', 'setup-wizard-footer');
+  const connect = el('button', 'setup-wizard-primary', 'Connect a gallery');
+  connect.type = 'button';
+  connect.addEventListener('click', () => { close(); _handlers.openGallery?.(); });
+  footer.append(connect);
+  footer.append(_skipButton('gallery', 'No problem — connect a gallery whenever you like.'));
+  footer.append(_backRow(panel));
+  panel.append(footer);
+}
+
+function renderUpdates(panel, status) {
+  _startStep(panel, 'Updates', 'This guide only reports update state — it never changes your version. Installation and rollback stay in the Updater.');
+  const update = status.update;
+  if (!update) {
+    panel.append(el('p', 'setup-wizard-note', 'Update status is available to administrators.'));
+  } else {
+    const state = String(update.state || 'idle');
+    panel.append(_stateLane('Version', `Installed version ${update.version || 'unknown'}`, true));
+    panel.append(_stateLane('Update state', _updateStateCopy(state), state === 'idle'));
+    if (update.target_version) {
+      panel.append(_stateLane('Target version', String(update.target_version), false));
+    }
+    panel.append(_stateLane('Rollback', update.rollback_available
+      ? 'A rollback snapshot is available'
+      : 'No rollback snapshot available', false));
+  }
+
+  const footer = el('div', 'setup-wizard-footer');
+  footer.append(_skipButton('update', "Updates stay in your administrator's hands — nothing changed here."));
+  footer.append(_backRow(panel));
+  panel.append(footer);
+}
+
 async function render() {
   const panel = _panel();
   if (!panel) return;
@@ -640,13 +1018,14 @@ async function render() {
     renderUnavailable(panel);
     return;
   }
-  if (_view.name === 'step' && _view.step === 'identity') {
-    renderIdentity(panel, status);
-    return;
-  }
-  if (_view.name === 'step' && _view.step === 'model') {
-    renderModel(panel, status);
-    return;
+  if (_view.name === 'step') {
+    if (_view.step === 'identity') return renderIdentity(panel, status);
+    if (_view.step === 'model') return renderModel(panel, status);
+    if (_view.step === 'voice') return renderVoice(panel, status);
+    if (_view.step === 'integrations') return renderIntegrations(panel, status);
+    if (_view.step === 'plugins') return renderPlugins(panel, status);
+    if (_view.step === 'gallery') return renderGallery(panel, status);
+    if (_view.step === 'updates') return renderUpdates(panel, status);
   }
   await renderHome(panel, status);
 }
