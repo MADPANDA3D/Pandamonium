@@ -148,7 +148,7 @@ test('setup wizard opens from the guide button, names the assistant, and keeps s
   await expect(lanes.filter({ hasText: 'Assistant name' })).toContainText('Ready — Jarvis');
   await expect(lanes.filter({ hasText: 'Model engine' })).toContainText('Ready');
   await expect(lanes.filter({ hasText: 'Updates' })).toContainText('Version 1.0.55');
-  await expect(modal.locator('.setup-lane-action')).toHaveCount(6);
+  await expect(modal.locator('.setup-lane-action')).toHaveCount(7);
   expect(await page.evaluate(() => localStorage.getItem('odysseus-toggles'))).toBe(initializedToggles);
 
   await modal.getByRole('button', { name: 'Name it' }).click();
