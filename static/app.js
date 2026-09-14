@@ -57,12 +57,13 @@ import marketplaceModule from './js/marketplace.js';
 import updaterModule from './js/updater.js';
 import agentPlanModule from './js/agentPlan.js';
 import setupWizardModule from './js/setupWizard.js';
-import { MANAGED_BY_ADMIN_COPY, createModelSetupEntry } from './js/setupUi.js';
+import { MANAGED_BY_ADMIN_COPY, createModelSetupEntry, humanSetupError } from './js/setupUi.js';
 
 initComposerLinks();
 
 const API_BASE = window.location.origin;
 window.setupWizardModule = setupWizardModule;
+window.humanSetupError = humanSetupError;
 window.themeModule = themeModule;
 window.sessionModule = sessionModule;
 window.uiModule = uiModule;
