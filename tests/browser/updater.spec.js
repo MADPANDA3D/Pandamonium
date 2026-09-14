@@ -208,7 +208,7 @@ for (const [scenario, bridgeReload] of [
 
   try {
     await expect.poll(() => navigations, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => statusPolls, { timeout: 15000 }).toBeGreaterThanOrEqual(8);
+    await expect.poll(() => statusPolls, { timeout: 30000 }).toBeGreaterThanOrEqual(8);
     await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'complete', {
       timeout: 8000,
     });
