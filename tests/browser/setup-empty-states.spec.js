@@ -89,12 +89,18 @@ test('admin no-model surfaces share one wizard entry that opens the model step',
   await expect(modal).toContainText('Give it a brain');
   await page.screenshot({ path: `${SCREENSHOT_DIR}/mad-925-wizard-model-step.png` });
 
-  // Welcome and models entries open the same model step.
+  // Welcome and models entries open the same model step. Wait for each close
+  // to finish before reopening: the shared modal hides on animationend, and a
+  // fast reopen would otherwise be hidden by the pending close animation.
   await modal.locator('#close-guide-modal').click();
+  await expect(modal).toHaveClass(/hidden/);
   await welcomeEntry.click();
+  await expect(modal).not.toHaveClass(/hidden/);
   await expect(modal).toContainText('Give it a brain');
   await modal.locator('#close-guide-modal').click();
+  await expect(modal).toHaveClass(/hidden/);
   await modelsEntry.click();
+  await expect(modal).not.toHaveClass(/hidden/);
   await expect(modal).toContainText('Give it a brain');
 });
 
@@ -142,6 +148,9 @@ test('a wizard-linked plugin scan failure never shows the raw backend code', asy
   await expect(modal).not.toHaveClass(/hidden/);
   await modal.locator('.setup-lane').filter({ hasText: 'Plugins' })
     .getByRole('button', { name: 'Browse' }).click();
+  // MAD-924: the lane opens the wizard's plugins step, which links onward.
+  await expect(modal).toContainText('Add plugins');
+  await modal.getByRole('button', { name: 'Add Plugins' }).click();
 
   const marketplace = page.locator('#marketplace-modal');
   await expect(marketplace).not.toHaveClass(/hidden/);
