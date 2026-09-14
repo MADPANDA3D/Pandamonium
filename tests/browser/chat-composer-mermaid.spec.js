@@ -170,8 +170,17 @@ test('composer reserves the injected Compare eval picker width', async ({ page }
     const style = getComputedStyle(ta);
     const lineHeight = parseFloat(style.lineHeight) || 0;
     const maxHeight = lineHeight * 8;
-    return ta.getBoundingClientRect().height >= Math.min(initial, maxHeight) - 0.5;
-  }, initialHeight)).toBe(true);
+    const height = ta.getBoundingClientRect().height;
+    return {
+      ok: height >= Math.min(initial, maxHeight) - 0.5,
+      height: Math.round(height * 100) / 100,
+      initial: Math.round(initial * 100) / 100,
+      lineHeight,
+      maxHeight,
+      styleHeight: ta.style.height,
+      width: Math.round(ta.getBoundingClientRect().width * 100) / 100,
+    };
+  }, initialHeight)).toEqual(expect.objectContaining({ ok: true }));
   const clearsCompare = await page.locator('.chat-input-top:visible').evaluate(inputTop => {
     const ta = inputTop.querySelector('#message');
     const picker = inputTop.querySelector('.cmp-eval-wrap');
