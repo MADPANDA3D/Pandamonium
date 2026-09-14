@@ -73,6 +73,8 @@ class Session:
     history: List[ChatMessage] = None
     owner: Optional[str] = None
     agent_target: str = "jarvis"
+    # Active workspace persisted per session (MAD-883); "" = none.
+    workspace: str = ""
     is_important: bool = False
     message_count: int = 0
 

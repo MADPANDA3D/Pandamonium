@@ -1223,9 +1223,11 @@ async function _cmdWorkspace(args, ctx) {
     if (!rest) { slashReply('Usage: <code>/workspace set /absolute/path</code>'); return true; }
     // Validate server-side before persisting so the pill never claims a
     // workspace the backend will refuse to bind (typo, file path, deleted
-    // folder, sensitive dir, filesystem root).
-    workspaceModule.vetAndSetWorkspace(rest).then(({ ok, path }) => {
+    // folder, sensitive dir, filesystem root). Gate failures (401/403) come
+    // back with actionable copy instead of a generic rejection (MAD-883).
+    workspaceModule.vetAndSetWorkspace(rest).then(({ ok, path, error }) => {
       if (ok) slashReply(`Workspace set: <code>${uiModule.esc(path)}</code>`);
+      else if (error && !/usable workspace folder/i.test(error)) slashReply(`Could not set workspace: ${uiModule.esc(error)}`);
       else slashReply(`Not a usable workspace folder: <code>${uiModule.esc(rest)}</code>. It must be an existing directory, not a filesystem root or sensitive path.`);
     });
     return true;

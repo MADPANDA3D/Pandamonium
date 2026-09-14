@@ -20,6 +20,81 @@ export function getWorkspace() {
   return Storage.get(KEYS.WORKSPACE, '') || '';
 }
 
+/**
+ * Turn an HTTP failure into honest, actionable copy. The old code collapsed
+ * every non-OK response into "Could not browse folders", so a signed-out or
+ * non-admin session looked exactly like "there is no way to set a workspace"
+ * (MAD-883).
+ */
+function _httpFailureMessage(status, detail) {
+  if (status === 401) {
+    return 'You are not signed in (or your session expired). Sign in, then reopen the workspace picker.';
+  }
+  if (status === 403) {
+    return detail
+      || 'Workspace selection is restricted to the installation admin on this server. Sign in as an admin account to choose a workspace.';
+  }
+  if (status === 404) {
+    return detail || 'That path was not found on the server.';
+  }
+  if (status >= 500) {
+    return `The server could not list folders (error ${status}). Check the server log.`;
+  }
+  return detail || `Folder browser request failed (error ${status}).`;
+}
+
+async function _errorDetail(res) {
+  try {
+    const body = await res.json();
+    if (body && typeof body.detail === 'string') return body.detail;
+    if (body && typeof body.error === 'string') return body.error;
+  } catch (_) {}
+  return '';
+}
+
+async function _fetchJson(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const detail = await _errorDetail(res);
+    const err = new Error(_httpFailureMessage(res.status, detail));
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/**
+ * Persist the chosen workspace on the current chat session so every client
+ * that opens it sees the same folder (MAD-883). No-op when there is no chat
+ * yet: the first send persists the localStorage value instead.
+ */
+async function _persistToSession(path, clear) {
+  try {
+    const sessions = await import('./sessions.js');
+    const sessionId = sessions.getCurrentSessionId ? sessions.getCurrentSessionId() : null;
+    if (!sessionId) return null;
+    return await _fetchJson(`${API_BASE}/api/workspace/session`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(clear ? { session_id: sessionId, clear: true } : { session_id: sessionId, path }),
+    });
+  } catch (e) {
+    // The local pill is already updated; the next chat send re-validates and
+    // persists the value, but a failed CLEAR cannot sync that way. Surface
+    // every non-401 failure instead of leaving the server and the pill
+    // disagreeing silently.
+    const status = e && e.status;
+    if (uiModule && uiModule.showError && status !== 401) {
+      uiModule.showError(
+        `Could not sync the workspace to this chat${status ? ` (error ${status})` : ''}. `
+        + 'The server may keep the previous folder for this chat — try again.'
+      );
+    }
+    return null;
+  }
+}
+
 function _basename(p) {
   if (!p) return '';
   // Handle both POSIX (/) and Windows (\) separators.
@@ -58,35 +133,37 @@ export function setWorkspace(path) {
 
 /**
  * Validate a manually entered path server-side, then persist the canonical
- * form. Returns {ok, path|null}. Without this, a typo / file path / deleted
- * folder / filesystem root would be stored and shown as active while the
- * backend silently refuses to bind it on every send.
+ * form. Returns {ok, path|null, error}. Without this, a typo / file path /
+ * deleted folder / filesystem root would be stored and shown as active while
+ * the backend silently refuses to bind it on every send.
  */
 export async function vetAndSetWorkspace(path) {
   try {
     const res = await fetch(`${API_BASE}/api/workspace/vet?path=${encodeURIComponent(path)}`, { credentials: 'same-origin' });
-    if (!res.ok) return { ok: false, path: null };
+    if (!res.ok) {
+      return { ok: false, path: null, error: _httpFailureMessage(res.status, await _errorDetail(res)) };
+    }
     const data = await res.json();
     if (data.ok && data.path) {
       setWorkspace(data.path);
+      await _persistToSession(data.path, false);
       return { ok: true, path: data.path };
     }
-    return { ok: false, path: null };
+    return { ok: false, path: null, error: 'Not a usable workspace folder.' };
   } catch (e) {
-    return { ok: false, path: null };
+    return { ok: false, path: null, error: (e && e.message) || 'Workspace validation failed.' };
   }
 }
 
 export function clearWorkspace() {
   setWorkspace('');
+  _persistToSession('', true);
   if (uiModule && uiModule.showToast) uiModule.showToast('Workspace cleared');
 }
 
 async function _load(path) {
   const url = `${API_BASE}/api/workspace/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`;
-  const res = await fetch(url, { credentials: 'same-origin' });
-  if (!res.ok) throw new Error(`browse failed: ${res.status}`);
-  return res.json();
+  return _fetchJson(url, { credentials: 'same-origin' });
 }
 
 function _render(data) {
@@ -127,8 +204,17 @@ async function _navigate(path) {
   try {
     _render(await _load(path));
   } catch (e) {
-    if (uiModule && uiModule.showError) uiModule.showError('Could not open folder');
+    _showBrowseFailure(e);
   }
+}
+
+function _showBrowseFailure(error) {
+  const message = (error && error.message) || 'Could not open the folder.';
+  const body = _modal && _modal.querySelector('#workspace-body');
+  if (body) {
+    body.innerHTML = `<div class="workspace-empty">${uiModule.esc(message)}</div>`;
+  }
+  if (uiModule && uiModule.showError) uiModule.showError(message);
 }
 
 function _getModal() {
@@ -176,6 +262,7 @@ function _getModal() {
       return;
     }
     setWorkspace(chosen);
+    _persistToSession(chosen, !chosen);
     if (uiModule && uiModule.showToast) uiModule.showToast(`Workspace set: ${_basename(chosen)}`);
     closeWorkspaceBrowser();
   });
@@ -191,7 +278,7 @@ export async function openWorkspaceBrowser() {
   try {
     _render(await _load(getWorkspace() || ''));
   } catch (e) {
-    if (uiModule && uiModule.showError) uiModule.showError('Could not browse folders');
+    _showBrowseFailure(e);
   }
 }
 
