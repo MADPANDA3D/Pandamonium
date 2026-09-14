@@ -23,6 +23,21 @@ def test_release_comparison_keeps_commit_with_empty_body(monkeypatch):
     }]
 
 
+def test_release_comparison_ignores_prose_references_in_bodies(monkeypatch):
+    record = (
+        "b" * 40
+        + "\x1ffeat(composer): wire the identity selector\x1f"
+        + "The composer now lists the saved MAD-999 identities.\n\nRefs: MAD-930\x1e\n"
+    )
+    monkeypatch.setattr(build_release_notes, "git", lambda *_args: record)
+
+    assert build_release_notes.collect_commits("v1.0.62", "HEAD") == [{
+        "sha": "b" * 40,
+        "subject": "feat(composer): wire the identity selector",
+        "issues": ["MAD-930"],
+    }]
+
+
 def test_release_notes_cover_comparison_and_publish_only_after_verification(tmp_path):
     output = tmp_path / "notes.md"
     comparison = tmp_path / "comparison.json"

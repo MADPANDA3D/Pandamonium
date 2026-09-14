@@ -3396,6 +3396,21 @@ function initializeEventListeners() {
     _syncMobileEnterKeyHint(textarea);
     window.addEventListener('odysseus:chat-busy-change', () => _syncMobileEnterKeyHint(textarea));
     uiModule.autoResize(textarea);
+    // Re-measure whenever the composer's content width changes (picker
+    // clearance, responsive collapse, side docks) so the height never keeps a
+    // stale measure from a wider layout. Height-only changes are ignored to
+    // avoid feedback loops with autoResize itself.
+    if (typeof ResizeObserver !== 'undefined') {
+      let lastContentWidth = null;
+      const composerResizeObserver = new ResizeObserver(entries => {
+        const entry = entries[entries.length - 1];
+        const width = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (lastContentWidth !== null && Math.abs(width - lastContentWidth) < 0.5) return;
+        lastContentWidth = width;
+        uiModule.autoResize(textarea);
+      });
+      composerResizeObserver.observe(textarea, { box: 'content-box' });
+    }
     let previousTextareaValue = textarea.value || '';
     textarea.addEventListener('beforeinput', (e) => {
       if (_isLineBreakInputEvent(e) && _shouldQueueFromMobileLineBreak(textarea)) {
