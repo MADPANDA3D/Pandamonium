@@ -401,7 +401,12 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
 
     @router.post("/api/session/{session_id}/mark-stopped")
     async def mark_stopped(request: Request, session_id: str):
-        """Mark the last assistant message as stopped by user."""
+        """Mark the last assistant message as stopped by user.
+
+        Only the ``stopped`` flag is written. Model attribution is immutable
+        history: stamping ``session.model`` here rewrote it whenever the
+        operator switched the active model before pressing Stop (MAD-787).
+        """
         _verify_session_owner(request, session_id)
         try:
             session = session_manager.get_session(session_id)
@@ -413,14 +418,10 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                         if not msg.metadata:
                             msg.metadata = {}
                         msg.metadata['stopped'] = True
-                        if not msg.metadata.get('model'):
-                            msg.metadata['model'] = session.model
                     else:
                         if 'metadata' not in msg:
                             msg['metadata'] = {}
                         msg['metadata']['stopped'] = True
-                        if not msg['metadata'].get('model'):
-                            msg['metadata']['model'] = session.model
                     break
             # Also update in DB
             db = SessionLocal()
@@ -440,8 +441,6 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
                         except (json.JSONDecodeError, ValueError):
                             pass
                     meta['stopped'] = True
-                    if not meta.get('model'):
-                        meta['model'] = session.model
                     db_messages.meta_data = _json.dumps(meta)
                     db.commit()
             finally:
