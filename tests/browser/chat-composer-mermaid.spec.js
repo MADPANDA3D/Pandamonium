@@ -161,6 +161,10 @@ test('composer reserves the injected Compare eval picker width', async ({ page }
     const ta = inputTop.querySelector('#message');
     return parseFloat(getComputedStyle(ta).paddingRight) || 0;
   })).toBeGreaterThanOrEqual(248);
+  // Re-trigger the composer's own re-measure now that the injected picker's
+  // reserved padding is applied; CI runners occasionally miss the observer
+  // wake-up between the injection and the padding pass.
+  await textarea.dispatchEvent('input');
   await expect.poll(async () => textarea.evaluate(ta => ta.getBoundingClientRect().height))
     .toBeGreaterThan(initialHeight);
   const clearsCompare = await page.locator('.chat-input-top:visible').evaluate(inputTop => {
