@@ -44084,3 +44084,315 @@ body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-ev
   .agent-plan-panel { margin: 0 0 6px; border-radius: 10px; }
   .agent-plan-list { max-height: 26vh; }
 }
+
+/* ── Guided in-app bug reports (MAD-856) ─────────────────────────────────
+   Reuses the canonical modal + right-dock framework. Desktop: compact docked
+   panel; mobile (<=768px): the shared bottom-sheet becomes a full-width
+   surface with a scrollable body. */
+.bug-report-modal .bug-report-content {
+  width: min(560px, 94vw);
+  max-height: 88vh;
+}
+.bug-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bug-report-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.bug-report-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.bug-report-tab {
+  flex: 1;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.bug-report-tab[aria-selected="true"] {
+  border-color: var(--border);
+  background: var(--card, rgba(255, 255, 255, 0.04));
+  opacity: 1;
+  font-weight: 600;
+}
+.bug-report-tab:focus-visible,
+.bug-report-icon-btn:focus-visible,
+.bug-report-retry:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 1px;
+}
+.bug-report-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bug-report-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bug-report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bug-report-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+}
+.bug-report-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+textarea.bug-report-input {
+  resize: vertical;
+  min-height: 34px;
+  font-family: inherit;
+}
+.bug-report-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+.bug-report-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bug-report-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bug-report-step-number {
+  width: 16px;
+  text-align: right;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.bug-report-step-input { flex: 1; }
+.bug-report-add-step {
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 3px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.bug-report-add-step:hover { opacity: 1; }
+.bug-report-icon-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.bug-report-icon-btn:hover { background: var(--card, rgba(255, 255, 255, 0.05)); }
+.bug-report-drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  opacity: 0.8;
+  cursor: pointer;
+}
+.bug-report-drop-zone.is-dragover,
+.bug-report-drop-zone:focus-visible {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  opacity: 1;
+}
+.bug-report-file-input { display: none; }
+.bug-report-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.bug-report-attachment {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card, rgba(255, 255, 255, 0.02));
+}
+.bug-report-attachment.is-failed { border-color: var(--red); }
+.bug-report-thumb {
+  flex-shrink: 0;
+  width: 54px;
+  height: 42px;
+  border-radius: 5px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 18px;
+}
+.bug-report-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bug-report-attachment-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bug-report-attachment-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bug-report-attachment-label { font-size: 12px; }
+.bug-report-attachment-route {
+  font-size: 10px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bug-report-attachment-error { font-size: 11px; color: var(--red); }
+.bug-report-retry {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.bug-report-attachment-actions { display: flex; flex-direction: column; gap: 3px; }
+.bug-report-diagnostics summary {
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.bug-report-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.bug-report-diagnostics-pre,
+.bug-report-review-body {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bug-report-review-title {
+  margin: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bug-report-review-list { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+.bug-report-duplicates { display: flex; flex-direction: column; gap: 3px; }
+.bug-report-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bug-report-public-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  font-size: 12px;
+}
+.bug-report-security-notice {
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.bug-report-security-notice a { color: var(--red); }
+.bug-report-success {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.bug-report-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bug-report-footer-actions { display: flex; gap: 6px; }
+.bug-report-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  opacity: 0.8;
+}
+.bug-report-status.is-error { color: var(--red); opacity: 1; }
+.bug-report-status.is-warn { color: var(--yellow, #f0c674); }
+.bug-report-status.is-ok { color: var(--green, #50fa7b); }
+@media (max-width: 768px) {
+  .bug-report-modal .bug-report-content {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    border-radius: 12px 12px 0 0;
+  }
+  .bug-report-body { max-height: none; }
+  .bug-report-diagnostics-pre,
+  .bug-report-review-body { max-height: 34dvh; }
+}
