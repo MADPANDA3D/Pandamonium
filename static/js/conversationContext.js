@@ -1,4 +1,5 @@
 import { getSelectedAgentSelection } from './modelPicker.js';
+import { sidePanelDocked, watchSidePanelDock } from './modalSnap.js';
 
 const byId = id => document.getElementById(id);
 const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -14,6 +15,12 @@ let activityOffset = null;
 let activityLoading = false;
 let drawerSection = '';
 let environment = [];
+// MAD-932: while a side-mounted panel owns the edge, Details hides by default.
+// `_detailsAutoHidden` remembers that WE hid it so closing the dock restores
+// the prior state; `_detailsUserOverride` remembers an explicit re-open while
+// docked so the dock observer never fights the user's choice.
+let _detailsAutoHidden = false;
+let _detailsUserOverride = false;
 const activityCursors = new Set();
 const array = value => Array.isArray(value) ? value : [];
 
@@ -286,10 +293,37 @@ async function loadHistory() {
   }
 }
 
-function setOpen(open) {
+function setOpen(open, { auto = false } = {}) {
   byId('session-context-panel').hidden = !open;
   byId('chat-container').classList.toggle('context-open', open);
   byId('session-context-toggle').setAttribute('aria-expanded', String(open));
+  if (auto) return;
+  // Explicit user choice: an open while a side panel is docked becomes the
+  // remembered preference; a close clears both the preference and any pending
+  // auto-restore.
+  if (open) {
+    _detailsUserOverride = sidePanelDocked();
+    _detailsAutoHidden = false;
+  } else {
+    _detailsUserOverride = false;
+    _detailsAutoHidden = false;
+  }
+}
+
+// React to the canonical dock state (MAD-932). Never runs while the user has
+// explicitly asked for Details to stay open.
+function _syncDetailsWithSidePanel(docked) {
+  if (docked) {
+    if (_detailsUserOverride) return;
+    if (byId('session-context-panel').hidden) return;
+    _detailsAutoHidden = true;
+    setOpen(false, { auto: true });
+    return;
+  }
+  if (_detailsAutoHidden) {
+    _detailsAutoHidden = false;
+    setOpen(true, { auto: true });
+  }
 }
 
 function bind() {
@@ -368,7 +402,10 @@ function bind() {
     renderPanel();
   });
   window.addEventListener('odysseus:turn-completed', event => { if (event.detail.sessionId === sessionId()) loadHistory(); });
-  setOpen(window.matchMedia('(min-width: 1250px)').matches);
+  setOpen(window.matchMedia('(min-width: 1250px)').matches, { auto: true });
+  // The initial open is viewport-driven, not a user preference, so let the
+  // dock state govern it from the first mutation onward (MAD-932).
+  watchSidePanelDock(_syncDetailsWithSidePanel);
   renderEffort();
   loadHistory();
 }
