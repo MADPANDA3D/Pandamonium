@@ -1,0 +1,56 @@
+{
+  "baseline_version": "v1",
+  "suite_version": "v1",
+  "harness_version": "1.0.0",
+  "description": "Versioned offline baseline. asset_sha256 pins the exact suite, fixtures, and evaluator cases; any edit must deliberately update this baseline. expectations.required_pass lists scenarios a healthy install must pass for each model class.",
+  "asset_sha256": {
+    "suite/v1/suite.json": "99b333ea2776cbbb85462f720fa399b801dd5036e9bbdfbda735bf8c39892cb5",
+    "fixtures/v1/suite-fixtures.json": "beee0881856fd4a4a64c9bcca137f66f5a711cb759a97911c8204c47f2354ff0",
+    "fixtures/v1/evaluator-cases.json": "5d878b3f2734d13ebbb009ff38946a79668056c83c443bc035b6ecd1221111f5"
+  },
+  "evaluator_cases": "fixtures/v1/evaluator-cases.json",
+  "expectations": {
+    "fixture-local": {
+      "min_pass": 16,
+      "required_pass": [
+        "capability-discovery-text",
+        "capability-discovery-voice",
+        "files-read-text",
+        "files-read-voice",
+        "books-search-text",
+        "books-search-voice",
+        "calendar-read-text",
+        "calendar-read-voice",
+        "calendar-mutation-gated",
+        "integrations-health",
+        "oracle-read",
+        "oracle-control-gated",
+        "safe-mutation-notes",
+        "gated-mutation-bulk-email",
+        "failure-recovery",
+        "long-response"
+      ]
+    },
+    "fixture-flagship": {
+      "min_pass": 16,
+      "required_pass": [
+        "capability-discovery-text",
+        "capability-discovery-voice",
+        "files-read-text",
+        "files-read-voice",
+        "books-search-text",
+        "books-search-voice",
+        "calendar-read-text",
+        "calendar-read-voice",
+        "calendar-mutation-gated",
+        "integrations-health",
+        "oracle-read",
+        "oracle-control-gated",
+        "safe-mutation-notes",
+        "gated-mutation-bulk-email",
+        "failure-recovery",
+        "long-response"
+      ]
+    }
+  }
+}
