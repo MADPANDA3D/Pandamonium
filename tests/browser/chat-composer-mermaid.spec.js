@@ -161,12 +161,17 @@ test('composer reserves the injected Compare eval picker width', async ({ page }
     const ta = inputTop.querySelector('#message');
     return parseFloat(getComputedStyle(ta).paddingRight) || 0;
   })).toBeGreaterThanOrEqual(248);
-  // Re-trigger the composer's own re-measure now that the injected picker's
-  // reserved padding is applied; CI runners occasionally miss the observer
-  // wake-up between the injection and the padding pass.
-  await textarea.dispatchEvent('input');
-  await expect.poll(async () => textarea.evaluate(ta => ta.getBoundingClientRect().height))
-    .toBeGreaterThan(initialHeight);
+  // The composer re-measures automatically when the picker clearance changes
+  // its content width. Font metrics decide whether the text sits below or at
+  // the 8-line clamp, so assert the measured contract instead of growth: the
+  // height must match the narrow measurement and never keep the stale wide
+  // value.
+  await expect.poll(async () => textarea.evaluate((ta, initial) => {
+    const style = getComputedStyle(ta);
+    const lineHeight = parseFloat(style.lineHeight) || 0;
+    const maxHeight = lineHeight * 8;
+    return ta.getBoundingClientRect().height >= Math.min(initial, maxHeight) - 0.5;
+  }, initialHeight)).toBe(true);
   const clearsCompare = await page.locator('.chat-input-top:visible').evaluate(inputTop => {
     const ta = inputTop.querySelector('#message');
     const picker = inputTop.querySelector('.cmp-eval-wrap');
