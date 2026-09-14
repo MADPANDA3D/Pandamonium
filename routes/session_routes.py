@@ -289,6 +289,9 @@ def _apply_identity_profile_chat(session, session_id: str, identity_id: str, own
                 row.headers = session.headers or {}
                 row.updated_at = utcnow_naive()
                 db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
     elif model:
@@ -301,6 +304,9 @@ def _apply_identity_profile_chat(session, session_id: str, identity_id: str, own
                 row.model = model
                 row.updated_at = utcnow_naive()
                 db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
     return applied
