@@ -38,9 +38,10 @@ def test_wizard_never_renders_raw_backend_error_codes():
 
 
 def test_non_admin_welcome_copy_points_at_the_administrator():
-    assert "Setup is managed by your administrator." in APP_JS
+    assert "MANAGED_BY_ADMIN_COPY" in APP_JS
     assert "window._isAdmin === false" in APP_JS
-    assert "setup-wizard-link" in APP_JS
+    assert "createModelSetupEntry" in APP_JS
+    assert "Setup is managed by your administrator" not in APP_JS
 
 
 def test_wizard_dismissal_is_persistent_not_session_scoped():

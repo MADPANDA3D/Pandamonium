@@ -4,6 +4,7 @@
 import { providerLogo } from './providers.js';
 import uiModule from './ui.js';
 import settingsModule from './settings.js';
+import { MANAGED_BY_ADMIN_COPY, createModelSetupEntry } from './setupUi.js';
 
 const API_BASE = window.location.origin;
 
@@ -595,7 +596,13 @@ function _initModelPickerDropdown() {
       const empty = document.createElement('div');
       empty.className = 'model-switch-status';
       empty.setAttribute('role', 'status');
-      empty.textContent = 'No configured identities are available.';
+      if (window._isAdmin === false) {
+        empty.textContent = MANAGED_BY_ADMIN_COPY;
+      } else {
+        empty.textContent = 'No configured identities are available.';
+        empty.appendChild(document.createElement('br'));
+        empty.appendChild(createModelSetupEntry());
+      }
       listEl.appendChild(empty);
       return;
     }
