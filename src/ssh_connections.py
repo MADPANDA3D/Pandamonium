@@ -21,6 +21,7 @@ Security contract:
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -29,6 +30,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,6 +104,527 @@ _KEY_TYPE_PRIORITY = {
     "rsa-sha2-256": 4,
     "ssh-rsa": 5,
 }
+
+# ── governed agent operations (MAD-936) ──────────────────────────────────
+#
+# Agent-initiated SSH is bounded to saved connections, never a free-form
+# target. list/read are built here from fixed binaries and a quoted path; run
+# accepts only a single command whose first token is on the connection's
+# allowlist (a conservative read-only default when the operator has not set
+# one). Every call is audited with connection, bounds, and redacted target.
+
+AGENT_ACTIONS = ("list", "read", "run")
+DEFAULT_ALLOWED_COMMANDS = (
+    "cat",
+    "date",
+    "df",
+    "du",
+    "free",
+    "head",
+    "hostname",
+    "id",
+    "ls",
+    "pwd",
+    "stat",
+    "tail",
+    "uname",
+    "uptime",
+    "wc",
+    "whoami",
+)
+MAX_ALLOWED_COMMANDS = 64
+MAX_ALLOWED_COMMAND_CHARS = 120
+MAX_REMOTE_PATH_CHARS = 1024
+AGENT_COMMAND_TIMEOUT_SECONDS = 15
+AGENT_LIST_MAX_BYTES = 64 * 1024
+AGENT_READ_MAX_BYTES = 64 * 1024
+AGENT_RUN_MAX_BYTES = 32 * 1024
+AGENT_MIN_READ_BYTES = 1
+_SAFE_COMMAND_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._=/@:+,%-]*$")
+_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._=/@:+,%-]+$")
+
+
+class SshAgentError(RuntimeError):
+    """Raised for governed agent SSH failures; callers map this to honest copy."""
+
+    def __init__(self, code: str, message: str, *, reason: str = "", status_code: int = 400):
+        super().__init__(message)
+        self.code = str(code or "failed")
+        self.message = str(message or "")
+        self.reason = str(reason or self.code)
+        self.status_code = int(status_code)
+
+
+def _shell_quote(value: str) -> str:
+    """POSIX single-quote a path so the remote shell treats it as a literal."""
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def effective_allowed_commands(connection: Any) -> list[str]:
+    """The connection's run allowlist (built-in read-only default when unset)."""
+    raw = getattr(connection, "allowed_commands", None)
+    if raw:
+        try:
+            parsed = json.loads(str(raw))
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            commands = []
+            for item in parsed:
+                token = " ".join(str(item or "").split())
+                if token and token not in commands:
+                    commands.append(token)
+            if commands:
+                return commands
+    return list(DEFAULT_ALLOWED_COMMANDS)
+
+
+def validate_allowed_commands(value: Any) -> str | None:
+    """Normalize a policy value (JSON array or comma/newline list) for storage."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("["):
+        try:
+            items = json.loads(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Allowed commands must be a JSON array or a comma-separated list.")
+        if not isinstance(items, list):
+            raise HTTPException(400, "Allowed commands must be a list of commands.")
+    else:
+        items = re.split(r"[\n,]", raw)
+    commands: list[str] = []
+    for item in items:
+        token = " ".join(str(item or "").split())
+        if not token:
+            continue
+        if len(token) > MAX_ALLOWED_COMMAND_CHARS or not _SAFE_COMMAND_RE.match(token):
+            raise HTTPException(
+                400,
+                "Allowed commands must be simple commands (letters, numbers, and . _ = / @ : + , -% only).",
+            )
+        if token not in commands:
+            commands.append(token)
+    if len(commands) > MAX_ALLOWED_COMMANDS:
+        raise HTTPException(400, f"Keep the allowlist to {MAX_ALLOWED_COMMANDS} commands or fewer.")
+    return json.dumps(commands) if commands else None
+
+
+def validate_remote_path(value: Any, default: str = "") -> str:
+    path = str(value if value is not None else "").strip()
+    if not path:
+        if default:
+            return default
+        raise SshAgentError("invalid_path", "Enter the file or folder path on the node.")
+    if len(path) > MAX_REMOTE_PATH_CHARS or _CONTROL_RE.search(path):
+        raise SshAgentError("invalid_path", "Enter a plain file or folder path on the node.")
+    return path
+
+
+def validate_run_command(command: Any, allowed: list[str]) -> str:
+    value = " ".join(str(command or "").split())
+    if not value or len(value) > MAX_ALLOWED_COMMAND_CHARS:
+        raise SshAgentError("invalid_command", "Enter one simple command from the connection's allowlist.")
+    if not _SAFE_COMMAND_RE.match(value):
+        raise SshAgentError(
+            "invalid_command",
+            "Commands with shell operators are not allowed. Use one command from the allowlist.",
+        )
+    tokens = value.split(" ")
+    if any(not _SAFE_TOKEN_RE.match(token) for token in tokens):
+        raise SshAgentError("invalid_command", "That command contains unsupported characters.")
+    if tokens[0] not in allowed:
+        raise SshAgentError(
+            "command_not_allowed",
+            f"'{tokens[0]}' is not allowed for this connection. Allowed commands: {', '.join(allowed)}.",
+        )
+    return value
+
+
+def build_list_command(path: str) -> str:
+    return f"ls -la -- {_shell_quote(path)}"
+
+
+def build_read_command(path: str, max_bytes: int) -> str:
+    return f"head -c {int(max_bytes)} -- {_shell_quote(path)}"
+
+
+def resolve_saved_connection(reference: Any) -> Any:
+    """Resolve one saved SshConnection by id or case-insensitive label."""
+    value = str(reference or "").strip()
+    if not value:
+        raise SshAgentError(
+            "not_found",
+            "Name a saved SSH connection from Settings \u2192 SSH Connections.",
+        )
+    from core.database import SessionLocal, SshConnection
+
+    with SessionLocal() as session:
+        rows = session.query(SshConnection).order_by(SshConnection.created_at.asc()).all()
+        exact = [row for row in rows if row.id == value]
+        if exact:
+            return exact[0]
+        matches = [row for row in rows if str(row.label or "").strip().casefold() == value.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise SshAgentError(
+            "ambiguous",
+            f"More than one saved connection is named '{value}'. Use the connection id from Settings \u2192 SSH Connections.",
+        )
+    raise SshAgentError(
+        "not_found",
+        f"No saved SSH connection is named '{value}'. Add it in Settings \u2192 SSH Connections.",
+    )
+
+
+def _run_command_bounded(
+    argv: list[str],
+    timeout: int = AGENT_COMMAND_TIMEOUT_SECONDS,
+    max_bytes: int = AGENT_RUN_MAX_BYTES,
+):
+    """Run one OpenSSH command with a hard timeout and a hard output ceiling.
+
+    stdout is read up to ``max_bytes`` and the child is killed when it exceeds
+    that; stderr goes to a temporary file so a chatty child can never deadlock
+    the pipes. Return shape matches ``_run_command`` plus ``truncated``.
+    """
+    timer = None
+    proc = None
+    timed_out = False
+    truncated = False
+    raw = b""
+    stderr_raw = b""
+    try:
+        with tempfile.TemporaryFile() as errfile:
+            proc = subprocess.Popen(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=errfile,
+            )
+
+            def _kill():
+                nonlocal timed_out
+                timed_out = True
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
+            timer = threading.Timer(timeout, _kill)
+            timer.daemon = True
+            timer.start()
+            try:
+                raw = proc.stdout.read(max_bytes + 1) if proc.stdout else b""
+                if len(raw) > max_bytes:
+                    truncated = True
+                    raw = raw[:max_bytes]
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                if proc.stdout:
+                    proc.stdout.close()
+                proc.wait()
+                errfile.seek(0)
+                stderr_raw = errfile.read(8192)
+            finally:
+                timer.cancel()
+    except OSError as exc:
+        return SimpleNamespace(returncode=127, stdout="", stderr=str(exc), truncated=False)
+    returncode = 124 if timed_out else (proc.returncode if proc is not None else 127)
+    return SimpleNamespace(
+        returncode=returncode,
+        stdout=raw.decode("utf-8", errors="replace"),
+        stderr=stderr_raw.decode("utf-8", errors="replace"),
+        truncated=truncated,
+    )
+
+
+@contextlib.contextmanager
+def managed_agent_material(connection: Any):
+    """Materialize the pinned host key and managed key for one agent call."""
+    binary = resolve_ssh_binary()
+    if not binary:
+        raise SshAgentError("unavailable", UNAVAILABLE_MESSAGE, reason="openssh_unavailable")
+    if not getattr(connection, "host_key", None):
+        raise SshAgentError("host_key_unknown", HOST_KEY_UNKNOWN_MESSAGE, reason="host_key_unknown")
+    try:
+        workdir = ensure_connection_dir(connection.id)
+    except HTTPException as exc:
+        raise SshAgentError("storage_unavailable", str(exc.detail)) from exc
+    known_hosts_path = workdir / "known_hosts"
+    _write_owner_only(known_hosts_path, str(connection.host_key))
+    with tempfile.TemporaryDirectory(prefix="agent-", dir=workdir) as tmp:
+        key_path = None
+        if bool(getattr(connection, "keyless", False)) and getattr(connection, "private_key", None):
+            key_path = os.path.join(tmp, "id_ed25519")
+            _write_owner_only(key_path, str(connection.private_key))
+        config_path = os.path.join(tmp, "config")
+        _write_owner_only(
+            config_path,
+            build_managed_config(
+                connection,
+                identity_path=key_path,
+                known_hosts_path=str(known_hosts_path),
+            ),
+        )
+        yield binary, config_path, str(known_hosts_path)
+
+
+def _run_remote(
+    connection: Any,
+    remote_command: str,
+    *,
+    timeout: int = AGENT_COMMAND_TIMEOUT_SECONDS,
+    max_bytes: int = AGENT_RUN_MAX_BYTES,
+):
+    """Run one bounded remote command through the managed OpenSSH config."""
+    with managed_agent_material(connection) as (binary, config_path, known_hosts_path):
+        alias = managed_alias(connection.id)
+        argv = [
+            binary,
+            "-F",
+            config_path,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            f"UserKnownHostsFile={known_hosts_path}",
+            "-o",
+            f"GlobalKnownHostsFile={_DEV_NULL}",
+            alias,
+            remote_command,
+        ]
+        proc = _run_command_bounded(argv, timeout=timeout, max_bytes=max_bytes)
+    if proc.truncated and proc.stdout:
+        return proc
+    if proc.returncode == 0:
+        return proc
+    if proc.returncode == 124:
+        raise SshAgentError(
+            "timeout",
+            "The node did not finish the operation in time. Try a narrower path or command.",
+            reason="timeout",
+        )
+    if proc.returncode == 127:
+        raise SshAgentError("unavailable", FAILED_MESSAGE, reason="openssh_unavailable")
+    if proc.returncode == 255:
+        classified = classify_ssh_failure(proc.stderr or "")
+        raise SshAgentError(classified["state"], classified["message"], reason=classified["reason"])
+    safe_stderr = ""
+    try:
+        from src.authority_protocol import redact_secret_text
+
+        safe_stderr = redact_secret_text(str(proc.stderr or "")[:300]).strip()
+    except Exception:
+        safe_stderr = ""
+    message = f"The command exited with code {proc.returncode} on the node."
+    if safe_stderr:
+        message = f"{message} {safe_stderr}"
+    raise SshAgentError("command_failed", message, reason="command_failed")
+
+
+def _bounded_text(text: str, limit: int, truncated: bool) -> tuple[str, bool]:
+    raw = str(text or "").encode("utf-8")
+    hit = bool(truncated) or len(raw) > limit
+    if len(raw) > limit:
+        raw = raw[:limit]
+    output = raw.decode("utf-8", errors="replace")
+    if hit:
+        output += f"\n... [truncated at {limit} bytes; ask for a narrower path or command]"
+    return output, hit
+
+
+def _clamped_int(value: Any, default: int, *, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+def _agent_source(connection: Any, action: str, **extra: Any) -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "kind": "ssh_node",
+        "connection_id": connection.id,
+        "label": connection.label,
+        "action": action,
+        "read_only": action in ("list", "read"),
+    }
+    source.update({key: value for key, value in extra.items() if value is not None})
+    return source
+
+
+def _agent_citation(connection: Any, *, path: str | None = None, command: str | None = None) -> str:
+    node = f'ssh node "{connection.label}"'
+    if path:
+        return f"{node}: {path}"
+    if command:
+        return f'{node}: "{command}"'
+    return node
+
+
+def _audit_agent_call(
+    connection: Any,
+    action: str,
+    *,
+    state: str,
+    output_bytes: int,
+    truncated: bool,
+    actor: str | None,
+    path: str | None = None,
+    command: str | None = None,
+) -> None:
+    detail: dict[str, Any] = {
+        "source": "agent",
+        "action": action,
+        "state": state,
+        "timeout_seconds": AGENT_COMMAND_TIMEOUT_SECONDS,
+        "max_output_bytes": (
+            AGENT_LIST_MAX_BYTES
+            if action == "list"
+            else AGENT_READ_MAX_BYTES
+            if action == "read"
+            else AGENT_RUN_MAX_BYTES
+        ),
+        "output_bytes": max(0, int(output_bytes or 0)),
+        "truncated": bool(truncated),
+    }
+    if path:
+        detail["path"] = path
+    if command:
+        detail["command"] = command
+    record_ssh_audit(
+        getattr(connection, "id", "") or "",
+        f"agent-{action}",
+        state,
+        state if state != "ok" else "",
+        actor,
+        detail=detail,
+    )
+
+
+def _execute_agent_operation(connection: Any, action: str, args: dict[str, Any]) -> dict[str, Any]:
+    if action == "list":
+        path = validate_remote_path(args.get("path"), default=".")
+        proc = _run_remote(connection, build_list_command(path), max_bytes=AGENT_LIST_MAX_BYTES)
+        output, truncated = _bounded_text(proc.stdout, AGENT_LIST_MAX_BYTES, proc.truncated)
+        return {
+            "ok": True,
+            "action": action,
+            "output": output,
+            "truncated": truncated,
+            "source": _agent_source(connection, action, path=path),
+            "citation": _agent_citation(connection, path=path),
+            "limits": {
+                "timeout_seconds": AGENT_COMMAND_TIMEOUT_SECONDS,
+                "max_output_bytes": AGENT_LIST_MAX_BYTES,
+            },
+        }
+    if action == "read":
+        path = validate_remote_path(args.get("path"))
+        max_bytes = _clamped_int(
+            args.get("max_bytes"),
+            AGENT_READ_MAX_BYTES,
+            low=AGENT_MIN_READ_BYTES,
+            high=AGENT_READ_MAX_BYTES,
+        )
+        proc = _run_remote(
+            connection,
+            build_read_command(path, max_bytes + 1),
+            max_bytes=max_bytes + 1,
+        )
+        output, truncated = _bounded_text(proc.stdout, max_bytes, proc.truncated)
+        return {
+            "ok": True,
+            "action": action,
+            "output": output,
+            "truncated": truncated,
+            "source": _agent_source(connection, action, path=path),
+            "citation": _agent_citation(connection, path=path),
+            "limits": {
+                "timeout_seconds": AGENT_COMMAND_TIMEOUT_SECONDS,
+                "max_output_bytes": max_bytes,
+            },
+        }
+    allowed = effective_allowed_commands(connection)
+    command = validate_run_command(args.get("command"), allowed)
+    proc = _run_remote(connection, command, max_bytes=AGENT_RUN_MAX_BYTES)
+    output, truncated = _bounded_text(proc.stdout, AGENT_RUN_MAX_BYTES, proc.truncated)
+    return {
+        "ok": True,
+        "action": action,
+        "output": output,
+        "truncated": truncated,
+        "source": _agent_source(connection, action, command=command),
+        "citation": _agent_citation(connection, command=command),
+        "limits": {
+            "timeout_seconds": AGENT_COMMAND_TIMEOUT_SECONDS,
+            "max_output_bytes": AGENT_RUN_MAX_BYTES,
+            "allowed_commands": allowed,
+        },
+    }
+
+
+def execute_agent_operation(
+    connection: Any,
+    action: Any,
+    arguments: dict[str, Any] | None = None,
+    *,
+    actor: str | None = None,
+) -> dict[str, Any]:
+    """Run one governed agent SSH operation and audit the attempt."""
+    action_value = str(action or "").strip().lower()
+    args = dict(arguments or {})
+    if action_value not in AGENT_ACTIONS:
+        raise SshAgentError("invalid_action", "The SSH action must be list, read, or run.")
+    started = time.monotonic()
+    path = None
+    command = None
+    try:
+        if action_value == "read":
+            path = str(args.get("path") or "").strip() or None
+        elif action_value == "list":
+            path = str(args.get("path") or "").strip() or None
+        else:
+            command = " ".join(str(args.get("command") or "").split()) or None
+        result = _execute_agent_operation(connection, action_value, args)
+    except SshAgentError as exc:
+        _audit_agent_call(
+            connection,
+            action_value,
+            state=exc.reason,
+            output_bytes=0,
+            truncated=False,
+            actor=actor,
+            path=path,
+            command=command,
+        )
+        raise
+    logger.info(
+        "ssh agent operation action=%s state=ok id=%s duration_ms=%s",
+        action_value,
+        getattr(connection, "id", ""),
+        int((time.monotonic() - started) * 1000),
+    )
+    _audit_agent_call(
+        connection,
+        action_value,
+        state="ok",
+        output_bytes=len(result["output"].encode("utf-8")),
+        truncated=result["truncated"],
+        actor=actor,
+        path=result["source"].get("path"),
+        command=result["source"].get("command"),
+    )
+    return result
 
 
 class SshScanError(RuntimeError):
@@ -567,6 +1091,8 @@ def connection_payload(connection: Any) -> dict[str, Any]:
         "host_key_pinned": bool(getattr(connection, "host_key", None)),
         "host_key_fingerprint": connection.host_key_fingerprint or None,
         "host_key_type": connection.host_key_type or None,
+        "allowed_commands": effective_allowed_commands(connection),
+        "allowed_commands_custom": bool(getattr(connection, "allowed_commands", None)),
         "status": {
             "state": connection.last_status or STATE_UNKNOWN,
             "reason": connection.last_status_reason or "",
@@ -584,11 +1110,13 @@ def record_ssh_audit(
     state: str,
     reason: str = "",
     actor: str | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> None:
-    """Append one redacted audit event for a user-initiated connect/test.
+    """Append one redacted audit event for a connect/test or agent operation.
 
     The record intentionally omits host, user, and any key material so an audit
-    file leak cannot expose node topology or secrets.
+    file leak cannot expose node topology or secrets. Optional ``detail`` is
+    flattened to redacted, bounded string/number values for the same reason.
     """
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -598,6 +1126,22 @@ def record_ssh_audit(
         "reason": str(reason or ""),
         "actor": str(actor or ""),
     }
+    if isinstance(detail, dict) and detail:
+        safe_detail: dict[str, Any] = {}
+        for key, value in list(detail.items())[:24]:
+            name = str(key)[:40]
+            if isinstance(value, bool) or isinstance(value, (int, float)):
+                safe_detail[name] = value
+            else:
+                text = str(value if value is not None else "")
+                try:
+                    from src.authority_protocol import redact_secret_text
+
+                    text = redact_secret_text(text)
+                except Exception:
+                    pass
+                safe_detail[name] = text[:500]
+        entry["detail"] = safe_detail
     logger.info(
         "ssh connection action=%s state=%s reason=%s id=%s",
         entry["action"],

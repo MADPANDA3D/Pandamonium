@@ -189,6 +189,25 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "ssh_node",
+            "description": "Run a bounded, read-only-by-default operation on one SAVED SSH connection (Settings > SSH Connections): list a folder, read a file, or run a command the connection's allowlist permits. Never invents a target: the connection must already be saved. Output and run time are bounded; every call is audited. Results cite the exact node and path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "connection": {"type": "string", "maxLength": 120, "description": "Saved connection id or exact label, e.g. 'Home VPS'"},
+                    "action": {"type": "string", "enum": ["list", "read", "run"], "description": "list a folder, read a file, or run one allowlisted command"},
+                    "path": {"type": "string", "maxLength": 1024, "description": "Remote file/folder path (required for read; defaults to the home folder for list)"},
+                    "command": {"type": "string", "maxLength": 120, "description": "One command from the connection's allowlist (required for run; no shell operators)"},
+                    "max_bytes": {"type": "integer", "minimum": 1, "maximum": 65536, "description": "Optional smaller read limit; never above the 64 KiB hard cap"}
+                },
+                "required": ["connection", "action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Write/save a file to disk",
             "parameters": {

@@ -69,6 +69,7 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "vault_search",
     "vault_get",
     "vault_unlock",
+    "ssh_node",
     "download_model",
     "serve_model",
     "serve_preset",

@@ -570,6 +570,10 @@ class SshConnection(TimestampMixin, Base):
     last_status_reason = Column(String, nullable=True)
     last_status_message = Column(Text, nullable=True)
     last_checked_at = Column(DateTime, nullable=True)
+    # Per-connection agent command policy (MAD-936): JSON array of allowlisted
+    # commands for the governed agent SSH tool. NULL means the built-in
+    # conservative read-only default in src/ssh_connections.py.
+    allowed_commands = Column(Text, nullable=True)
     # Installation-level by default (admin-configured). Null means shared.
     owner = Column(String, nullable=True, index=True)
 
@@ -916,6 +920,37 @@ def _migrate_add_last_message_at_column():
             conn.close()
         except Exception:
             pass
+
+
+def _migrate_add_ssh_allowed_commands_column():
+    """Add the per-connection agent command policy column (MAD-936). Idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='ssh_connections'"
+            ).fetchall()
+        ]
+        if "ssh_connections" not in tables:
+            return
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(ssh_connections)").fetchall()]
+        if "allowed_commands" not in columns:
+            conn.execute("ALTER TABLE ssh_connections ADD COLUMN allowed_commands TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info(
+                "Migrated: added 'allowed_commands' to ssh_connections"
+            )
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"ssh_connections.allowed_commands migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _migrate_add_agent_target_column():
@@ -2137,6 +2172,7 @@ def init_db():
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
     _migrate_add_agent_target_column()
+    _migrate_add_ssh_allowed_commands_column()
     _migrate_add_folder_column()
     _migrate_add_project_id_column()
     _migrate_add_token_columns()

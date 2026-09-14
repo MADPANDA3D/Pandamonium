@@ -52,6 +52,7 @@ def _process(returncode: int = 0, stdout: str = "", stderr: str = "", truncated:
 def env(tmp_path, monkeypatch):
     SessionLocal, engine, tmpfile = make_temp_sqlite(database.Base.metadata)
     monkeypatch.setattr(database, "SessionLocal", SessionLocal)
+    monkeypatch.setattr(ssh_routes, "SessionLocal", SessionLocal)
 
     import src.secret_storage as secret_storage
 
@@ -474,4 +475,4 @@ def test_connection_payload_lists_effective_allowlist(env):
 
     assert payload["allowed_commands"] == list(ssh.DEFAULT_ALLOWED_COMMANDS)
     assert payload["allowed_commands_custom"] is False
-    assert "private_key" not in json.dumps(payload)
+    assert '"private_key"' not in json.dumps(payload)

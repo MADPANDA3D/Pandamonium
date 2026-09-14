@@ -110,6 +110,7 @@ _COMMON_TOOL_NAMES = {
     "send_to_session",
     "serve_model",
     "serve_preset",
+    "ssh_node",
     "stop_served_model",
     "suggest_document",
     "trigger_research",
