@@ -243,6 +243,31 @@ async function stubModelApis(page, state) {
       state.modelUsable = true;
       return route.fulfill({ json: { id: 'ep-1', models: state.addedModels || ['model-a', 'model-b'] } });
     }
+    if (path === '/api/probe-selected' && request.method() === 'POST') {
+      if (state.validationFails) {
+        return route.fulfill({
+          json: {
+            results: [{
+              status: 'fail',
+              category: 'authentication',
+              action: 'validate_settings',
+              guidance: 'Validate settings — the endpoint rejected the credential.',
+            }],
+          },
+        });
+      }
+      return route.fulfill({
+        json: {
+          results: [{
+            status: 'ok',
+            category: 'ok',
+            action: 'none',
+            guidance: '',
+            model: 'model-a',
+          }],
+        },
+      });
+    }
     if (path === '/api/discover') {
       return route.fulfill({ json: { hosts: ['127.0.0.1'], items: state.discoverItems || [] } });
     }
@@ -275,11 +300,28 @@ test('admin connects an API model from the wizard alone and the model lane turns
 
   await expect(modal.locator('.setup-wizard-notice')).toContainText('Found 2 models on OpenRouter');
   await expect(modal.locator('.setup-lane').filter({ hasText: 'Model engine' }))
-    .toContainText('Ready — 2 models available');
+    .toContainText('Ready — 2 models validated');
   await expect(page.locator('#settings-modal')).toHaveClass(/hidden/);
   expect(state.posts).toHaveLength(1);
   expect(state.posts[0]).toContain('https://openrouter.ai/api/v1');
   expect(state.posts[0]).toContain('sk-or-v1-0000000000000000000000');
+});
+
+
+test('a saved endpoint whose minimal completion fails is not called ready', async ({ page }) => {
+  const state = { modelUsable: false, connectFails: false, validationFails: true, posts: [] };
+  await stubModelApis(page, state);
+  await page.goto('/static/index.html');
+
+  const modal = await openWizardModelStep(page);
+  await modal.locator('.setup-wizard-field input').fill('sk-or-v1-0000000000000000000000');
+  await modal.locator('.setup-wizard-primary', { hasText: 'Connect' }).click();
+
+  const message = modal.locator('.setup-wizard-message.is-error');
+  await expect(message).toContainText('Validate settings');
+  await expect(modal).not.toContainText("you're ready to chat");
+  await expect(modal.locator('.setup-lane').filter({ hasText: 'Model engine' }))
+    .not.toContainText('Ready');
 });
 
 
@@ -330,7 +372,7 @@ test('scanning this machine lists a local server and Add connects it', async ({ 
 
   await expect(modal.locator('.setup-wizard-notice')).toContainText('Found 1 model');
   await expect(modal.locator('.setup-lane').filter({ hasText: 'Model engine' }))
-    .toContainText('Ready — 2 models available');
+    .toContainText('Ready — 2 models validated');
   expect(state.posts).toHaveLength(1);
   expect(state.posts[0]).toContain('http://127.0.0.1:11434/v1');
 });

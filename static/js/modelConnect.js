@@ -130,12 +130,24 @@ export async function connectDetectedEndpoint(detected, options = {}) {
     });
     let data = {};
     try { data = await res.json(); } catch (_) { data = {}; }
+    const models = Array.isArray(data.models) ? data.models : [];
+    // A saved endpoint with discovered models is not "ready": run the explicit
+    // safe test (one minimal completion) and report its redacted category.
+    let validation = null;
+    if (res.ok && data.id && models.length && options.validate !== false) {
+      validation = await validateDetectedEndpoint(data.id, models[0], {
+        apiBase,
+        fetchImpl,
+        timeoutMs: Number.isFinite(options.validateTimeoutMs) ? options.validateTimeoutMs : 20000,
+      });
+    }
     return {
       ok: Boolean(res.ok),
       saved: Boolean(res.ok),
       status: res.status,
       data,
-      models: Array.isArray(data.models) ? data.models : [],
+      models,
+      validation,
       failure: res.ok ? null : 'http_error',
     };
   } catch (error) {
@@ -145,7 +157,49 @@ export async function connectDetectedEndpoint(detected, options = {}) {
       status: 0,
       data: {},
       models: [],
+      validation: null,
       failure: error?.name === 'AbortError' ? 'timeout' : 'unreachable',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function validateDetectedEndpoint(endpointId, modelId, options = {}) {
+  const apiBase = options.apiBase || '';
+  const fetchImpl = options.fetchImpl || fetch;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 20000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(`${apiBase}/api/probe-selected`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ models: [{ endpoint_id: endpointId, model: modelId }] }),
+      signal: controller.signal,
+    });
+    let payload = {};
+    try { payload = await res.json(); } catch (_) { payload = {}; }
+    const result = Array.isArray(payload.results) ? payload.results[0] : null;
+    if (!result || typeof result !== 'object') {
+      return {
+        status: 'fail',
+        category: 'url_http',
+        action: 'validate_settings',
+        guidance: "We couldn't run the model test. Check the endpoint settings, then try again.",
+      };
+    }
+    return result;
+  } catch (error) {
+    const timedOut = error?.name === 'AbortError';
+    return {
+      status: 'fail',
+      category: timedOut ? 'timeout' : 'url_http',
+      action: timedOut ? 'retry' : 'validate_settings',
+      guidance: timedOut
+        ? 'The model test timed out. Send it again; if it repeats, check the server load.'
+        : "We couldn't run the model test. Check the connection and try again.",
     };
   } finally {
     clearTimeout(timer);
@@ -156,9 +210,23 @@ export function connectResultMessage(result, label) {
   const providerLabel = label || 'the model engine';
   const count = result.models.length;
   if (result.ok && count > 0) {
+    const validation = result.validation;
+    if (validation && validation.status === 'ok') {
+      return {
+        level: 'success',
+        message: `Found ${count} model${count === 1 ? '' : 's'} on ${providerLabel} and the model test passed — you're ready to chat.`,
+      };
+    }
+    if (validation) {
+      return {
+        level: 'error',
+        message: validation.guidance
+          || `We saved ${providerLabel}, but the model test did not pass. Check the endpoint settings, then try again.`,
+      };
+    }
     return {
-      level: 'success',
-      message: `Found ${count} model${count === 1 ? '' : 's'} on ${providerLabel} — you're ready to chat.`,
+      level: 'error',
+      message: `We saved ${providerLabel}, but the model test could not run. Open Settings → Models and run the model test.`,
     };
   }
   if (result.ok) {

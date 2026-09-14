@@ -76,6 +76,11 @@ async function main() {
   const calls = [];
   global.fetch = async (url, options) => {
     calls.push({ url, options });
+    if (String(url).includes('/api/probe-selected')) {
+      return fakeResponse({
+        results: [{ status: 'ok', category: 'ok', action: 'none', guidance: '', model: 'model-a' }],
+      });
+    }
     return fakeResponse({ id: 'ep-1', models: ['model-a', 'model-b'] });
   };
   const success = await mod.connectDetectedEndpoint({
@@ -86,7 +91,8 @@ async function main() {
   assert.equal(success.ok, true);
   assert.equal(success.saved, true);
   assert.deepEqual(success.models, ['model-a', 'model-b']);
-  assert.equal(calls.length, 1);
+  assert.equal(success.validation.status, 'ok');
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].url, '/api/model-endpoints');
   assert.equal(calls[0].options.credentials, 'same-origin');
   const form = calls[0].options.body;
@@ -95,12 +101,17 @@ async function main() {
   assert.equal(form.get('name'), 'OpenRouter');
   assert.equal(form.get('require_models'), 'true');
   assert.equal(form.get('skip_probe'), 'true');
+  assert.equal(calls[1].url, '/api/probe-selected');
+  const probeBody = JSON.parse(calls[1].options.body);
+  assert.equal(probeBody.models[0].endpoint_id, 'ep-1');
+  assert.equal(probeBody.models[0].model, 'model-a');
 
   const localSuccess = await mod.connectDetectedEndpoint({
     base_url: 'http://localhost:11434/v1',
   });
   assert.equal(localSuccess.ok, true);
-  assert.equal(calls[1].options.body.get('skip_probe'), null);
+  assert.equal(calls[2].options.body.get('skip_probe'), null);
+  assert.equal(calls[3].url, '/api/probe-selected');
 
   // ── the settings scan pattern registers local servers the same way ────
   const scanResult = await mod.connectDetectedEndpoint(
@@ -108,7 +119,7 @@ async function main() {
     { requireModels: false, skipProbe: false, endpointKind: 'local', refreshMode: 'auto' },
   );
   assert.equal(scanResult.ok, true);
-  const scanForm = calls[2].options.body;
+  const scanForm = calls[4].options.body;
   assert.equal(scanForm.get('require_models'), 'false');
   assert.equal(scanForm.get('skip_probe'), 'false');
   assert.equal(scanForm.get('endpoint_kind'), 'local');
@@ -118,6 +129,33 @@ async function main() {
   const successCopy = mod.connectResultMessage(success, 'OpenRouter');
   assert.equal(successCopy.level, 'success');
   assert.match(successCopy.message, /Found 2 models on OpenRouter/);
+  assert.match(successCopy.message, /model test passed/);
+
+  // ── a saved endpoint is not "ready" until the minimal completion passes ─
+  global.fetch = async (url, options) => {
+    if (String(url).includes('/api/probe-selected')) {
+      return fakeResponse({
+        results: [{
+          status: 'fail',
+          category: 'authentication',
+          action: 'validate_settings',
+          guidance: 'Validate settings — the endpoint rejected the credential.',
+        }],
+      });
+    }
+    return fakeResponse({ id: 'ep-3', models: ['model-a'] });
+  };
+  const unvalidated = await mod.connectDetectedEndpoint({
+    base_url: 'https://openrouter.ai/api/v1',
+    api_key: 'sk-or-v1-bad',
+    name: 'OpenRouter',
+  });
+  assert.equal(unvalidated.ok, true);
+  assert.equal(unvalidated.validation.category, 'authentication');
+  const unvalidatedCopy = mod.connectResultMessage(unvalidated, 'OpenRouter');
+  assert.equal(unvalidatedCopy.level, 'error');
+  assert.match(unvalidatedCopy.message, /Validate settings/);
+  assert.doesNotMatch(unvalidatedCopy.message, /ready to chat/);
 
   // ── HTTP failure copy is human, with next steps, no raw backend code ──
   global.fetch = async () => fakeResponse({ detail: 'provider_key_invalid' }, false, 400);

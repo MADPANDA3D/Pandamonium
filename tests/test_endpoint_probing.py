@@ -495,3 +495,120 @@ class TestClassifyEndpointTailscale:
     ])
     def test_outside_cgnat_is_api(self, url):
         assert _classify_endpoint(url) == "api"
+
+
+# ── MAD-860: _probe_single_model category + validation persistence ──
+
+class TestProbeSingleModelDiagnosis:
+    def test_200_with_no_choices_is_a_failure_not_ok(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+        monkeypatch.setattr(
+            model_routes.httpx, "post",
+            lambda url, headers=None, json=None, timeout=None, verify=None: _resp(
+                200, json={"choices": []}),
+        )
+        result = _probe_single_model("https://api.example.com/v1", "key", "gpt-4o-mini")
+        assert result["status"] == "fail"
+        assert result["category"] == "zero_choices"
+        assert result["action"] == "retry"
+        assert result["diagnostic_id"]
+
+    def test_200_with_empty_content_is_zero_content_completion(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+        monkeypatch.setattr(
+            model_routes.httpx, "post",
+            lambda url, headers=None, json=None, timeout=None, verify=None: _resp(
+                200, json={"choices": [{"message": {"content": ""}}]}),
+        )
+        result = _probe_single_model("https://api.example.com/v1", "key", "gpt-4o-mini")
+        assert result["status"] == "fail"
+        assert result["category"] == "zero_content_completion"
+
+    def test_gpt4o_mini_compatible_fixture_is_ok(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+        monkeypatch.setattr(
+            model_routes.httpx, "post",
+            lambda url, headers=None, json=None, timeout=None, verify=None: _resp(
+                200, json={
+                    "id": "chatcmpl-1",
+                    "model": "gpt-4o-mini-2024-07-18",
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "OK"},
+                    }],
+                }),
+        )
+        result = _probe_single_model("https://api.example.com/v1", "key", "gpt-4o-mini")
+        assert result["status"] == "ok"
+        assert result["category"] == "ok"
+
+    def test_auth_failure_is_authentication(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+        monkeypatch.setattr(
+            model_routes.httpx, "post",
+            lambda url, headers=None, json=None, timeout=None, verify=None: _resp(
+                401, json={"error": {"message": "invalid api key"}}),
+        )
+        result = _probe_single_model("https://api.example.com/v1", "bad", "gpt-4o-mini")
+        assert result["status"] == "fail"
+        assert result["category"] == "authentication"
+        assert result["action"] == "validate_settings"
+
+    def test_unsupported_model_is_classified(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+        monkeypatch.setattr(
+            model_routes.httpx, "post",
+            lambda url, headers=None, json=None, timeout=None, verify=None: _resp(
+                404, json={"error": {"message": "The model `ghost` does not exist"}}),
+        )
+        result = _probe_single_model("https://api.example.com/v1", "key", "ghost")
+        assert result["category"] == "unsupported_model"
+        assert result["action"] == "change_model"
+
+    def test_unparseable_body_is_parser_failure(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+
+        class _BadBody:
+            is_success = True
+            status_code = 200
+
+            def json(self):
+                raise ValueError("not json")
+
+        monkeypatch.setattr(
+            model_routes.httpx, "post",
+            lambda url, headers=None, json=None, timeout=None, verify=None: _BadBody(),
+        )
+        result = _probe_single_model("https://api.example.com/v1", "key", "m")
+        assert result["category"] == "parser_failure"
+
+    def test_transport_error_is_classified_without_echoing_the_key(self, monkeypatch):
+        _patch_resolve(monkeypatch)
+
+        def fake_post(url, headers=None, json=None, timeout=None, verify=None):
+            raise httpx.ConnectError("refused for https://api.example.com/v1 key sk-live-abc123456789")
+
+        monkeypatch.setattr(model_routes.httpx, "post", fake_post)
+        result = _probe_single_model("https://api.example.com/v1", "sk-live-abc", "m")
+        assert result["status"] == "fail"
+        assert result["category"] in {"url_http", "tls"}
+        blob = str(result)
+        assert "sk-live" not in blob
+        assert "https://api.example.com" not in result.get("guidance", "")
+
+    def test_probe_result_is_persisted_for_first_run_readiness(self, monkeypatch, tmp_path):
+        import src.settings as settings_module
+        from src.model_response_diagnosis import validation_state
+
+        monkeypatch.setattr(settings_module, "SETTINGS_FILE", tmp_path / "settings.json")
+        settings_module._invalidate_caches()
+        try:
+            _record_probe_validation = model_routes._record_probe_validation
+            _record_probe_validation({"status": "fail", "category": "authentication"}, "ep-9", "m")
+            assert validation_state("ep-9", "m") == "failed"
+            _record_probe_validation({"status": "ok", "category": "ok"}, "ep-9", "m")
+            assert validation_state("ep-9", "m") == "validated"
+            # A missing endpoint id must never write anything.
+            _record_probe_validation({"status": "ok", "category": "ok"}, None, "m")
+        finally:
+            settings_module._invalidate_caches()

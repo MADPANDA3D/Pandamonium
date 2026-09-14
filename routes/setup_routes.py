@@ -75,6 +75,7 @@ def _is_chat_capable(endpoint: Any) -> bool:
 
 def _project_model(user: str, is_admin: bool) -> Dict[str, Any]:
     from core.database import ModelEndpoint, SessionLocal
+    from src.model_response_diagnosis import recovery_guidance, validation_entry
 
     db = SessionLocal()
     try:
@@ -85,18 +86,80 @@ def _project_model(user: str, is_admin: bool) -> Dict[str, Any]:
             )
         endpoints = [endpoint for endpoint in query.all() if _is_chat_capable(endpoint)]
         models: set[str] = set()
+        visible_by_endpoint: Dict[str, set] = {}
         for endpoint in endpoints:
-            models.update(
-                _visible_model_ids(
-                    getattr(endpoint, "cached_models", None),
-                    getattr(endpoint, "hidden_models", None),
-                )
+            visible = _visible_model_ids(
+                getattr(endpoint, "cached_models", None),
+                getattr(endpoint, "hidden_models", None),
             )
-            models.update(_visible_model_ids(getattr(endpoint, "pinned_models", None), None))
+            visible.update(_visible_model_ids(getattr(endpoint, "pinned_models", None), None))
+            models.update(visible)
+            visible_by_endpoint[str(getattr(endpoint, "id", ""))] = visible
+
+        # Only a successful minimal completion means "ready". Saved endpoint or
+        # discovered model fields alone are not validation evidence.
+        validated = 0
+        failed: list[Dict[str, Any]] = []
+        for endpoint_id, visible in visible_by_endpoint.items():
+            for model_id in visible:
+                entry = validation_entry(endpoint_id, model_id)
+                if not entry:
+                    continue
+                if entry.get("state") == "validated" or entry.get("category") == "ok":
+                    validated += 1
+                    continue
+                failed.append({
+                    "endpoint_id": endpoint_id,
+                    "model": model_id,
+                    "category": str(entry.get("category") or "url_http"),
+                    "action": str(entry.get("action") or ""),
+                    "guidance": recovery_guidance(
+                        str(entry.get("category") or "url_http")
+                    ),
+                    "at": str(entry.get("validated_at") or ""),
+                })
+
+        if not endpoints:
+            state = "unconfigured"
+        elif validated:
+            state = "validated"
+        elif failed:
+            state = "failed"
+        elif models:
+            state = "discovered"
+        else:
+            state = "configured"
+
+        last_failure = None
+        if failed:
+            last_failure = max(failed, key=lambda item: item["at"])
+
+        if state == "validated":
+            guidance = ""
+        elif state == "failed" and last_failure:
+            guidance = last_failure["guidance"]
+        elif state == "discovered":
+            guidance = (
+                "Run the model test to validate a model with one minimal completion "
+                "before chat is marked ready."
+            )
+        elif state == "configured":
+            guidance = (
+                "Discover or add a model on the endpoint, then run the model test "
+                "to validate it."
+            )
+        else:
+            guidance = "Connect a model engine in Settings → Models to get started."
+
         return {
-            "usable": bool(models),
+            "usable": validated > 0,
+            "state": state,
             "endpoints": len(endpoints),
             "models": len(models),
+            "validated": validated,
+            "failed": len(failed),
+            "last_failure": last_failure,
+            "guidance": guidance,
         }
     finally:
         db.close()
