@@ -26,6 +26,12 @@ except ModuleNotFoundError:  # Python 3.10 test/dev venv
     import tomli as tomllib  # type: ignore[no-redef]
 
 from core.atomic_io import atomic_write_json
+from services.memory.skill_importer import (
+    MAX_FILE_BYTES as SKILL_FILE_BYTES,
+    MAX_FILES as SKILL_BUNDLE_FILES,
+    MAX_TOTAL_BYTES as SKILL_BUNDLE_BYTES,
+    _is_text_file,
+)
 from src.constants import DATA_DIR
 from src.extension_capability_inventory import (
     MAX_SCAN_BYTES,
@@ -120,6 +126,37 @@ def _repo_name(source_url: str) -> str:
     if name.endswith(".git"):
         name = name[:-4]
     return name or "extension"
+
+
+SKILL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,59}$")
+SKILL_FIELD_PATTERN = re.compile(r"^(name|description):\s*(.*?)\s*$")
+
+
+def _read_skill_identity(path: Path) -> dict[str, str] | None:
+    """Read a bounded frontmatter identity that the skill adapter will admit."""
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_READ_BYTES:
+            return None
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not text.startswith("---\n"):
+        return None
+    marker = text.find("\n---", 4)
+    if marker == -1:
+        return None
+    fields: dict[str, str] = {}
+    for line in text[4:marker].splitlines():
+        match = SKILL_FIELD_PATTERN.match(line)
+        if match:
+            fields[match.group(1)] = match.group(2).strip().strip('"').strip("'")
+    name = fields.get("name") or ""
+    description = fields.get("description") or ""
+    if not SKILL_NAME_PATTERN.fullmatch(name) or not description.strip():
+        return None
+    if not text[marker + 4 :].strip():
+        return None
+    return {"name": name, "description": description}
 
 
 class ExtensionStaticScanner:
@@ -253,9 +290,12 @@ class ExtensionStaticScanner:
             for key in sorted(relative):
                 if not key.lower().endswith("skill.md"):
                     continue
-                skill_dir = Path(key).parent.name
-                if skill_dir:
-                    add(_slug(skill_dir), "skill", "skill_bundle", key)
+                identity = _read_skill_identity(relative[key])
+                if identity is not None:
+                    add(identity["name"], "skill", "skill_bundle", key)
+                    continue
+                fallback = Path(key).parent.name or _repo_name(str(root))
+                add(_slug(fallback), "skill", "skill_bundle", key)
         elif repo_class == "python_cli":
             pyproject = relative.get("pyproject.toml")
             if pyproject is not None:
@@ -316,6 +356,142 @@ class ExtensionStaticScanner:
                             break
                 break
         return capabilities
+
+    @staticmethod
+    def _skill_bundle_assets(skill_dir: Path) -> tuple[int, int] | None:
+        """Count importable files for one skill, or None when it cannot install."""
+        files = 0
+        total_bytes = 0
+        for path in sorted(skill_dir.rglob("*")):
+            if path.is_symlink():
+                return None
+            if path.is_dir():
+                continue
+            if not _is_text_file(path.name):
+                return None
+            try:
+                size = path.stat().st_size
+            except OSError:
+                return None
+            if size > SKILL_FILE_BYTES:
+                return None
+            files += 1
+            total_bytes += size
+        return files, total_bytes
+
+    @staticmethod
+    def _agent_skill_layout(
+        entrypoint: str, skill_file: Path
+    ) -> dict[str, Any] | None:
+        identity = _read_skill_identity(skill_file)
+        if identity is None:
+            return None
+        assets = ExtensionStaticScanner._skill_bundle_assets(skill_file.parent)
+        if assets is None:
+            return None
+        if assets[0] > SKILL_BUNDLE_FILES or assets[1] > SKILL_BUNDLE_BYTES:
+            return None
+        return {
+            "format": "agent_skill",
+            "entrypoint": entrypoint,
+            "include": [identity["name"]],
+            "excluded": [],
+        }
+
+    def _descriptor_skill_layout(
+        self, root: Path, descriptor_key: str, descriptor_path: Path
+    ) -> dict[str, Any] | None:
+        try:
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(descriptor, Mapping):
+            return None
+        skills_value = descriptor.get("skills")
+        if not isinstance(skills_value, str) or not skills_value.strip():
+            return None
+        try:
+            skills_root = (root / skills_value).resolve(strict=True)
+        except (OSError, ValueError):
+            return None
+        if (
+            not skills_root.is_relative_to(root)
+            or skills_root.is_symlink()
+            or not skills_root.is_dir()
+        ):
+            return None
+        include: list[str] = []
+        excluded: list[str] = []
+        total_files = 0
+        total_bytes = 0
+        for skill_dir in sorted(skills_root.iterdir()):
+            if skill_dir.is_symlink() or not skill_dir.is_dir():
+                continue
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.is_file() or skill_file.is_symlink():
+                continue
+            identity = _read_skill_identity(skill_file)
+            assets = self._skill_bundle_assets(skill_dir)
+            if identity is None or assets is None or identity["name"] != skill_dir.name:
+                excluded.append(skill_dir.name)
+                continue
+            files_count, bytes_count = assets
+            if (
+                total_files + files_count > SKILL_BUNDLE_FILES
+                or total_bytes + bytes_count > SKILL_BUNDLE_BYTES
+            ):
+                excluded.append(skill_dir.name)
+                continue
+            include.append(identity["name"])
+            total_files += files_count
+            total_bytes += bytes_count
+        if not include:
+            return None
+        return {
+            "format": "codex_plugin",
+            "entrypoint": descriptor_key,
+            "include": include,
+            "excluded": excluded,
+        }
+
+    def _skill_bundle_layout(
+        self, root: Path, files: list[Path]
+    ) -> dict[str, Any] | None:
+        """Pick the installable skill layout the adapter can admit, if any."""
+        relative = {path.relative_to(root).as_posix(): path for path in files}
+        for descriptor_key in (".codex-plugin/plugin.json", ".claude-plugin/plugin.json"):
+            descriptor_path = relative.get(descriptor_key)
+            if descriptor_path is None:
+                continue
+            layout = self._descriptor_skill_layout(root, descriptor_key, descriptor_path)
+            if layout is not None:
+                return layout
+        root_skill = relative.get("SKILL.md")
+        if root_skill is not None:
+            layout = self._agent_skill_layout("SKILL.md", root_skill)
+            if layout is not None:
+                return layout
+        candidates: list[tuple[str, str]] = []
+        for key in sorted(relative):
+            if not key.lower().endswith("/skill.md"):
+                continue
+            parent = Path(key).parent.name
+            if not parent:
+                continue
+            identity = _read_skill_identity(relative[key])
+            assets = self._skill_bundle_assets(relative[key].parent)
+            if identity is None or assets is None or identity["name"] != parent:
+                continue
+            candidates.append((key, identity["name"]))
+        if len(candidates) != 1:
+            return None
+        entrypoint, name = candidates[0]
+        return {
+            "format": "agent_skill",
+            "entrypoint": entrypoint,
+            "include": [name],
+            "excluded": [],
+        }
 
     def _dependencies(self, root: Path, files: list[Path]) -> list[dict[str, Any]]:
         dependencies: list[dict[str, Any]] = []
@@ -493,23 +669,24 @@ class ExtensionStaticScanner:
         repo_class: str,
         capabilities: list[dict[str, Any]],
         licenses: list[str],
+        *,
+        layout: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         repo = _repo_name(source_url)
         extension_id = _slug(repo, maximum=63)
         tool_capabilities = [item for item in capabilities if item["kind"] == "tool"]
-        skill_capabilities = [item for item in capabilities if item["kind"] == "skill"]
         endpoint_capabilities = [item for item in capabilities if item["kind"] == "endpoint"]
         runtime: dict[str, Any] | None = None
         descriptors: dict[str, Any] | None = None
         schemas: list[dict[str, Any]] | None = None
-        if repo_class == "skill_bundle" and skill_capabilities:
-            include = [
-                item["name"] for item in skill_capabilities
-                if re.fullmatch(r"[a-z][a-z0-9-]{0,59}", item["name"])
-            ]
-            if include:
-                runtime = {"type": "skills", "entrypoint": "skills"}
-                descriptors = {"type": "skill_bundle", "format": "agent_skill", "include": include}
+        if repo_class == "skill_bundle":
+            if layout:
+                runtime = {"type": "skills", "entrypoint": layout["entrypoint"]}
+                descriptors = {
+                    "type": "skill_bundle",
+                    "format": layout["format"],
+                    "include": list(layout["include"]),
+                }
         elif repo_class == "mcp_server":
             runtime = {"type": "mcp", "entrypoint": "server.py"}
             descriptors = {"type": "mcp", "reference": f"{extension_id}-runtime"}
@@ -597,12 +774,35 @@ class ExtensionStaticScanner:
 
             report("extract", "Extracting entrypoints and capabilities")
             capabilities = self._extract(staging, files, repo_class)
+            layout = (
+                self._skill_bundle_layout(staging, files)
+                if repo_class == "skill_bundle"
+                else None
+            )
             remaining = [MAX_TOTAL_READ_BYTES]
 
             report("audit", "Auditing dependencies, licenses, and findings")
             dependencies = self._dependencies(staging, files)
             licenses = self._licenses(staging, files)
             findings = self._audit(staging, files, repo_class, licenses, remaining)
+            if (
+                layout
+                and layout.get("excluded")
+                and len(findings) < MAX_ARTIFACT_FINDINGS
+            ):
+                excluded = [str(name)[:80] for name in layout["excluded"]][:32]
+                findings.append(
+                    {
+                        "id": "skill-assets-excluded",
+                        "severity": "low",
+                        "category": "skill_asset",
+                        "title": (
+                            f"{len(excluded)} skill(s) stay out of the draft: "
+                            "their assets are not importable text"
+                        )[:200],
+                        "evidence": redact_scan_evidence(", ".join(excluded)[:200]),
+                    }
+                )
 
             report("report", "Building scan artifact")
             elapsed_ms = max(int((self.clock() - started) * 1000), 0)
@@ -623,7 +823,11 @@ class ExtensionStaticScanner:
                 "licenses": licenses,
                 "findings": findings,
                 "draft_manifest": self._draft_manifest(
-                    source_url, repo_class, capabilities, licenses
+                    source_url,
+                    repo_class,
+                    capabilities,
+                    licenses,
+                    layout=layout,
                 ),
                 "bounds": {
                     "files_scanned": len(files),

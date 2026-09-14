@@ -17,11 +17,13 @@ from core.constants import APP_VERSION, DATA_DIR
 from core.middleware import require_admin
 from src.auth_helpers import require_user
 from src.authority_protocol import operator_identity
+from src.extension_capability_inventory import validate_scan_artifact
 from src.extension_host import live_catalog_web_adapter
 from src.extension_installer import (
     ExtensionLifecycleError,
     ExtensionLifecycleManager,
     InlineWebAdapter,
+    normalize_git_source_url,
 )
 from src.extension_mcp_adapter import mcp_extension_adapter
 from src.extension_registry import ExtensionContractError
@@ -77,6 +79,7 @@ class SourcePlanRequest(BaseModel):
     operation: str = Field(pattern=r"^(install|upgrade)$")
     source_url: str = Field(min_length=1, max_length=2_048)
     ref: str = Field(default="HEAD", min_length=1, max_length=200)
+    scan_id: str | None = Field(default=None, min_length=8, max_length=64)
 
 
 class SourceScanRequest(BaseModel):
@@ -375,12 +378,34 @@ def setup_extension_routes(
     ):
         try:
             _bind_async_adapters()
+            draft_manifest = None
+            scan_revision = None
+            if payload.scan_id:
+                job = await asyncio.to_thread(get_scan, payload.scan_id)
+                if job is None:
+                    raise HTTPException(404, "extension_scan_not_found")
+                if job.get("status") != "succeeded":
+                    raise HTTPException(409, "extension_scan_unavailable")
+                artifact = await asyncio.to_thread(
+                    validate_scan_artifact, job.get("artifact"), require_complete=True
+                )
+                if normalize_git_source_url(
+                    payload.source_url, check_public=False
+                ) != normalize_git_source_url(
+                    artifact["source_url"], check_public=False
+                ):
+                    raise HTTPException(400, "extension_scan_source_mismatch")
+                scan_revision = artifact["source_revision"]
+                draft_manifest = artifact.get("draft_manifest")
             return await asyncio.to_thread(
                 manager.preview_source,
                 payload.operation,
                 payload.source_url,
                 payload.ref,
                 operator_id=_operator(owner),
+                scan_id=payload.scan_id,
+                scan_revision=scan_revision,
+                draft_manifest=draft_manifest,
             )
         except (ExtensionLifecycleError, ExtensionContractError) as exc:
             raise _http_error(exc) from exc

@@ -50,6 +50,7 @@ async function mockApp(page) {
       return route.fulfill({ json: {
         plan_id: 'plan-1', operation: 'install', extension_id: 'demo-tools',
         source_revision: REVISION,
+        manifest_origin: 'scan_draft',
         authority_decision: { decision: 'approval_required', decision_id: 'decision-1' },
         manifest: { name: 'Demo Tools' },
         requested_permissions: { default: 'read_only', capabilities: {} },
@@ -80,12 +81,34 @@ test('Add from GitHub scans, reviews, and installs through approval', async ({ p
   await expect(page.locator('#marketplace-scan-results')).toContainText('Static scan only');
   await expect(page.locator('#marketplace-scan-results')).toContainText('MIT');
 
+  const planRequest = page.waitForRequest(request => request.url().includes('/api/extensions/plans/source'));
   await page.getByRole('button', { name: 'Install plugin…' }).click();
+  const sent = await planRequest;
+  expect(sent.postDataJSON().scan_id).toBe('scan-1');
   await expect(page.getByText('Approval required: Install Demo Tools')).toBeVisible();
+  await expect(page.locator('#marketplace-scan-results')).toContainText('generated draft manifest');
   await expect(page.getByRole('button', { name: 'Approve once' })).toBeInViewport();
   await expect(page.getByRole('button', { name: '← Back to scan' })).toBeVisible();
   await page.getByRole('button', { name: 'Approve once' }).click();
   await expect(page.locator('#marketplace-summary')).toContainText('Demo Tools: Install completed.');
+});
+
+test('Add from GitHub explains a missing manifest instead of a raw code', async ({ page }) => {
+  await mockApp(page);
+  await page.route('**/api/extensions/plans/source', route => route.fulfill({
+    status: 409,
+    json: { detail: 'extension_manifest_missing' },
+  }));
+  await page.goto('/static/index.html');
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+
+  await page.locator('#marketplace-source-url').fill(SOURCE_URL);
+  await page.getByRole('button', { name: 'Scan repository' }).click();
+  await expect(page.locator('#marketplace-scan-progress')).toHaveAttribute('data-state', 'complete', { timeout: 15000 });
+  await page.getByRole('button', { name: 'Install plugin…' }).click();
+
+  await expect(page.locator('#marketplace-scan-status')).toContainText('no jarvis-extension.json');
+  await expect(page.locator('#marketplace-scan-status')).not.toContainText('extension_manifest_missing');
 });
 
 test('Add from GitHub rejects non-https sources without scanning', async ({ page }) => {
