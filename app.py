@@ -863,6 +863,10 @@ app.include_router(setup_nextcloud_routes())
 from routes.unsloth_routes import setup_unsloth_routes
 app.include_router(setup_unsloth_routes())
 
+# Reviewed training datasets and observable jobs (MAD-797)
+from routes.training_routes import setup_training_routes
+app.include_router(setup_training_routes())
+
 # Guided in-app bug reports (MAD-856: redacted diagnostics + server-held
 # GitHub App submission; the browser never receives a repository credential).
 from routes.feedback_routes import setup_feedback_routes

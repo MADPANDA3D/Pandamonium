@@ -2,9 +2,10 @@
 
 Pandamonium does not bundle a trainer. Training is an optional external
 runtime: the operator runs Unsloth Studio on a machine they own and points
-this adapter at its HTTP API. The adapter owns exactly four jobs — store the
-connection (encrypted token), test it, discover what the runtime can do, and
-fail closed with honest copy when it cannot. It never submits a training job.
+this adapter at its HTTP API. The adapter owns connection storage, read-only
+health/capability discovery, and the explicit job-control calls that
+``src/training_jobs.py`` invokes only after a previewed, operator-confirmed
+spec. It never decides to train anything by itself.
 
 Contract
 --------
@@ -26,12 +27,15 @@ so conversion is reported ``unsupported`` unless the runtime exposes its own
 
 No-accidental-training guarantee
 --------------------------------
-Every request this module can make goes through :func:`_get`, which is
-structurally GET-only: it has no method parameter and refuses anything that is
-not a read. ``POST /api/train/start`` is only ever *observed* in the OpenAPI
-schema; it is never called. There is no training route in
-``routes/unsloth_routes.py``. Job submission is deferred to the reviewed jobs
-slice (MAD-797), which must add its own explicit, audited path.
+Discovery is still structurally GET-only: every read goes through
+:func:`_get`, which has no method parameter, and ``POST /api/train/start`` is
+only ever *observed* in the OpenAPI schema while testing a connection. Job
+control is a separate, explicit surface (MAD-797): :func:`start_training_job`
+and :func:`stop_training_job` are the only functions that POST, they are never
+called by discovery, and their only caller is the reviewed jobs module, which
+requires a preview fingerprint match, an acknowledgment of the destructive/
+paid implications, a reviewed dataset fingerprint, and an admin-authorized
+route. A health/discovery/test call can therefore never begin a job.
 
 Security contract
 -----------------
@@ -332,6 +336,7 @@ def get_connection(owner: str | None, *, require_enabled: bool = False) -> dict[
             "last_checked_at": config.get("last_checked_at"),
             "runtime_version": config.get("runtime_version"),
             "job_state": config.get("job_state"),
+            "resources": config.get("resources"),
             "capabilities": config.get("capabilities"),
             "contract": config.get("contract"),
         }
@@ -360,6 +365,7 @@ def connection_status(owner: str | None) -> dict[str, Any]:
                 "last_checked_at": None,
                 "runtime_version": None,
                 "job_state": None,
+                "resources": None,
                 "capabilities": None,
                 "contract": CONTRACT_ID,
                 "adapter_version": ADAPTER_VERSION,
@@ -382,6 +388,7 @@ def connection_status(owner: str | None) -> dict[str, Any]:
         "last_checked_at": connection["last_checked_at"],
         "runtime_version": connection["runtime_version"],
         "job_state": connection["job_state"],
+        "resources": connection["resources"],
         "capabilities": connection["capabilities"],
         "contract": connection["contract"] or CONTRACT_ID,
         "adapter_version": ADAPTER_VERSION,
@@ -489,6 +496,7 @@ def _record_discovery(
     capabilities: dict[str, Any] | None,
     runtime_version: str | None,
     job_state: str | None,
+    resources: dict[str, Any] | None = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -505,6 +513,7 @@ def _record_discovery(
                 "capabilities": capabilities,
                 "runtime_version": runtime_version,
                 "job_state": job_state,
+                "resources": resources,
                 "contract": CONTRACT_ID,
             }
         )
@@ -959,8 +968,299 @@ async def test_connection(
         capabilities=capabilities,
         runtime_version=runtime.get("version"),
         job_state=job.get("normalized"),
+        resources=result.get("resources"),
     )
     return {"configured": True, **result}
+
+
+# ── job control (explicit, reviewed path) ────────────────────────────────
+#
+# MAD-797: these are the only functions that mutate runtime state. Discovery
+# never calls them; their only caller is src/training_jobs.py, which owns the
+# preview, confirmation-fingerprint, acknowledgment, and dataset-review gates.
+
+POST_TIMEOUT_SECONDS = 20.0
+ROUTE_TRAIN_STOP = "/api/train/stop"
+ROUTE_TRAIN_METRICS = "/api/train/metrics"
+MAX_JOB_ID_CHARS = 128
+MAX_METRICS_FIELDS = 40
+MAX_METRICS_STRING_CHARS = 200
+MAX_CHECKPOINTS = 50
+MAX_CHECKPOINT_PATH_CHARS = 400
+MAX_LOG_CHARS = 8000
+
+START_REJECTED_MESSAGE = "The runtime rejected the training start request."
+STOP_REJECTED_MESSAGE = "The runtime rejected the stop request."
+NO_ACTIVE_JOB_MESSAGE = "The runtime reports no active job to stop."
+JOB_ROUTE_UNAVAILABLE_MESSAGE = (
+    "The runtime does not expose the training job routes this adapter needs."
+)
+
+
+async def _post(
+    connection: dict[str, Any],
+    path: str,
+    payload: dict[str, Any],
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    timeout: float = POST_TIMEOUT_SECONDS,
+) -> _ReadResponse:
+    """One bounded, redirect-free POST. Only job control may call this."""
+    url = f"{connection['base_url']}{path}"
+    headers = {"Accept": "application/json"}
+    token = connection.get("token") or ""
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                if 300 <= response.status_code < 400:
+                    raise UnslothError(STATE_INVALID, INVALID_MESSAGE)
+                chunks: list[bytes] = []
+                received = 0
+                async for chunk in response.aiter_bytes():
+                    received += len(chunk)
+                    if received > MAX_RESPONSE_BYTES:
+                        raise UnslothError(STATE_INVALID, INVALID_MESSAGE)
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                status_code = response.status_code
+    except UnslothError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise UnslothError(STATE_OFFLINE, TIMEOUT_MESSAGE) from exc
+    except httpx.RequestError as exc:
+        raise UnslothError(STATE_OFFLINE, OFFLINE_MESSAGE) from exc
+    parsed = None
+    if body:
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            parsed = None
+    return _ReadResponse(
+        status_code=status_code,
+        payload=parsed,
+        media_type=media_type,
+        truncated=False,
+    )
+
+
+def _raise_job_status(response: _ReadResponse, *, rejected_message: str) -> dict[str, Any]:
+    if response.status_code in (401, 403):
+        raise UnslothError(STATE_UNAUTHORIZED, UNAUTHORIZED_MESSAGE, status_code=401)
+    if response.status_code == 404 or response.status_code == 405:
+        raise UnslothError(
+            STATE_INCOMPATIBLE, JOB_ROUTE_UNAVAILABLE_MESSAGE, status_code=502
+        )
+    if response.status_code == 409:
+        raise UnslothError(STATE_BUSY, NO_ACTIVE_JOB_MESSAGE, status_code=409)
+    if response.status_code == 507:
+        raise UnslothError(STATE_INSUFFICIENT, INSUFFICIENT_MESSAGE, status_code=507)
+    if response.status_code >= 400:
+        raise UnslothError(STATE_ERROR, rejected_message, status_code=response.status_code)
+    return response.payload if isinstance(response.payload, dict) else {}
+
+
+def _safe_scalar(value: Any) -> Any:
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or len(text) > MAX_METRICS_STRING_CHARS or _CONTROL_RE.search(text):
+            return None
+        try:
+            from src.authority_protocol import redact_secret_text
+
+            return redact_secret_text(text)
+        except Exception:
+            return text
+    return None
+
+
+def _percent(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 1.0:
+        number *= 100.0
+    return round(max(0.0, min(100.0, number)), 2)
+
+
+def _progress_summary(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    progress: dict[str, Any] = {}
+    for key in ("percent", "progress", "progress_percent", "percentage"):
+        percent = _percent(payload.get(key))
+        if percent is not None:
+            progress["percent"] = percent
+            break
+    step = payload.get("step", payload.get("current_step"))
+    total = payload.get("total_steps", payload.get("max_steps"))
+    if isinstance(step, (int, float)) and not isinstance(step, bool):
+        progress["step"] = int(step)
+    if isinstance(total, (int, float)) and not isinstance(total, bool) and total > 0:
+        progress["total_steps"] = int(total)
+        if "percent" not in progress and progress.get("step") is not None:
+            progress["percent"] = round(min(100.0, progress["step"] / total * 100.0), 2)
+    epoch = payload.get("epoch", payload.get("current_epoch"))
+    if isinstance(epoch, (int, float)) and not isinstance(epoch, bool):
+        progress["epoch"] = float(epoch)
+    for key in ("loss", "eta_seconds", "elapsed_seconds"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            progress[key] = value
+    return progress
+
+
+def _checkpoint_list(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get("checkpoints")
+    if not isinstance(raw, list):
+        return []
+    checkpoints: list[dict[str, Any]] = []
+    for entry in raw[:MAX_CHECKPOINTS]:
+        if isinstance(entry, dict):
+            checkpoint: dict[str, Any] = {}
+            for key in ("id", "name", "step", "path", "created_at"):
+                value = _safe_scalar(entry.get(key))
+                if value is not None and not (isinstance(value, str) and len(value) > MAX_CHECKPOINT_PATH_CHARS):
+                    checkpoint[key] = value
+            if checkpoint:
+                checkpoints.append(checkpoint)
+        elif isinstance(entry, str) and entry.strip() and len(entry) <= MAX_CHECKPOINT_PATH_CHARS:
+            checkpoints.append({"id": entry.strip()})
+    return checkpoints
+
+
+def _log_tail(payload: Any, previous: str = "") -> str:
+    if not isinstance(payload, dict):
+        return str(previous or "")[-MAX_LOG_CHARS:]
+    raw = None
+    for key in ("logs", "log", "log_tail", "message", "last_message"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            raw = value
+            break
+        if isinstance(value, list) and value:
+            raw = "\n".join(str(item) for item in value if isinstance(item, str))
+            break
+    if raw is None:
+        return str(previous or "")[-MAX_LOG_CHARS:]
+    try:
+        from src.authority_protocol import redact_secret_text
+
+        raw = redact_secret_text(raw)
+    except Exception:
+        pass
+    combined = f"{previous or ''}\n{raw}".strip() if previous else raw
+    return combined[-MAX_LOG_CHARS:]
+
+
+def _metrics_summary(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    source = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else payload
+    metrics: dict[str, Any] = {}
+    for key, value in list(source.items())[:MAX_METRICS_FIELDS]:
+        name = str(key)[:60]
+        scalar = _safe_scalar(value)
+        if scalar is not None:
+            metrics[name] = scalar
+    return metrics
+
+
+async def fetch_training_status(
+    connection: dict[str, Any],
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    previous_logs: str = "",
+) -> dict[str, Any]:
+    """Read-only job snapshot: state, progress, checkpoints, metrics, logs."""
+    response = await _get(connection, ROUTE_TRAIN_STATUS, transport=transport)
+    payload = _raise_job_status(response, rejected_message=JOB_ROUTE_UNAVAILABLE_MESSAGE)
+    raw_state, normalized, active = _job_state(payload)
+    return {
+        "raw_state": raw_state,
+        "state": normalized,
+        "active": active,
+        "progress": _progress_summary(payload),
+        "checkpoints": _checkpoint_list(payload),
+        "logs": _log_tail(payload, previous_logs),
+        "metrics": _metrics_summary(payload),
+    }
+
+
+async def fetch_training_metrics(
+    connection: dict[str, Any],
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """Read-only metrics read, tolerant of runtimes without the route."""
+    response = await _get(connection, ROUTE_TRAIN_METRICS, transport=transport)
+    if response.status_code in (404, 405):
+        return {}
+    payload = _raise_job_status(response, rejected_message=JOB_ROUTE_UNAVAILABLE_MESSAGE)
+    return _metrics_summary(payload)
+
+
+async def start_training_job(
+    connection: dict[str, Any],
+    spec: dict[str, Any],
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """POST /api/train/start for one already-confirmed spec.
+
+    This is the only start path. Callers must be the reviewed jobs module with
+    a matching preview fingerprint and an explicit operator acknowledgment.
+    """
+    if not isinstance(spec, dict) or not spec:
+        raise UnslothError(STATE_INVALID, INVALID_MESSAGE)
+    response = await _post(connection, ROUTE_TRAIN_START, spec, transport=transport)
+    payload = _raise_job_status(response, rejected_message=START_REJECTED_MESSAGE)
+    runtime_job_id = _first_text(payload, ("job_id", "jobId", "run_id", "id"))
+    if runtime_job_id and len(runtime_job_id) > MAX_JOB_ID_CHARS:
+        runtime_job_id = runtime_job_id[:MAX_JOB_ID_CHARS]
+    raw_state, normalized, active = _job_state(payload)
+    state = normalized if normalized != "unknown" else "running"
+    return {
+        "accepted": True,
+        "runtime_job_id": runtime_job_id,
+        "state": state,
+        "raw_state": raw_state,
+        "active": active if normalized != "unknown" else True,
+    }
+
+
+async def stop_training_job(
+    connection: dict[str, Any],
+    *,
+    save: bool,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """POST /api/train/stop. ``save`` decides whether a checkpoint is retained."""
+    response = await _post(
+        connection, ROUTE_TRAIN_STOP, {"save": bool(save)}, transport=transport
+    )
+    if response.status_code in (404, 405):
+        raise UnslothError(STATE_INCOMPATIBLE, JOB_ROUTE_UNAVAILABLE_MESSAGE, status_code=502)
+    if response.status_code == 409:
+        raise UnslothError("no_active_job", NO_ACTIVE_JOB_MESSAGE, status_code=409)
+    payload = _raise_job_status(response, rejected_message=STOP_REJECTED_MESSAGE)
+    raw_state, normalized, active = _job_state(payload)
+    return {
+        "state": normalized if normalized != "unknown" else "stopped",
+        "raw_state": raw_state,
+        "active": active,
+    }
 
 
 def cached_capabilities(owner: str | None) -> dict[str, Any]:
