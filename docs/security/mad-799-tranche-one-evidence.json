@@ -1,0 +1,816 @@
+{
+  "schema": "pandamonium.security.tranche-one-evidence/1",
+  "task": "MAD-799",
+  "title": "First read-only cybersecurity package tranche — upstream evidence",
+  "captured_at": "2026-09-14T11:53:58Z",
+  "captured_from": "research lane worktree .worktrees/mad-799 (branch docs/mad-799-security-tranche)",
+  "method": {
+    "github_rest": "GET /repos/{owner}/{repo} and GET /repos/{owner}/{repo}/releases/latest and GET /repos/{owner}/{repo}/releases/tags/{tag} via the GitHub REST API (metadata only)",
+    "github_advisories": "GET /repos/{owner}/{repo}/security-advisories (authenticated gh api, metadata only)",
+    "osv": "POST https://api.osv.dev/v1/query with package+version (pinned-version check) and package-only (advisory history)",
+    "pypi": "GET https://pypi.org/pypi/checkdmarc/json and /pypi/checkdmarc/6.0.1/json (metadata and wheel digests)",
+    "license_files": "first lines of LICENSE/LICENCE at the pinned release tag for drwetter/testssl.sh and WithSecureLabs/chainsaw",
+    "not_performed": [
+      "no package or binary download",
+      "no upstream code execution",
+      "no live scan against any host, network, or domain",
+      "no upstream source-code security review",
+      "no malware scan",
+      "no CVE database sweep beyond OSV and GitHub security advisories"
+    ]
+  },
+  "candidates": [
+    {
+      "candidate_id": "syft-sbom",
+      "plugin_id": "syft-sbom",
+      "name": "Syft",
+      "job": "Generate a Software Bill of Materials for an owner-selected local directory or filesystem snapshot",
+      "user_story": "As the operator, I want an SBOM for a workspace folder or container rootfs tarball so I can see every package and version before I trust or ship it.",
+      "status": "proposed_tranche_one",
+      "upstream": {
+        "repo_url": "https://github.com/anchore/syft",
+        "release_url": "https://github.com/anchore/syft/releases/tag/v1.51.1",
+        "observed_version": "v1.51.1",
+        "release_published_at": "2026-08-27T17:01:15Z",
+        "release_check_command": "gh api repos/anchore/syft/releases/tags/v1.51.1"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "verified": true,
+        "evidence": "GitHub REST /repos/anchore/syft license.spdx_id = Apache-2.0; raw LICENSE at v1.51.1 is the Apache License 2.0"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-11T21:46:09Z",
+        "stars": 9558,
+        "open_issues": 648,
+        "release_cadence_note": "Frequent tagged releases; v1.51.1 is 18 days old at capture"
+      },
+      "platforms": {
+        "linux": ["amd64", "arm64", "ppc64le", "riscv64", "s390x"],
+        "macos": ["amd64", "arm64"],
+        "windows": ["amd64", "arm64"],
+        "source": "release asset names at v1.51.1"
+      },
+      "provenance": {
+        "checksums_asset": "syft_1.51.1_checksums.txt",
+        "signature_assets": ["syft_1.51.1_checksums.txt.pem", "syft_1.51.1_checksums.txt.sig"],
+        "sbom_assets": true,
+        "slsa_provenance": false,
+        "note": "cosign-style checksum signature pair present; our catalog adds its own sha256 + Ed25519 artifact signature regardless"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "Go github.com/anchore/syft at v1.51.1",
+        "pinned_version_osv_count": 0,
+        "pinned_version_note": "OSV reports no advisory affecting the pinned version at capture time",
+        "history": [
+          {
+            "id": "GHSA-jp7v-3587-2956",
+            "aliases": ["CVE-2023-24827", "GO-2023-1533"],
+            "severity": "medium",
+            "summary": "Credential disclosure in syft when SYFT_ATTEST_PASSWORD environment variable set",
+            "published": "2023-02-08T21:38:46Z"
+          },
+          {
+            "id": "GHSA-rjcw-vg7j-m9rc",
+            "aliases": ["CVE-2026-33481", "GO-2026-4809"],
+            "severity": "medium",
+            "summary": "Syft improper temporary file cleanup",
+            "published": "2026-03-20T20:46:29Z"
+          }
+        ],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/anchore/syft/security-advisories"
+        ],
+        "note": "Historical advisory themes — credential environment variables and temporary file handling — shape the wrapper rule that no secret env vars are passed to the tool and temp files stay inside the plugin-owned workspace"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": false,
+        "dual_use": "low",
+        "notes": "Reads local files only; outputs an SBOM to stdout or a plugin-owned result path"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"generate_sbom_report": "bounded_write"},
+        "network_allowlist": [],
+        "credentials_required": false,
+        "host_dependencies": [],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "accepts a workspace-relative directory or a tarball path inside the workspace only",
+        "reuses the extension static-scan bounds as runtime defaults: <= 50,000 files, <= 512 MB, <= 10 minutes",
+        "does not follow symlinks out of the workspace; special files (devices, FIFOs) are skipped",
+        "no network egress in tranche one; catalog and SBOM generation run offline"
+      ],
+      "unverified": [
+        "runtime behavior on Windows hosts (not tested; excluded from catalog v1 platforms)",
+        "upstream source-code quality review (metadata and advisories only)"
+      ]
+    },
+    {
+      "candidate_id": "grype-vuln",
+      "plugin_id": "grype-vuln",
+      "name": "Grype",
+      "job": "Match a local SBOM, directory, or rootfs against vulnerability data and produce a findings report",
+      "user_story": "As the operator, I want the packages in my project checked against known vulnerabilities and a severity-ranked report I can act on locally.",
+      "status": "proposed_tranche_one",
+      "upstream": {
+        "repo_url": "https://github.com/anchore/grype",
+        "release_url": "https://github.com/anchore/grype/releases/tag/v0.118.0",
+        "observed_version": "v0.118.0",
+        "release_published_at": "2026-08-27T20:04:42Z",
+        "release_check_command": "gh api repos/anchore/grype/releases/tags/v0.118.0"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "verified": true,
+        "evidence": "GitHub REST /repos/anchore/grype license.spdx_id = Apache-2.0"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-11T16:06:13Z",
+        "stars": 12877,
+        "open_issues": 411,
+        "release_cadence_note": "Frequent tagged releases; v0.118.0 is 18 days old at capture"
+      },
+      "platforms": {
+        "linux": ["amd64", "arm64", "ppc64le", "s390x"],
+        "macos": ["amd64", "arm64"],
+        "windows": ["amd64"],
+        "source": "release asset names at v0.118.0"
+      },
+      "provenance": {
+        "checksums_asset": "grype_0.118.0_checksums.txt",
+        "signature_assets": ["grype_0.118.0_checksums.txt.pem", "grype_0.118.0_checksums.txt.sig"],
+        "sbom_assets": false,
+        "slsa_provenance": false,
+        "note": "cosign-style checksum signature pair present"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "Go github.com/anchore/grype at v0.118.0",
+        "pinned_version_osv_count": 0,
+        "history": [
+          {
+            "id": "GHSA-6gxw-85q2-q646",
+            "aliases": ["CVE-2025-65965", "GO-2025-4160"],
+            "severity": "high",
+            "summary": "Grype has a credential disclosure vulnerability in its JSON output",
+            "published": "2025-11-25T14:18:46Z"
+          }
+        ],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/anchore/grype/security-advisories"
+        ],
+        "note": "The JSON output credential-disclosure history reinforces the redaction rule for all scanner output before it reaches chat, logs, or artifacts"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": true,
+        "dual_use": "low",
+        "notes": "Targets are local artifacts; the only network use is the official vulnerability DB refresh, which can be pre-staged for offline mode"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"refresh_vulnerability_database": "bounded_write", "write_findings_report": "bounded_write"},
+        "network_allowlist": [],
+        "network_allowlist_review_required": true,
+        "network_allowlist_note": "Exact official Anchore DB endpoint hosts must be captured from the pinned binary and written into the manifest for preview before installation.",
+        "credentials_required": false,
+        "host_dependencies": [],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "tranche one scans local directories, SBOM files, or exported rootfs tarballs only — no container socket, no live image pull",
+        "DB refresh is a separate bounded network action; offline mode uses a pre-staged DB inside the plugin data directory",
+        "findings output is redacted before agent/UI exposure and is stored owner-scoped"
+      ],
+      "unverified": [
+        "exact pinned DB endpoint hosts for the manifest allowlist (to be captured from the pinned binary during adaptation)",
+        "offline DB staging workflow and its size bounds (unimplemented)"
+      ]
+    },
+    {
+      "candidate_id": "osv-deps",
+      "plugin_id": "osv-deps",
+      "name": "OSV-Scanner",
+      "job": "Audit project dependency/lockfiles against OSV vulnerability data",
+      "user_story": "As the operator, I want my lockfiles checked against OSV so I know which dependencies need an update and can see the advisory links.",
+      "status": "proposed_tranche_one",
+      "upstream": {
+        "repo_url": "https://github.com/google/osv-scanner",
+        "release_url": "https://github.com/google/osv-scanner/releases/tag/v2.6.0",
+        "observed_version": "v2.6.0",
+        "release_published_at": "2026-09-14T02:55:16Z",
+        "release_check_command": "gh api repos/google/osv-scanner/releases/tags/v2.6.0"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "verified": true,
+        "evidence": "GitHub REST /repos/google/osv-scanner license.spdx_id = Apache-2.0"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-14T02:56:35Z",
+        "stars": 11022,
+        "open_issues": 115,
+        "release_cadence_note": "Very active; v2.6.0 published on the capture date"
+      },
+      "platforms": {
+        "linux": ["amd64", "arm64"],
+        "macos": ["amd64", "arm64"],
+        "windows": ["amd64", "arm64"],
+        "source": "release asset names at v2.6.0"
+      },
+      "provenance": {
+        "checksums_asset": "osv-scanner_SHA256SUMS",
+        "signature_assets": [],
+        "sbom_assets": false,
+        "slsa_provenance": true,
+        "note": "multiple.intoto.jsonl SLSA provenance asset plus SHA256SUMS"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "Go github.com/google/osv-scanner/v2 at v2.6.0",
+        "pinned_version_osv_count": 0,
+        "history": [],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/google/osv-scanner/security-advisories"
+        ],
+        "note": "No OSV or repository advisories observed at capture time"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": true,
+        "dual_use": "low",
+        "notes": "Reads lockfiles and source manifests; queries api.osv.dev unless an offline database is provided"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"write_audit_report": "bounded_write"},
+        "network_allowlist": ["https://api.osv.dev"],
+        "network_allowlist_review_required": true,
+        "network_allowlist_note": "The OSV API endpoint is confirmed; the official offline-database source host must be captured from the pinned binary during adaptation.",
+        "credentials_required": false,
+        "host_dependencies": [],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "scans workspace-relative manifests and lockfiles only",
+        "network queries are advisory lookups of package coordinates — never target probes",
+        "offline mode must be supported because the host may be air-gapped"
+      ],
+      "unverified": [
+        "offline database export/import workflow details",
+        "license/dependency license summary output behavior"
+      ]
+    },
+    {
+      "candidate_id": "gitleaks-secrets",
+      "plugin_id": "gitleaks-secrets",
+      "name": "Gitleaks",
+      "job": "Scan a local repository or directory for committed secrets without leaving the host",
+      "user_story": "As the operator, I want to check a repo for committed credentials before I share it, and see file/line locations without exposing the secret values in chat.",
+      "status": "proposed_tranche_one",
+      "upstream": {
+        "repo_url": "https://github.com/gitleaks/gitleaks",
+        "release_url": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+        "observed_version": "v8.30.1",
+        "release_published_at": "2026-03-21T02:17:58Z",
+        "release_check_command": "gh api repos/gitleaks/gitleaks/releases/tags/v8.30.1"
+      },
+      "license": {
+        "spdx": "MIT",
+        "verified": true,
+        "evidence": "GitHub REST /repos/gitleaks/gitleaks license.spdx_id = MIT"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-09T04:18:49Z",
+        "stars": 29294,
+        "open_issues": 474,
+        "release_cadence_note": "Active repository; v8.30.1 is the latest tag at capture (March 2026) with commits through September 2026"
+      },
+      "platforms": {
+        "linux": ["x64", "arm64", "armv6", "armv7", "x32"],
+        "macos": ["x64", "arm64"],
+        "windows": ["x64", "arm64", "x32"],
+        "source": "release asset names at v8.30.1"
+      },
+      "provenance": {
+        "checksums_asset": "gitleaks_8.30.1_checksums.txt",
+        "signature_assets": [],
+        "sbom_assets": false,
+        "slsa_provenance": false,
+        "note": "Checksums only; our catalog signing supplies the publish-time provenance"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "Go github.com/gitleaks/gitleaks/v8 at v8.30.1",
+        "pinned_version_osv_count": 0,
+        "history": [],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/gitleaks/gitleaks/security-advisories"
+        ],
+        "note": "No OSV or repository advisories observed at capture time"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": false,
+        "dual_use": "low",
+        "notes": "Highest data-sensitivity candidate: findings can contain live credentials, so output redaction and owner-scoped storage are mandatory controls"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"write_secret_findings": "bounded_write"},
+        "network_allowlist": [],
+        "credentials_required": false,
+        "host_dependencies": [],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "scans a workspace-relative git checkout or directory",
+        "secret values are redacted in every agent-visible, logged, or stored preview; raw values are never written to shared artifacts",
+        "findings are owner-scoped with an explicit retention/removal path",
+        "no network egress; no git history rewriting and no remediation actions"
+      ],
+      "unverified": [
+        "the exact redaction coverage of every gitleaks rule type against our redactor (fixture tests required during adaptation)"
+      ]
+    },
+    {
+      "candidate_id": "checkdmarc-dns",
+      "plugin_id": "checkdmarc-dns",
+      "name": "checkdmarc",
+      "job": "Inspect SPF, DMARC, DKIM, and MX posture for an owner-specified domain over DNS-over-HTTPS",
+      "user_story": "As the operator, I want a bounded check of my own domain's email-authentication records so I can find missing or misconfigured SPF/DMARC entries.",
+      "status": "proposed_tranche_one",
+      "upstream": {
+        "repo_url": "https://github.com/domainaware/checkdmarc",
+        "release_url": "https://github.com/domainaware/checkdmarc/releases/tag/6.0.1",
+        "observed_version": "6.0.1",
+        "release_published_at": "2026-09-04T19:48:18Z",
+        "release_check_command": "gh api repos/domainaware/checkdmarc/releases/tags/6.0.1"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "verified": true,
+        "evidence": "GitHub REST license.spdx_id = Apache-2.0; PyPI license_expression = Apache-2.0"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-04T19:46:36Z",
+        "stars": 321,
+        "open_issues": 1,
+        "release_cadence_note": "Small but active; 6.0.1 published 10 days before capture"
+      },
+      "platforms": {
+        "linux": ["any (pure Python >= 3.10)"],
+        "macos": ["any (pure Python >= 3.10)"],
+        "windows": ["any (pure Python >= 3.10)"],
+        "source": "PyPI wheel checkdmarc-6.0.1-py3-none-any.whl"
+      },
+      "provenance": {
+        "checksums_asset": "PyPI sha256 digests for the wheel and sdist recorded in the PyPI metadata",
+        "signature_assets": [],
+        "sbom_assets": false,
+        "slsa_provenance": false,
+        "note": "PyPI attestation availability was not checked; dependency wheels must be pinned with hashes during adaptation"
+      },
+      "dependencies": {
+        "direct": [
+          "cryptography>=50.0.0",
+          "dnspython[doh]>=2.7.0",
+          "expiringdict>=1.1.4",
+          "httpx>=0.26.0",
+          "importlib-resources>=6.0",
+          "pem>=23.1.0",
+          "publicsuffixlist>=0.10.0",
+          "pyleri>=1.3.2",
+          "requests>=2.25.0",
+          "xmltodict>=0.14.2"
+        ],
+        "source": "PyPI requires_dist for 6.0.1",
+        "packaging_note": "Python dependency tree is the largest in the tranche; adaptation must vendor hash-pinned wheels and run a dependency audit"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "PyPI checkdmarc at 6.0.1",
+        "pinned_version_osv_count": 0,
+        "history": [],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/domainaware/checkdmarc/security-advisories"
+        ],
+        "note": "The dependency tree, not checkdmarc itself, is the CVE surface; audit pinned wheels during adaptation"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": true,
+        "dual_use": "moderate",
+        "notes": "DNS lookups are bounded to operator-named domains over DoH; enumeration or bulk domain lists are excluded by design"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"write_posture_report": "bounded_write"},
+        "network_allowlist": [],
+        "network_allowlist_review_required": true,
+        "network_allowlist_note": "DNS-over-HTTPS resolver endpoints only; the exact endpoints must be selected and written into the manifest for preview before installation.",
+        "credentials_required": false,
+        "host_dependencies": ["Python 3.10+ runtime provided by the plugin package; no host package installation"],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "one operator-named domain per invocation; no zone transfers, no wildcard sweeps, no domain lists",
+        "DNS transport restricted to DNS-over-HTTPS endpoints in the manifest network allowlist so the external effect is visible before install",
+        "results carry record contents only and are owner-scoped",
+        "no email sending, no mailbox access, no SMTP probing"
+      ],
+      "unverified": [
+        "pure-DNS/UDP transport is not representable in the manifest network allowlist; DoH-only is a required adaptation constraint",
+        "PyPI attestation/provenance status"
+      ]
+    },
+    {
+      "candidate_id": "cyclonedx-reports",
+      "plugin_id": "cyclonedx-reports",
+      "name": "CycloneDX CLI",
+      "job": "Validate, merge, diff, and convert CycloneDX SBOMs into readable report formats",
+      "user_story": "As the operator, I want the SBOMs I already own validated and merged into one report so I can hand a consistent inventory to another tool or person.",
+      "status": "proposed_tranche_one",
+      "upstream": {
+        "repo_url": "https://github.com/CycloneDX/cyclonedx-cli",
+        "release_url": "https://github.com/CycloneDX/cyclonedx-cli/releases/tag/v0.33.1",
+        "observed_version": "v0.33.1",
+        "release_published_at": "2026-07-23T19:48:51Z",
+        "release_check_command": "gh api repos/CycloneDX/cyclonedx-cli/releases/tags/v0.33.1"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "verified": true,
+        "evidence": "GitHub REST /repos/CycloneDX/cyclonedx-cli license.spdx_id = Apache-2.0"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-08-20T23:42:19Z",
+        "stars": 541,
+        "open_issues": 125,
+        "release_cadence_note": "Maintained; v0.33.1 published ~7 weeks before capture"
+      },
+      "platforms": {
+        "linux": ["x64", "arm", "arm64", "musl-x64", "musl-arm"],
+        "macos": ["x64", "arm64"],
+        "windows": ["x64", "x86", "arm64"],
+        "source": "release asset names at v0.33.1"
+      },
+      "provenance": {
+        "checksums_asset": null,
+        "signature_assets": [],
+        "sbom_assets": false,
+        "slsa_provenance": false,
+        "note": "Release assets are bare binaries without checksums; publish-time provenance comes only from the signed catalog artifact. This is the weakest upstream provenance in the tranche and is called out for Leo."
+      },
+      "advisories": {
+        "pinned_version_osv_query": "NuGet CycloneDX.Cli at a matching version could not be resolved exactly; OSV history query for the module returned 0",
+        "pinned_version_osv_count": 0,
+        "history": [],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/CycloneDX/cyclonedx-cli/security-advisories"
+        ],
+        "note": "No advisories observed; NuGet ecosystem/version mapping is approximate and marked unverified"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": false,
+        "dual_use": "low",
+        "notes": "Operates on SBOM files the operator already owns; writes new report files but never mutates inputs in place"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"write_report": "bounded_write"},
+        "network_allowlist": [],
+        "credentials_required": false,
+        "host_dependencies": [],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "reads SBOM files inside the workspace and writes merged/report output to a plugin-owned result path",
+        "file size and element count bounds reuse the extension static-scan bounds",
+        "no schema fetching from the network at runtime; schemas are pinned in the package"
+      ],
+      "unverified": [
+        "exact NuGet package identity for OSV version matching",
+        "upstream release checksum/signature absence risk acceptance (requires catalog signing only)"
+      ]
+    },
+    {
+      "candidate_id": "chainsaw-logs",
+      "plugin_id": "chainsaw-logs",
+      "name": "Chainsaw",
+      "job": "Search Windows event logs (EVTX) and other forensic artifacts against Sigma rules locally",
+      "user_story": "As the operator, I want to hunt through exported Windows event logs on this machine with Sigma rules and get a findings report.",
+      "status": "conditional",
+      "condition": "Approve only if the plugin package ships the upstream GPL-3.0 LICENCE and a pinned source offer; GPL-3.0 is compatible with this AGPL-3.0-or-later project at the aggregate/plugin boundary.",
+      "upstream": {
+        "repo_url": "https://github.com/WithSecureLabs/chainsaw",
+        "release_url": "https://github.com/WithSecureLabs/chainsaw/releases/tag/v2.16.5",
+        "observed_version": "v2.16.5",
+        "release_published_at": "2026-08-25T19:14:50Z",
+        "release_check_command": "gh api repos/WithSecureLabs/chainsaw/releases/tags/v2.16.5"
+      },
+      "license": {
+        "spdx": "GPL-3.0",
+        "verified": true,
+        "evidence": "GitHub REST license.spdx_id = GPL-3.0; raw LICENCE at v2.16.5 is the GNU GPL version 3 text"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-08-25T19:12:42Z",
+        "stars": 3660,
+        "open_issues": 4,
+        "release_cadence_note": "Steady releases; v2.16.5 published ~3 weeks before capture"
+      },
+      "platforms": {
+        "linux": ["x86_64", "aarch64"],
+        "macos": ["x86_64", "aarch64"],
+        "windows": ["x86_64"],
+        "source": "release asset names at v2.16.5"
+      },
+      "provenance": {
+        "checksums_asset": null,
+        "signature_assets": [],
+        "sbom_assets": false,
+        "slsa_provenance": false,
+        "note": "No release checksums or signatures; publish-time provenance comes from the signed catalog artifact"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "Go github.com/WithSecureLabs/chainsaw at v2.16.5",
+        "pinned_version_osv_count": 0,
+        "history": [],
+        "sources": [
+          "POST https://api.osv.dev/v1/query",
+          "GET /repos/WithSecureLabs/chainsaw/security-advisories"
+        ],
+        "note": "No OSV or repository advisories observed at capture time"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": false,
+        "dual_use": "low",
+        "notes": "Offline forensic log search; no live system access, no memory acquisition, no endpoint agent"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"write_hunt_report": "bounded_write"},
+        "network_allowlist": [],
+        "credentials_required": false,
+        "host_dependencies": [],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "reads exported log/artifact files inside the workspace only",
+        "Sigma rule packs are pinned in the package; no runtime rule downloads",
+        "bounds and redaction reuse the static-scan limits"
+      ],
+      "unverified": [
+        "Windows arm64 support (no upstream binary)",
+        "rule pack licensing for bundled Sigma rules (Sigma rules are typically DRL; to be audited during adaptation)"
+      ]
+    },
+    {
+      "candidate_id": "testssl-tls",
+      "plugin_id": "testssl-tls",
+      "name": "testssl.sh",
+      "job": "Audit the TLS configuration of one operator-owned host:port",
+      "user_story": "As the operator, I want a configuration audit of one of my own services' TLS endpoint so I can fix weak protocols or cipher settings.",
+      "status": "conditional",
+      "condition": "Approve only with a single explicit host:port per invocation, an operator target-ownership attestation, rate limits, and GPL-2.0-or-later compliance packaging. Unrestricted or list-based scanning stays excluded.",
+      "upstream": {
+        "repo_url": "https://github.com/drwetter/testssl.sh",
+        "release_url": "https://github.com/drwetter/testssl.sh/releases/tag/v3.2.4",
+        "observed_version": "v3.2.4",
+        "release_published_at": "2026-07-12T18:50:39Z",
+        "release_check_command": "gh api repos/drwetter/testssl.sh/releases/tags/v3.2.4"
+      },
+      "license": {
+        "spdx": "GPL-2.0-or-later",
+        "github_spdx_alias": "GPL-2.0",
+        "verified": true,
+        "evidence": "GitHub REST license key gpl-2.0; raw LICENSE at v3.2.4 contains the GPLv2 text with the 'any later version' option, so GPL-3.0/AGPL-3.0 compatibility applies"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-14T08:12:59Z",
+        "stars": 9200,
+        "open_issues": 248,
+        "release_cadence_note": "Very active; default branch is 3.3dev, stable v3.2.4 from July 2026"
+      },
+      "platforms": {
+        "linux": ["POSIX shell + openssl"],
+        "macos": ["POSIX shell + openssl"],
+        "windows": ["not supported upstream in tranche one"],
+        "source": "project README/platform notes; no release binary assets"
+      },
+      "provenance": {
+        "checksums_asset": null,
+        "signature_assets": [],
+        "sbom_assets": false,
+        "slsa_provenance": false,
+        "note": "Source-only release; the plugin package must pin the tag and ship the script plus LICENSE, with catalog-level signing"
+      },
+      "advisories": {
+        "pinned_version_osv_query": "not a package ecosystem; no OSV entry",
+        "pinned_version_osv_count": null,
+        "history": [],
+        "sources": ["GET /repos/drwetter/testssl.sh/security-advisories (none observed)"],
+        "note": "Shell/openssl toolchain CVEs are the real surface; host openssl version matters and is outside upstream control"
+      },
+      "classification": {
+        "target_effect": "read-only",
+        "mutating": false,
+        "privileged": false,
+        "network_active": true,
+        "dual_use": "moderate",
+        "notes": "TLS handshake probing has a large per-target footprint; bounded to one named host:port and gated by ownership attestation"
+      },
+      "manifest_plan": {
+        "package_type": "plugin",
+        "runtime_type": "mcp",
+        "permissions_default": "read_only",
+        "permission_overrides": {"write_tls_report": "bounded_write"},
+        "network_allowlist": [],
+        "network_allowlist_review_required": true,
+        "network_allowlist_note": "The host:port target is not expressible in the https URL allowlist; the single-target ownership gate must live in the wrapper and the target confirmation must be visible in the plan preview.",
+        "credentials_required": false,
+        "host_dependencies": ["bash", "openssl (host-provided, version recorded at install preview)"],
+        "restart_required": "none",
+        "compatibility": {"platforms": ["linux", "macos"], "architectures": ["amd64", "arm64"]}
+      },
+      "bounded_input_notes": [
+        "exactly one host:port per invocation, resolved to one address, no ranges/CIDR/lists",
+        "operator attestation that the target is owned or authorized",
+        "rate limit and timeout caps per run",
+        "no exploitation, no certificate forging, no connection flooding"
+      ],
+      "unverified": [
+        "host openssl compatibility matrix",
+        "whether the manifest network boundary can express a host:port target (evidence suggests only https URLs are expressible; adaptation may require the ownership gate in the wrapper instead)"
+      ]
+    },
+    {
+      "candidate_id": "checkov-iac",
+      "plugin_id": "checkov-iac",
+      "name": "Checkov",
+      "job": "Static configuration audit of IaC files (Terraform, CloudFormation, Kubernetes, Dockerfile)",
+      "user_story": "As the operator, I want my infrastructure files checked for insecure configuration before I apply them.",
+      "status": "deferred",
+      "condition": "Deferred to tranche two: broad IaC coverage is attractive, but the Python dependency tree and rule-pack surface need pinned-wheel and rule-provenance review first.",
+      "upstream": {
+        "repo_url": "https://github.com/bridgecrewio/checkov",
+        "release_url": "https://github.com/bridgecrewio/checkov/releases/tag/3.3.17",
+        "observed_version": "3.3.17",
+        "release_published_at": "2026-09-10T23:02:57Z",
+        "release_check_command": "gh api repos/bridgecrewio/checkov/releases/tags/3.3.17"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "verified": true,
+        "evidence": "GitHub REST /repos/bridgecrewio/checkov license.spdx_id = Apache-2.0"
+      },
+      "maintenance": {
+        "archived": false,
+        "pushed_at": "2026-09-10T23:03:02Z",
+        "stars": 9000,
+        "open_issues": null,
+        "release_cadence_note": "Very active; 3.3.17 published four days before capture"
+      },
+      "platforms": {"linux": ["x64", "arm64"], "macos": ["x86_64"], "windows": ["x86_64"], "source": "release asset names at 3.3.17"},
+      "provenance": {"checksums_asset": null, "signature_assets": [], "sbom_assets": false, "slsa_provenance": false, "note": "Platform zip assets; checksums not captured"},
+      "advisories": {"pinned_version_osv_query": "not queried for this deferred candidate", "pinned_version_osv_count": null, "history": [], "sources": [], "note": "Deferred; CVE and dependency audit required before selection"},
+      "classification": {"target_effect": "read-only", "mutating": false, "privileged": false, "network_active": false, "dual_use": "low", "notes": "Local static analysis"},
+      "manifest_plan": {"package_type": "plugin", "runtime_type": "mcp", "permissions_default": "read_only", "permission_overrides": {}, "network_allowlist": [], "credentials_required": false, "host_dependencies": [], "restart_required": "none"},
+      "bounded_input_notes": ["workspace-relative IaC files only"],
+      "unverified": ["dependency tree", "rule-pack provenance", "CVE history", "offline behavior"]
+    },
+    {
+      "candidate_id": "kube-linter-k8s",
+      "plugin_id": "kube-linter-k8s",
+      "name": "KubeLinter",
+      "job": "Lint Kubernetes YAML/Helm manifests for insecure configuration",
+      "user_story": "As the operator, I want my Kubernetes manifests checked for common security misconfigurations before I apply them.",
+      "status": "deferred",
+      "condition": "Deferred to tranche two: excellent provenance (sigstore files) and a static Go binary, but the job overlaps the IaC audit slot and Kubernetes is not a first-tranche priority.",
+      "upstream": {
+        "repo_url": "https://github.com/stackrox/kube-linter",
+        "release_url": "https://github.com/stackrox/kube-linter/releases/tag/v0.8.3",
+        "observed_version": "v0.8.3",
+        "release_published_at": "2026-03-10T13:17:40Z",
+        "release_check_command": "gh api repos/stackrox/kube-linter/releases/tags/v0.8.3"
+      },
+      "license": {"spdx": "Apache-2.0", "verified": true, "evidence": "GitHub REST license.spdx_id = Apache-2.0"},
+      "maintenance": {"archived": false, "pushed_at": "2026-09-11T00:15:46Z", "stars": 3506, "open_issues": null, "release_cadence_note": "Active repository; v0.8.3 from March 2026"},
+      "platforms": {"linux": ["amd64", "arm64"], "macos": ["amd64", "arm64"], "windows": ["amd64"], "source": "release asset names at v0.8.3"},
+      "provenance": {"checksums_asset": null, "signature_assets": [".sigstore.json per binary"], "sbom_assets": false, "slsa_provenance": false, "note": "sigstore bundle files present per platform"},
+      "advisories": {"pinned_version_osv_query": "not queried for this deferred candidate", "pinned_version_osv_count": null, "history": [], "sources": [], "note": "Deferred; CVE audit required before selection"},
+      "classification": {"target_effect": "read-only", "mutating": false, "privileged": false, "network_active": false, "dual_use": "low", "notes": "Local static analysis"},
+      "manifest_plan": {"package_type": "plugin", "runtime_type": "mcp", "permissions_default": "read_only", "permission_overrides": {}, "network_allowlist": [], "credentials_required": false, "host_dependencies": [], "restart_required": "none"},
+      "bounded_input_notes": ["workspace-relative manifests only"],
+      "unverified": ["CVE history", "rule provenance", "release cadence sufficiency"]
+    },
+    {
+      "candidate_id": "hadolint-dockerfile",
+      "plugin_id": "hadolint-dockerfile",
+      "name": "Hadolint",
+      "job": "Lint Dockerfiles for insecure or non-reproducible build instructions",
+      "user_story": "As the operator, I want my Dockerfiles linted for security and reproducibility issues.",
+      "status": "deferred",
+      "condition": "Deferred: GPL-3.0 packaging plus a narrow job; covered conceptually by the IaC audit slot in tranche two.",
+      "upstream": {
+        "repo_url": "https://github.com/hadolint/hadolint",
+        "release_url": "https://github.com/hadolint/hadolint/releases/tag/v2.15.1",
+        "observed_version": "v2.15.1",
+        "release_published_at": "2026-07-31T10:13:06Z",
+        "release_check_command": "gh api repos/hadolint/hadolint/releases/tags/v2.15.1"
+      },
+      "license": {"spdx": "GPL-3.0", "verified": true, "evidence": "GitHub REST license.spdx_id = GPL-3.0"},
+      "maintenance": {"archived": false, "pushed_at": "2026-08-24T14:37:20Z", "stars": 12400, "open_issues": null, "release_cadence_note": "Maintained; v2.15.1 from July 2026"},
+      "platforms": {"linux": ["x86_64", "arm64"], "macos": ["x86_64", "arm64"], "windows": ["x86_64"], "source": "release asset names at v2.15.1"},
+      "provenance": {"checksums_asset": "checksums.sha256", "signature_assets": [], "sbom_assets": false, "slsa_provenance": false, "note": "Checksums asset present"},
+      "advisories": {"pinned_version_osv_query": "not queried for this deferred candidate", "pinned_version_osv_count": null, "history": [], "sources": [], "note": "Deferred; CVE audit required before selection"},
+      "classification": {"target_effect": "read-only", "mutating": false, "privileged": false, "network_active": false, "dual_use": "low", "notes": "Local static analysis"},
+      "manifest_plan": {"package_type": "plugin", "runtime_type": "mcp", "permissions_default": "read_only", "permission_overrides": {}, "network_allowlist": [], "credentials_required": false, "host_dependencies": [], "restart_required": "none"},
+      "bounded_input_notes": ["workspace-relative Dockerfiles only"],
+      "unverified": ["CVE history", "GPL-3.0 packaging review"]
+    }
+  ],
+  "exclusion_classes": [
+    {
+      "class": "active exploitation",
+      "examples": ["exploitation frameworks", "payload generators", "weaponized PoC runners"],
+      "reason": "Can compromise targets; outside defensive read-only tranche one"
+    },
+    {
+      "class": "credential attacks",
+      "examples": ["brute force", "password cracking", "credential stuffing", "relay/coercion tools"],
+      "reason": "Attacks authentication and can lock out or breach accounts"
+    },
+    {
+      "class": "persistence",
+      "examples": ["implant/C2 frameworks", "startup or scheduled-task persistence installers"],
+      "reason": "Establishes durable unauthorized access"
+    },
+    {
+      "class": "evasion",
+      "examples": ["AV/EDR bypass", "log tampering", "obfuscation frameworks"],
+      "reason": "Defeats defensive controls and evidence integrity"
+    },
+    {
+      "class": "destructive response",
+      "examples": ["automatic quarantine/delete", "firewall or account mutation", "process killing in response to findings"],
+      "reason": "Mutating response can cause data loss and requires the separate destructive gate; tranche one never auto-remediates"
+    },
+    {
+      "class": "unrestricted scanning",
+      "examples": ["internet-wide or CIDR-range scanners", "mass enumeration", "vulnerability scanners pointed at third parties"],
+      "reason": "Unbounded external effects; tranche one allows only single, operator-owned, explicitly confirmed targets"
+    }
+  ]
+}
