@@ -184,6 +184,16 @@ def test_saved_private_installation_keeps_its_chosen_identity(
 @pytest.mark.asyncio
 async def test_target_switch_to_agent_uses_saved_identity(monkeypatch, isolated_settings):
     _configure_identity("Atlas")
+
+    # The full suite can initialize a real session manager that has no
+    # "chat-1" (created lazily from the DB); the voice target-switch path must
+    # tolerate a missing chat session instead of raising KeyError.
+    class _MissingSessionManager:
+        @staticmethod
+        def get_session(_session_id):
+            raise KeyError("Session chat-1 not found")
+
+    monkeypatch.setattr(voice_routes, "_SESSION_MANAGER", _MissingSessionManager())
     monkeypatch.setattr(
         voice_routes,
         "_resolve_voice_target_endpoint",
