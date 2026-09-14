@@ -84,12 +84,34 @@ async function mockApi(page, { browseStatus = 200, browseDetail = '', posted = [
   });
 }
 
-async function openPicker(page) {
-  await page.goto('/static/index.html#session-one');
+async function waitForBoot(page) {
   await expect.poll(() => page.evaluate(async () => {
     const directImport = await import('/static/js/sessions.js');
     return window.sessionModule === directImport.default;
   }), { timeout: 15_000 }).toBe(true);
+}
+
+async function selectFixtureSession(page, sessionId = 'session-one') {
+  // The picker persists the chosen folder on the CURRENT chat; before a
+  // session is selected, the value is deliberately localStorage-only and is
+  // persisted on the first send. Select the mocked session explicitly (the
+  // static test server has no backend for the initial auto-select) so the POST
+  // assertion is deterministic.
+  await expect.poll(() => page.evaluate(expectedId => (
+    typeof window.sessionModule?.selectSession === 'function'
+    && window.sessionModule.getSessions?.().some(session => session.id === expectedId)
+  ), sessionId), { timeout: 15_000 }).toBe(true);
+  await page.evaluate(id => window.sessionModule.selectSession(id, { showLoading: false }), sessionId);
+  await expect.poll(
+    () => page.evaluate(() => window.sessionModule?.getCurrentSessionId()),
+    { timeout: 15_000 },
+  ).toBe(sessionId);
+}
+
+async function openPicker(page) {
+  await page.goto('/static/index.html#session-one');
+  await waitForBoot(page);
+  await selectFixtureSession(page, 'session-one');
   await page.evaluate(async () => {
     const module = await import('/static/js/workspace.js');
     await (module.default || module).openWorkspaceBrowser();
@@ -125,16 +147,17 @@ test('picker shows actionable copy when the server refuses (403)', async ({ page
 test('a signed-out session is sent to sign in (401)', async ({ page }) => {
   await mockApi(page, { browseStatus: 401 });
   await page.goto('/static/index.html#session-one');
-  await expect.poll(() => page.evaluate(async () => {
-    const directImport = await import('/static/js/sessions.js');
-    return window.sessionModule === directImport.default;
-  }), { timeout: 15_000 }).toBe(true);
+  await waitForBoot(page);
   // The app's global fetch wrapper redirects any 401 (except /api/auth/) to
   // /login, so a signed-out user gets the actionable sign-in page instead of
-  // the old generic "Could not browse folders" toast.
-  await page.evaluate(async () => {
-    const module = await import('/static/js/workspace.js');
-    await (module.default || module).openWorkspaceBrowser();
+  // the old generic "Could not browse folders" toast. Fire the picker WITHOUT
+  // awaiting it in the page context: the redirect destroys that JS context and
+  // an awaited evaluate would reject with "Execution context was destroyed".
+  await page.evaluate(() => {
+    import('/static/js/workspace.js').then((module) => {
+      (module.default || module).openWorkspaceBrowser();
+    });
   });
-  await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+  await page.waitForURL('**/login**', { timeout: 10_000 });
+  await expect(page).toHaveURL(/\/login/);
 });
