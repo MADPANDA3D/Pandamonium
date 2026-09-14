@@ -21,6 +21,16 @@ function sessionId() { return window.sessionModule?.getCurrentSessionId?.() || '
 function currentSession() { return window.sessionModule?.getSessions?.().find(session => session.id === sessionId()) || {}; }
 function target() { return getSelectedAgentSelection()?.target || currentSession().agent_target || 'jarvis'; }
 
+// The reasoning level the session is actually set to (MAD-930): the bound
+// identity's attached profile level, persisted as sessions.reasoning_level by
+// the MAD-929 binding (or carried on the pending chat until it materializes).
+// An empty value means the model's own default applies.
+function sessionReasoningLevel() {
+  const sessionLevel = String(currentSession().reasoning_level || '').trim();
+  const pendingLevel = String(window.sessionModule?.getPendingChat?.()?.reasoningLevel || '').trim();
+  return (sessionLevel || pendingLevel).toLowerCase();
+}
+
 // Reasoning-effort support for the active model (MAD-900). The models payload
 // carries a per-endpoint `reasoning_levels` map for API reasoning models; when
 // the selected model has one, the composer control switches from the rounds
@@ -60,13 +70,27 @@ function renderEffort() {
   const options = native
     ? [...byId('codex-reasoning').options].map(option => option.value).filter(Boolean)
     : reasoningMode ? reasoningLevels : levels;
-  const chosen = native ? byId('codex-reasoning').value : (reasoningMode && !reasoningLevels.includes(agentEffort) ? '' : agentEffort);
+  const sessionLevel = sessionReasoningLevel();
+  const chosen = native
+    ? byId('codex-reasoning').value
+    : reasoningMode
+      ? (reasoningLevels.includes(agentEffort) ? agentEffort : (reasoningLevels.includes(sessionLevel) ? sessionLevel : ''))
+      : agentEffort;
   const index = Math.max(0, options.indexOf(chosen));
   range.max = String(Math.max(0, options.length - 1));
   range.value = String(chosen ? index : native ? 0 : Math.min(2, Math.max(0, options.length - 1)));
   range.disabled = !options.length;
   range.style.setProperty('--effort-fill', `${Number(range.max) ? Number(range.value) / Number(range.max) * 100 : 0}%`);
-  const label = names[chosen] || chosen || 'Default';
+  // The reasoning chip names the level actually in effect. A session level
+  // (identity default) shows as itself; when nothing is configured the model's
+  // own default applies, and the work-budget control keeps its legacy label.
+  const label = chosen
+    ? (names[chosen] || chosen)
+    : native
+      ? 'Task default'
+      : reasoningMode
+        ? 'Model default'
+        : 'Default';
   const controlLabel = native || reasoningMode ? 'Reasoning effort' : 'Agent work budget';
   byId('conversation-effort-label').textContent = controlLabel;
   byId('conversation-effort-value').textContent = label;
