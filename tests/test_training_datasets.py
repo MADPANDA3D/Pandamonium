@@ -29,6 +29,13 @@ with preserve_import_state(
     import routes.training_routes as training_routes
     import src.training_datasets as datasets
 
+    # Snapshot the real ORM classes at collection time. Some unrelated tests
+    # rebind core.database.TaskRun/ScheduledTask to local test classes and do
+    # not restore them, which would otherwise leak a reduced schema into this
+    # file's fixtures at run time.
+    TaskRunModel = database.TaskRun
+    ScheduledTaskModel = database.ScheduledTask
+
 
 @pytest.fixture
 def data_env(tmp_path, monkeypatch):
@@ -314,9 +321,9 @@ def test_conversation_memory_and_tool_trace_resolvers_use_explicit_ids(data_env)
             database.ChatMessage(id="msg-9", session_id="sess-9", role="user", content="chosen message")
         )
         session.add(database.Memory(id="mem-9", text="chosen memory", owner="alice"))
-        session.add(database.ScheduledTask(id="task-9", name="Nightly", owner="alice"))
+        session.add(ScheduledTaskModel(id="task-9", name="Nightly", owner="alice"))
         session.add(
-            database.TaskRun(id="run-9", task_id="task-9", status="success", steps='[{"tool":"ls"}]')
+            TaskRunModel(id="run-9", task_id="task-9", status="success", steps='[{"tool":"ls"}]')
         )
         session.commit()
 
