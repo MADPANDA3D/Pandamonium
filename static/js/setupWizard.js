@@ -208,6 +208,13 @@ function _runTour() {
   _handlers.runChatCommand?.('/tour');
 }
 
+// MAD-931: the model-defaults chapter of the tour, surfaced from the guide so
+// the first-run path can walk the five model lanes on demand.
+function _runModelDefaults() {
+  close();
+  _handlers.runChatCommand?.('/tour-models');
+}
+
 function _runGuide() {
   close();
   _handlers.runChatCommand?.('/setup');
@@ -387,6 +394,11 @@ async function renderHome(panel, status) {
   tour.type = 'button';
   tour.addEventListener('click', _runTour);
   nextLinks.append(tour);
+
+  const modelDefaults = el('button', 'setup-wizard-secondary', 'Model defaults');
+  modelDefaults.type = 'button';
+  modelDefaults.addEventListener('click', _runModelDefaults);
+  nextLinks.append(modelDefaults);
 
   const guide = el('button', 'setup-wizard-secondary', 'Replay the setup guide');
   guide.type = 'button';

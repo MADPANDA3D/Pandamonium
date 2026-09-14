@@ -3232,14 +3232,11 @@ async function _cmdTourTheme(args, ctx) {
 }
 
 // ── Settings tour ──
-async function _cmdTourSettings(args, ctx) {
-  // Clear the chat input so "/tour-settings" doesn't linger.
-  const _msgEl = document.getElementById('message');
-  if (_msgEl) {
-    _msgEl.value = '';
-    _msgEl.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-
+// Shared scaffolding for Settings tours: opens Settings, walks `steps` with
+// the tour halos/tooltips, and lands back on `landTab`. The general settings
+// tour and the model-defaults chapter (MAD-931) share it so both keep one
+// design language and one replay path.
+async function _runSettingsTour(steps, doneText, landTab = 'services') {
   // Idempotent tour-styles injection.
   if (!document.getElementById('tour-styles')) {
     const s = document.createElement('style');
@@ -3264,12 +3261,17 @@ async function _cmdTourSettings(args, ctx) {
     document.head.appendChild(s);
   }
 
-  // Open the settings modal.
+  // Open the settings modal through the settings module: the rail button only
+  // reveals the sidebar, it does not open this modal.
   let modal = document.getElementById('settings-modal');
   if (!modal || modal.classList.contains('hidden')) {
-    const opener = document.getElementById('rail-settings')
-      || document.getElementById('tool-settings-btn');
-    if (opener) opener.click();
+    try {
+      settingsModule.open(landTab || 'ai');
+    } catch (_) {
+      const opener = document.getElementById('user-bar-settings')
+        || document.getElementById('tool-settings-btn');
+      if (opener) opener.click();
+    }
     for (let i = 0; i < 25; i++) {
       await new Promise(r => setTimeout(r, 80));
       modal = document.getElementById('settings-modal');
@@ -3408,6 +3410,33 @@ async function _cmdTourSettings(args, ctx) {
     if (btn) btn.click();
   }
 
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const res = await _showStep(step.sel, step.text, {
+      isFirst: i === 0,
+      isLast: i === steps.length - 1,
+      before: step.before,
+      placement: step.placement,
+    });
+    if (res === 'skip') { _clear(); return true; }
+    if (res === 'back') { if (i > 0) i -= 2; continue; }
+  }
+
+  // Land somewhere familiar before clearing the overlays.
+  if (landTab) _clickNav(landTab);
+  _clear();
+  await typewriterReply(doneText);
+  return true;
+}
+
+async function _cmdTourSettings(args, ctx) {
+  // Clear the chat input so "/tour-settings" doesn't linger.
+  const _msgEl = document.getElementById('message');
+  if (_msgEl) {
+    _msgEl.value = '';
+    _msgEl.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
   const steps = [
     { sel: '#settings-modal .modal-content',
       text: '<b>Welcome to Settings.</b> HOW EXCITING.',
@@ -3444,23 +3473,50 @@ async function _cmdTourSettings(args, ctx) {
       before: () => _clickNav('reminders') },
   ];
 
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    const res = await _showStep(step.sel, step.text, {
-      isFirst: i === 0,
-      isLast: i === steps.length - 1,
-      before: step.before,
-      placement: step.placement,
-    });
-    if (res === 'skip') { _clear(); return true; }
-    if (res === 'back') { if (i > 0) i -= 2; continue; }
+  return _runSettingsTour(steps, 'See? Not so bad. Tweak away.');
+}
+
+// ── Model-defaults tour (MAD-931) ──
+// Chapter for the model lanes: what each one does, what to pick, fallback
+// behavior, and the cost/latency tradeoff. Runs on the shared Settings tour
+// scaffolding, so it can be replayed any time from the guide or with
+// /tour-models without touching a single saved setting.
+async function _cmdTourModels(args, ctx) {
+  // Clear the chat input so "/tour-models" doesn't linger.
+  const _msgEl = document.getElementById('message');
+  if (_msgEl) {
+    _msgEl.value = '';
+    _msgEl.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  // Land on the first tab so the user has a familiar starting point.
-  _clickNav('services');
-  _clear();
-  await typewriterReply('See? Not so bad. Tweak away.');
-  return true;
+  const steps = [
+    { sel: '#settings-modal .modal-content',
+      text: '<b>Model defaults.</b> Five small decisions: which engine handles chores, images, deep research, image making, and voice. Each lane can use a different model.',
+      placement: 'center-above' },
+    { sel: '#settings-modal .settings-nav-item[data-settings-tab="ai"]',
+      text: '<b>AI Defaults</b> — every lane lives on this tab. Blank means "follow the chat model" wherever that makes sense.',
+      before: () => _clickNav('ai') },
+    { sel: '#settings-modal .admin-card:has(#set-utilityModelSelect)',
+      text: '<b>Utility model</b> — runs the quiet chores: naming chats, tidying text, pulling memories, compacting long conversations. Pick a small, fast, always-on model; a local one is free and keeps working offline. Fallbacks are tried in order if it fails, and leaving it blank follows your chat model.',
+      before: () => _clickNav('ai') },
+    { sel: '#settings-modal .admin-card:has(#set-vlModelSelect)',
+      text: '<b>Vision</b> — reads images: descriptions, screenshots, and text in scans. Pick a model that accepts images; larger ones handle small print better, local ones keep images private. With nothing pinned, Pandamonium auto-detects a vision model and falls back down your chain.',
+      before: () => _clickNav('ai') },
+    { sel: '#settings-modal .admin-card:has(#set-researchModel)',
+      text: '<b>Research model</b> — drives Deep Research: planning, reading, cross-checking, and the long write-up. Pick a strong model with a big context window, or leave it on "Same as chat". Research makes the most calls, so it is the priciest lane.',
+      before: () => _clickNav('ai') },
+    { sel: '#settings-modal .admin-card:has(#set-imgModelSelect)',
+      text: '<b>Image generation</b> — creates and edits images. Pick an image-capable model (inpainting for edits) and a quality level: low is fastest and cheapest, high is the most detailed. Auto-detect covers a blank model; hosted renders bill per image.',
+      before: () => _clickNav('ai') },
+    { sel: '#settings-modal .admin-card:has(#set-ttsModelSelect)',
+      text: '<b>Voice</b> — speaks replies during voice calls; the chat agent still does the thinking. Browser speech is free and instant, a local voice is free and more natural, hosted voices sound best and bill per character.',
+      before: () => _clickNav('ai') },
+    { sel: '#settings-modal .settings-nav-item[data-settings-tab="ai"]',
+      text: '<b>Replay this chapter</b> any time with <b>/tour-models</b>, or open the full guided setup from the sidebar guide. Nothing here changes a saved setting until you pick one.',
+      before: () => _clickNav('ai') },
+  ];
+
+  return _runSettingsTour(steps, 'That is the whole model line-up. Pick what fits your hardware and budget — everything can change later.', 'ai');
 }
 
 // ── Gallery tour ──
@@ -5881,6 +5937,13 @@ const COMMANDS = {
     help: 'Settings tour: models, integrations, appearance',
     handler: _cmdTourSettings,
     usage: '/tour-settings'
+  },
+  'tour-models': {
+    alias: ['tour-defaults', 'model-defaults-tour', 'models-tour'],
+    category: 'Tours',
+    help: 'Model defaults tour: utility, vision, research, image, voice',
+    handler: _cmdTourModels,
+    usage: '/tour-models'
   },
   'tour-gallery': {
     alias: ['gallery-tour'],
