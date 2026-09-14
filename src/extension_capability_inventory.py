@@ -49,6 +49,7 @@ FINDING_CATEGORIES = frozenset(
         "oversized_blob",
         "network_egress",
         "privilege",
+        "skill_asset",
     }
 )
 
