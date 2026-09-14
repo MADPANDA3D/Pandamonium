@@ -125,6 +125,7 @@ def setup_ssh_routes() -> APIRouter:
         host: Optional[str] = Form(None),
         user: Optional[str] = Form(None),
         port: Optional[str] = Form(None),
+        allowed_commands: Optional[str] = Form(None),
     ):
         require_admin(request)
         with SessionLocal() as session:
@@ -135,6 +136,11 @@ def setup_ssh_routes() -> APIRouter:
                 row.user = ssh.validate_user(user)
             if isinstance(port, str):
                 row.port = ssh.validate_port(port)
+            if isinstance(allowed_commands, str):
+                # MAD-936: the agent command policy. Empty clears back to the
+                # built-in read-only default; values are validated against a
+                # simple-command charset so no shell syntax is stored.
+                row.allowed_commands = ssh.validate_allowed_commands(allowed_commands)
             if isinstance(host, str):
                 host_value = ssh.validate_host(host)
                 if host_value != row.host:

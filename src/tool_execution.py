@@ -774,6 +774,11 @@ async def _execute_tool_block_impl(
         desc = f"manage_bg_jobs: {content.split(chr(10))[0][:80]}"
         result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
             or {"error": "manage_bg_jobs: execution failed", "exit_code": 1}
+    elif tool == "ssh_node":
+        # Governed node access (MAD-936); needs the owner for the audit actor.
+        desc = f"ssh_node: {content.split(chr(10))[0][:80]}"
+        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
+            or {"error": "ssh_node: execution failed", "exit_code": 1}
     elif tool in ("create_document", "update_document", "edit_document",
                   "suggest_document", "manage_documents"):
         desc = f"{tool}: {content.split(chr(10))[0][:80]}"

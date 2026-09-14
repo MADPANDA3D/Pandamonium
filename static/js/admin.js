@@ -2164,6 +2164,7 @@ const TOOL_META = {
   manage_webhooks:   { name: 'Webhooks',         desc: 'Configure webhook events',        cat: 'System',     ctx: '~100' },
   manage_tokens:     { name: 'API Tokens',       desc: 'Manage API access tokens',        cat: 'System',     ctx: '~100' },
   manage_settings:   { name: 'Settings',         desc: 'Change app settings',             cat: 'System',     ctx: '~100' },
+  ssh_node:          { name: 'SSH Node',         desc: 'Bounded SSH to saved nodes',      cat: 'System',     ctx: '~150' },
 };
 
 async function loadBuiltinTools() {

@@ -12,9 +12,9 @@ paths = ['''^tests/test_mad_mcp_portal_routes\.py$''']
 regexes = ['''fixture-(?:invalid-)?(?:master-)?key-123456789''']
 
 [[allowlists]]
-description = "Test-only SSH connection fixture keys (MAD-935)"
+description = "Test-only SSH connection fixture keys (MAD-935, MAD-936)"
 targetRules = ["private-key"]
 condition = "AND"
 regexTarget = "match"
-paths = ['''^tests/(?:browser/mad-935-ssh-connections\.spec\.js|test_ssh_connections\.py)$''']
-regexes = ['''fake-(?:key|secret)-material''']
+paths = ['''^tests/(?:browser/mad-935-ssh-connections\.spec\.js|test_ssh_connections\.py|test_ssh_agent_governance\.py)$''']
+regexes = ['''fake-(?:[a-z]+-)?(?:key|secret)-material''']

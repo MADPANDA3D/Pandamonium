@@ -66,6 +66,7 @@ TOOL_CATEGORIES: Dict[str, str] = {
     "manage_tokens": "System",
     "manage_settings": "System",
     "manage_extensions": "System",
+    "ssh_node": "System",
 }
 
 # Email tools run through the bundled email MCP server; the bare names have no

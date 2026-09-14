@@ -758,6 +758,12 @@ Edit an EXISTING file by exact string replacement. PREFER this over bash (sed/ec
 ```
 Return the absolute path of the active workspace folder. File tools are CONFINED to it (paths can be RELATIVE to it); the shell starts there (cwd) but is NOT sandboxed. Call this first when the user says "the project"/"the code"/"this folder" without a path, instead of asking them. No arguments.""",
 
+    "ssh_node": """\
+```ssh_node
+{"connection": "<saved connection id or label>", "action": "list|read|run", "path": "<remote path>", "command": "<allowlisted command>"}
+```
+Work with a SAVED SSH connection (Settings > SSH Connections). Never invents a target: name an existing connection by id or exact label. `list` shows a folder (`path` optional, defaults to the home folder); `read` returns a file's text bounded to 64 KiB; `run` executes exactly one command from the connection's allowlist (no shell operators, no chaining). Output and run time are bounded, every call is audited, and the result cites the node and path. If the connection is missing or the command is not allowlisted, report that honestly instead of retrying another target.""",
+
     "create_document": """\
 ```create_document
 <title>

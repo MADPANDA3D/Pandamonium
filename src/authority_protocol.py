@@ -397,6 +397,13 @@ def action_effect_for(call: Mapping[str, Any]) -> str:
         candidates.append("destructive_or_difficult_to_recover")
     elif name == "api_call":
         candidates.append("read" if method == "GET" else "external_publication_or_communication")
+    elif name == "ssh_node":
+        # Governed node access (MAD-936): list/read are reads. A run is
+        # classified from the concrete command, so a destructive or
+        # privilege-expanding allowlisted command still hits the gate.
+        candidates.append(
+            _shell_effect(str(arguments.get("command") or "")) if action == "run" else "read"
+        )
     elif action in _EXTERNAL_ACTIONS:
         candidates.append("external_publication_or_communication")
     elif action in _READ_ACTIONS:
