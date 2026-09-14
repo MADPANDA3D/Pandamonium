@@ -57,10 +57,13 @@ import marketplaceModule from './js/marketplace.js';
 import updaterModule from './js/updater.js';
 import agentPlanModule from './js/agentPlan.js';
 import setupWizardModule from './js/setupWizard.js';
+import { MANAGED_BY_ADMIN_COPY, createModelSetupEntry, humanSetupError } from './js/setupUi.js';
 
 initComposerLinks();
 
 const API_BASE = window.location.origin;
+window.setupWizardModule = setupWizardModule;
+window.humanSetupError = humanSetupError;
 window.themeModule = themeModule;
 window.sessionModule = sessionModule;
 window.uiModule = uiModule;
@@ -293,16 +296,14 @@ async function _syncWelcomeModelHint() {
     return;
   }
   if (window._isAdmin === false) {
-    if (sub && !sub.dataset.researchOrigText) sub.textContent = 'Setup is managed by your administrator.';
+    if (sub && !sub.dataset.researchOrigText) sub.textContent = MANAGED_BY_ADMIN_COPY;
     if (tip) tip.textContent = 'Your administrator still needs to connect a model engine.';
     return;
   }
   if (sub && !sub.dataset.researchOrigText) {
-    sub.innerHTML = 'Welcome, <span class="setup-wizard-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Open the setup guide">open the setup guide</span> to get started.';
+    sub.replaceChildren('Welcome, ', createModelSetupEntry(), ' to get started.');
   }
-  if (tip) tip.textContent = 'The guide names your assistant and connects a model engine — no settings digging.';
-  const trigger = sub?.querySelector('.setup-wizard-link');
-  trigger?.addEventListener('click', () => setupWizardModule.open());
+  if (tip) tip.textContent = 'The wizard names your assistant and connects a model engine — no settings digging.';
 }
 
 async function initPluginSidebar() {

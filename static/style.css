@@ -2227,6 +2227,11 @@ body.bg-pattern-sparkles {
       #welcome-screen { opacity: 0; pointer-events: none; }
     }
     #welcome-screen.hidden { display:none; }
+    /* The wizard entry is a real control inside a decorative overlay: the
+       parent ignores pointer events and the chat-history layer paints above
+       it, so re-enable hit-testing and lift the overlay for that one link. */
+    #welcome-screen { z-index: 1; }
+    #welcome-screen .setup-wizard-entry { pointer-events: auto; }
     #welcome-screen.kb-hidden {
       opacity: 0;
       pointer-events: none;

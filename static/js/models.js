@@ -12,6 +12,7 @@ import spinnerModule from './spinner.js';
 import { modelColor } from './chatRenderer.js';
 import { providerLogo } from './providers.js';
 import { sortModelIds } from './modelSort.js';
+import { MANAGED_BY_ADMIN_COPY, createModelSetupEntry } from './setupUi.js';
 
 let API_BASE = '';
 let _cachedItems = []; // cached /api/models items for model-switch dropdown
@@ -570,22 +571,39 @@ export async function refreshModels(force = false) {
     }
 
     if (chatItems.length === 0) {
+      // Same wizard entry on every no-model surface (MAD-925): admins open the
+      // setup wizard at the model step; non-admins get the managed copy only.
       const noModels = document.createElement('div');
       noModels.className = 'models-empty-state';
-      if (window._isAdmin) {
-        noModels.innerHTML = '<span class="muted">No models found</span><br>'
-          + '<a href="#" onclick="document.getElementById(\'user-bar-admin\')?.click();return false;" class="accent-link">Open Admin to add endpoints</a>'
-          + '<br><span class="muted-sm">Type /setup for Local models or API setup.</span>';
+      noModels.appendChild(Object.assign(document.createElement('span'), {
+        className: 'muted',
+        textContent: window._isAdmin === false ? 'No models available' : 'No models found',
+      }));
+      noModels.appendChild(document.createElement('br'));
+      if (window._isAdmin === false) {
+        noModels.appendChild(Object.assign(document.createElement('span'), {
+          className: 'muted-sm',
+          textContent: MANAGED_BY_ADMIN_COPY,
+        }));
       } else {
-        noModels.innerHTML = '<span class="muted">No models available</span><br>'
-          + '<span class="muted-sm">Ask an admin to configure model endpoints</span>';
+        noModels.appendChild(createModelSetupEntry());
       }
       box.appendChild(noModels);
-      // No endpoints yet: keep the welcome screen focused on first setup.
+      // No endpoints yet: keep the welcome screen on the same wizard entry.
       const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.innerHTML = 'Type <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">/setup</span> to get started.';
+      if (welcomeSub) {
+        if (window._isAdmin === false) {
+          welcomeSub.textContent = MANAGED_BY_ADMIN_COPY;
+        } else {
+          welcomeSub.replaceChildren('Welcome, ', createModelSetupEntry(), ' to get started.');
+        }
+      }
       const welcomeTip = document.getElementById('welcome-tip');
-      if (welcomeTip) welcomeTip.textContent = 'Type /setup, then choose Local models or API.';
+      if (welcomeTip) {
+        welcomeTip.textContent = window._isAdmin === false
+          ? 'Your administrator still needs to connect a model engine.'
+          : 'The wizard connects a local or hosted model engine — no settings digging.';
+      }
     } else {
       // Configured installs should feel ready, not stuck in onboarding.
       const welcomeSub = document.getElementById('welcome-sub');

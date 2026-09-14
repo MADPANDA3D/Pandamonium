@@ -1,3 +1,14 @@
+// This file must stay import-free: tests/test_updater_release_bridge.mjs loads
+// its source through a data: URL, which cannot resolve module imports. The
+// shared mapper is injected by app.js as window.humanSetupError.
+function humanSetupError(value, fallback = 'Update request failed. Try again, or roll back from Settings.') {
+  const mapper = typeof window !== 'undefined' ? window.humanSetupError : null;
+  if (typeof mapper === 'function') return mapper(value, fallback);
+  const text = String((value && (value.detail || value.message)) || value || '').trim();
+  if (!text) return fallback;
+  return /^(?:extension|manifest|marketplace|updater|update)_[a-z0-9_]+$/.test(text) ? fallback : text;
+}
+
 let pollTimer = null;
 let pollInFlight = false;
 let lastRelease = null;
@@ -353,7 +364,7 @@ async function api(url, options = {}, timeoutMs = 8000) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(data.detail || 'Update request failed');
+      const error = new Error(humanSetupError(data.detail || 'Update request failed', 'Update request failed. Try again, or roll back from Settings.'));
       error.status = response.status;
       throw error;
     }

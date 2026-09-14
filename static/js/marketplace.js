@@ -1,3 +1,5 @@
+import { humanSetupError } from './setupUi.js';
+
 const API_BASE = window.location.origin;
 
 let modal;
@@ -183,7 +185,7 @@ async function loadInstalled(generation) {
   } catch (error) {
     if (generation !== loadGeneration) return;
     installedPlugins = [];
-    installedList?.replaceChildren(element('span', 'marketplace-installed-empty', error?.message || 'Installed plugins unavailable.'));
+    installedList?.replaceChildren(element('span', 'marketplace-installed-empty', humanSetupError(error, 'Installed plugins unavailable.')));
     if (installedSummary) installedSummary.textContent = 'Unavailable';
   }
 }
@@ -259,7 +261,7 @@ async function selectInstalled(id, focus = true) {
   } catch (error) {
     detailContent.replaceChildren();
     const state = element('div', 'marketplace-state');
-    state.append(element('strong', '', 'Plugin detail unavailable'), element('span', '', error?.message || ''));
+    state.append(element('strong', '', 'Plugin detail unavailable'), element('span', '', humanSetupError(error, 'Try again in a moment.')));
     detailContent.append(state);
   }
   workspace.classList.add('has-detail');
@@ -309,7 +311,7 @@ async function api(path, options = {}) {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || `marketplace_http_${response.status}`);
+  if (!response.ok) throw new Error(humanSetupError(payload.detail || `marketplace_http_${response.status}`));
   return payload;
 }
 
@@ -421,7 +423,7 @@ async function pollScan(scanId, generation) {
       title: job.status === 'succeeded' ? 'Scan complete' : job.status === 'failed' ? 'Scan failed' : (job.message || 'Scanning…'),
       detail: job.status === 'succeeded'
         ? `Classified as ${job.artifact?.repo_class || 'unknown'}`
-        : (job.error || job.message || ''),
+        : humanSetupError(job.error || job.message || ''),
       progress: job.progress,
       stage: job.stage,
     });
@@ -431,12 +433,12 @@ async function pollScan(scanId, generation) {
       return;
     }
     if (job.status === 'failed') {
-      scanStatus.textContent = `Scan stopped: ${job.error || job.message || 'unknown error'}`;
+      scanStatus.textContent = `Scan stopped: ${humanSetupError(job.error || job.message || 'unknown error')}`;
       return;
     }
   } catch (error) {
-    setScanProgress({ state: 'error', title: 'Scan unavailable', detail: error?.message || String(error), progress: 0, stage: 'fetch' });
-    scanStatus.textContent = `Scan request failed: ${error?.message || error}`;
+    setScanProgress({ state: 'error', title: 'Scan unavailable', detail: humanSetupError(error), progress: 0, stage: 'fetch' });
+    scanStatus.textContent = `Scan request failed: ${humanSetupError(error)}`;
     return;
   } finally {
     scanInFlight = false;
@@ -469,7 +471,7 @@ async function startSourceScan() {
     if (generation !== scanGeneration) return;
     pollScan(job.scan_id, generation);
   } catch (error) {
-    setScanProgress({ state: 'error', title: 'Scan unavailable', detail: error?.message || String(error), progress: 0, stage: 'fetch' });
+    setScanProgress({ state: 'error', title: 'Scan unavailable', detail: humanSetupError(error), progress: 0, stage: 'fetch' });
   } finally {
     scanButton.disabled = false;
   }
@@ -518,7 +520,7 @@ async function prepareSourceAction(artifact, section, actions) {
     preview.scrollIntoView({ block: 'center' });
     approve.focus({ preventScroll: true });
   } catch (error) {
-    scanStatus.textContent = `Install preview unavailable: ${error?.message || error}`;
+    scanStatus.textContent = `Install preview unavailable: ${humanSetupError(error)}`;
     actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
   }
 }
@@ -561,7 +563,7 @@ async function executeAction(plan, plugin, operation, status, actions) {
     status.textContent = `${actionLabel(operation)} completed.`;
     summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
   } catch (error) {
-    status.textContent = `${actionLabel(operation)} failed: ${error?.message || error}`;
+    status.textContent = `${actionLabel(operation)} failed: ${humanSetupError(error)}`;
     actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
   }
 }
@@ -611,7 +613,7 @@ async function prepareAction(plugin, operation, section, status, actions) {
     status.textContent = 'Review the exact signed package, data, and restart scope before approval.';
     approve.focus();
   } catch (error) {
-    status.textContent = `${actionLabel(operation)} unavailable: ${error?.message || error}`;
+    status.textContent = `${actionLabel(operation)} unavailable: ${humanSetupError(error)}`;
     actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
   }
 }
@@ -735,7 +737,7 @@ async function load() {
     plugins = Array.isArray(payload.plugins) ? payload.plugins : [];
     renderCategories();
     if (payload.status === 'offline') return renderState('Marketplace offline', 'No verified catalog is available. Refresh after connectivity or catalog configuration is restored.');
-    if (payload.status === 'error') return renderState('Catalog verification failed', payload.failure || 'The marketplace catalog could not be verified.');
+    if (payload.status === 'error') return renderState('Catalog verification failed', humanSetupError(payload.failure || 'The marketplace catalog could not be verified.'));
     if (payload.status === 'empty') return renderState('No plugins published', 'The verified catalog is empty. Installed plugins remain unchanged.');
     renderCards();
     if (plugins[0] && window.innerWidth > 720) selectPlugin(plugins[0].id, false);
@@ -743,7 +745,7 @@ async function load() {
     if (generation !== loadGeneration) return;
     plugins = [];
     renderCategories();
-    renderState('Marketplace unavailable', error?.message || 'The marketplace request failed.');
+    renderState('Marketplace unavailable', humanSetupError(error, 'The marketplace request failed.'));
   }
 }
 
