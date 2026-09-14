@@ -6,6 +6,7 @@ import Storage from './js/storage.js';
 import { initComposerLinks } from './js/composerLinks.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
+import bugReportModule from './js/bugReport.js';
 import projectsModule from './js/projects.js';
 import accessModeModule from './js/accessMode.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -1950,6 +1951,7 @@ function initializeEventListeners() {
   setupToggle('web-toggle-btn', 'web-toggle', 'web');
   setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
   try { workspaceModule.initWorkspace(); } catch (_) {}
+  try { bugReportModule.initBugReport(); } catch (_) {}
   try { projectsModule.initProjects(); } catch (_) {}
   try { agentPlanModule.initAgentPlan(); } catch (_) {}
   try { accessModeModule.initAccessMode(); } catch (_) {}

@@ -27,7 +27,8 @@ export const KEYS = {
   UI_SCALE: 'odysseus-ui-scale',
   WORKSPACE: 'odysseus-workspace',
   AGENT_PLAN: 'odysseus-agent-plan',
-  AGENT_PLAN_COLLAPSED: 'odysseus-agent-plan-collapsed'
+  AGENT_PLAN_COLLAPSED: 'odysseus-agent-plan-collapsed',
+  FEEDBACK_DRAFT: 'odysseus-feedback-draft'
 };
 
 /**

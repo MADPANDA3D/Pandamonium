@@ -858,6 +858,11 @@ app.include_router(setup_ssh_routes())
 from routes.nextcloud_routes import setup_nextcloud_routes
 app.include_router(setup_nextcloud_routes())
 
+# Guided in-app bug reports (MAD-856: redacted diagnostics + server-held
+# GitHub App submission; the browser never receives a repository credential).
+from routes.feedback_routes import setup_feedback_routes
+app.include_router(setup_feedback_routes())
+
 # Pandamonium agent workstation projects (MAD-902)
 from routes.project_routes import setup_project_routes
 app.include_router(setup_project_routes())

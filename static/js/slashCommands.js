@@ -1245,6 +1245,20 @@ async function _cmdWorkspace(args, ctx) {
   return true;
 }
 
+// Report a bug: open the guided capture workflow (MAD-856). The panel is a
+// right-docked tool window; the draft survives navigation and submission uses
+// the server-held GitHub App path.
+async function _cmdBugReport(args, ctx) {
+  try {
+    const module = await import('./bugReport.js');
+    await (module.default || module).openBugReport();
+    slashReply('Bug report: opened. Describe the problem, then add screenshots.');
+  } catch (e) {
+    slashReply('Bug report workflow is unavailable in this client.');
+  }
+  return true;
+}
+
 async function _cmdToggleShow(args, ctx) {
   const name = (args[0] || '').toLowerCase();
   const val = (args[1] || '').toLowerCase();
@@ -5797,6 +5811,14 @@ const COMMANDS = {
     handler: _cmdWorkspace,
     noUserBubble: true,
     usage: '/workspace [set <path> | clear | pick]',
+  },
+  bug: {
+    alias: ['report', 'feedback'],
+    category: 'Agent',
+    help: 'Report a bug with redacted diagnostics',
+    handler: _cmdBugReport,
+    noUserBubble: true,
+    usage: '/bug',
   },
   memory: {
     alias: ['m'],

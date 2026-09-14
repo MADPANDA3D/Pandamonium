@@ -192,6 +192,11 @@ DEFAULT_SETTINGS = {
     # Optional comma-separated allowlist of AVD names the adapter may start.
     # Empty = any installed AVD with a valid name may be started.
     "android_avd_allowlist": "",
+    # Guided in-app bug reports (MAD-856). The surface is on by default; the
+    # GitHub submission path itself is config-gated by the
+    # PANDAMONIUM_GITHUB_* env vars and fails closed with honest copy when
+    # unconfigured. Set false to hide the action entirely.
+    "feedback_enabled": True,
     "task_endpoint_id": "",
     "task_model": "",
     "default_endpoint_id": "",

@@ -71,6 +71,9 @@ SSH_AUDIT_FILE = os.path.join(DATA_DIR, "ssh_connections_audit.jsonl")
 # recordings captured through the adapter are written here as task evidence;
 # the audit trail records every attempt with redacted, bounded fields.
 ANDROID_EVIDENCE_DIR = os.path.join(DATA_DIR, "android_evidence")
+# Guided in-app bug reports (MAD-856): validated screenshot bytes and the
+# exact-once submission index live here. Never holds GitHub credentials.
+FEEDBACK_DIR = os.path.join(DATA_DIR, "feedback")
 ANDROID_AUDIT_FILE = os.path.join(DATA_DIR, "android_audit.jsonl")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
