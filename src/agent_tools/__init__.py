@@ -31,6 +31,7 @@ from .network_tools import NetworkInspectionTool
 from .session_tools import CreateSessionTool, ListSessionsTool, SendToSessionTool, ManageSessionTool
 from .ssh_tools import SshNodeTool
 from .nextcloud_tools import NextcloudFilesTool
+from .android_tools import AndroidDeviceTool
 from . import admin_tools as admin_tools
 from .admin_tools import (
     ADMIN_TOOL_HANDLERS,
@@ -69,6 +70,7 @@ TOOL_HANDLERS = {
     "manage_session": ManageSessionTool().execute,
     "ssh_node": SshNodeTool().execute,
     "nextcloud_files": NextcloudFilesTool().execute,
+    "android_device": AndroidDeviceTool().execute,
 }
 # Config/integration admin tools (manage_endpoints/mcp/webhooks/tokens/settings).
 TOOL_HANDLERS.update(ADMIN_TOOL_HANDLERS)
@@ -104,6 +106,9 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "ssh_node",
              # Read-only Nextcloud file source (MAD-937).
              "nextcloud_files",
+             # Governed Android emulator/ADB adapter (MAD-838): SDK discovery,
+             # AVD lifecycle, and bounded device actions. Admin-only.
+             "android_device",
              # Email tool names come from BUILTIN_EMAIL_TOOLS (unioned below)
              # so the fence regex, dispatch, and non-admin blocklist all cover
              # the same set.

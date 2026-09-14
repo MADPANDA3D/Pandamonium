@@ -143,6 +143,9 @@ _DEFAULT_EFFECT_BY_CAPABILITY = {
     "vault_unlock": "credential_or_auth_change",
 }
 _READ_ACTIONS = frozenset({"inventory", "list", "get", "read", "view", "search", "find", "status", "health"})
+# Governed Android adapter actions (MAD-838) that only observe: SDK/device/AVD
+# inventory, boot wait, bounded logcat dump, and screenshot capture.
+_ANDROID_READ_ACTIONS = frozenset({"status", "devices", "avds", "wait", "logcat", "screenshot"})
 _PUBLIC_READS = frozenset({"web_search", "web_fetch", "get_runtime_status"})
 _LEGACY_EFFECTS = {
     "read_only": "read",
@@ -416,6 +419,12 @@ def action_effect_for(call: Mapping[str, Any]) -> str:
         candidates.append(
             _shell_effect(str(arguments.get("command") or "")) if action == "run" else "read"
         )
+    elif name == "android_device":
+        # Governed Android adapter (MAD-838): inventory, boot wait, logcat, and
+        # screenshot are reads; lifecycle, install, launch, deep link, and
+        # input change device state and are reversible writes. Destructive
+        # device operations are not implemented in the adapter at all.
+        candidates.append("read" if action in _ANDROID_READ_ACTIONS else "reversible_write")
     elif action in _EXTERNAL_ACTIONS:
         candidates.append("external_publication_or_communication")
     elif action in _READ_ACTIONS:

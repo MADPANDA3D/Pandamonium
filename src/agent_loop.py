@@ -364,6 +364,13 @@ _DOMAIN_RULES = {
 ## Network inspection rules
 - Use `inspect_network` before making claims or diagrams about the current network. It runs only fixed, bounded, read-only probes and cannot accept commands or paths.
 - Distinguish the running service's visible network view from any wider topology that the probes cannot observe. If a probe is unavailable or incomplete, state that limitation instead of guessing.""",
+    "android": """\
+## Android device rules
+- Use `android_device` for the configured Android SDK, emulators, and connected devices. Start with `status` when the SDK is unknown, then `devices` and `avds` before acting.
+- Every device action needs the exact serial from `devices`; never guess a serial or reuse a stale one. If the target is unauthorized or offline, report that instead of retrying blindly.
+- `wait` is for boot readiness after `start`/`reboot`; it is bounded and cancellable with `cancel`.
+- An APK path must be absolute on the machine that runs the adapter. There is no arbitrary adb shell, no host shell, and no uninstall/wipe/clear-data surface.
+- Report the citation (serial + action) and the effective limits with any evidence such as a screenshot or recording.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -408,6 +415,7 @@ _DOMAIN_TOOL_MAP = {
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_workspace", "manage_bg_jobs"},
     "network_inspection": {"inspect_network"},
+    "android": {"android_device"},
     # Deep research is an agent-decided capability, not a user toggle: when
     # research intent fires, seed the job starter and the report reader so the
     # model can start/read research without the legacy per-message flag.
@@ -776,6 +784,12 @@ Work with a SAVED SSH connection (Settings > SSH Connections). Never invents a t
 {"action": "list|read|search", "path": "<folder or file path>", "query": "<file name search>"}
 ```
 Read-only access to the owner's connected Nextcloud (Settings > Integrations). `list` shows a folder (`path` optional, defaults to the account root); `search` matches file names (at least 2 characters, `path` optional to narrow the folder); `read` returns a text file's contents bounded to 64 KiB. There is no write or upload path. Secret-shaped paths are excluded, content and run time are bounded, and every result cites the exact node and path — quote that citation when you answer from a file. If Nextcloud is not connected or a path is excluded, say so honestly instead of trying another server.""",
+
+    "android_device": """\
+```android_device
+{"action": "status|devices|avds|start|stop|reboot|wait|install|launch|force_stop|deep_link|screenshot|record|logcat|input|cancel", "serial": "<exact serial>", "avd": "<AVD name>", "apk": "<absolute .apk path>", "package": "<com.example.app>", "url": "<https://...>", "input": "tap|swipe|text|key", "x": 0, "y": 0, "x1": 0, "y1": 0, "x2": 0, "y2": 0, "duration_ms": 300, "text": "<text>", "key": "HOME", "lines": 200, "tag": "<tag>", "seconds": 15, "timeout": 120, "headless": false}
+```
+Governed Android emulator/ADB control for the configured SDK. Start with `status` (SDK resolution), then `devices` (serial, model, Android/API version, boot and authorization state) and `avds`. `start` launches an installed AVD; `wait` (bounded, cancellable with `cancel`) confirms boot readiness; `stop`/`reboot` act on one explicit serial. `install` needs an absolute `.apk` path on the machine that runs the adapter. `launch`/`force_stop` take a package; `deep_link` takes an http(s) URL; `screenshot`/`record` save bounded evidence files; `logcat` dumps at most 2000 lines; `input` sends explicit tap/swipe/text/key. There is NO arbitrary adb shell, no host shell, no uninstall/wipe/clear-data, and no credential or Play Store automation. Every device action requires a ready serial, concurrent commands against one serial are rejected as busy, and results cite the serial and effective limits.""",
 
     "create_document": """\
 ```create_document
@@ -1865,6 +1879,15 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("files")
     if has(r"\b(endpoint|api token|mcp|webhook|preference|configure|config|setting)\b"):
         domains.add("settings")
+    # Android emulator/device intent — seed the governed adapter so "start the
+    # Pixel AVD", "adb devices", "install the APK", or "screenshot the
+    # emulator" reach `android_device` even when embedding retrieval misses.
+    if has(
+        r"\b(?:android|emulators?|avds?|adb|apks?|logcat)\b",
+        r"\bdeep\s?link\b",
+        r"\bmobile\s+app\b",
+    ):
+        domains.add("android")
     if has(r"\b(contact|contacts|phone|phone number|address book|vcard)\b"):
         domains.add("contacts")
     # API-integration intent — calling a configured service via the api_call

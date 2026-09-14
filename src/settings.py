@@ -183,6 +183,15 @@ DEFAULT_SETTINGS = {
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell
     # rc files, SSH key files) are always blocked regardless of roots.
     "tool_path_extra_roots": [],
+    # Installation-owned Android SDK location for the governed emulator/ADB
+    # adapter (MAD-838). Empty = resolve PANDAMONIUM_ANDROID_SDK_ROOT /
+    # ODYSSEUS_ANDROID_SDK_ROOT / ANDROID_SDK_ROOT / ANDROID_HOME, then PATH.
+    # No SDK is bundled with the base image; the adapter fails closed when none
+    # is configured.
+    "android_sdk_root": "",
+    # Optional comma-separated allowlist of AVD names the adapter may start.
+    # Empty = any installed AVD with a valid name may be started.
+    "android_avd_allowlist": "",
     "task_endpoint_id": "",
     "task_model": "",
     "default_endpoint_id": "",
