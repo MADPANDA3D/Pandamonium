@@ -755,7 +755,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         the projection carries names + model profiles but never the hidden
         constitution body.
         """
-        from src.agent_identities import list_identities, public_identity
+        from src.agent_identities import active_id, list_identities, public_identity
 
         user = _get_current_user(request)
         include_constitution = bool(user and auth_manager.is_admin(user))
@@ -764,6 +764,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 public_identity(entry, include_constitution=include_constitution)
                 for entry in list_identities()
             ],
+            "active_id": active_id(),
             "constitution_included": include_constitution,
         }
 
