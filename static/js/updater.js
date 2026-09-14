@@ -1,3 +1,5 @@
+import { humanSetupError } from './setupUi.js';
+
 let pollTimer = null;
 let pollInFlight = false;
 let lastRelease = null;
@@ -353,7 +355,7 @@ async function api(url, options = {}, timeoutMs = 8000) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(data.detail || 'Update request failed');
+      const error = new Error(humanSetupError(data.detail || 'Update request failed', 'Update request failed. Try again, or roll back from Settings.'));
       error.status = response.status;
       throw error;
     }
