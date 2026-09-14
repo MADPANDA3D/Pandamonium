@@ -210,7 +210,7 @@ def _validated_session_identity(value: str | None) -> str:
     An empty value clears the binding back to the installation identity. Any
     unknown id is rejected so a stale browser cannot pin a deleted identity.
     """
-    wanted = str(value or "").strip()
+    wanted = value.strip() if isinstance(value, str) else ""
     if not wanted:
         return ""
     try:
@@ -707,7 +707,7 @@ def setup_session_routes(
         # clears the binding. Unless the same request explicitly switches the
         # model, the identity's chat lane loads with it so a reload shows the
         # selected identity's model profile.
-        if identity_id is not None:
+        if isinstance(identity_id, str):
             bound_identity = _validated_session_identity(identity_id)
             identity_chat = _identity_chat_profile(bound_identity)
             if bound_identity and model is None and endpoint_url is None:
