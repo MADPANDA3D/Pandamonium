@@ -14,6 +14,22 @@ const SETUP_ERROR_MESSAGES = {
     'That repository link is not supported. Use a public https:// link to a GitHub repository, then start the scan again.',
   extension_scan_not_found:
     'That scan session expired. Start a new scan to continue.',
+  extension_scan_unavailable:
+    'That scan is not finished yet. Wait for it to complete, then install from its result.',
+  extension_scan_source_mismatch:
+    'This install does not match the scanned repository. Start a new scan and install from its result.',
+  extension_scan_revision_mismatch:
+    'This scan is pinned to a different revision. Start a new scan and install from its result.',
+  extension_scan_binding_invalid:
+    'The install preview could not be matched to its scan. Start a new scan and install from its result.',
+  extension_scan_draft_not_allowed:
+    'That install request mixed a signed package with a scan draft. Refresh the plugin list and try again.',
+  extension_scan_manifest_mismatch:
+    'The reviewed draft manifest could not be verified. Start a new scan and install from its result.',
+  extension_scan_manifest_source_mismatch:
+    'The reviewed draft manifest does not belong to this repository. Start a new scan and install from its result.',
+  extension_manifest_missing:
+    'This repository has no jarvis-extension.json, and no reviewed scan draft was available. Scan the repository, then install from the scan result.',
   extension_scan_bounds_exceeded:
     'That repository is too large to scan. Follow its own install instructions instead.',
   extension_plugin_not_found:

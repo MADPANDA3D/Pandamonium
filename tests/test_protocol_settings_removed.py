@@ -44,7 +44,9 @@ def test_settings_js_has_no_protocol_wiring():
 
 def test_identity_card_and_model_defaults_remain():
     index = (STATIC / "index.html").read_text(encoding="utf-8")
-    assert 'id="set-agentIdentityCard"' in index
+    # MAD-929 moved the identity editor to its own tab; it still ships.
+    assert 'data-settings-tab="identities"' in index
+    assert 'id="set-identityList"' in index
     assert 'id="set-defaultEpSelect"' in index
 
 

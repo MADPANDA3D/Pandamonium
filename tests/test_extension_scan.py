@@ -97,7 +97,11 @@ def test_scan_python_cli_reports_capabilities_dependencies_and_draft(tmp_path):
 
 def test_scan_skill_bundle_extracts_skills_and_draft(tmp_path):
     source = tmp_path / "source"
-    _write(source, "skills/pdf-tools/SKILL.md", "---\nname: pdf-tools\n---\n# PDF tools\n")
+    _write(
+        source,
+        "skills/pdf-tools/SKILL.md",
+        "---\nname: pdf-tools\ndescription: Tools for working with PDFs\n---\n# PDF tools\n",
+    )
 
     artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
 
@@ -107,11 +111,56 @@ def test_scan_skill_bundle_extracts_skills_and_draft(tmp_path):
         for item in artifact["capabilities"]
     ] == [("pdf-tools", "skill", "skill_bundle")]
     draft = validate_extension_manifest(artifact["draft_manifest"])
+    assert draft["runtime"]["entrypoint"] == "skills/pdf-tools/SKILL.md"
     assert draft["capabilities"]["descriptor"] == {
         "type": "skill_bundle",
         "format": "agent_skill",
         "include": ["pdf-tools"],
     }
+
+
+def test_scan_skill_bundle_descriptor_draft_marks_unimportable_skills(tmp_path):
+    source = tmp_path / "source"
+    _write(
+        source,
+        ".codex-plugin/plugin.json",
+        json.dumps({"name": "bundle", "skills": "./skills/"}),
+    )
+    for name in ("alpha-skill", "beta-skill", "raw-skill"):
+        _write(
+            source,
+            f"skills/{name}/SKILL.md",
+            f"---\nname: {name}\ndescription: Run the {name} workflow\n---\n# Procedure\n\n1. Do it.\n",
+        )
+    binary = source / "skills" / "raw-skill" / "data.bin"
+    binary.write_bytes(b"\x00\x01\x02")
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    draft = validate_extension_manifest(artifact["draft_manifest"])
+    assert draft["runtime"]["entrypoint"] == ".codex-plugin/plugin.json"
+    descriptor = draft["capabilities"]["descriptor"]
+    assert descriptor["format"] == "codex_plugin"
+    assert descriptor["include"] == ["alpha-skill", "beta-skill"]
+    findings = {item["id"]: item for item in artifact["findings"]}
+    assert findings["skill-assets-excluded"]["category"] == "skill_asset"
+    assert "raw-skill" in findings["skill-assets-excluded"]["evidence"]
+    assert _staging_empty(tmp_path)
+
+
+def test_scan_skill_bundle_without_descriptor_or_single_skill_has_no_draft(tmp_path):
+    source = tmp_path / "source"
+    for name in ("alpha-skill", "beta-skill"):
+        _write(
+            source,
+            f"skills/{name}/SKILL.md",
+            f"---\nname: {name}\ndescription: Run the {name} workflow\n---\n# Procedure\n\n1. Do it.\n",
+        )
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    assert artifact["repo_class"] == "skill_bundle"
+    assert artifact["draft_manifest"] is None
 
 
 def test_scan_findings_are_redacted_and_bounds_fail_closed(tmp_path):
@@ -204,3 +253,87 @@ def test_scan_job_lifecycle_and_routes(tmp_path, monkeypatch):
             )
         )
     assert exc.value.status_code == 404
+
+
+def test_source_plan_route_passes_stored_scan_draft(tmp_path, monkeypatch):
+    import routes.extension_routes as extension_routes
+
+    source = tmp_path / "source"
+    _write(
+        source,
+        "skills/pdf-tools/SKILL.md",
+        "---\nname: pdf-tools\ndescription: Tools for working with PDFs\n---\n# PDF tools\n",
+    )
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    captured = {}
+
+    class Manager:
+        adapters = ()
+
+        @staticmethod
+        def preview_source(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return {"plan_id": "plan-1", "status": "pending_approval"}
+
+    routes = {
+        route.path: route
+        for route in extension_routes.setup_extension_routes(
+            Manager(), marketplace_loader=lambda: None
+        ).routes
+    }
+    monkeypatch.setattr(
+        extension_routes,
+        "get_scan",
+        lambda scan_id: {
+            "scan_id": scan_id,
+            "status": "succeeded",
+            "artifact": artifact,
+        }
+        if scan_id == "scan-0001"
+        else None,
+    )
+
+    payload = extension_routes.SourcePlanRequest(
+        operation="install",
+        source_url=SOURCE_URL,
+        ref=artifact["source_revision"],
+        scan_id="scan-0001",
+    )
+    result = asyncio.run(
+        routes["/api/extensions/plans/source"].endpoint(payload=payload, owner="operator")
+    )
+    assert result == {"plan_id": "plan-1", "status": "pending_approval"}
+    assert captured["kwargs"]["draft_manifest"] == artifact["draft_manifest"]
+    assert captured["kwargs"]["scan_revision"] == artifact["source_revision"]
+
+    wrong_source = extension_routes.SourcePlanRequest(
+        operation="install",
+        source_url="https://github.com/example/other-tools.git",
+        ref=artifact["source_revision"],
+        scan_id="scan-0001",
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            routes["/api/extensions/plans/source"].endpoint(
+                payload=wrong_source, owner="operator"
+            )
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "extension_scan_source_mismatch"
+
+    missing_scan = extension_routes.SourcePlanRequest(
+        operation="install",
+        source_url=SOURCE_URL,
+        ref=artifact["source_revision"],
+        scan_id="missing-scan",
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            routes["/api/extensions/plans/source"].endpoint(
+                payload=missing_scan, owner="operator"
+            )
+        )
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "extension_scan_not_found"

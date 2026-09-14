@@ -234,6 +234,12 @@ class Session(TimestampMixin, Base):
     total_output_tokens = Column(Integer, default=0)
     mode = Column(String, nullable=True)  # 'agent', 'chat', or 'research'
     crew_member_id = Column(String, nullable=True)  # links to crew_members.id
+    # Session-bound saved identity (MAD-929). Null keeps the installation
+    # identity, exactly like sessions that predate the registry.
+    identity_id = Column(String, nullable=True)
+    # Reasoning level from the bound identity's model profile; used when the
+    # client does not send an explicit per-turn reasoning_effort.
+    reasoning_level = Column(String, nullable=True)
 
     # Relationship to chat messages
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -264,6 +270,8 @@ class Session(TimestampMixin, Base):
             'total_input_tokens': self.total_input_tokens or 0,
             'total_output_tokens': self.total_output_tokens or 0,
             'crew_member_id': self.crew_member_id,
+            'identity_id': self.identity_id,
+            'reasoning_level': self.reasoning_level,
         }
 
 class ChatMessage(Base):
@@ -1006,6 +1014,35 @@ def _migrate_add_session_workspace_column():
             logging.getLogger(__name__).info("Migrated: added 'workspace' on sessions")
     except Exception as e:
         logging.getLogger(__name__).warning(f"session workspace migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _migrate_add_session_identity_columns():
+    """Add the session-bound saved identity + reasoning level (MAD-929).
+
+    Guarded + idempotent. Legacy rows keep NULL, which resolves the
+    installation identity exactly as before the registry existed.
+    """
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "identity_id" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN identity_id TEXT")
+        if "reasoning_level" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN reasoning_level TEXT")
+        conn.commit()
+        logging.getLogger(__name__).info(
+            "Migrated: added 'identity_id' + 'reasoning_level' on sessions"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"session identity migration failed: {e}")
     finally:
         if conn is not None:
             conn.close()
@@ -2205,6 +2242,7 @@ def init_db():
     _migrate_add_last_message_at_column()
     _migrate_add_agent_target_column()
     _migrate_add_session_workspace_column()
+    _migrate_add_session_identity_columns()
     _migrate_add_ssh_allowed_commands_column()
     _migrate_add_folder_column()
     _migrate_add_project_id_column()

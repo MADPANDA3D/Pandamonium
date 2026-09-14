@@ -29,6 +29,7 @@ let scanStatus;
 let scanTimer = null;
 let scanInFlight = false;
 let scanGeneration = 0;
+let scanId = null;
 let installedPlugins = [];
 let installedSelectedId = null;
 let installedList;
@@ -461,6 +462,7 @@ async function startSourceScan() {
   }
   stopScanPolling();
   const generation = ++scanGeneration;
+  scanId = null;
   scanButton.disabled = true;
   setScanProgress({ state: 'working', title: 'Starting scan…', detail: url, progress: 0, stage: 'fetch' });
   try {
@@ -469,6 +471,7 @@ async function startSourceScan() {
       body: JSON.stringify({ source_url: url, ref }),
     });
     if (generation !== scanGeneration) return;
+    scanId = job.scan_id || null;
     pollScan(job.scan_id, generation);
   } catch (error) {
     setScanProgress({ state: 'error', title: 'Scan unavailable', detail: humanSetupError(error), progress: 0, stage: 'fetch' });
@@ -481,9 +484,11 @@ async function prepareSourceAction(artifact, section, actions) {
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
   scanStatus.textContent = 'Preparing install preview…';
   try {
+    const request = { operation: 'install', source_url: artifact.source_url, ref: artifact.source_revision };
+    if (scanId) request.scan_id = scanId;
     const plan = await api('/api/extensions/plans/source', {
       method: 'POST',
-      body: JSON.stringify({ operation: 'install', source_url: artifact.source_url, ref: artifact.source_revision }),
+      body: JSON.stringify(request),
     });
     section.querySelector('.marketplace-action-preview')?.remove();
     const manifest = plan.manifest || {};
@@ -494,6 +499,9 @@ async function prepareSourceAction(artifact, section, actions) {
         `revision ${(plan.source_revision || '').slice(0, 12)}…`,
         `${Object.keys(plan.requested_permissions?.capabilities || {}).length} declared permission overrides`,
         `${Object.values(plan.lifecycle_commands || {}).flat().length} lifecycle command entries`,
+        plan.manifest_origin === 'scan_draft'
+          ? 'generated draft manifest (repository has no jarvis-extension.json)'
+          : 'repository manifest',
         'static scan completed before install',
       ].join(' · ')),
     );

@@ -1183,6 +1183,13 @@ async def _startup_event():
             )
     except Exception as e:
         logger.warning(f"Session-folder project migration skipped: {e}")
+    # MAD-929: persist the installation settings identity as the registry's
+    # first entry exactly once. Idempotent; leaves an existing registry alone.
+    try:
+        from src.agent_identities import ensure_migrated
+        await asyncio.to_thread(ensure_migrated)
+    except Exception as e:
+        logger.warning(f"Agent identity registry migration skipped: {e}")
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])

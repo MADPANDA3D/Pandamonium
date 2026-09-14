@@ -989,6 +989,15 @@ def setup_chat_routes(
             # Verify ownership AFTER coerce (which may resolve a default session)
             # but BEFORE loading. Prevents cross-user session hijack.
             _verify_session_owner(request, session)
+            # A session-bound identity's model profile supplies the reasoning
+            # level when the caller does not send one explicitly (MAD-929).
+            if not reasoning_effort:
+                try:
+                    from src.agent_identities import session_reasoning_level
+
+                    reasoning_effort = session_reasoning_level(session)
+                except Exception:
+                    reasoning_effort = ""
             sess = session_manager.get_session(session)
             owner = effective_user(request)
             # Reconcile the posted workspace with the one stored on the chat:

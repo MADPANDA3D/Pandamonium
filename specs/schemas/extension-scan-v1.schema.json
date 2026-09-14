@@ -74,7 +74,8 @@
         "category": {
           "enum": [
             "secret", "dangerous_pattern", "postinstall", "license",
-            "dependency", "oversized_blob", "network_egress", "privilege"
+            "dependency", "oversized_blob", "network_egress", "privilege",
+            "skill_asset"
           ]
         },
         "title": {"type": "string", "minLength": 1, "maxLength": 200},

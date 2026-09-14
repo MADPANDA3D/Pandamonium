@@ -44,9 +44,42 @@ def validate_agent_identity_setting(key: str, value: Any) -> str:
     return normalized
 
 
-def resolve_agent_identity(settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Resolve identity, falling back field-by-field when stored values are invalid."""
-    values = settings if settings is not None else load_settings()
+def _identity_values_from_store(identity_id: str | None = None) -> dict[str, Any] | None:
+    """Read the saved-identity registry, if and only if it exists on disk.
+
+    A fresh install without a registry keeps the pure settings path so the
+    public default identity is unchanged. Once a registry exists, the active
+    (installation) entry or an explicitly requested session identity wins.
+    """
+    try:
+        from src import agent_identities as store
+    except Exception:
+        return None
+    try:
+        if identity_id:
+            return store.identity_prompt_values(identity_id)
+        if not store.store_exists():
+            return None
+        return store.identity_prompt_values()
+    except Exception:
+        return None
+
+
+def resolve_agent_identity(
+    settings: Mapping[str, Any] | None = None, *, identity_id: str | None = None
+) -> dict[str, Any]:
+    """Resolve identity, falling back field-by-field when stored values are invalid.
+
+    ``settings`` keeps the installation-settings contract used by callers and
+    tests. Without it, a persisted registry is consulted first (the migrated
+    first entry matches the settings identity, so behavior is unchanged), then
+    the installation settings.
+    """
+    values = settings
+    if values is None:
+        values = _identity_values_from_store(identity_id)
+        if values is None:
+            values = load_settings()
     resolved: dict[str, str] = {}
     fallback_reasons: list[str] = []
     for key in _IDENTITY_KEYS:
@@ -90,9 +123,15 @@ def agent_system_prompt(
     model: Any = None,
     trace_surface: str | None = None,
     protocol_domains: Iterable[str] | None = None,
+    identity_id: str | None = None,
 ) -> str:
-    """Mount the configured identity, the protocol layer, and the active preset."""
-    identity = resolve_agent_identity()
+    """Mount the configured identity, the protocol layer, and the active preset.
+
+    ``identity_id`` selects a saved identity for one session (MAD-929). When it
+    is missing, unknown, or the registry does not exist, the installation
+    identity resolves exactly as before.
+    """
+    identity = resolve_agent_identity(identity_id=identity_id)
     prompt = (
         f"Your persistent agent identity is {identity['agent_display_name']} "
         f"(stable agent id: {identity['agent_id']}; constitution version: "

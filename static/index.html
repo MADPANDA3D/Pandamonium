@@ -1768,6 +1768,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/></svg>
             <span>AI Defaults</span>
           </button>
+          <button class="settings-nav-item" data-settings-tab="identities">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></svg>
+            <span>Agent Identities</span>
+          </button>
           <button class="settings-nav-item" data-settings-tab="search">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <span>Search</span>
@@ -1828,34 +1832,6 @@
         <!-- ═══ AI TAB ═══ -->
 
         <div data-settings-panel="ai" class="hidden">
-          <div class="admin-card admin-only" id="set-agentIdentityCard">
-            <h2 style="display:flex;align-items:center;gap:6px;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></svg>
-              Agent Identity
-              <span id="set-agentIdentityStatus" class="identity-status-badge">Loading</span>
-            </h2>
-            <div class="admin-toggle-sub" style="margin-bottom:10px">This is who the agent is across chat, tools, voice, and plugins. Models are replaceable engines and do not change this identity.</div>
-            <div class="settings-col">
-              <div class="settings-row">
-                <label class="settings-label" for="set-agentDisplayName">Display name</label>
-                <input id="set-agentDisplayName" type="text" maxlength="80" autocomplete="off" class="settings-select" placeholder="Assistant">
-              </div>
-              <div class="settings-row">
-                <label class="settings-label" for="set-agentId">Stable ID</label>
-                <input id="set-agentId" type="text" maxlength="64" autocomplete="off" spellcheck="false" class="settings-select" placeholder="assistant">
-              </div>
-              <div class="settings-row">
-                <label class="settings-label" for="set-agentConstitutionVersion">Version</label>
-                <input id="set-agentConstitutionVersion" type="text" maxlength="64" autocomplete="off" spellcheck="false" class="settings-select" placeholder="1">
-              </div>
-              <label class="settings-label" for="set-agentConstitution">Constitution</label>
-              <textarea id="set-agentConstitution" rows="7" maxlength="16000" autocomplete="off" class="settings-select identity-constitution-input" placeholder="Define durable behavior, operator boundaries, and presentation guidance for this installation."></textarea>
-              <div class="identity-settings-actions">
-                <span id="set-agentIdentityMsg" class="identity-settings-message" role="status" aria-live="polite"></span>
-                <button type="button" class="admin-btn-add" id="set-agentIdentitySave">Save identity</button>
-              </div>
-            </div>
-          </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Default Chat Model</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">The model used when creating a new chat session.</div>
@@ -2037,6 +2013,72 @@
                 <span id="set-email-style-msg" style="font-size:11px;"></span>
                 <button class="admin-btn-add" id="set-email-style-extract" style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg>Extract from Sent (15 emails)</button>
                 <button class="admin-btn-add" id="set-email-style-save">Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ AGENT IDENTITIES TAB (MAD-929) ═══ -->
+        <div data-settings-panel="identities" class="hidden">
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></svg>
+              Agent Identities
+              <span id="set-identityCount" class="identity-status-badge">Loading</span>
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:10px">Who the agent is. Each identity keeps its own constitution and attached model profile, and any identity can be bound to one chat session. Models remain replaceable engines.</div>
+            <div id="set-identityList" class="identity-list" role="list"></div>
+            <div class="identity-settings-actions">
+              <span id="set-identityListMsg" class="identity-settings-message" role="status" aria-live="polite"></span>
+              <button type="button" class="admin-btn-add admin-only" id="set-identityNew">New identity</button>
+            </div>
+          </div>
+          <div class="admin-card hidden" id="set-identityEditorCard">
+            <h2 id="set-identityEditorTitle">New identity</h2>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label" for="set-identityDisplayName">Display name</label>
+                <input id="set-identityDisplayName" type="text" maxlength="80" autocomplete="off" class="settings-select" placeholder="Assistant">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="set-identityId">Stable ID</label>
+                <input id="set-identityId" type="text" maxlength="64" autocomplete="off" spellcheck="false" class="settings-select" placeholder="assistant">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="set-identityVersion">Version</label>
+                <input id="set-identityVersion" type="text" maxlength="64" autocomplete="off" spellcheck="false" class="settings-select" placeholder="1">
+              </div>
+              <label class="settings-label" for="set-identityConstitution">Constitution</label>
+              <textarea id="set-identityConstitution" rows="7" maxlength="16000" autocomplete="off" class="settings-select identity-constitution-input" placeholder="Define durable behavior, operator boundaries, and presentation guidance for this identity."></textarea>
+              <h2 style="margin-top:14px;">Attached model profile</h2>
+              <div class="admin-toggle-sub" style="margin-bottom:8px">The chat model this identity uses when bound to a session, plus its reasoning level. Lane overrides are optional and default to this same profile.</div>
+              <div class="settings-row">
+                <label class="settings-label">Chat endpoint</label>
+                <span class="adm-model-logo" id="set-identityChatEndpoint-logo" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;opacity:0.9;color:var(--fg);"></span>
+                <select id="set-identityChatEndpoint" class="settings-select"><option value="">Installation default</option></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Chat model</label>
+                <span class="adm-model-logo" id="set-identityChatModel-logo" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;opacity:0.9;color:var(--fg);"></span>
+                <select id="set-identityChatModel" class="settings-select"><option value="">Installation default</option></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="set-identityReasoning">Reasoning level</label>
+                <select id="set-identityReasoning" class="settings-select">
+                  <option value="">Model default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <details class="identity-lane-overrides">
+                <summary>Per-lane overrides</summary>
+                <div id="set-identityLanes"></div>
+              </details>
+              <div class="identity-settings-actions">
+                <span id="set-identityEditorMsg" class="identity-settings-message" role="status" aria-live="polite"></span>
+                <button type="button" class="admin-btn-add" id="set-identityCancel">Cancel</button>
+                <button type="button" class="admin-btn-add" id="set-identitySave">Save identity</button>
               </div>
             </div>
           </div>

@@ -36,8 +36,14 @@ persist beyond the request.
    extracted capabilities with evidence paths, findings with severities,
    licenses, dependencies, and the draft manifest.
 4. **Review install** builds the existing source plan from the pinned
-   revision. Approve once and the normal authority/execute flow installs the
-   extension; the Plugins sidebar refreshes.
+   revision. When the repository ships its own `jarvis-extension.json` that
+   manifest is always used. When it does not, the reviewed draft from the
+   stored scan artifact becomes the install manifest (`manifest_origin:
+   scan_draft` in the plan) and is materialized into the pinned install so
+   lifecycle actions keep working. Approve once and the normal
+   authority/execute flow installs the extension; the Plugins sidebar
+   refreshes. No repository is expected to carry a JOS-specific manifest for
+   the paste-a-link flow to work.
 
 Installed-plugin detail (Add Plugins → Installed) shows declared
 `configuration` keys with required/secret flags so the operator knows what a
@@ -64,8 +70,11 @@ from; enabling, upgrading, or reinstalling them writes a fresh inventory.
   closed.
 - Findings evidence is redacted before storage; raw secrets never appear in
   artifacts, logs, or the UI.
-- The scan produces a proposal. Installation still requires the repository's
-  own `jarvis-extension.json`, a source plan, and explicit approval.
+- The scan produces a proposal. Installation still requires a source plan and
+  explicit approval. Skill-bundle drafts only include skills whose assets are
+  importable text under the existing bundle limits; excluded skills are
+  reported as a `skill_asset` finding so the review is honest about what will
+  be admitted.
 
 ## Verification
 
