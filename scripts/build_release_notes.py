@@ -13,6 +13,9 @@ from pathlib import Path
 
 ISSUE_RE = re.compile(r"\bMAD-\d+\b", re.IGNORECASE)
 ISSUE_HEADING_RE = re.compile(r"^## (MAD-\d+) — (.+)$", re.MULTILINE)
+TRAILER_RE = re.compile(
+    r"^(?:Refs|Fixes|Closes|Resolves)\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE
+)
 REQUIRED_SECTIONS = (
     "Problem",
     "Implementation",
@@ -29,6 +32,19 @@ def git(*args: str) -> str:
     ).stdout
 
 
+def released_issues(subject: str, body: str) -> list[str]:
+    """Issues a commit actually claims: its subject plus Refs/Fixes trailers.
+
+    Prose that merely mentions another issue (for example a dependency that
+    shipped in an earlier release) must not force a duplicate outcome section
+    into this train's notes.
+    """
+    keys = set(ISSUE_RE.findall(subject))
+    for match in TRAILER_RE.finditer(body):
+        keys.update(ISSUE_RE.findall(match.group(1)))
+    return sorted({key.upper() for key in keys})
+
+
 def collect_commits(previous_tag: str, tag: str) -> list[dict]:
     raw = git(
         "log", "--reverse", "--format=%H%x1f%s%x1f%b%x1e",
@@ -42,7 +58,7 @@ def collect_commits(previous_tag: str, tag: str) -> list[dict]:
         sha, subject, body = fields
         sha = sha.strip()
         subject = subject.strip()
-        issues = sorted({key.upper() for key in ISSUE_RE.findall(f"{subject}\n{body}")})
+        issues = released_issues(subject, body)
         commits.append({"sha": sha, "subject": subject, "issues": issues})
     if not commits:
         raise ValueError(f"release comparison {previous_tag}..{tag} has no commits")
