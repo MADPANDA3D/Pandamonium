@@ -1,0 +1,65 @@
+{
+  "fixture_version": "v1",
+  "description": "Deterministic multi-turn memory acceptance fixture. The scripted extractor responses stand in for the background extraction model; no network or live model is used.",
+  "turns": [
+    {
+      "user": "My name is Leo and I live in Austin.",
+      "extractor": [
+        {"text": "User's name is Leo", "category": "identity"},
+        {"text": "User lives in Austin", "category": "identity"}
+      ]
+    },
+    {
+      "user": "I prefer concise technical answers.",
+      "extractor": [
+        {"text": "User prefers concise technical answers", "category": "preference"}
+      ]
+    },
+    {
+      "user": "My main project is called Odyssey.",
+      "extractor": [
+        {"text": "User's main project is called Odyssey", "category": "project"}
+      ]
+    },
+    {
+      "user": "I dislike cilantro.",
+      "extractor": [
+        {"text": "User dislikes cilantro", "category": "preference"}
+      ]
+    }
+  ],
+  "useful_recall": [
+    {"query": "what do I prefer", "expect_any": ["concise"], "top_k": 3},
+    {"query": "where do I live", "expect_any": ["Austin"], "top_k": 3},
+    {"query": "what is my project called", "expect_any": ["Odyssey"], "top_k": 3},
+    {"query": "what is my name", "expect_any": ["Leo"], "top_k": 3}
+  ],
+  "false_recall": [
+    {"query": "what is the capital of France", "expect_absent": ["Austin", "cilantro", "concise", "Odyssey", "Leo"]},
+    {"query": "how do I rotate backup keys", "expect_absent": ["Austin", "cilantro", "concise", "Odyssey", "Leo"]},
+    {"query": "recommend a pasta recipe", "expect_absent": ["Austin", "concise", "Odyssey", "Leo"]}
+  ],
+  "correction": {
+    "old_contains": "Austin",
+    "new_text": "User lives in Denver",
+    "recall_query": "where do I live",
+    "expect_new": "Denver"
+  },
+  "deletion": {
+    "contains": "cilantro",
+    "recall_query": "what do I dislike"
+  },
+  "owner_isolation": {
+    "owner_b_facts": [
+      {"text": "User's name is Dana", "category": "identity"}
+    ],
+    "owner_b_query": "what is my name",
+    "owner_b_expect": "Dana",
+    "owner_a_must_not_see": "Dana",
+    "owner_b_must_not_see": "Leo"
+  },
+  "extraction_budget": {
+    "max_messages_in_window": 6,
+    "max_added_per_turn": 4
+  }
+}

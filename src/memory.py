@@ -12,6 +12,53 @@ logger = logging.getLogger(__name__)
 
 MEMORY_STATUSES = {"candidate", "approved", "rejected", "superseded", "deleted"}
 
+# Function words removed before relevance scoring so shared stop words ("the",
+# "is", "what") cannot make an unrelated memory look relevant.
+_STOPWORDS = frozenset({
+    "a", "about", "an", "and", "are", "am", "as", "at", "be", "been", "but",
+    "by", "can", "could", "did", "do", "does", "for", "from", "had", "has",
+    "have", "he", "her", "hers", "him", "his", "how", "i", "if", "in", "is",
+    "it", "its", "me", "my", "myself", "of", "on", "or", "our", "ours", "she",
+    "should", "that", "the", "their", "theirs", "them", "then", "there",
+    "these", "they", "this", "those", "to", "was", "we", "were", "what",
+    "when", "where", "which", "who", "whom", "why", "will", "with", "would",
+    "you", "your", "yours", "tell", "give", "show", "please", "know",
+})
+
+
+def _content_tokens(text: str) -> set:
+    """Tokens that carry topical meaning (stop words removed)."""
+    return {
+        token
+        for token in tokenize(str(text or "").lower())
+        if token and token not in _STOPWORDS
+    }
+
+
+def _default_confidence(source: str) -> float:
+    """Policy confidence for a write, based on how the fact was admitted.
+
+    Confidence is descriptive provenance, not authority: it never promotes a
+    fact by itself. Operator/user statements are exact; extracted/imported
+    statements are provisional.
+    """
+    if source in {"user", "operator", "correction"}:
+        return 1.0
+    if source in {"auto", "ai_agent", "jarvis"}:
+        return 0.6
+    if source == "migration":
+        return 0.5
+    if source == "memory_audit":
+        return 0.5
+    return 0.5
+
+
+def _clamp_confidence(value) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def _default_admitted_by(source: str) -> str:
     """Return the existing policy/operator boundary for a memory source."""
@@ -193,6 +240,7 @@ class MemoryManager:
             entry.setdefault("admitted_at", entry["timestamp"])
             entry.setdefault("admitted_by", "legacy")
             entry.setdefault("supersedes", None)
+            entry.setdefault("confidence", _default_confidence(str(entry.get("source") or "unknown")))
             entry["owner_id"] = entry.get("owner")
             validated.append(entry)
         return validated
@@ -253,6 +301,7 @@ class MemoryManager:
         source_time: Optional[int] = None,
         admitted_by: Optional[str] = None,
         supersedes: Optional[str] = None,
+        confidence: Optional[float] = None,
     ) -> Dict:
         """Create a provenance-complete memory record without saving it."""
         if not text.strip():
@@ -276,6 +325,11 @@ class MemoryManager:
             "admitted_at": now,
             "admitted_by": admitted_by or _default_admitted_by(source),
             "supersedes": supersedes,
+            "confidence": (
+                _clamp_confidence(confidence)
+                if confidence is not None
+                else _default_confidence(source)
+            ),
             "owner_id": owner,
         }
         if owner:
@@ -403,100 +457,121 @@ class MemoryManager:
         return categories
 
     def get_relevant_memories(self, query: str, memories: list, threshold: float = 0.05, max_items: int = 8):
-        """Get memories that are relevant to the query based on text similarity and semantic keyword matching."""
+        """Rank approved memories by topical overlap with the query.
+
+        Scoring uses whole content tokens with a prefix match ("prefer" against
+        "prefers") and a stop-word filter, so shared function words ("the",
+        "is", "what") can no longer make an unrelated memory look relevant.
+        Identity memories are only force-included when the query is actually
+        about identity, and results are deduplicated by text.
+        """
         memories = [m for m in memories if m.get("status", "approved") == "approved"]
         if not memories or not query.strip():
             return []
-            
-        # Define keyword categories for semantic matching
-        identity_words = ["name", "who", "i", "am", "called", "identity", "myself", "me", "my"]
-        contact_words = ["phone", "email", "address", "contact", "number", "where", "located", "reach"]
-        preference_words = ["like", "prefer", "favorite", "want", "love", "hate", "dislike", "enjoy", "interested"]
-        task_words = ["todo", "task", "remind", "meeting", "appointment", "schedule", "deadline"]
-        fact_words = ["what", "when", "where", "how", "why", "explain", "describe", "information", "know"]
-        
+
+        identity_words = {"name", "who", "i", "am", "called", "identity", "myself", "me", "my"}
+        strong_identity_words = {"name", "who", "myself", "identity", "named"}
+        contact_words = {"phone", "email", "address", "contact", "number", "where", "located", "reach"}
+        preference_words = {"like", "prefer", "favorite", "want", "love", "hate", "dislike", "enjoy", "interested"}
+        task_words = {"todo", "task", "remind", "meeting", "appointment", "schedule", "deadline"}
+
         query_lower = query.lower()
-        
-        # Determine query type based on keywords
-        query_type = None
-        if any(word in query_lower for word in identity_words):
-            query_type = "identity"
-        elif any(word in query_lower for word in contact_words):
-            query_type = "contact"
-        elif any(word in query_lower for word in preference_words):
+        query_tokens = set(tokenize(query_lower))
+        query_content = _content_tokens(query_lower)
+
+        def _has_query_word(words) -> bool:
+            return bool(query_tokens & set(words))
+
+        # Topical groups win over the broad identity group: "where do I live"
+        # contains "i" but is a location lookup, and "what do I prefer" is a
+        # preference lookup even though it also contains "i".
+        query_type = "fact"
+        if _has_query_word(preference_words):
             query_type = "preference"
-        elif any(word in query_lower for word in task_words):
+        elif _has_query_word(contact_words):
+            query_type = "contact"
+        elif _has_query_word(task_words):
             query_type = "task"
-        elif any(word in query_lower for word in fact_words):
-            query_type = "fact"
-        
-        relevant = []
-        identity_memories = []
-        other_memories = []
-        
-        # Separate identity memories from others
+        elif _has_query_word(identity_words):
+            query_type = "identity"
+
+        def _is_identity_memory(memory: dict) -> bool:
+            text = str(memory.get("text") or "")
+            return bool(
+                re.search(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", text)
+                or any(
+                    marker in text.lower()
+                    for marker in ("name is", "i'm", "i am", "called", "my name", "named", "call me")
+                )
+            )
+
+        def _prefix_overlap(tokens: set, memory_content: set) -> float:
+            if not tokens:
+                return 0.0
+            hits = 0
+            for token in tokens:
+                if any(
+                    token == other
+                    or (
+                        len(token) >= 4
+                        and (other.startswith(token) or token.startswith(other))
+                    )
+                    for other in memory_content
+                ):
+                    hits += 1
+            return hits / len(tokens)
+
+        identity_query = query_type == "identity"
+        strong_identity = bool(query_tokens & strong_identity_words)
+        scored = []
         for memory in memories:
-            memory_text = memory["text"].lower()
-            # Check if this is an identity memory (contains name patterns or identity indicators)
-            is_identity = any([
-                re.search(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', memory["text"]),
-                any(word in memory_text for word in ["name is", "i'm", "i am", "called", "my name", "named", "call me"])
-            ])
-            if is_identity:
-                identity_memories.append(memory)
-            else:
-                other_memories.append(memory)
-        
-        # For identity queries, include all identity memories regardless of similarity
-        if query_type == "identity" and identity_memories:
-            # Give them high scores to ensure they're included first
-            for memory in identity_memories:
-                relevant.append((0.9, memory))  # High score for identity memories in identity queries
-        
-        # Process other memories with similarity scoring
-        for memory in other_memories:
-            memory_text = memory["text"].lower()
-            memory_tokens = set(tokenize(memory_text))
-            query_tokens = set(tokenize(query_lower))
-            
-            # Calculate base Jaccard similarity
-            if not query_tokens or not memory_tokens:
-                continue
-                
-            base_similarity = len(query_tokens & memory_tokens) / len(query_tokens | memory_tokens)
+            text = str(memory.get("text") or "")
+            memory_content = _content_tokens(text)
+            base_similarity = _prefix_overlap(query_content, memory_content)
+            is_identity = _is_identity_memory(memory)
+            if base_similarity <= 0:
+                # A memory with no content overlap may only enter when the
+                # query itself is an identity question whose content tokens are
+                # all stop words ("who am I") and this is an identity fact.
+                if not (identity_query and strong_identity and is_identity and not query_content):
+                    continue
+                base_similarity = 0.5
             final_score = base_similarity
-            
-            # Apply boosts based on semantic matching
-            if query_type == "contact":
-                # Boost memories with contact information
-                has_contact_info = any(word in memory_text for word in ["@gmail.com", "@", ".com", 
-                                                                     "phone", "number", "address", 
-                                                                     "http", "www", "tel:"])
-                if has_contact_info:
-                    final_score *= 1.4  # 40% boost for contact-related memories
-            
-            elif query_type == "preference":
-                # Boost memories with preference indicators
-                has_preference = any(word in memory_text for word in ["like", "love", "hate", "dislike", 
-                                                                   "prefer", "favorite", "enjoy", "interested"])
-                if has_preference:
-                    final_score *= 1.3  # 30% boost for preference-related memories
-            
-            elif query_type == "task":
-                # Boost memories with task indicators
-                has_task = any(word in memory_text for word in ["todo", "task", "remind", "meeting", 
-                                                              "appointment", "schedule", "deadline", "need to"])
-                if has_task:
-                    final_score *= 1.3  # 30% boost for task-related memories
-            
-            # Always consider exact phrase matches as highly relevant
-            if query.lower() in memory["text"].lower():
-                final_score = max(final_score, 0.8)  # Ensure high relevance for exact matches
-            
-            # Include memory if it meets threshold after boosts
+            if identity_query and strong_identity and is_identity:
+                final_score *= 1.5
+            lowered_text = text.lower()
+            if query_type == "contact" and any(
+                marker in lowered_text
+                for marker in ("@", ".com", "phone", "number", "address", "http", "www", "tel:")
+            ):
+                final_score *= 1.4
+            elif query_type == "preference" and any(
+                marker in lowered_text
+                for marker in ("like", "love", "hate", "dislike", "prefer", "favorite", "enjoy", "interested")
+            ):
+                final_score *= 1.3
+            elif query_type == "task" and any(
+                marker in lowered_text
+                for marker in ("todo", "task", "remind", "meeting", "appointment", "schedule", "deadline", "need to")
+            ):
+                final_score *= 1.3
+            if query_lower.strip() and query_lower in lowered_text:
+                final_score = max(final_score, 0.8)
             if final_score >= threshold:
-                relevant.append((final_score, memory))
-        
-        # Sort by final score (descending) and return top matches
-        relevant.sort(key=lambda x: x[0], reverse=True)
-        return [mem for _, mem in relevant[:max_items]]
+                scored.append((final_score, memory))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        seen_ids = set()
+        seen_texts = set()
+        results = []
+        for _score, memory in scored:
+            memory_id = memory.get("id")
+            text_key = str(memory.get("text") or "").strip().lower()
+            if memory_id in seen_ids or text_key in seen_texts:
+                continue
+            seen_ids.add(memory_id)
+            seen_texts.add(text_key)
+            results.append(memory)
+            if len(results) >= max_items:
+                break
+        return results
