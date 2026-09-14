@@ -464,16 +464,43 @@ class ExtensionLifecycleManager:
             raise ExtensionLifecycleError("extension_manifest_revision_mismatch")
 
     @staticmethod
+    def _manifest_matches_exact(
+        manifest: Mapping[str, Any], expected_manifest: Mapping[str, Any], revision: str
+    ) -> bool:
+        observed_manifest = json.loads(json.dumps(manifest))
+        expected = json.loads(json.dumps(expected_manifest))
+        for candidate in (observed_manifest, expected):
+            if candidate["source"]["revision"] == "self":
+                candidate["source"]["revision"] = revision
+        return observed_manifest == expected
+
+    @staticmethod
     def _signed_manifest_matches(
         manifest: Mapping[str, Any], expected_manifest: Mapping[str, Any], revision: str
     ) -> dict[str, Any]:
         signed_manifest = validate_extension_manifest(expected_manifest)
-        observed_manifest = json.loads(json.dumps(manifest))
-        if observed_manifest["source"]["revision"] == "self":
-            observed_manifest["source"]["revision"] = revision
-        if observed_manifest != signed_manifest:
+        if not ExtensionLifecycleManager._manifest_matches_exact(
+            manifest, signed_manifest, revision
+        ):
             raise ExtensionLifecycleError("extension_signed_manifest_mismatch")
         return signed_manifest
+
+    @staticmethod
+    def _materialize_scan_draft(
+        checkout: Path,
+        draft_manifest: Mapping[str, Any],
+        source: str,
+        revision: str,
+    ) -> dict[str, Any]:
+        draft = validate_extension_manifest(json.loads(json.dumps(draft_manifest)))
+        declared_url = normalize_git_source_url(
+            str((draft.get("source") or {}).get("url") or ""), check_public=False
+        )
+        declared_revision = str((draft.get("source") or {}).get("revision") or "")
+        if declared_url != source or declared_revision not in {"self", revision}:
+            raise ExtensionLifecycleError("extension_scan_manifest_source_mismatch")
+        atomic_write_json(str(checkout / MANIFEST_NAME), draft, indent=2)
+        return ExtensionLifecycleManager._load_manifest(checkout)
 
     def _action_call(self, plan: Mapping[str, Any]) -> dict[str, Any]:
         manifest = plan.get("manifest") or {}
@@ -556,9 +583,17 @@ class ExtensionLifecycleManager:
         operator_id: str,
         expected_manifest: Mapping[str, Any] | None = None,
         distribution: Mapping[str, Any] | None = None,
+        scan_id: str | None = None,
+        scan_revision: str | None = None,
+        draft_manifest: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if operation not in {"install", "upgrade"}:
             raise ExtensionLifecycleError("extension_source_operation_invalid")
+        if draft_manifest is not None:
+            if expected_manifest is not None:
+                raise ExtensionLifecycleError("extension_scan_draft_not_allowed")
+            if not str(scan_id or "").strip() or not str(scan_revision or "").strip():
+                raise ExtensionLifecycleError("extension_scan_binding_invalid")
         self._ensure_dirs()
         plan_id = str(uuid.uuid4())
         staging = self.root / "staging" / plan_id
@@ -573,8 +608,19 @@ class ExtensionLifecycleManager:
         )
         try:
             source, ref, revision = self.git.resolve_revision(source_url, requested_ref)
+            if draft_manifest is not None and scan_revision != revision:
+                raise ExtensionLifecycleError("extension_scan_revision_mismatch")
             self.git.checkout(source, ref, revision, staging)
-            manifest = self._load_manifest(staging)
+            manifest_origin = "repository"
+            try:
+                manifest = self._load_manifest(staging)
+            except ExtensionLifecycleError as exc:
+                if exc.code != "extension_manifest_missing" or draft_manifest is None:
+                    raise
+                manifest = self._materialize_scan_draft(
+                    staging, draft_manifest, source, revision
+                )
+                manifest_origin = "scan_draft"
             self._manifest_source_matches(manifest, source, revision)
             signed_manifest = None
             if expected_manifest is not None:
@@ -611,6 +657,11 @@ class ExtensionLifecycleManager:
                     "source_revision": revision,
                     "staging_path": str(staging),
                     "manifest": manifest,
+                    "manifest_origin": manifest_origin,
+                    "scan_id": str(scan_id) if manifest_origin == "scan_draft" else None,
+                    "scan_revision": (
+                        str(scan_revision) if manifest_origin == "scan_draft" else None
+                    ),
                     "resolved_catalog": resolved_catalog,
                     "expected_manifest": signed_manifest,
                     "distribution": dict(distribution or {}),
@@ -728,6 +779,7 @@ class ExtensionLifecycleManager:
                 "requested_ref",
                 "source_revision",
                 "target_revision",
+                "manifest_origin",
                 "status",
             )
             if plan.get(key) is not None
@@ -933,6 +985,10 @@ class ExtensionLifecycleManager:
             shutil.rmtree(staging, ignore_errors=True)
         manifest = self._load_manifest(destination)
         self._manifest_source_matches(manifest, plan["source_url"], revision)
+        if plan.get("manifest_origin") == "scan_draft":
+            expected = validate_extension_manifest(plan.get("manifest") or {})
+            if not self._manifest_matches_exact(manifest, expected, revision):
+                raise ExtensionLifecycleError("extension_scan_manifest_mismatch")
         if plan.get("expected_manifest") is not None:
             self._signed_manifest_matches(manifest, plan["expected_manifest"], revision)
         with self._lock:
