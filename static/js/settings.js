@@ -12,6 +12,7 @@ import { isAltGrEvent } from './platform.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 import sshConnectionsModule from './sshConnections.js';
+import unslothRuntimeModule from './unslothRuntime.js';
 import { startVoicePreview } from './voicePreview.js';
 import { initModelHelp } from './modelHelp.js';
 
@@ -122,6 +123,7 @@ function initTabs() {
       syncAppearanceOpacity(tab === 'appearance');
       if (tab === 'ai') refreshAiModelEndpoints();
       if (tab === 'ssh') sshConnectionsModule.open();
+      if (tab === 'training') unslothRuntimeModule.open();
     });
   });
 }
@@ -6586,6 +6588,7 @@ export function open(tab) {
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
   if (activeTab === 'ssh') sshConnectionsModule.open();
+  if (activeTab === 'training') unslothRuntimeModule.open();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }

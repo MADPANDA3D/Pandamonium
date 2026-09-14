@@ -858,6 +858,11 @@ app.include_router(setup_ssh_routes())
 from routes.nextcloud_routes import setup_nextcloud_routes
 app.include_router(setup_nextcloud_routes())
 
+# Unsloth Studio training runtime (MAD-796: versioned read-only adapter; the
+# runtime is operator-provided and job submission is deferred to MAD-797)
+from routes.unsloth_routes import setup_unsloth_routes
+app.include_router(setup_unsloth_routes())
+
 # Guided in-app bug reports (MAD-856: redacted diagnostics + server-held
 # GitHub App submission; the browser never receives a repository credential).
 from routes.feedback_routes import setup_feedback_routes
