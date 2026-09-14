@@ -92,6 +92,7 @@ output.txt.txt
 # Reports and temp files
 reports/
 tasks/
+benchmarks/runs/
 scripts/compound/*.json
 research_data/
 **/search_analytics.json

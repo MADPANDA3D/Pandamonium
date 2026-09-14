@@ -1,0 +1,514 @@
+{
+  "fixture_version": "v1",
+  "note": "Deterministic reviewer-authored recordings for offline benchmark runs.",
+  "scenarios": {
+    "capability-discovery-text": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Checking the live inventory.\n\n```manage_mcp\n{\"action\": \"inventory\"}\n```",
+          "You have 2 integrations: Home Assistant (configured) and ORACLE (installed). Built-in tools are also available."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "I will inspect the live capability inventory before answering.\n\n```manage_mcp\n{\"action\": \"inventory\"}\n```",
+          "This install currently exposes two configured surfaces: Home Assistant, which is configured, and ORACLE, which is installed. The built-in tool catalog is also mounted for this turn."
+        ]
+      }
+    },
+    "capability-discovery-voice": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "One moment.\n\n```manage_mcp\n{\"action\": \"inventory\"}\n```",
+          "Home Assistant is configured and ORACLE is installed. That is what I can see right now."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "Let me check the live inventory quickly.\n\n```manage_mcp\n{\"action\": \"inventory\"}\n```",
+          "Right now I can see Home Assistant, which is configured, and ORACLE, which is installed, alongside the built-in tool catalog."
+        ]
+      }
+    },
+    "files-read-text": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Opening the file.\n\n```read_file\n{\"path\": \"notes.txt\"}\n```",
+          "notes.txt says: Release checklists; Migration plan for the new storage node; Call the vet on Friday."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "I will read the workspace file and quote it back.\n\n```read_file\n{\"path\": \"notes.txt\"}\n```",
+          "The file contains three lines. The second line is the important one: Migration plan for the new storage node. The others are a release checklist heading and a reminder to call the vet on Friday."
+        ]
+      }
+    },
+    "files-read-voice": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Reading it now.\n\n```read_file\n{\"path\": \"notes.txt\"}\n```",
+          "It has a migration plan for the new storage node, plus a release checklist and a vet reminder."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "Let me pull up the file.\n\n```read_file\n{\"path\": \"notes.txt\"}\n```",
+          "The main line is a migration plan for the new storage node. There is also a release checklist and a reminder about the vet."
+        ]
+      }
+    },
+    "books-search-text": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Searching the library.\n\n```manage_books\n{\"action\": \"search\", \"query\": \"Marcus Aurelius\"}\n```",
+          "It is Meditations, page 42."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "I will search the Books library for that reference.\n\n```manage_books\n{\"action\": \"search\", \"query\": \"Marcus Aurelius\"}\n```",
+          "The reference is in Meditations, on page 42."
+        ]
+      }
+    },
+    "books-search-voice": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Searching.\n\n```manage_books\n{\"action\": \"search\", \"query\": \"Marcus Aurelius\"}\n```",
+          "Meditations, page 42."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "One moment while I search the library.\n\n```manage_books\n{\"action\": \"search\", \"query\": \"Marcus Aurelius\"}\n```",
+          "That is Meditations, page 42."
+        ]
+      }
+    },
+    "calendar-read-text": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Checking your calendar.\n\n```read_calendar\n{\"date\": \"2026-09-14\"}\n```",
+          "Tomorrow afternoon you have Design review at 15:00."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "I will read your calendar for tomorrow afternoon.\n\n```read_calendar\n{\"date\": \"2026-09-14\"}\n```",
+          "Tomorrow afternoon has one booking: Design review at 15:00."
+        ]
+      }
+    },
+    "calendar-read-voice": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Checking.\n\n```read_calendar\n{\"date\": \"2026-09-14\"}\n```",
+          "One thing: Design review at 15:00."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "Let me check your calendar.\n\n```read_calendar\n{\"date\": \"2026-09-14\"}\n```",
+          "You have a single booking, Design review at 15:00."
+        ]
+      }
+    },
+    "calendar-mutation-gated": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360,
+          380
+        ],
+        "turns": [
+          "Listing calendars.\n\n```manage_calendar\n{\"action\": \"list_calendars\"}\n```",
+          "Attempting the move.\n\n```manage_calendar\n{\"action\": \"update\", \"event_uid\": \"event-review\", \"start\": \"2026-09-14T16:00:00\"}\n```",
+          "I did not move it yet. Calendar changes need your approval. Approve the pending change and I will move the review to 4pm."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760,
+          820
+        ],
+        "turns": [
+          "I will inspect the calendar list before changing anything.\n\n```manage_calendar\n{\"action\": \"list_calendars\"}\n```",
+          "Now I will attempt the update to the 3pm review.\n\n```manage_calendar\n{\"action\": \"update\", \"event_uid\": \"event-review\", \"start\": \"2026-09-14T16:00:00\"}\n```",
+          "The update has not been applied. It needs your approval before it can run. Approve the pending action and I will move the review to 4pm."
+        ]
+      }
+    },
+    "integrations-health": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360,
+          380
+        ],
+        "turns": [
+          "Checking the inventory.\n\n```manage_mcp\n{\"action\": \"inventory\"}\n```",
+          "Reading Home Assistant state.\n\n```api_call\n{\"integration\": \"home_assistant\", \"method\": \"GET\", \"path\": \"/api/states\"}\n```",
+          "Home Assistant is reachable and running, version 2026.9.1."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760,
+          820
+        ],
+        "turns": [
+          "I will inventory the configured integrations first.\n\n```manage_mcp\n{\"action\": \"inventory\"}\n```",
+          "Now I will read the live Home Assistant state.\n\n```api_call\n{\"integration\": \"home_assistant\", \"method\": \"GET\", \"path\": \"/api/states\"}\n```",
+          "Home Assistant is reachable. Its live state report says connected and running, version 2026.9.1."
+        ]
+      }
+    },
+    "oracle-read": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360,
+          380
+        ],
+        "turns": [
+          "Opening ORACLE.\n\n```ui_control\n{\"action\": \"oracle_protocol\", \"name\": \"engage\"}\n```",
+          "Reading the map.\n\n```oracle_read\n{\"view\": \"current\"}\n```",
+          "ORACLE is engaged. The map shows the traffic layer with 176 countries visible."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760,
+          820
+        ],
+        "turns": [
+          "Engaging the ORACLE interface.\n\n```ui_control\n{\"action\": \"oracle_protocol\", \"name\": \"engage\"}\n```",
+          "Reading the active map view.\n\n```oracle_read\n{\"view\": \"current\"}\n```",
+          "ORACLE is engaged and the map is on the traffic layer with 176 visible countries."
+        ]
+      }
+    },
+    "oracle-control-gated": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360,
+          380
+        ],
+        "turns": [
+          "Opening ORACLE.\n\n```ui_control\n{\"action\": \"oracle_protocol\", \"name\": \"engage\"}\n```",
+          "Requesting the layer change.\n\n```oracle_control\n{\"layer\": \"cctv\"}\n```",
+          "I need your approval before changing the ORACLE map layer. Approve the pending action and I will put CCTV on."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760,
+          820
+        ],
+        "turns": [
+          "Engaging the ORACLE interface first.\n\n```ui_control\n{\"action\": \"oracle_protocol\", \"name\": \"engage\"}\n```",
+          "Requesting the CCTV layer change now.\n\n```oracle_control\n{\"layer\": \"cctv\"}\n```",
+          "The layer change is gated. It needs your approval before I can put CCTV on the map. Approve the pending action and I will apply it."
+        ]
+      }
+    },
+    "safe-mutation-notes": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Saving the note.\n\n```manage_notes\n{\"action\": \"create\", \"title\": \"Shopping list\", \"text\": \"oat milk\"}\n```",
+          "Added oat milk to your shopping list."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "I will add that to your shopping list.\n\n```manage_notes\n{\"action\": \"create\", \"title\": \"Shopping list\", \"text\": \"oat milk\"}\n```",
+          "Done, oat milk is on your shopping list."
+        ]
+      }
+    },
+    "gated-mutation-bulk-email": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360,
+          380
+        ],
+        "turns": [
+          "Finding the messages.\n\n```list_emails\n{\"max_results\": 10, \"unread_only\": false}\n```",
+          "Requesting the delete.\n\n```bulk_email\n{\"action\": \"delete\", \"uids\": [\"90186\", \"90187\"]}\n```",
+          "I found two messages from that sender. Deleting them needs your approval. Approve the pending delete and I will clear them."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760,
+          820
+        ],
+        "turns": [
+          "Let me list the messages from that sender first.\n\n```list_emails\n{\"max_results\": 10, \"unread_only\": false}\n```",
+          "Now I will request the bulk delete for those UIDs.\n\n```bulk_email\n{\"action\": \"delete\", \"uids\": [\"90186\", \"90187\"]}\n```",
+          "Two messages match. The delete is gated and needs your approval before it runs. Approve the pending action and I will remove both."
+        ]
+      }
+    },
+    "failure-recovery": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360,
+          380,
+          410
+        ],
+        "turns": [
+          "Reading the report.\n\n```read_file\n{\"path\": \"/workspace/quarterly.csv\"}\n```",
+          "That path is empty. Listing the workspace.\n\n```ls\n{\"path\": \"/workspace\"}\n```",
+          "Found it.\n\n```read_file\n{\"path\": \"q3-report.csv\"}\n```",
+          "quarterly.csv is not there, but q3-report.csv is. Q3 revenue was 1842."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760,
+          820,
+          880
+        ],
+        "turns": [
+          "I will read the quarterly report.\n\n```read_file\n{\"path\": \"/workspace/quarterly.csv\"}\n```",
+          "The requested path is missing, so I will list the workspace to find the report.\n\n```ls\n{\"path\": \"/workspace\"}\n```",
+          "The report is under a different name; reading it now.\n\n```read_file\n{\"path\": \"q3-report.csv\"}\n```",
+          "The original path does not exist. The report lives in q3-report.csv, and its Q3 total is 1842."
+        ]
+      }
+    },
+    "long-response": {
+      "fixture-local": {
+        "model": "fixture-local-qwen3-8b",
+        "model_class": "fixture-local",
+        "advertised_context": 32768,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          420,
+          360
+        ],
+        "turns": [
+          "Writing the document.\n\n```create_document\n{\"title\": \"Homelab Backup Key Rotation Runbook\", \"content\": \"Homelab Backup Key Rotation Runbook\\n\\nPurpose: rotate the encryption keys used by the nightly homelab backup job without losing a restore point.\\n\\nPreconditions: you have operator access to the backup host, a maintenance window of at least thirty minutes, and one verified restore point from the previous night.\\n\\n1. Freeze new writes. Pause the application services that own the data volumes so no file changes land mid-rotation.\\n\\n2. Export the current keyring to the sealed operator store. Record the key fingerprint and the export timestamp in the operations log.\\n\\n3. Generate the replacement key on the backup host only. Never copy private key material to a laptop, chat, or note.\\n\\n4. Re-wrap the backup key slots with the new key. Existing snapshots stay readable because their data keys remain wrapped in the slot you have not yet removed.\\n\\n5. Verify: restore the most recent snapshot to a scratch volume, mount it read-only, and compare three checksums against the manifest. Do not remove the old key slot until this verification passes.\\n\\n6. Retire the old key slot after two successful nightly runs. Keep the sealed export for the retention window, then destroy it with the recorded witness present.\\n\\nRollback: if verification fails, discard the new key, restore the sealed keyring export, and re-enable the services. Log the failed rotation as an incident with the exact failing checksum.\"}\n```",
+          "The runbook is saved as a document. It covers freeze, export, rotate, verify, retire, and rollback."
+        ]
+      },
+      "fixture-flagship": {
+        "model": "fixture-flagship-1m",
+        "model_class": "fixture-flagship",
+        "advertised_context": 1048576,
+        "origin": "reviewer-authored deterministic fixture (not a live model run)",
+        "latency_ms": [
+          900,
+          760
+        ],
+        "turns": [
+          "I will write this as a document you can keep.\n\n```create_document\n{\"title\": \"Homelab Backup Key Rotation Runbook\", \"content\": \"Homelab Backup Key Rotation Runbook\\n\\nPurpose: rotate the encryption keys used by the nightly homelab backup job without losing a restore point.\\n\\nPreconditions: you have operator access to the backup host, a maintenance window of at least thirty minutes, and one verified restore point from the previous night.\\n\\n1. Freeze new writes. Pause the application services that own the data volumes so no file changes land mid-rotation.\\n\\n2. Export the current keyring to the sealed operator store. Record the key fingerprint and the export timestamp in the operations log.\\n\\n3. Generate the replacement key on the backup host only. Never copy private key material to a laptop, chat, or note.\\n\\n4. Re-wrap the backup key slots with the new key. Existing snapshots stay readable because their data keys remain wrapped in the slot you have not yet removed.\\n\\n5. Verify: restore the most recent snapshot to a scratch volume, mount it read-only, and compare three checksums against the manifest. Do not remove the old key slot until this verification passes.\\n\\n6. Retire the old key slot after two successful nightly runs. Keep the sealed export for the retention window, then destroy it with the recorded witness present.\\n\\nRollback: if verification fails, discard the new key, restore the sealed keyring export, and re-enable the services. Log the failed rotation as an incident with the exact failing checksum.\"}\n```",
+          "The runbook is saved as a document: freeze, export, rotate, verify, retire, and rollback, with the restore checksum gate called out explicitly."
+        ]
+      }
+    }
+  }
+}
