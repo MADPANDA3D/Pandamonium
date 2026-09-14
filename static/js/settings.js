@@ -13,6 +13,7 @@ import { bindMenuDismiss } from './escMenuStack.js';
 import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 import sshConnectionsModule from './sshConnections.js';
 import { startVoicePreview } from './voicePreview.js';
+import { initModelHelp } from './modelHelp.js';
 
 let initialized = false;
 let modalEl = null;
@@ -3008,6 +3009,8 @@ function initAll() {
   initVisionSettings();
   initTtsSettings();
   initSttSettings();
+  // MAD-931: per-section guided help for the model-default cards.
+  initModelHelp();
   initSearchSettings();
   initResearchSettings();
   initResearchSearchSettings();

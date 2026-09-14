@@ -6886,6 +6886,56 @@ body.bg-pattern-sparkles {
       overflow: visible !important;
     }
 
+    /* ── Per-section model help (MAD-931) ── */
+    /* The "?" affordance on each AI Defaults model card. */
+    .settings-help-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      margin-left: 6px;
+      flex-shrink: 0;
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 50%;
+      background: none;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .settings-help-btn:hover,
+    .settings-help-btn:focus-visible,
+    .settings-help-btn[aria-expanded="true"] {
+      border-color: var(--accent, var(--red));
+      color: var(--fg);
+      background: color-mix(in srgb, var(--fg) 8%, transparent);
+    }
+    /* Help body rendered inside the shared #tour-tooltip shell. */
+    .tour-help-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--accent, var(--red));
+    }
+    .tour-help-body p { margin: 0 0 6px; }
+    .tour-help-body b { color: var(--fg); font-weight: 600; }
+    .tour-help-now {
+      padding-top: 6px;
+      border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      opacity: 0.9;
+    }
+    .tour-help-actions { gap: 6px; margin-top: 8px; }
+    .tour-help-actions .tour-btn-arrow {
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      opacity: 1;
+    }
+    .tour-help-actions .tour-btn-skip { margin-left: 0; }
+
     /* ── Secret tour hint (drag-to-snap on first modal open) ── */
     .tour-hint {
       position: fixed;
