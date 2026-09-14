@@ -65,6 +65,7 @@ TOOL_CATEGORIES: Dict[str, str] = {
     "manage_webhooks": "System",
     "manage_tokens": "System",
     "manage_settings": "System",
+    "manage_workspace": "System",
     "manage_extensions": "System",
     "ssh_node": "System",
     "nextcloud_files": "Knowledge",

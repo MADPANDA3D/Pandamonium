@@ -134,6 +134,7 @@ class SessionManager:
             history=[],
             owner=getattr(db_session, "owner", None),
             agent_target=getattr(db_session, "agent_target", None) or "jarvis",
+            workspace=getattr(db_session, "workspace", None) or "",
             is_important=getattr(db_session, "is_important", False) or False,
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
@@ -193,6 +194,7 @@ class SessionManager:
             history=history,
             owner=getattr(db_session, 'owner', None),
             agent_target=getattr(db_session, 'agent_target', None) or 'jarvis',
+            workspace=getattr(db_session, 'workspace', None) or '',
             is_important=getattr(db_session, 'is_important', False) or False,
         )
 
@@ -484,6 +486,7 @@ class SessionManager:
             session.archived = db_session.archived
             session.owner = getattr(db_session, "owner", None)
             session.agent_target = getattr(db_session, "agent_target", None) or "jarvis"
+            session.workspace = getattr(db_session, "workspace", None) or ""
             session.is_important = getattr(db_session, "is_important", False) or False
             session.message_count = getattr(db_session, "message_count", session.message_count) or 0
             return True

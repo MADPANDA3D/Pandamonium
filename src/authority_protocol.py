@@ -126,6 +126,9 @@ _DEFAULT_EFFECT_BY_CAPABILITY = {
             "bash", "python", "download_model", "serve_model", "serve_preset", "adopt_served_model",
             "manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks",
             "manage_extensions",
+            # Changing the chat's active workspace (MAD-883) is a bounded,
+            # reversible scope change; the folder is vetted by vet_workspace.
+            "manage_workspace",
         }
     },
     **{
@@ -316,6 +319,13 @@ def _outside_configured_workspace(call: Mapping[str, Any]) -> bool:
     policy = call.get("capability_policy") if isinstance(call.get("capability_policy"), Mapping) else {}
     if arguments.get("outside_workspace") is True:
         return True
+    if str(call.get("name") or "") == "manage_workspace":
+        # Switching the workspace is the explicit intent of this tool; the
+        # requested folder is vetted by vet_workspace and is not an attempt to
+        # escape the CURRENT boundary. Without this, "work out of /other"
+        # would be classified outside_workspace_boundary and gated as an
+        # escape instead of a workspace change (MAD-883).
+        return False
     configured_scopes = policy.get("configured_scopes")
     requested_scope = str(arguments.get("workspace") or "")
     if requested_scope and isinstance(configured_scopes, (list, tuple, set)):

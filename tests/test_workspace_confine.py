@@ -295,7 +295,7 @@ def test_browse_is_admin_gated(monkeypatch):
     router = wr.setup_workspace_routes()
     browse = next(r.endpoint for r in router.routes if r.path == "/api/workspace/browse")
 
-    monkeypatch.setattr(wr, "get_current_user", lambda req: "bob")
+    monkeypatch.setattr(wr, "effective_user", lambda req: "bob")
     monkeypatch.setattr(wr, "owner_is_admin_or_single_user", lambda owner: False)
     with pytest.raises(HTTPException) as ei:
         browse(request=object(), path="/")
@@ -346,7 +346,7 @@ def test_browse_marks_root_unselectable_and_vet_endpoint(monkeypatch):
     browse = next(r.endpoint for r in router.routes if r.path == "/api/workspace/browse")
     vet = next(r.endpoint for r in router.routes if r.path == "/api/workspace/vet")
 
-    monkeypatch.setattr(wr, "get_current_user", lambda req: "admin")
+    monkeypatch.setattr(wr, "effective_user", lambda req: "admin")
     monkeypatch.setattr(wr, "owner_is_admin_or_single_user", lambda owner: True)
 
     out = browse(request=object(), path="/")
@@ -372,7 +372,7 @@ def test_request_workspace_gate(ws, monkeypatch):
     workspace_rejected signal would otherwise reveal which host paths exist."""
     import routes.chat_routes as cr
 
-    monkeypatch.setattr(cr, "get_current_user", lambda req: "bob")
+    monkeypatch.setattr(cr, "effective_user", lambda req: "bob")
     vet_calls = []
     import src.tool_execution as te
     real_vet = te.vet_workspace

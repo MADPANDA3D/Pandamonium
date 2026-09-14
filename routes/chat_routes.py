@@ -311,16 +311,73 @@ def _resolve_request_workspace(request, raw_value) -> tuple:
     default tool-path allowlist applies. The rejected value is surfaced so the
     stream can tell an admin client (which believes a workspace is active)
     that it was dropped.
+
+    The owner is resolved with effective_user so a bearer API token minted by
+    the admin (paired client) is treated as that owner, not the sandboxed
+    "api" pseudo-user.
     """
     requested = (raw_value or "").strip()
     if not requested:
         return "", ""
     from src.tool_security import owner_is_admin_or_single_user
-    if not owner_is_admin_or_single_user(get_current_user(request)):
+    if not owner_is_admin_or_single_user(effective_user(request)):
         return "", ""
     from src.tool_execution import vet_workspace
     workspace = vet_workspace(requested) or ""
     return workspace, (requested if not workspace else "")
+
+
+def _apply_session_workspace(sess, owner, workspace, workspace_rejected) -> tuple:
+    """Reconcile the posted workspace with the chat's persisted workspace.
+
+    Explicit vetted value wins and is persisted on the session; when the
+    request carries none, the stored value is re-vetted and bound so every
+    client that opens the chat shares the setting (MAD-883). A stored folder
+    that was deleted or made unusable is cleared and surfaced through
+    workspace_rejected so the client can drop its pill.
+
+    Non-admin callers are skipped entirely: they cannot use workspace-backed
+    tools, so a stored path must not become an existence oracle or leak via
+    get_workspace.
+    """
+    from src.tool_security import owner_is_admin_or_single_user
+    if not owner_is_admin_or_single_user(owner):
+        return "", ""
+    session_id = str(getattr(sess, "id", "") or "")
+    stored = str(getattr(sess, "workspace", "") or "")
+    if workspace:
+        if workspace != stored:
+            from src.workspace_store import set_session_workspace
+            try:
+                set_session_workspace(session_id, workspace)
+            except Exception as exc:
+                logger.warning("persist workspace failed for %s: %s", session_id, exc)
+            try:
+                sess.workspace = workspace
+            except Exception:
+                pass
+        return workspace, workspace_rejected
+    if not stored:
+        return "", workspace_rejected
+    from src.tool_execution import vet_workspace
+    resolved = vet_workspace(stored)
+    if resolved:
+        try:
+            sess.workspace = resolved
+        except Exception:
+            pass
+        return resolved, workspace_rejected
+    # The stored folder is gone/unusable. Drop it and let the client know.
+    from src.workspace_store import clear_session_workspace
+    try:
+        clear_session_workspace(session_id)
+    except Exception as exc:
+        logger.warning("clear workspace failed for %s: %s", session_id, exc)
+    try:
+        sess.workspace = ""
+    except Exception:
+        pass
+    return "", workspace_rejected or stored
 
 
 def _session_url_matches_endpoint(session_url: str, endpoint_base: str) -> bool:
@@ -943,6 +1000,13 @@ def setup_chat_routes(
                     reasoning_effort = ""
             sess = session_manager.get_session(session)
             owner = effective_user(request)
+            # Reconcile the posted workspace with the one stored on the chat:
+            # an explicit pick wins and is persisted; otherwise the stored
+            # value is re-vetted and bound. Keeps the pill, the agent's
+            # get_workspace, and every client of this chat consistent.
+            workspace, workspace_rejected = _apply_session_workspace(
+                sess, owner, workspace, workspace_rejected
+            )
             # The session row owns conversational routing. A stale or forged
             # browser value cannot silently move an established conversation.
             agent_target = _authoritative_agent_target(sess, agent_target)
@@ -2068,6 +2132,10 @@ def setup_chat_routes(
                                     "authority_approval_required",
                                     "ask_user",
                                     "plan_update",
+                                    # MAD-883: the agent changed the chat's
+                                    # workspace (manage_workspace); update the
+                                    # pill/persistence on the client.
+                                    "workspace_changed",
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))

@@ -200,6 +200,13 @@ class Session(TimestampMixin, Base):
     # Durable binding to a real Pandamonium project (MAD-920). Null means the
     # chat is unfiled. Project removal never deletes sessions; it only unbinds.
     project_id = Column(String, nullable=True, default=None, index=True)
+    # Server-persisted active workspace for this chat (MAD-883). Null means no
+    # workspace is bound: file tools use the default allowed roots. Storing it
+    # per session makes the selection visible to every client that opens the
+    # chat and lets the in-app agent set/clear/report it. The value is always
+    # re-vetted with vet_workspace() before it is bound to a turn, so a folder
+    # that was deleted or made unusable is dropped instead of trusted.
+    workspace = Column(String, nullable=True, default=None)
     
     # Headers stored as JSON
     headers = Column(JSON, default=dict)
@@ -259,6 +266,7 @@ class Session(TimestampMixin, Base):
             'is_important': self.is_important,
             'folder': self.folder,
             'project_id': self.project_id,
+            'workspace': self.workspace or '',
             'total_input_tokens': self.total_input_tokens or 0,
             'total_output_tokens': self.total_output_tokens or 0,
             'crew_member_id': self.crew_member_id,
@@ -986,6 +994,30 @@ def _migrate_add_agent_target_column():
     finally:
         if conn is not None:
             conn.close()
+
+def _migrate_add_session_workspace_column():
+    """Add the per-session active workspace (MAD-883). Idempotent: guarded by a
+    PRAGMA table_info check so every startup is safe. Existing sessions keep
+    NULL (no workspace) — the client migrates its legacy localStorage value on
+    the next send, which persists it here."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "workspace" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN workspace TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'workspace' on sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"session workspace migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
 
 def _migrate_add_session_identity_columns():
     """Add the session-bound saved identity + reasoning level (MAD-929).
@@ -2209,6 +2241,7 @@ def init_db():
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
     _migrate_add_agent_target_column()
+    _migrate_add_session_workspace_column()
     _migrate_add_session_identity_columns()
     _migrate_add_ssh_allowed_commands_column()
     _migrate_add_folder_column()

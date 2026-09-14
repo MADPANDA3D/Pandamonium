@@ -2456,6 +2456,27 @@ import { getSelectedAgentSelection } from './modelPicker.js';
                   6000
                 );
                 continue;
+              } else if (json.type === 'workspace_changed') {
+                // The agent called manage_workspace. The server already
+                // persisted it on this chat; mirror it into the cached session
+                // metadata and the pill so every surface agrees (MAD-883).
+                const _wsChanged = (json.data && json.data.path) || '';
+                if (sessionModule && sessionModule.applySessionWorkspace) {
+                  sessionModule.applySessionWorkspace(
+                    (json.data && json.data.session) || streamSessionId,
+                    _wsChanged
+                  );
+                } else {
+                  import('./workspace.js').then((m) => {
+                    const ws = m.default || m;
+                    if (ws && ws.setWorkspace) ws.setWorkspace(_wsChanged);
+                  });
+                }
+                uiModule.showToast(
+                  _wsChanged ? `Workspace set: ${_wsChanged}` : 'Workspace cleared',
+                  4000
+                );
+                continue;
               } else if (json.type === 'model_fallback') {
                 // Model went offline — switched to fallback
                 var _fbData = json.data || {};
