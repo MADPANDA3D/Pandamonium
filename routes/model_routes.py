@@ -819,9 +819,7 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
             body_text = json.dumps(body)[:800]
         except Exception:
             pass
-        from src.authority_protocol import redact_secret_text
-
-        error_msg = redact_secret_text(error_msg)
+        error_msg = _redact_api_key(error_msg, api_key)
         diagnosis = classify_http_status(r.status_code, body_text or error_msg)
         return _classified(
             "fail", latency, error=error_msg,
@@ -836,11 +834,9 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
             guidance=diagnosis["guidance"],
         )
     except Exception as e:
-        from src.authority_protocol import redact_secret_text
-
         diagnosis = classify_exception(e)
         return _classified(
-            "fail", None, error=redact_secret_text(str(e))[:80],
+            "fail", None, error=_redact_api_key(str(e)[:80], api_key),
             category=diagnosis["category"], action=diagnosis["action"],
             guidance=diagnosis["guidance"],
         )
@@ -1336,7 +1332,7 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
         logger.warning("Failed to probe %s: %s", _redact_url_for_log(url), e)
     except Exception as e:
         if api_key:
-            logger.warning("Failed to probe %s with API key: %s", _redact_url_for_log(url), e)
+            logger.warning("Failed to probe %s with API key: %s", _redact_url_for_log(url), _redact_api_key(e, api_key))
             return []
         logger.warning("Failed to probe %s: %s", _redact_url_for_log(url), e)
 
@@ -1429,7 +1425,7 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
                         return result
                     last_error = result.get("error")
                 except Exception as e:
-                    last_error = str(e)[:120]
+                    last_error = _redact_api_key(str(e)[:120], api_key)
     except Exception:
         pass
 
@@ -1452,7 +1448,7 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
             return result
         last_error = result.get("error") or last_error
     except Exception as e:
-        last_error = str(e)[:120]
+        last_error = _redact_api_key(str(e)[:120], api_key)
 
     return {"reachable": False, "status_code": None, "error": last_error}
 
@@ -1632,6 +1628,26 @@ def _api_key_fingerprint(api_key: Optional[str]) -> str:
     if not key:
         return ""
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+
+def _redact_api_key(text: Any, api_key: Optional[str]) -> str:
+    """Return provider error text with the configured credential removed.
+
+    Providers occasionally echo the submitted credential back in a 4xx body;
+    probe results and setup errors are shown in the UI and must never carry it.
+    The exact configured key is redacted first, then the shared secret-pattern
+    redactor masks recognizable token shapes from any other source.
+    """
+    value = str(text or "")
+    key = (api_key or "").strip()
+    if key and key in value:
+        value = value.replace(key, "[redacted]")
+    try:
+        from src.authority_protocol import redact_secret_text
+        value = redact_secret_text(value)
+    except Exception:
+        pass
+    return value
 
 
 def setup_model_routes(model_discovery):
