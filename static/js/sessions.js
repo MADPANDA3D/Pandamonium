@@ -2362,7 +2362,14 @@ export async function materializePendingSession() {
   fd.append('name', name);
   fd.append('endpoint_url', pending?.url || '');
   fd.append('model', pending?.modelId || 'Codex');
-  fd.append('agent_target', getSelectedAgentTarget() || 'jarvis');
+  const pendingTarget = getSelectedAgentTarget() || 'jarvis';
+  fd.append('agent_target', pendingTarget);
+  // A saved identity picked before the first message binds as soon as the
+  // session exists (MAD-930). Worker-routed sessions never carry it.
+  const pendingIdentity = String(pending?.identityId || '').trim();
+  if (pendingIdentity && pendingTarget === 'jarvis') {
+    fd.append('identity_id', pendingIdentity);
+  }
   if (native?.workspace || (pending?.url && pending?.modelId)) {
     fd.append('skip_validation', 'true');
   }
