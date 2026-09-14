@@ -2,7 +2,7 @@
 // Settings → AI. Runtime protocol mounting is unchanged (Python suites).
 import { expect, test } from '@playwright/test';
 
-test('AI tab keeps identity and model defaults but renders no protocol controls', async ({ page }) => {
+test('AI tab keeps model defaults but renders no protocol controls; identities have their own tab', async ({ page }) => {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/api/auth/status') {
@@ -40,7 +40,6 @@ test('AI tab keeps identity and model defaults but renders no protocol controls'
   await expect(page.locator('#settings-modal')).toBeVisible();
   await page.locator('#settings-modal [data-settings-tab="ai"]').click();
 
-  await expect(page.locator('#set-agentIdentityCard')).toBeVisible();
   await expect(page.locator('#set-defaultEpSelect')).toBeAttached();
 
   await expect(page.locator('#set-protocolCard')).toHaveCount(0);
@@ -59,6 +58,7 @@ test('AI tab keeps identity and model defaults but renders no protocol controls'
   });
   await page.locator('#settings-modal [data-settings-tab="added-models"]').click();
   await page.locator('#settings-modal [data-settings-tab="ai"]').click();
-  await expect(page.locator('#set-agentIdentityCard')).toBeVisible();
+  await page.locator('#settings-modal [data-settings-tab="identities"]').click();
+  await expect(page.locator('#set-identityList')).toBeVisible();
   expect(protocolPacksRequests).toEqual([]);
 });

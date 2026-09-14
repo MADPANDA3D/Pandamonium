@@ -26,6 +26,10 @@ RUNBOOK_DIR = os.path.join(PERSONAL_DIR, "runbook")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 FEATURES_FILE = os.path.join(DATA_DIR, "features.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+# Multi-identity registry (MAD-929): saved agent identities and their attached
+# model profiles. Settings still own the installation identity contract; this
+# file migrates it as the first entry and layers additional identities on top.
+AGENT_IDENTITIES_FILE = os.path.join(DATA_DIR, "agent_identities.json")
 BRAND_FILE = os.path.join(DATA_DIR, "brand.json")
 AUTH_FILE = os.path.join(DATA_DIR, "auth.json")
 USER_PREFS_FILE = os.path.join(DATA_DIR, "user_prefs.json")

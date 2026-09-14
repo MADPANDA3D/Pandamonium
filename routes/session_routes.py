@@ -204,6 +204,114 @@ def _persist_session_agent_target(session_id: str, target: str) -> None:
         db.close()
 
 
+def _validated_session_identity(value: str | None) -> str:
+    """Normalize a session's saved-identity binding (MAD-929).
+
+    An empty value clears the binding back to the installation identity. Any
+    unknown id is rejected so a stale browser cannot pin a deleted identity.
+    """
+    wanted = value.strip() if isinstance(value, str) else ""
+    if not wanted:
+        return ""
+    try:
+        from src.agent_identities import get_identity
+
+        entry = get_identity(wanted)
+    except Exception:
+        entry = None
+    if entry is None:
+        raise HTTPException(400, "Unknown agent identity")
+    return wanted
+
+
+def _identity_chat_profile(identity_id: str) -> dict:
+    """Return the identity's chat lane ({endpoint_id, model, reasoning_level})."""
+    if not identity_id:
+        return {}
+    try:
+        from src.agent_identities import resolve_model_profile
+
+        return dict(resolve_model_profile(identity_id).get("chat") or {})
+    except Exception:
+        return {}
+
+
+def _persist_session_identity(session_id: str, identity_id: str, reasoning_level: str) -> None:
+    db = SessionLocal()
+    try:
+        db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
+        if not db_session:
+            raise HTTPException(404, f"Session {session_id} not found")
+        db_session.identity_id = identity_id or None
+        db_session.reasoning_level = (reasoning_level or "").strip().lower()[:16] or None
+        db_session.updated_at = utcnow_naive()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _apply_identity_profile_chat(session, session_id: str, identity_id: str, owner: str | None) -> dict:
+    """Apply the identity's chat lane to a session's model/endpoint/headers.
+
+    Returns the applied fields (empty when the profile has no chat model, in
+    which case the session keeps its current model). Never raises for a missing
+    endpoint — bindings must not brick a chat.
+    """
+    chat = _identity_chat_profile(identity_id)
+    endpoint_id = chat.get("endpoint_id") or ""
+    model = chat.get("model") or ""
+    if not endpoint_id and not model:
+        return {}
+    applied: dict = {}
+    if endpoint_id:
+        try:
+            from src.endpoint_resolver import resolve_endpoint_by_id
+
+            resolved = resolve_endpoint_by_id(endpoint_id, model or None, owner=owner or None)
+        except Exception:
+            resolved = None
+        if not resolved:
+            return {}
+        chat_url, resolved_model, headers = resolved
+        session.model = resolved_model
+        session.endpoint_url = chat_url
+        session.headers = headers or {}
+        applied = {"model": resolved_model, "endpoint_url": chat_url}
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if row:
+                row.model = resolved_model
+                row.endpoint_url = chat_url
+                row.headers = session.headers or {}
+                row.updated_at = utcnow_naive()
+                db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    elif model:
+        session.model = model
+        applied = {"model": model}
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if row:
+                row.model = model
+                row.updated_at = utcnow_naive()
+                db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    return applied
+
+
 def _validate_project_id(project_id: str) -> str:
     """Normalize a project binding: '' clears it, a real id passes, else 400."""
     from src import project_registry
@@ -328,7 +436,9 @@ def setup_session_routes(
             mode_map = {}
             msg_count_map = {}
             agent_target_map = {}
-            q = db.query(DbSession.id, DbSession.folder, DbSession.project_id, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count, DbSession.agent_target).filter(DbSession.archived == False)
+            identity_map = {}
+            reasoning_map = {}
+            q = db.query(DbSession.id, DbSession.folder, DbSession.project_id, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count, DbSession.agent_target, DbSession.identity_id, DbSession.reasoning_level).filter(DbSession.archived == False)
             q = owner_filter(q, DbSession, user)
             rows = q.all()
             for row in rows:
@@ -348,6 +458,8 @@ def setup_session_routes(
                 mode_map[row.id] = row.mode
                 msg_count_map[row.id] = row.message_count or 0
                 agent_target_map[row.id] = row.agent_target or "jarvis"
+                identity_map[row.id] = row.identity_id or ""
+                reasoning_map[row.id] = row.reasoning_level or ""
             # Sessions with active documents that have content
             from sqlalchemy import func
             doc_session_ids = set(
@@ -382,6 +494,8 @@ def setup_session_routes(
                      "has_images": s.id in img_session_ids,
                      "mode": mode_map.get(s.id),
                      "agent_target": agent_target_map.get(s.id, "jarvis"),
+                     "identity_id": identity_map.get(s.id, ""),
+                     "reasoning_level": reasoning_map.get(s.id, ""),
                      "message_count": msg_count_map.get(s.id, 0)}
                     for s in user_sessions.values()
                     if not s.archived
@@ -402,11 +516,22 @@ def setup_session_routes(
         endpoint_id: str = Form(""),
         agent_target: str = Form(None),
         project_id: str = Form(None),
+        identity_id: str = Form(None),
     ):
         skip_val = str(skip_validation).lower() == "true"
         user = effective_user(request)
         endpoint_api_key = ""
         endpoint_base_url = ""
+        # Session-bound saved identity (MAD-929). When the caller supplies an
+        # identity but no explicit model, the identity's chat lane seeds the
+        # session model/endpoint through the normal resolution below.
+        bound_identity = _validated_session_identity(identity_id)
+        identity_chat = _identity_chat_profile(bound_identity)
+        if bound_identity and not endpoint_id and not endpoint_url:
+            if identity_chat.get("endpoint_id"):
+                endpoint_id = identity_chat["endpoint_id"]
+            if identity_chat.get("model"):
+                model = identity_chat["model"]
         _reject_raw_endpoint_url_for_non_admin(request, user, endpoint_id, endpoint_url)
         if endpoint_id and endpoint_id.strip():
             from core.database import ModelEndpoint
@@ -502,6 +627,12 @@ def setup_session_routes(
         )
         _persist_session_agent_target(sid, target)
         session.agent_target = target
+        if bound_identity:
+            _persist_session_identity(
+                sid, bound_identity, identity_chat.get("reasoning_level") or ""
+            )
+            session.identity_id = bound_identity
+            session.reasoning_level = identity_chat.get("reasoning_level") or ""
         if resolved_project_id:
             _persist_session_project(sid, resolved_project_id)
         # Set auth headers for custom API-key endpoints
@@ -529,6 +660,7 @@ def setup_session_routes(
             rag=str(rag).lower() == "true" if rag else False,
             archived=False,
             agent_target=target,
+            identity_id=bound_identity,
         )    
     @router.patch("/session/{sid}")
     def rename_session(
@@ -538,6 +670,7 @@ def setup_session_routes(
         endpoint_id: str = Form(None),
         agent_target: str = Form(None),
         project_id: str = Form(None),
+        identity_id: str = Form(None),
     ):
         _verify_session_owner(request, sid)
         try:
@@ -570,6 +703,26 @@ def setup_session_routes(
             normalized_project = _validate_project_id(project_id)
             _persist_session_project(sid, normalized_project)
             result["project_id"] = normalized_project or None
+        # Bind a saved identity to this session (MAD-929). An empty string
+        # clears the binding. Unless the same request explicitly switches the
+        # model, the identity's chat lane loads with it so a reload shows the
+        # selected identity's model profile.
+        if isinstance(identity_id, str):
+            bound_identity = _validated_session_identity(identity_id)
+            identity_chat = _identity_chat_profile(bound_identity)
+            if bound_identity and model is None and endpoint_url is None:
+                applied = _apply_identity_profile_chat(
+                    session, sid, bound_identity, effective_user(request)
+                )
+                if applied:
+                    result.update(applied)
+            _persist_session_identity(
+                sid, bound_identity, identity_chat.get("reasoning_level") or ""
+            )
+            session.identity_id = bound_identity or None
+            session.reasoning_level = identity_chat.get("reasoning_level") or None
+            result["identity_id"] = bound_identity
+            result["reasoning_level"] = identity_chat.get("reasoning_level") or ""
         # Switch model/endpoint mid-session
         if model is not None and endpoint_url is not None:
             user = effective_user(request)

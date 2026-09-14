@@ -495,7 +495,7 @@ function renderIdentity(panel, status) {
 
   const advanced = el('button', 'setup-wizard-secondary', 'More identity options');
   advanced.type = 'button';
-  advanced.addEventListener('click', () => _openSettings('ai'));
+  advanced.addEventListener('click', () => _openSettings('identities'));
   footer.append(advanced);
   footer.append(_backRow(panel));
   panel.append(footer);

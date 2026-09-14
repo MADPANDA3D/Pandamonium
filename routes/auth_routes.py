@@ -719,8 +719,126 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     raise HTTPException(400, f"{key}: {exc}") from exc
             current[key] = val
         _save_settings(current)
+        # The settings identity remains the installation contract. Mirror the
+        # write into an already-persisted registry so the public status and the
+        # saved identities cannot drift apart (MAD-929).
+        try:
+            from src.agent_identities import sync_installation_identity
+
+            sync_installation_identity({
+                key: body[key]
+                for key in (
+                    "agent_id",
+                    "agent_display_name",
+                    "agent_constitution",
+                    "agent_constitution_version",
+                )
+                if key in body
+            })
+        except Exception:
+            logger.debug("Agent identity registry sync skipped", exc_info=True)
         return current
 
+    # ---- Agent identities (MAD-929) ----
+
+    def _require_admin(request: Request) -> str:
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        return user
+
+    @router.get("/identities")
+    async def list_agent_identities(request: Request):
+        """List saved identities. Constitutions stay admin-only.
+
+        Non-admins need the list to bind an identity to their own session, so
+        the projection carries names + model profiles but never the hidden
+        constitution body.
+        """
+        from src.agent_identities import active_id, list_identities, public_identity
+
+        user = _get_current_user(request)
+        include_constitution = bool(user and auth_manager.is_admin(user))
+        return {
+            "identities": [
+                public_identity(entry, include_constitution=include_constitution)
+                for entry in list_identities()
+            ],
+            "active_id": active_id(),
+            "constitution_included": include_constitution,
+        }
+
+    @router.post("/identities")
+    async def create_agent_identity(request: Request):
+        """Create a saved identity (admin only)."""
+        _require_admin(request)
+        from src.agent_identities import create_identity, public_identity
+
+        body = await request.json()
+        try:
+            entry = create_identity(body)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return public_identity(entry, include_constitution=True)
+
+    @router.put("/identities/{identity_id}")
+    async def update_agent_identity(identity_id: str, request: Request):
+        """Edit a saved identity (admin only)."""
+        _require_admin(request)
+        from src.agent_identities import public_identity, update_identity
+
+        body = await request.json()
+        try:
+            entry = update_identity(identity_id, body)
+        except KeyError:
+            raise HTTPException(404, "Identity not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return public_identity(entry, include_constitution=True)
+
+    @router.post("/identities/{identity_id}/duplicate")
+    async def duplicate_agent_identity(identity_id: str, request: Request):
+        """Duplicate a saved identity (admin only)."""
+        _require_admin(request)
+        from src.agent_identities import duplicate_identity, public_identity
+
+        try:
+            entry = duplicate_identity(identity_id)
+        except KeyError:
+            raise HTTPException(404, "Identity not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return public_identity(entry, include_constitution=True)
+
+    @router.delete("/identities/{identity_id}")
+    async def delete_agent_identity(identity_id: str, request: Request):
+        """Delete a saved identity. At least one must remain (admin only)."""
+        _require_admin(request)
+        from src.agent_identities import delete_identity
+
+        try:
+            result = delete_identity(identity_id)
+        except KeyError:
+            raise HTTPException(404, "Identity not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True, **result}
+
+    @router.post("/identities/active")
+    async def set_active_agent_identity(request: Request):
+        """Choose the installation (default) identity for new sessions."""
+        _require_admin(request)
+        from src.agent_identities import public_identity, set_active_identity
+
+        body = await request.json()
+        identity_id = str((body or {}).get("identity_id") or "")
+        try:
+            entry = set_active_identity(identity_id)
+        except KeyError:
+            raise HTTPException(404, "Identity not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"active_id": entry["id"]}
     # ---- Integrations CRUD ----
 
     # Run migration on startup

@@ -65,22 +65,24 @@ def test_public_ui_reuses_authenticated_identity_settings_and_guides_setup():
     wizard_js = (REPO_ROOT / "static" / "js" / "setupWizard.js").read_text(encoding="utf-8")
 
     for element_id in (
-        "set-agentIdentityCard",
-        "set-agentId",
-        "set-agentDisplayName",
-        "set-agentConstitution",
-        "set-agentConstitutionVersion",
-        "set-agentIdentitySave",
+        "set-identityList",
+        "set-identityId",
+        "set-identityDisplayName",
+        "set-identityConstitution",
+        "set-identityVersion",
+        "set-identitySave",
     ):
         assert f'id="{element_id}"' in html
+    assert 'data-settings-tab="identities"' in html
 
     for setting_key in (
         "agent_id",
-        "agent_display_name",
-        "agent_constitution",
-        "agent_constitution_version",
+        "display_name",
+        "constitution",
+        "constitution_version",
     ):
         assert setting_key in settings_js
+    assert "/api/auth/identities" in settings_js
 
     assert "guide-modal" in html
     assert "guide-panel" in html

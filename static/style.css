@@ -15782,6 +15782,73 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   color:color-mix(in srgb, var(--fg) 65%, transparent);
   font-size:11px;
 }
+/* Saved-identity list (MAD-929) */
+.identity-list {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-bottom:10px;
+}
+.identity-card {
+  border:1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius:8px;
+  padding:9px 10px;
+  background:color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.identity-card-head {
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.identity-card-name {
+  font-size:13px;
+  font-weight:600;
+}
+.identity-card-id {
+  font-size:10px;
+  color:color-mix(in srgb, var(--fg) 55%, transparent);
+  font-family:var(--font-mono, monospace);
+}
+.identity-card-meta {
+  margin-top:4px;
+  font-size:11px;
+  color:color-mix(in srgb, var(--fg) 65%, transparent);
+}
+.identity-card-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:8px;
+}
+.identity-card-actions button {
+  font-size:11px;
+}
+.identity-card.in-session {
+  border-color:color-mix(in srgb, var(--green) 55%, transparent);
+}
+.identity-lane-overrides {
+  margin-top:6px;
+  font-size:12px;
+}
+.identity-lane-overrides summary {
+  cursor:pointer;
+  color:color-mix(in srgb, var(--fg) 70%, transparent);
+  font-size:12px;
+}
+.identity-lane-row {
+  display:grid;
+  grid-template-columns:110px 22px 1fr 1fr;
+  gap:6px;
+  align-items:center;
+  margin-top:6px;
+}
+.identity-lane-row .settings-select {
+  min-width:0;
+}
+.identity-lane-label {
+  font-size:12px;
+  text-transform:capitalize;
+}
 .admin-danger-card {
   border-color: color-mix(in srgb, var(--color-error) 27%, transparent);
 }

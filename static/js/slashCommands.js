@@ -286,7 +286,7 @@ async function _showSetupOverview() {
   return slashReply(
     '<div class="setup-guide-no-censor" style="display:grid;gap:10px;">' +
       '<div><strong>Set up Pandamonium</strong><br><span style="opacity:.72;">Pandamonium is the harness. Your configured agent stays the same while model engines and integrations can change.</span></div>' +
-      step(identityConfigured ? '✓' : '1', 'Agent identity', identityConfigured ? 'Configured as ' + displayName : 'Name the agent and define its durable behavior', 'ai', 'set-agentIdentityCard') +
+      step(identityConfigured ? '✓' : '1', 'Agent identity', identityConfigured ? 'Configured as ' + displayName : 'Name the agent and define its durable behavior', 'identities', 'set-identityList') +
       step(hasModel ? '✓' : '2', 'Model engine', hasModel ? 'At least one model is available' : 'Connect a local or hosted model', 'services') +
       step('3', 'Integrations', 'Optionally connect services and install plugins', 'integrations') +
     '</div>'
@@ -5052,9 +5052,9 @@ async function _cmdSetup(args, ctx) {
     return true;
   }
   if (topic === 'identity' || topic === 'agent') {
-    settingsModule.open('ai');
-    setTimeout(() => document.getElementById('set-agentIdentityCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
-    await _setupReply('Agent Identity is open. This persistent identity stays stable when you switch models or plugins.');
+    settingsModule.open('identities');
+    setTimeout(() => document.getElementById('set-identityList')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    await _setupReply('Agent Identities is open. Every saved identity keeps its own constitution and model profile, and stays stable when you switch models or plugins.');
     return true;
   }
   if (topic === 'model' || topic === 'models') {

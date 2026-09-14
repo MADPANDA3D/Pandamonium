@@ -744,6 +744,14 @@ async def build_chat_context(
     _chat_domains = (
         [_chat_intent.category] if _chat_intent.needs_tools and _chat_intent.category else []
     )
+    # Session-bound identity (MAD-929). Unbound sessions resolve the
+    # installation identity exactly as before.
+    try:
+        from src.agent_identities import identity_id_for_session
+
+        _session_identity_id = identity_id_for_session(session_id)
+    except Exception:
+        _session_identity_id = ""
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
@@ -755,6 +763,7 @@ async def build_chat_context(
             model=sess.model,
             trace_surface="chat",
             protocol_domains=_chat_domains,
+            identity_id=_session_identity_id,
         ),
         owner=user,
         character_name=preset.character_name,
