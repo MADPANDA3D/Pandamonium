@@ -179,6 +179,11 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("research", "deep research imperative request", rf"{_PLEASE}(?:research|deep\s+dive|look\s+into|investigate)\s+.+"),
         ("research", "assistant deep research request", rf"{_ACTION_QUESTION}(?:research|do\s+research|deep\s+dive|look\s+into|investigate)\s+.+"),
 
+        # Android emulator/device control (governed adapter, MAD-838).
+        ("android", "android emulator/device request",
+         r"\b(?:android\s+(?:emulator|device|avd|app)|emulators?\b|\bavds?\b|"
+         r"adb\s+\w+|logcat|deep\s?link\b|\.apk\b)"),
+
         # Shell / remote-host intent.
         ("shell", "ssh request", r"\bssh\s+(?:in)?to\b"),
         ("shell", "ssh target request", r"\bssh\s+\w+"),

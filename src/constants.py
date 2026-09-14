@@ -67,6 +67,11 @@ MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
 # this managed directory only for the duration of a keygen/derive/test command.
 SSH_CONNECTIONS_DIR = os.path.join(DATA_DIR, "ssh_connections")
 SSH_AUDIT_FILE = os.path.join(DATA_DIR, "ssh_connections_audit.jsonl")
+# Governed Android emulator/ADB adapter (MAD-838). Screenshots and screen
+# recordings captured through the adapter are written here as task evidence;
+# the audit trail records every attempt with redacted, bounded fields.
+ANDROID_EVIDENCE_DIR = os.path.join(DATA_DIR, "android_evidence")
+ANDROID_AUDIT_FILE = os.path.join(DATA_DIR, "android_audit.jsonl")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
 MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))
