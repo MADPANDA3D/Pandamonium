@@ -550,12 +550,30 @@ export function autoResize(textarea) {
     textarea.parentNode.appendChild(clone);
     textarea._resizeClone = clone;
   }
-  // Computed styles copied during clone creation become fixed inline values.
-  // Refresh the dimensions that can change with responsive composer controls.
+  // Computed styles copied during clone creation become fixed inline values,
+  // and a cold start can create the clone before the stylesheet or webfont has
+  // settled. Refresh every property that affects text wrapping and measured
+  // height so scrollHeight and maxHeight are always computed from the same
+  // live values.
+  clone.style.font = textareaStyle.font;
+  clone.style.fontFamily = textareaStyle.fontFamily;
+  clone.style.fontSize = textareaStyle.fontSize;
+  clone.style.fontWeight = textareaStyle.fontWeight;
+  clone.style.fontStyle = textareaStyle.fontStyle;
+  clone.style.lineHeight = textareaStyle.lineHeight;
+  clone.style.letterSpacing = textareaStyle.letterSpacing;
+  clone.style.wordSpacing = textareaStyle.wordSpacing;
+  clone.style.whiteSpace = textareaStyle.whiteSpace;
+  clone.style.overflowWrap = textareaStyle.overflowWrap;
+  clone.style.wordBreak = textareaStyle.wordBreak;
+  clone.style.textTransform = textareaStyle.textTransform;
   clone.style.paddingLeft = textareaStyle.paddingLeft;
   clone.style.paddingRight = textareaStyle.paddingRight;
+  clone.style.paddingTop = textareaStyle.paddingTop;
+  clone.style.paddingBottom = textareaStyle.paddingBottom;
+  clone.style.border = textareaStyle.border;
   clone.style.boxSizing = textareaStyle.boxSizing;
-  clone.style.width = textarea.offsetWidth + 'px';
+  clone.style.width = textarea.getBoundingClientRect().width + 'px';
   clone.value = textarea.value;
   clone.style.height = '0';
   const newHeight = Math.min(Math.max(clone.scrollHeight, lineHeight), maxHeight);
