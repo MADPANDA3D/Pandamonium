@@ -25,7 +25,12 @@ from core.atomic_io import atomic_write_json
 from core.middleware import require_admin
 from core.models import ChatMessage
 from src.agent_loop import stream_agent_loop
-from src.agent_identity import agent_system_prompt, configured_agent_id, configured_agent_name
+from src.agent_identity import (
+    agent_identity_status,
+    agent_system_prompt,
+    configured_agent_id,
+    configured_agent_name,
+)
 from src.agent_worker_broker import worker_statuses
 from src.action_protocol import compose_capability_catalog, normalize_action_call, validate_action_call
 from src.action_intents import classify_tool_intent
@@ -153,10 +158,19 @@ CHATGPT_SUBSCRIPTION_LABEL = (
 )
 VOICE_TARGET_LABELS = {**WORKER_LABELS, "friday": CHATGPT_SUBSCRIPTION_LABEL}
 DIRECT_MODEL_TARGETS = {"jarvis", "friday"}
-VOICE_TARGET_ENDPOINT_NAMES = {
-    "jarvis": ("Jarvis",),
-    "friday": ("Friday", "ChatGPT Subscription"),
-}
+
+
+def _voice_target_endpoint_names(target: str) -> tuple:
+    """Endpoint display names that can answer for a direct voice target.
+
+    The direct agent resolves through the saved installation identity instead
+    of a hardcoded label; the subscription target keeps its public names.
+    """
+    if target == "jarvis":
+        return (configured_agent_name(),)
+    return {
+        "friday": ("Friday", CHATGPT_SUBSCRIPTION_LABEL),
+    }.get(target, ())
 ACTIVE_VOICE_TARGETS = DIRECT_MODEL_TARGETS | {
     worker for worker, details in worker_catalog().items() if details.get("enabled")
 }
@@ -214,6 +228,41 @@ def _worker_command(text: str) -> tuple[str, str, str, str | None, str | None] |
 def _operator_vocative() -> str:
     name = os.getenv("ODYSSEUS_OPERATOR_DISPLAY_NAME", "").strip()
     return f", {name}" if re.fullmatch(r"[^\s][^\r\n]{0,63}", name) else ""
+
+
+def _voice_target_display(target: str) -> str:
+    """Saved installation identity for the direct agent; worker label otherwise.
+
+    The direct agent's display comes from the configured identity, never from a
+    hardcoded private label. Worker targets keep their catalog label.
+    """
+    if not target or target == "jarvis":
+        return configured_agent_name()
+    return VOICE_TARGET_LABELS.get(target, str(target))
+
+
+def _deterministic_greeting_enabled() -> bool:
+    """Explicit, installation-configurable low-latency greeting mode.
+
+    Default OFF: casual greetings follow the configured identity/model path.
+    The deterministic mode is never the default and never required for a clean
+    install to greet the operator.
+    """
+    try:
+        return bool(load_settings().get("voice_deterministic_greeting", False))
+    except Exception:
+        return False
+
+
+def _greeting_identity_name() -> str:
+    """The saved installation display name, or '' while the public default is active."""
+    try:
+        status = agent_identity_status()
+    except Exception:
+        return ""
+    if str(status.get("source") or "") != "configured":
+        return ""
+    return str(status.get("display_name") or "").strip()
 
 
 class VoiceSessionCreate(BaseModel):
@@ -970,7 +1019,7 @@ def _tts_voice_for_final(final: dict[str, Any]) -> str | None:
 
 
 def _voice_character_name(voice_session: dict[str, Any]) -> str:
-    return VOICE_TARGET_LABELS.get(str(voice_session.get("target") or "jarvis"), configured_agent_name())
+    return _voice_target_display(str(voice_session.get("target") or "jarvis"))
 
 
 def _voice_system_prompt(voice_session: dict[str, Any]) -> str:
@@ -1279,7 +1328,7 @@ async def _handoff_greeting(
     workspace: str,
 ) -> dict[str, Any]:
     """Return one destination-owned greeting without launching a worker task."""
-    label = VOICE_TARGET_LABELS.get(target, target)
+    label = _voice_target_display(target)
     try:
         if target == "hermes":
             from src.jarvis_agent import direct_hermes_turn
@@ -1522,7 +1571,7 @@ def _resolve_voice_target_endpoint(target: str, owner: str) -> tuple[str, str, d
         resolved = resolve_endpoint("default", owner=owner)
         if resolved and resolved[0] and resolved[1]:
             return resolved
-    names = VOICE_TARGET_ENDPOINT_NAMES.get(target) or ()
+    names = _voice_target_endpoint_names(target)
     if not names:
         return None
     from core.database import ModelEndpoint, SessionLocal
@@ -2129,13 +2178,21 @@ def _is_casual_greeting(text: str) -> bool:
 
 
 def _casual_greeting_reply(text: str, voice_session: dict) -> str:
+    """Deterministic greeting used only when the operator enabled that mode.
+
+    Copy is generic while the public default identity is active and uses the
+    saved display name once the installation configured one. It never contains
+    a hardcoded private name or phrase.
+    """
+    name = _greeting_identity_name()
+    introduction = f" — {name} here" if name else ""
     explicit_band = re.search(r"\bgood\s+(morning|afternoon|evening)\b", text, re.IGNORECASE)
     if explicit_band:
         band = explicit_band.group(1).lower()
-        return f"Good {band}{_operator_vocative()}. What are we working on?"
+        return f"Good {band}{introduction}. What would you like to work on?"
     replies = (
-        f"I’m doing well{_operator_vocative()}. What are we working on?",
-        f"Good to hear from you{_operator_vocative()}. What would you like to tackle?",
+        f"I’m doing well{introduction}. What would you like to work on?",
+        f"Good to hear from you{introduction}. What would you like to tackle?",
     )
     recent = {str(turn.get("text") or "") for turn in voice_session.get("turns", [])[-6:]}
     return next((reply for reply in replies if reply not in recent), replies[0])
@@ -3010,7 +3067,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "vps-codex": "vps-ops",
             "hermes": "home-lab",
         }.get(target_switch, _workspace_for_text(text))
-        label = VOICE_TARGET_LABELS.get(target_switch, "Jarvis")
+        label = _voice_target_display(target_switch)
         chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
         origin_target = _voice_origin_target(voice_session, chat_session)
         target_connected = True
@@ -3044,7 +3101,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         reply = (
             _casual_greeting_reply(text, voice_session)
             if target_switch == "jarvis" and _is_casual_greeting(text)
-            else "You’re back with Jarvis."
+            else f"You’re back with {_voice_target_display('jarvis')}."
             if target_switch == "jarvis"
             else f"Transferring you to {label} now—one moment, please."
         )
@@ -3094,7 +3151,11 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
         )
         return
 
-    if selected_target == "jarvis" and _is_casual_greeting(text):
+    if (
+        selected_target == "jarvis"
+        and _deterministic_greeting_enabled()
+        and _is_casual_greeting(text)
+    ):
         reply = _casual_greeting_reply(text, voice_session)
         yield {"type": "assistant_delta", "text": reply}
         yield _server_final_event(text, reply, "casual_greeting")
@@ -3443,7 +3504,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         or (
             selected_target == "jarvis"
             and (
-                _is_casual_greeting(text)
+                (_deterministic_greeting_enabled() and _is_casual_greeting(text))
                 or _background_delegation(text)
                 or _asks_current_business(text)
             )

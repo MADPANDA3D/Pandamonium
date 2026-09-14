@@ -159,7 +159,7 @@ assert.match(source, /item\.dataset\.source === 'jarvis_worker_summary'/);
 assert.doesNotMatch(source, /const isResultSummary = event\.type === 'result'/);
 assert.match(source, /metadata\.progress_summary === true \|\| metadata\.milestone === true/);
 assert.match(source, /source: 'jarvis_worker_summary'/);
-assert.match(source, /character_name: task\.presenter \|\| 'Jarvis'/);
+assert.match(source, /character_name: task\.presenter \|\| agentDisplayName\(\)/);
 assert.match(source, /summary\.dataset\.workerEventId = eventId/);
 assert.match(source, /if \(eventId\) return item\.dataset\.workerEventId === eventId/);
 assert.match(source, /if \(afterResult\)/);
@@ -170,7 +170,7 @@ assert.match(source, /querySelectorAll\('\.jarvis-task-approval-actions button'\
 assert.doesNotMatch(source, /history\.setAttribute\('role', 'log'\)/);
 assert.doesNotMatch(source, /history\.setAttribute\('aria-live', 'polite'\)/);
 assert.match(source, /window\.chatModule\?\.addMessage\?\.\('assistant', event\.text, '', \{/);
-assert.match(source, /character_name: task\.presenter \|\| 'Jarvis'/);
+assert.match(source, /character_name: task\.presenter \|\| agentDisplayName\(\)/);
 assert.match(source, /renderWorkerResult\(completed, task, liveAssistantMessage\)/);
 assert.match(source, /Could not load completed foreground worker result/);
 assert.match(source, /replaceMessage\.remove\(\)/);
