@@ -70,6 +70,7 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "vault_get",
     "vault_unlock",
     "ssh_node",
+    "nextcloud_files",
     "download_model",
     "serve_model",
     "serve_preset",

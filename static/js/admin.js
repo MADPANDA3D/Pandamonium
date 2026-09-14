@@ -2165,6 +2165,7 @@ const TOOL_META = {
   manage_tokens:     { name: 'API Tokens',       desc: 'Manage API access tokens',        cat: 'System',     ctx: '~100' },
   manage_settings:   { name: 'Settings',         desc: 'Change app settings',             cat: 'System',     ctx: '~100' },
   ssh_node:          { name: 'SSH Node',         desc: 'Bounded SSH to saved nodes',      cat: 'System',     ctx: '~150' },
+  nextcloud_files:   { name: 'Nextcloud Files',  desc: 'Read files from Nextcloud',       cat: 'Knowledge',  ctx: '~150' },
 };
 
 async function loadBuiltinTools() {

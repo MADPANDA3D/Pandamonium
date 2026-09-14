@@ -208,6 +208,24 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "nextcloud_files",
+            "description": "Read-only access to the owner's connected Nextcloud (Settings > Integrations): list a folder, search file names, or read a text file. There is no write/upload path. Content is bounded and secret-shaped paths are excluded. Results cite the exact node and path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "read", "search"], "description": "list a folder, read a file, or search file names"},
+                    "path": {"type": "string", "maxLength": 1024, "description": "Folder path for list/search, file path for read (root when omitted for list)"},
+                    "query": {"type": "string", "maxLength": 120, "description": "File-name search text (required for search; at least 2 characters)"},
+                    "max_bytes": {"type": "integer", "minimum": 1, "maximum": 65536, "description": "Optional smaller text read limit; never above the 64 KiB hard cap"}
+                },
+                "required": ["action"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Write/save a file to disk",
             "parameters": {

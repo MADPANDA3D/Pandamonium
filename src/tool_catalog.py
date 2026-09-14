@@ -67,6 +67,7 @@ TOOL_CATEGORIES: Dict[str, str] = {
     "manage_settings": "System",
     "manage_extensions": "System",
     "ssh_node": "System",
+    "nextcloud_files": "Knowledge",
 }
 
 # Email tools run through the bundled email MCP server; the bare names have no

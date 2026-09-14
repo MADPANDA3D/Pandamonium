@@ -97,6 +97,7 @@ _COMMON_TOOL_NAMES = {
     "manage_tokens",
     "manage_webhooks",
     "mark_email_read",
+    "nextcloud_files",
     "pipeline",
     "python",
     "read_calendar",

@@ -3827,6 +3827,7 @@ const INTG_TYPES = {
   carddav: { label: 'CardDAV', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
   email:   { label: 'Email',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>' },
   mcp:     { label: 'MCP',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' },
+  nextcloud: { label: 'Nextcloud', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6 1.8A3.6 3.6 0 0 0 6.5 19z"/></svg>' },
   codex:   { label: 'Codex',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 10.696.453a6.023 6.023 0 0 0-5.75 4.172 6.061 6.061 0 0 0-3.946 2.945 6.024 6.024 0 0 0 .742 7.099 5.98 5.98 0 0 0 .516 4.911 6.046 6.046 0 0 0 6.51 2.9A5.996 5.996 0 0 0 13.26 23.547a6.023 6.023 0 0 0 5.75-4.172 6.061 6.061 0 0 0 3.946-2.945 6.024 6.024 0 0 0-.674-6.609zM13.26 21.047a4.508 4.508 0 0 1-2.886-1.041l.143-.082 4.793-2.769a.777.777 0 0 0 .391-.676V10.34l2.026 1.17a.072.072 0 0 1 .039.061v5.596a4.532 4.532 0 0 1-4.506 4.48zM3.968 17.64a4.473 4.473 0 0 1-.537-3.018l.143.086 4.793 2.769a.79.79 0 0 0 .782 0l5.852-3.379v2.34a.072.072 0 0 1-.029.062l-4.845 2.796a4.532 4.532 0 0 1-6.159-1.656zM2.804 7.922a4.49 4.49 0 0 1 2.348-1.973V11.6a.778.778 0 0 0 .391.676l5.852 3.378-2.026 1.17a.072.072 0 0 1-.068 0L4.456 14.03a4.532 4.532 0 0 1-1.652-6.108zm16.423 3.823L13.375 8.367l2.026-1.17a.072.072 0 0 1 .068 0l4.845 2.796a4.525 4.525 0 0 1-.7 8.08V12.42a.778.778 0 0 0-.387-.676zm2.015-3.025l-.143-.086-4.793-2.769a.79.79 0 0 0-.782 0L9.672 9.243V6.903a.072.072 0 0 1 .029-.062l4.845-2.796a4.525 4.525 0 0 1 6.696 4.675zM8.598 12.66L6.57 11.49a.072.072 0 0 1-.039-.061V5.833a4.525 4.525 0 0 1 7.413-3.48l-.143.082-4.793 2.769a.777.777 0 0 0-.391.676l-.019 6.78zm1.1-2.379l2.607-1.505 2.607 1.505v3.01l-2.607 1.505-2.607-1.505z"/></svg>' },
   claude:  { label: 'Claude',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>' },
   vault:   { label: 'Vault',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
@@ -3922,7 +3923,7 @@ async function initUnifiedIntegrations() {
   }
 
   async function fetchAll() {
-    const [apiRes, calRes, cardRes, contactsRes, emailAccountsRes, mcpRes, vaultRes, tokenRes, calendarsRes] = await Promise.all([
+    const [apiRes, calRes, cardRes, contactsRes, emailAccountsRes, mcpRes, vaultRes, tokenRes, calendarsRes, nextcloudRes] = await Promise.all([
       fetch('/api/auth/integrations', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { integrations: [] }).catch(() => ({ integrations: [] })),
       fetch('/api/calendar/config/accounts', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { accounts: [] }).catch(() => ({ accounts: [] })),
       fetch('/api/contacts/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
@@ -3932,6 +3933,7 @@ async function initUnifiedIntegrations() {
       fetch('/api/vault/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
       fetch('/api/tokens', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch('/api/calendar/calendars', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { calendars: [] }).catch(() => ({ calendars: [] })),
+      fetch('/api/nextcloud/connection', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { configured: false }).catch(() => ({ configured: false })),
     ]);
     const items = [];
     const nativeApiByMcpId = new Map();
@@ -4006,6 +4008,18 @@ async function initUnifiedIntegrations() {
       items.push({ type: agentType, id: tok.id, name: tok.name || (agentType === 'claude' ? 'Claude Agent' : 'Codex Agent'), detail, enabled: true, data: tok });
     }
     // Vaultwarden removed as an integration option.
+    if (nextcloudRes && nextcloudRes.configured) {
+      const state = nextcloudRes.status || 'untested';
+      const detail = [nextcloudRes.server_url, nextcloudRes.username].filter(Boolean).join(' — ') + ` · ${state}`;
+      items.push({
+        type: 'nextcloud',
+        id: '__nextcloud__',
+        name: 'Nextcloud Files',
+        detail,
+        enabled: state !== 'disabled' && nextcloudRes.enabled !== false,
+        data: nextcloudRes,
+      });
+    }
     return items;
   }
 
@@ -4080,6 +4094,7 @@ async function initUnifiedIntegrations() {
           else if (type === 'email') await fetch(`/api/email/accounts/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'mcp') await fetch(`/api/mcp/servers/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'codex' || type === 'claude') await fetch(`/api/tokens/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+          else if (type === 'nextcloud') await fetch('/api/nextcloud/connection', { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'vault') await fetch('/api/vault/logout', { method: 'POST', credentials: 'same-origin' });
         } catch (_) {}
         formEl.style.display = 'none';
@@ -4100,6 +4115,110 @@ async function initUnifiedIntegrations() {
     else if (type === 'codex') showAgentForm('codex', editId);
     else if (type === 'claude') showAgentForm('claude', editId);
     else if (type === 'vault') showVaultForm();
+    else if (type === 'nextcloud') showNextcloudForm();
+  }
+
+  // ── Nextcloud form (MAD-937: read-only files over tailnet) ──
+  async function showNextcloudForm() {
+    let state = { configured: false, status: 'unconfigured' };
+    try {
+      const r = await fetch('/api/nextcloud/connection', { credentials: 'same-origin' });
+      if (r.ok) state = await r.json();
+    } catch (_) {}
+    formEl.innerHTML = `
+      <div class="admin-card" style="margin-top:8px">
+        <h2 style="font-size:13px;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent, var(--red));flex-shrink:0;"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6 1.8A3.6 3.6 0 0 0 6.5 19z"/></svg>Nextcloud Files</h2>
+        <div class="settings-col">
+          <div style="font-size:11px;opacity:0.6;line-height:1.35;">Connect a Nextcloud instance with an app password. Access is read-only: browse, search, and read files. The app password is stored encrypted and never shown again.</div>
+          <div class="settings-row"><label class="settings-label">Server URL</label><input id="uf-nextcloud-url" class="settings-input" placeholder="https://cloud.example.test" value="${esc(state.server_url || '')}"></div>
+          <div class="settings-row"><label class="settings-label">Username</label><input id="uf-nextcloud-user" class="settings-input" placeholder="Nextcloud user" value="${esc(state.username || '')}"></div>
+          <div class="settings-row"><label class="settings-label">App password</label><input id="uf-nextcloud-pass" class="settings-input" type="password" placeholder="${state.app_password_configured ? 'Saved — leave blank to keep' : 'App password'}"></div>
+          <div style="display:flex;align-items:center;gap:8px;margin:-2px 0 2px 106px;">
+            <span id="uf-nextcloud-status" style="font-size:11px;opacity:0.7;">${esc(state.configured ? `${state.status || 'untested'}` : 'Not connected')}</span>
+            <button class="admin-btn-sm" id="uf-nextcloud-scan" style="background:none;border:1px solid var(--border);color:var(--fg);">Scan tailnet</button>
+          </div>
+          <div id="uf-nextcloud-candidates" style="display:none;margin:0 0 6px 106px;font-size:11px;"></div>
+          <div class="settings-row" style="margin-top:10px;align-items:center;justify-content:flex-end;gap:6px;">
+            <span id="uf-nextcloud-msg" style="font-size:11px;flex:1;margin-right:8px"></span>
+            <button class="admin-btn-add" id="uf-nextcloud-test" style="display:inline-flex;align-items:center;gap:5px;background:transparent;color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));">Test</button>
+            <button class="admin-btn-add" id="uf-nextcloud-save" style="display:inline-flex;align-items:center;gap:5px;background:transparent;color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));font-weight:600;">Save</button>
+            <button class="admin-btn-add" id="uf-nextcloud-cancel" style="display:inline-flex;align-items:center;gap:5px;background:transparent;color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    const msg = el('uf-nextcloud-msg');
+    const statusEl = el('uf-nextcloud-status');
+    const saveBody = () => {
+      const body = {
+        server_url: el('uf-nextcloud-url')?.value.trim() || undefined,
+        username: el('uf-nextcloud-user')?.value.trim() || undefined,
+      };
+      const pass = el('uf-nextcloud-pass')?.value.trim();
+      if (pass) body.app_password = pass;
+      return body;
+    };
+    const report = (text, ok) => {
+      if (!msg) return;
+      msg.textContent = text;
+      msg.style.color = ok ? 'var(--green, #50fa7b)' : 'var(--red)';
+    };
+    el('uf-nextcloud-save')?.addEventListener('click', async () => {
+      const body = saveBody();
+      if (!body.server_url || !body.username) { report('Server URL and username are required.', false); return; }
+      try {
+        const r = await fetch('/api/nextcloud/connection', {
+          method: 'PUT', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || d.message || 'Save failed');
+        report('Saved. Run Test to verify the connection.', true);
+        if (statusEl) statusEl.textContent = d.status || 'untested';
+        await renderList();
+        notifyIntegrationsChanged();
+      } catch (err) {
+        report(err?.message || 'Save failed', false);
+      }
+    });
+    el('uf-nextcloud-test')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/nextcloud/connection/test', { method: 'POST', credentials: 'same-origin' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail?.message || d.detail || d.message || 'Connection test failed');
+        report(d.message || 'Nextcloud files are readable.', true);
+        if (statusEl) statusEl.textContent = d.status || 'healthy';
+        await renderList();
+      } catch (err) {
+        report(err?.message || 'Connection test failed', false);
+      }
+    });
+    el('uf-nextcloud-scan')?.addEventListener('click', async () => {
+      const box = el('uf-nextcloud-candidates');
+      if (!box) return;
+      box.style.display = '';
+      box.textContent = 'Scanning online tailnet devices…';
+      try {
+        const r = await fetch('/api/nextcloud/discover', { credentials: 'same-origin' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || 'Scan failed');
+        const candidates = d.candidates || [];
+        if (!candidates.length) { box.textContent = d.message || 'No Nextcloud server answered.'; return; }
+        box.innerHTML = candidates.map((c, i) =>
+          `<button type="button" class="admin-btn-sm uf-nextcloud-candidate" data-value="${esc(c.server_url || '')}" style="background:none;border:1px solid var(--border);color:var(--fg);margin:2px 4px 2px 0;">${esc(c.device || c.label)} — ${esc(c.server_url || '')}</button>`
+        ).join('');
+        box.querySelectorAll('.uf-nextcloud-candidate').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const urlInput = el('uf-nextcloud-url');
+            if (urlInput) urlInput.value = btn.dataset.value || '';
+            report('Candidate selected. Add the username and app password, then Save.', true);
+          });
+        });
+      } catch (err) {
+        box.textContent = err?.message || 'Scan failed';
+      }
+    });
+    el('uf-nextcloud-cancel')?.addEventListener('click', () => { formEl.style.display = 'none'; });
   }
 
   // ── API form ──
@@ -6025,6 +6144,7 @@ async function initUnifiedIntegrations() {
       ['contacts', 'Contacts Import'],
       ['email', 'Email (IMAP/SMTP)'],
       ['mcp', 'MCP Tool Server'],
+      ['nextcloud', 'Nextcloud Files'],
     ];
     const _iconFor = (k) => (INTG_TYPES[k]?.icon || '').replace(/width="14"/, 'width="16"').replace(/height="14"/, 'height="16"');
     const _rowsHtml = _typeOptions.map(([k, label]) => `<button type="button" class="uf-type-option" data-value="${k}" style="display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;background:transparent;border:0;color:var(--fg);font:inherit;cursor:pointer;text-align:left;"><span style="display:inline-flex;color:var(--accent, var(--red));flex-shrink:0;">${_iconFor(k)}</span><span>${esc(label)}</span></button>`).join('');
