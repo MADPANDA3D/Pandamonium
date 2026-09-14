@@ -765,6 +765,12 @@ Return the absolute path of the active workspace folder. File tools are CONFINED
 ```
 Work with a SAVED SSH connection (Settings > SSH Connections). Never invents a target: name an existing connection by id or exact label. `list` shows a folder (`path` optional, defaults to the home folder); `read` returns a file's text bounded to 64 KiB; `run` executes exactly one command from the connection's allowlist (no shell operators, no chaining). Output and run time are bounded, every call is audited, and the result cites the node and path. If the connection is missing or the command is not allowlisted, report that honestly instead of retrying another target.""",
 
+    "nextcloud_files": """\
+```nextcloud_files
+{"action": "list|read|search", "path": "<folder or file path>", "query": "<file name search>"}
+```
+Read-only access to the owner's connected Nextcloud (Settings > Integrations). `list` shows a folder (`path` optional, defaults to the account root); `search` matches file names (at least 2 characters, `path` optional to narrow the folder); `read` returns a text file's contents bounded to 64 KiB. There is no write or upload path. Secret-shaped paths are excluded, content and run time are bounded, and every result cites the exact node and path — quote that citation when you answer from a file. If Nextcloud is not connected or a path is excluded, say so honestly instead of trying another server.""",
+
     "create_document": """\
 ```create_document
 <title>

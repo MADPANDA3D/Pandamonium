@@ -779,6 +779,11 @@ async def _execute_tool_block_impl(
         desc = f"ssh_node: {content.split(chr(10))[0][:80]}"
         result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
             or {"error": "ssh_node: execution failed", "exit_code": 1}
+    elif tool == "nextcloud_files":
+        # Read-only Nextcloud files (MAD-937); owner-scoped connection.
+        desc = f"nextcloud_files: {content.split(chr(10))[0][:80]}"
+        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
+            or {"error": "nextcloud_files: execution failed", "exit_code": 1}
     elif tool in ("create_document", "update_document", "edit_document",
                   "suggest_document", "manage_documents"):
         desc = f"{tool}: {content.split(chr(10))[0][:80]}"

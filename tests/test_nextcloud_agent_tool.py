@@ -161,3 +161,13 @@ def test_nextcloud_tool_is_admin_gated():
     from src.tool_security import is_public_blocked_tool
 
     assert is_public_blocked_tool("nextcloud_files") is True
+
+
+def test_nextcloud_tool_is_registered_and_has_a_schema():
+    from src.agent_tools import TOOL_HANDLERS, TOOL_TAGS
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    assert "nextcloud_files" in TOOL_HANDLERS
+    assert "nextcloud_files" in TOOL_TAGS
+    names = {schema["function"]["name"] for schema in FUNCTION_TOOL_SCHEMAS}
+    assert "nextcloud_files" in names

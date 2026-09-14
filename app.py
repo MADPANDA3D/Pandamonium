@@ -854,6 +854,10 @@ app.include_router(setup_workspace_routes())
 from routes.ssh_routes import setup_ssh_routes
 app.include_router(setup_ssh_routes())
 
+# Nextcloud files (MAD-937: owner-scoped read-only connection and browsing)
+from routes.nextcloud_routes import setup_nextcloud_routes
+app.include_router(setup_nextcloud_routes())
+
 # Pandamonium agent workstation projects (MAD-902)
 from routes.project_routes import setup_project_routes
 app.include_router(setup_project_routes())

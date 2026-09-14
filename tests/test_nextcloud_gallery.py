@@ -88,6 +88,9 @@ def nc_env(tmp_path, monkeypatch):
         nc, "decrypt", lambda value: value[4:][::-1] if value.startswith("enc:") else value
     )
     monkeypatch.setattr(nc, "is_encrypted", lambda value: value.startswith("enc:"))
+    # Fixtures use reserved placeholder hostnames (cloud.example.test) that do
+    # not resolve in CI; DNS safety itself is covered by src/url_safety tests.
+    monkeypatch.setattr(nc, "check_outbound_url", lambda value, block_private=False: (True, ""))
     yield factory
     engine.dispose()
 
@@ -200,7 +203,7 @@ async def test_tailnet_discovery_probes_status_php_without_credentials():
 
     def handler(request: httpx.Request):
         seen.append((str(request.url), request.headers.get("authorization")))
-        if request.url.path.endswith("/status.php"):
+        if request.url.host == "100.64.0.2" and request.url.path.endswith("/status.php"):
             return httpx.Response(200, json=STATUS_JSON, request=request)
         return httpx.Response(404, request=request)
 
@@ -348,7 +351,8 @@ async def test_read_file_truncates_at_bound(nc_env):
     )
 
     assert result["truncated"] is True
-    assert len(result["content"]) <= 1024
+    assert len(result["content"]) <= 1024 + 80
+    assert "truncated at 1024 bytes" in result["content"]
 
 
 @pytest.mark.asyncio
@@ -377,3 +381,33 @@ def test_redacted_paths_cover_secret_shapes():
     assert nc.is_redacted_path("keys/server.pem")
     assert nc.is_redacted_path("private.key")
     assert not nc.is_redacted_path("Reports/q3.txt")
+
+
+def test_routes_expose_owner_scoped_connection_and_validate(nc_env, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import routes.nextcloud_routes as nextcloud_routes
+
+    monkeypatch.setattr(nextcloud_routes, "require_user", lambda request: "alice")
+    app = FastAPI()
+    app.include_router(nextcloud_routes.setup_nextcloud_routes())
+    client = TestClient(app)
+
+    unconfigured = client.get("/api/nextcloud/connection").json()
+    assert unconfigured["configured"] is False
+    assert "app_password" not in unconfigured
+
+    saved = client.put(
+        "/api/nextcloud/connection",
+        json={"server_url": BASE_URL, "username": USERNAME, "app_password": APP_PASSWORD},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["configured"] is True
+    assert APP_PASSWORD not in saved.text
+
+    rejected = client.put(
+        "/api/nextcloud/connection", json={"server_url": "ftp://cloud.example.test"}
+    )
+    assert rejected.status_code == 400
+    assert "HTTP" in rejected.json()["detail"]
