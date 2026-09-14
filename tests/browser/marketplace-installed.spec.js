@@ -51,17 +51,27 @@ test('installed plugins stay visible and detailed when the marketplace is offlin
   await page.goto('/static/index.html');
   await page.getByRole('button', { name: 'Browse plugins' }).click();
 
+  await expect(page.locator('#marketplace-panel-installed')).toBeVisible();
   await expect(page.locator('#marketplace-installed-list')).toContainText('ORACLE');
   await expect(page.locator('#marketplace-installed-list')).toContainText('Atlas Lab');
+
+  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
   await expect(page.locator('#marketplace-results')).toContainText('Marketplace offline');
+  await page.getByRole('tab', { name: 'Installed plugins' }).click();
 
   await page.locator('#marketplace-installed-list button', { hasText: 'ORACLE' }).click();
-  await expect(page.locator('#marketplace-detail-content')).toContainText('Configured surface');
-  await expect(page.locator('#marketplace-detail-content')).toContainText('live_catalog');
+  await expect(page.locator('#marketplace-installed-view')).toBeHidden();
+  await expect(page.locator('#marketplace-installed-detail')).toBeVisible();
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('Configured surface');
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('live_catalog');
+
+  await page.getByRole('button', { name: '← Back to installed' }).click();
+  await expect(page.locator('#marketplace-installed-view')).toBeVisible();
+  await expect(page.locator('#marketplace-installed-detail')).toBeHidden();
 
   await page.locator('#marketplace-installed-list button', { hasText: 'Atlas Lab' }).click();
-  await expect(page.locator('#marketplace-detail-content')).toContainText('create_mesh');
-  await expect(page.locator('#marketplace-detail-content')).toContainText('Create a mesh');
-  await expect(page.locator('#marketplace-detail-content')).toContainText('ATLAS_API_TOKEN');
-  await expect(page.locator('#marketplace-detail-content')).toContainText('secret');
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('create_mesh');
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('Create a mesh');
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('ATLAS_API_TOKEN');
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('secret');
 });
