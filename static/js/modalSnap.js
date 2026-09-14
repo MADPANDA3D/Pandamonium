@@ -39,6 +39,33 @@ export function edgeDockAvailable() {
   return window.innerWidth > EDGE_DOCK_BREAKPOINT;
 }
 
+// ── Side-panel dock state (MAD-932) ──────────────────────────────────────
+// `left-dock-active` / `right-dock-active` on <body> ARE the canonical
+// "a side-mounted panel owns the edge" state: every dock path in this module
+// sets them, tileManager shares them, and they are cleared when the docked
+// owner disappears. Expose one observer so panes react to that state instead
+// of each wiring its own body listener and fighting the dock.
+export function sidePanelDocked() {
+  return document.body.classList.contains('left-dock-active')
+    || document.body.classList.contains('right-dock-active');
+}
+
+export function watchSidePanelDock(listener) {
+  if (typeof listener !== 'function') return () => {};
+  let last = sidePanelDocked();
+  const notify = () => {
+    const next = sidePanelDocked();
+    if (next === last) return;
+    last = next;
+    try { listener(next); } catch (_) {}
+  };
+  const observer = new MutationObserver(notify);
+  observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  // Report the current state once so callers can sync at bind time.
+  try { listener(last); } catch (_) {}
+  return () => { try { observer.disconnect(); } catch (_) {} };
+}
+
 export function dockViewportGeometry() {
   const viewport = window.visualViewport;
   const height = viewport?.height
