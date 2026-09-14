@@ -113,6 +113,15 @@ test('Training tab lists the runtime with capability discovery and never shows t
 
   await row.locator('[data-unsloth-action="test"]').click();
   await expect(page.locator('#unsloth-msg')).toContainText('accepted the access token');
+
+  if (process.env.MAD796_SCREENSHOT_DIR) {
+    const dir = process.env.MAD796_SCREENSHOT_DIR;
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: `${dir}/mad-796-training-runtime-desktop.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: `${dir}/mad-796-training-runtime-mobile.png` });
+    await page.setViewportSize({ width: 1280, height: 720 });
+  }
 });
 
 test('configuring the runtime sends the URL and token once and renders the saved state', async ({ page }) => {
