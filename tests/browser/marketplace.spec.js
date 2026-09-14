@@ -74,8 +74,11 @@ test('Plugins → Add Plugins previews and executes the approved lifecycle', asy
   await launcher.focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#marketplace-modal')).toBeVisible();
-  await expect(page.locator('#marketplace-search')).toBeFocused();
+  await expect(page.locator('#marketplace-tab-installed')).toBeFocused();
+  await expect(page.locator('#marketplace-panel-installed')).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Add Plugins' })).toContainText('Signed marketplace');
+  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
+  await expect(page.locator('#marketplace-panel-add')).toBeVisible();
   await expect(page.getByRole('button', { name: /Atlas/ })).toContainText('Update available');
   await expect(page.getByRole('button', { name: /Robin/ })).toContainText('Revoked');
 
@@ -142,6 +145,7 @@ test('marketplace renders loading, offline, empty, and mobile detail navigation'
   expect(launcherBox.height).toBeGreaterThanOrEqual(44);
   await launcher.focus();
   await page.keyboard.press('Space');
+  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
   await expect(page.locator('#marketplace-results')).toContainText('Loading plugins');
   resolveCatalog();
   await expect(page.getByRole('button', { name: /Atlas/ })).toBeVisible();

@@ -154,6 +154,7 @@ test('a wizard-linked plugin scan failure never shows the raw backend code', asy
 
   const marketplace = page.locator('#marketplace-modal');
   await expect(marketplace).not.toHaveClass(/hidden/);
+  await marketplace.getByRole('tab', { name: 'Add a new plugin' }).click();
   await marketplace.locator('#marketplace-source-url').fill('https://github.com/example/plugin');
   await marketplace.locator('#marketplace-source-scan').click();
 

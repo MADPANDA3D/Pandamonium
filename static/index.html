@@ -1675,6 +1675,24 @@
         <button type="button" class="close-btn" id="close-marketplace-modal" aria-label="Close Add Plugins">✖</button>
       </div>
       <div class="modal-body marketplace-modal-body">
+        <div class="marketplace-tabs" role="tablist" aria-label="Add Plugins sections">
+          <button type="button" class="marketplace-tab" id="marketplace-tab-installed" role="tab" aria-selected="true" aria-controls="marketplace-panel-installed">Installed plugins</button>
+          <button type="button" class="marketplace-tab" id="marketplace-tab-add" role="tab" aria-selected="false" aria-controls="marketplace-panel-add">Add a new plugin</button>
+        </div>
+        <section class="marketplace-panel" id="marketplace-panel-installed" role="tabpanel" aria-labelledby="marketplace-tab-installed">
+          <div class="marketplace-installed-view" id="marketplace-installed-view">
+            <div class="marketplace-installed-head">
+              <h4>Installed plugins</h4>
+              <span id="marketplace-installed-summary">Loading installed plugins…</span>
+            </div>
+            <div id="marketplace-installed-list" class="marketplace-installed-list" role="list"></div>
+          </div>
+          <article id="marketplace-installed-detail" class="marketplace-detail" tabindex="-1" aria-live="polite" hidden>
+            <button type="button" id="marketplace-installed-back" class="marketplace-back is-persistent">← Back to installed</button>
+            <div id="marketplace-installed-detail-content" class="marketplace-detail-content"></div>
+          </article>
+        </section>
+        <section class="marketplace-panel" id="marketplace-panel-add" role="tabpanel" aria-labelledby="marketplace-tab-add" hidden>
         <div class="marketplace-toolbar">
           <label class="marketplace-search-wrap">
             <span class="sr-only">Search plugins</span>
@@ -1688,10 +1706,9 @@
         </div>
         <section class="marketplace-intake" id="marketplace-intake" aria-label="Add plugin from GitHub">
           <h4>Add from GitHub</h4>
-          <p>Paste a public repository URL. Pandamonium fetches the pinned revision and scans it statically — capabilities, dependencies, licenses, and findings — before anything is installed.</p>
+          <p>Paste a public repository URL. Pandamonium fetches the latest default-branch revision and scans it statically — capabilities, dependencies, licenses, and findings — before anything is installed.</p>
           <div class="marketplace-intake-form">
             <input id="marketplace-source-url" type="url" inputmode="url" placeholder="https://github.com/owner/repo.git" autocomplete="off" aria-label="Repository URL">
-            <input id="marketplace-source-ref" type="text" placeholder="HEAD" autocomplete="off" aria-label="Git ref" value="HEAD">
             <button type="button" id="marketplace-source-scan">Scan repository</button>
           </div>
           <section class="mad-mcp-progress-card marketplace-scan-progress" id="marketplace-scan-progress" data-state="idle" aria-live="polite" hidden>
@@ -1716,13 +1733,6 @@
         <div id="marketplace-summary" class="marketplace-summary" role="status" aria-live="polite"></div>
         <div id="marketplace-workspace" class="marketplace-workspace">
           <section class="marketplace-results-pane" aria-label="Marketplace plugins">
-            <section class="marketplace-installed" id="marketplace-installed" aria-label="Installed plugins">
-              <div class="marketplace-installed-head">
-                <h4>Installed</h4>
-                <span id="marketplace-installed-summary">Loading installed plugins…</span>
-              </div>
-              <div id="marketplace-installed-list" class="marketplace-installed-list" role="list"></div>
-            </section>
             <div id="marketplace-results" class="marketplace-results"></div>
           </section>
           <article id="marketplace-detail" class="marketplace-detail" tabindex="-1" aria-live="polite">
@@ -1732,6 +1742,7 @@
             </div>
           </article>
         </div>
+        </section>
       </div>
     </div>
   </div>
