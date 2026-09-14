@@ -1,0 +1,903 @@
+{
+  "sha": "ab976a028059075b6ba607cf94350a6f484b03f7",
+  "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/trees/ab976a028059075b6ba607cf94350a6f484b03f7?recursive=1",
+  "tree": [
+    {
+      "path": "Active Visual Inference of Surface Shape - Roberto Cipolla.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "77f32883c7d7a5a66acc4b787afd9ff863f2a41a",
+      "size": 18328934,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/77f32883c7d7a5a66acc4b787afd9ff863f2a41a"
+    },
+    {
+      "path": "Adaptive Motion of Animals and Machines - Hiroshi Kimura et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1774251ca4f33bc5103e689c1634501a8c4dd6a1",
+      "size": 8111394,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/1774251ca4f33bc5103e689c1634501a8c4dd6a1"
+    },
+    {
+      "path": "Advances in Robot Kinematics - Jadran Lenarcic and Bernard Roth (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0d3e3163c5d2bfed489725eb1bff7930b36c8399",
+      "size": 29892830,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/0d3e3163c5d2bfed489725eb1bff7930b36c8399"
+    },
+    {
+      "path": "Amphibionics Build Your Own Biologically Inspired Reptilian Robot - Karl Williams.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0d1f2f3ed6b5a6e597cd4a1ed801a5fa1f9ebea6",
+      "size": 6296206,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/0d1f2f3ed6b5a6e597cd4a1ed801a5fa1f9ebea6"
+    },
+    {
+      "path": "An Introduction to MEMs Engineering - Nadim Maluf and Kirt Williams.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cf59751c57c8fc7141392a566adbed46bff82be5",
+      "size": 4432175,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/cf59751c57c8fc7141392a566adbed46bff82be5"
+    },
+    {
+      "path": "Anatomy of a Rrobot - Charles M Bergren.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7115467c315368679c004fe3cfae11e2eb3f33d7",
+      "size": 4615264,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/7115467c315368679c004fe3cfae11e2eb3f33d7"
+    },
+    {
+      "path": "Artificial Mind System – Kernel Memory Approach - Tetsuya Hoya.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1d4823c816b7e6c29af8e38fe3f56cda91c88452",
+      "size": 6495782,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/1d4823c816b7e6c29af8e38fe3f56cda91c88452"
+    },
+    {
+      "path": "Autonomous Mobile Robots - Shuzhi Sam Ge & Frank L Lewis.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "edda84b8d006fe8a0cef4d944e76393dcf29ffd9",
+      "size": 26297158,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/edda84b8d006fe8a0cef4d944e76393dcf29ffd9"
+    },
+    {
+      "path": "Autonomous Robotic Systems - Anibal T. de Almeida and Oussama Khatib (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c8cbd10875ec837ade7dc969967ce67015ce6322",
+      "size": 17152472,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/c8cbd10875ec837ade7dc969967ce67015ce6322"
+    },
+    {
+      "path": "Bio-MEMS Technologies and Applications - Wang and Soper (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "16ce9aefd986c8b14e78f68452fcf85837d2e6e1",
+      "size": 9187356,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/16ce9aefd986c8b14e78f68452fcf85837d2e6e1"
+    },
+    {
+      "path": "Biomimetics - Biologically Inspired Technologies - Yoseph Bar Cohen.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "319b5259bcad759e538c7a0fbee7a8da2043b585",
+      "size": 16393692,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/319b5259bcad759e538c7a0fbee7a8da2043b585"
+    },
+    {
+      "path": "Build Your Own Combat Robot - Pete Miles.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3f5357f16bbfb9b7f5df1bca6b06563b66dd7b92",
+      "size": 7974391,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/3f5357f16bbfb9b7f5df1bca6b06563b66dd7b92"
+    },
+    {
+      "path": "Build a Remote Controlled Robot - David R Shircliff.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2af92ee66a018db9ca1953ae2aeff6c7e5e0a148",
+      "size": 1869979,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2af92ee66a018db9ca1953ae2aeff6c7e5e0a148"
+    },
+    {
+      "path": "CNC Robotics - Geoff Williams.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f2b17200c65061a7e7b7e145b5b1f81ccc24e446",
+      "size": 58545426,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/f2b17200c65061a7e7b7e145b5b1f81ccc24e446"
+    },
+    {
+      "path": "CRC Press - Mechanical Engineering Handbook - Robotics.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "add17d77268146b0f4540b1e767a8232a55924d0",
+      "size": 1620449,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/add17d77268146b0f4540b1e767a8232a55924d0"
+    },
+    {
+      "path": "CRC Press - Opto-Mechatronic Systems Handbook.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ef45f3324e3b5bf6c06038dc562b706f15af513b",
+      "size": 57015311,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/ef45f3324e3b5bf6c06038dc562b706f15af513b"
+    },
+    {
+      "path": "CRC Press - Robotics and Automation Handbook.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0878c5f2f001694417326997c0af5b74ac947d1b",
+      "size": 25443763,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/0878c5f2f001694417326997c0af5b74ac947d1b"
+    },
+    {
+      "path": "CRC Press - The Mechatronics Handbook.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "737ccd991a529096c9e8555c2fee1a082a5afc10",
+      "size": 51784719,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/737ccd991a529096c9e8555c2fee1a082a5afc10"
+    },
+    {
+      "path": "Cells and Robots -  Milutinovic and Lima.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "905991c163751cbc27261e6f93348e686744f195",
+      "size": 6337641,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/905991c163751cbc27261e6f93348e686744f195"
+    },
+    {
+      "path": "Complex Robotic Systems - Pasquale Chiacchio & Stefano Chiaverini (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cc54397affccd9658e2c449d4b7c8a45b0307d1e",
+      "size": 10416436,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/cc54397affccd9658e2c449d4b7c8a45b0307d1e"
+    },
+    {
+      "path": "Concise Encyclopedia of Robotics - Stan Gibilisco.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6bc9c098a529278ec4f3e3411aa0c6e1857c2fad",
+      "size": 1792511,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/6bc9c098a529278ec4f3e3411aa0c6e1857c2fad"
+    },
+    {
+      "path": "Control Problems in Robotics and Automation - B. Siciliano and K.P. Valavanis (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "70023cea835fc936a2a98ca3c1d2a8acaf88d56e",
+      "size": 15827933,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/70023cea835fc936a2a98ca3c1d2a8acaf88d56e"
+    },
+    {
+      "path": "Control of Intelligent Robotic Interfaces - Cristian Secchi.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "31436b071945273c1d54bbd5324f949cc8d04f94",
+      "size": 2355460,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/31436b071945273c1d54bbd5324f949cc8d04f94"
+    },
+    {
+      "path": "Control of Redundant Robot Manipulators - R.V. Patel and F. Shadpey.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c38bf8259ddddd5f95d826f055e7de36016a501f",
+      "size": 4713223,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/c38bf8259ddddd5f95d826f055e7de36016a501f"
+    },
+    {
+      "path": "Control of Robot Manipulators in Joint Space - R. Kelly, V. Santibanez and A. Loria.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b1ea2a3abe35304f3229f97067f790d83e2e0f02",
+      "size": 3815163,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/b1ea2a3abe35304f3229f97067f790d83e2e0f02"
+    },
+    {
+      "path": "Control of Single Wheel Robots - Yangsheng Xu & Yongsheng Ou.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1bbf751a1003400c3202c443cfb24b5c43d4e3bf",
+      "size": 5412184,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/1bbf751a1003400c3202c443cfb24b5c43d4e3bf"
+    },
+    {
+      "path": "Designing Mobile Autonomous Robots - John Holland.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bf8154f8b5e14883526dd0c956825a750e85b316",
+      "size": 7336871,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/bf8154f8b5e14883526dd0c956825a750e85b316"
+    },
+    {
+      "path": "Designing Sociable Robots - Cynthia L Breazeal.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f65ef841515deccc6e839fead38dd97285aa8603",
+      "size": 3397273,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/f65ef841515deccc6e839fead38dd97285aa8603"
+    },
+    {
+      "path": "Dynamic Vision for Perception and Control of Motion - Ernst D. Dickmanns.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "126f63ca70ca63d4c086fd52d4a928b13ad1237f",
+      "size": 8888292,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/126f63ca70ca63d4c086fd52d4a928b13ad1237f"
+    },
+    {
+      "path": "Effective Computational Geometry for Curves & Surfaces - Boissonnat & Teillaud.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bccd2c78f18411c84e7edee83a5f7554d4672727",
+      "size": 5991788,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/bccd2c78f18411c84e7edee83a5f7554d4672727"
+    },
+    {
+      "path": "Efficient Collision Detection for Animation and Robotics - Ming C Lin.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "944d2f0d35b30cde9d07b090bebfbe4606cd2229",
+      "size": 837503,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/944d2f0d35b30cde9d07b090bebfbe4606cd2229"
+    },
+    {
+      "path": "Electroactive Polymers for Robotic Applications - Kim & Tadokoro (Eds.).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "08c8d700ef88b1ca30f73d0212a1d10eb13f5a3d",
+      "size": 5053088,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/08c8d700ef88b1ca30f73d0212a1d10eb13f5a3d"
+    },
+    {
+      "path": "Embedded Robotics - Thomas Braunl.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e4e366d715ae9de3c7dc7880c8d7199ae874fe99",
+      "size": 5790471,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e4e366d715ae9de3c7dc7880c8d7199ae874fe99"
+    },
+    {
+      "path": "Environment Learning for Indoor Mobile Robots - Andrade Cetto & Sanfeliu.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "aab00eb7ce4e62781cfceac7385eeca5533fb2d3",
+      "size": 6275726,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/aab00eb7ce4e62781cfceac7385eeca5533fb2d3"
+    },
+    {
+      "path": "Field and Service Robotics - Corke P. and Sukkarieh S.(Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9c3286e8bec0a78bd66bb340bfa04b7d2bf6575a",
+      "size": 86097367,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/9c3286e8bec0a78bd66bb340bfa04b7d2bf6575a"
+    },
+    {
+      "path": "Field and Service Robotics- Recent Advances - Yuta S. et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f9ade0dbc402ca77597853747652e2123415ba2d",
+      "size": 68309353,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/f9ade0dbc402ca77597853747652e2123415ba2d"
+    },
+    {
+      "path": "Fundamentals of Robotic Mechanical Systems - Jorge Angeles.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c1745df3cfb3658d9db562067b1d5e9a254bfdc3",
+      "size": 26691422,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/c1745df3cfb3658d9db562067b1d5e9a254bfdc3"
+    },
+    {
+      "path": "Fundamentals of Robotics Linking Perception to Action - Ming Xie.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "39a544523d3f9c2e9198bdad841a73faa35a54f0",
+      "size": 37262413,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/39a544523d3f9c2e9198bdad841a73faa35a54f0"
+    },
+    {
+      "path": "Grippers in Motion - the Fascination of Automated Handling Tasks - Wolf.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1f605e66536a66c8d849dc2df4c391a16d4be808",
+      "size": 17654335,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/1f605e66536a66c8d849dc2df4c391a16d4be808"
+    },
+    {
+      "path": "Hacking Roomba - Tod E.Kurt.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9874a94b93e8209d982e248d76739a1a7e2e7020",
+      "size": 8252969,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/9874a94b93e8209d982e248d76739a1a7e2e7020"
+    },
+    {
+      "path": "Handbook of Geometric Computing - Eduardo Bayro Corrochano.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fad522f04e3340205d623edd2896ef1eb362ed87",
+      "size": 11844795,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/fad522f04e3340205d623edd2896ef1eb362ed87"
+    },
+    {
+      "path": "Handbook of Industrial Automation - Richard L. Shell and Ernest L. Hall.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3a6bd9d73304f44d39abdb31814632bd9f9d04f8",
+      "size": 12400482,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/3a6bd9d73304f44d39abdb31814632bd9f9d04f8"
+    },
+    {
+      "path": "Industrial Robots Programming - J. Norberto Pires.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3d5d924bdd094e36a50023b8586656ba7897002c",
+      "size": 20235697,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/3d5d924bdd094e36a50023b8586656ba7897002c"
+    },
+    {
+      "path": "Informatics in Control, Automation and Robotics I - Braz J.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d39bacf81e0e8f7c87834c0174353f07a30cc79f",
+      "size": 6260443,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/d39bacf81e0e8f7c87834c0174353f07a30cc79f"
+    },
+    {
+      "path": "Innovations in Intelligent Machines 1 - Javaan Singh Chahl et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "be8f3f131cd37d0c7f97ead8c0a3918234e787f3",
+      "size": 12261089,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/be8f3f131cd37d0c7f97ead8c0a3918234e787f3"
+    },
+    {
+      "path": "Innovations in Robot Mobility and Control - Srikanta Patnaik et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "34db7c5aef1d240e38e040da66f9b4edec8cb918",
+      "size": 7039179,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/34db7c5aef1d240e38e040da66f9b4edec8cb918"
+    },
+    {
+      "path": "Intelligent Autonomous Robotics - A Robot Soccer Case Study - Peter Stone.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ccefe9c02d39fffdaadcb2a61f5eccb9b8669354",
+      "size": 1955314,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/ccefe9c02d39fffdaadcb2a61f5eccb9b8669354"
+    },
+    {
+      "path": "Introduction to AI Robotics - Murphy R.R.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6454d9d360680e4783a964bba5866ade4a5d8fd8",
+      "size": 14158126,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/6454d9d360680e4783a964bba5866ade4a5d8fd8"
+    },
+    {
+      "path": "Introduction to Autonomous Mobile Robots - Siegwart Nourbakhsh.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "31241eb9d9ede091206b1455fdf26338a1a6d273",
+      "size": 8292025,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/31241eb9d9ede091206b1455fdf26338a1a6d273"
+    },
+    {
+      "path": "Introduction to Robotics Mechanics and Control - J J Craig.djvu",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2d5f2b075f3fdf431b1150ef5265bd62944fe080",
+      "size": 2961210,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2d5f2b075f3fdf431b1150ef5265bd62944fe080"
+    },
+    {
+      "path": "Introductory Robotics - J M Selig.djvu",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f2340fbd392d989c688da390ef97264796214721",
+      "size": 1180928,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/f2340fbd392d989c688da390ef97264796214721"
+    },
+    {
+      "path": "LEGO MINDSTORMS -  Robotics Invention System-2  Projects.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "11053d9b97c348a1f874d8eba92d86f3cfcfe68f",
+      "size": 33037341,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/11053d9b97c348a1f874d8eba92d86f3cfcfe68f"
+    },
+    {
+      "path": "LEGO MINDSTORMS - Building Robots.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "40a1056624b2086d26f121f96dc6f1642d2587b6",
+      "size": 14890421,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/40a1056624b2086d26f121f96dc6f1642d2587b6"
+    },
+    {
+      "path": "LEGO MINDSTORMS - Dark Side Robots Transports and Creatures.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "78b284eb46358a7d24112ba72659338b4aa6c7d0",
+      "size": 30676623,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/78b284eb46358a7d24112ba72659338b4aa6c7d0"
+    },
+    {
+      "path": "LEGO MINDSTORMS - The Unofficial Guide to Robots - Jonathan B. Knudsen.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "070d5d8b64deda6c08a4536b05a5bebd305d054e",
+      "size": 4124249,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/070d5d8b64deda6c08a4536b05a5bebd305d054e"
+    },
+    {
+      "path": "LEGO Mindstorms Masterpieces - Building and Programming Advanced Robots.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2e90d7538d8b34a505fcd0ed54bead32caab86b7",
+      "size": 19597710,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2e90d7538d8b34a505fcd0ed54bead32caab86b7"
+    },
+    {
+      "path": "MEMS Advanced Materials and Fabrication Methods - Nat. Aca.  Press.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7fdb80c2e2f2a198c897153efd827be7cb1b7edc",
+      "size": 7263106,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/7fdb80c2e2f2a198c897153efd827be7cb1b7edc"
+    },
+    {
+      "path": "MEMS Mechanical Sensors - Stephen Beeby.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5fe4a048813200a086ae62dee6094005330bb52c",
+      "size": 4263300,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/5fe4a048813200a086ae62dee6094005330bb52c"
+    },
+    {
+      "path": "MEMS and Microstructures in Aerospace Applications - Robert Osiander et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "54f4d059d30680737165e18bc2f715d4e8df74a2",
+      "size": 12856754,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/54f4d059d30680737165e18bc2f715d4e8df74a2"
+    },
+    {
+      "path": "Machine Learning and Robot Perception - Bruno Apolloni et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b448a8f1351d238980261ccd4e0980b9673c2896",
+      "size": 27148229,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/b448a8f1351d238980261ccd4e0980b9673c2896"
+    },
+    {
+      "path": "Machine Vision - David Vernon.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "df585c175efefdec7c237cd17b1eec329e4793a8",
+      "size": 38449965,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/df585c175efefdec7c237cd17b1eec329e4793a8"
+    },
+    {
+      "path": "Mechanics of Microelectromechanical Systems - N.Lobontiu and E.Garcia.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5852a6c3bcffe1c26f7e4f1fb38e283a146fcaae",
+      "size": 12508119,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/5852a6c3bcffe1c26f7e4f1fb38e283a146fcaae"
+    },
+    {
+      "path": "Mechantronics An Introduction - Robert H Bishop.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "442016eb434a32faae9bc5ef66eabbadcce9580c",
+      "size": 15556197,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/442016eb434a32faae9bc5ef66eabbadcce9580c"
+    },
+    {
+      "path": "Mechatronic Servo System Control - M. Nakamura S. Goto and  N. Kyura.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9f8ddffb18d6e4bc47057d427c0f80289fc56240",
+      "size": 6686864,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/9f8ddffb18d6e4bc47057d427c0f80289fc56240"
+    },
+    {
+      "path": "Mechatronic Systems - Georg Pelz.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "fb789e6af0a62648229c882e5014852eef4f2e55",
+      "size": 3118901,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/fb789e6af0a62648229c882e5014852eef4f2e55"
+    },
+    {
+      "path": "Mechatronics - A Preumont.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3005c86a1e56eac7dfdabf4908ba4e4917ff0a41",
+      "size": 2217641,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/3005c86a1e56eac7dfdabf4908ba4e4917ff0a41"
+    },
+    {
+      "path": "Mechatronics for Safety, Security and Dependability in a New Era - Arai and Arai.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cc99d83a276d561706961f69b864d34189e87e72",
+      "size": 53266195,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/cc99d83a276d561706961f69b864d34189e87e72"
+    },
+    {
+      "path": "Micro Electro Mechanical System Design - James J. Allen.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e1af5e79e62f6db492cc403bbe20ab0e38693daa",
+      "size": 18854085,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e1af5e79e62f6db492cc403bbe20ab0e38693daa"
+    },
+    {
+      "path": "Microengineering MEMs and Interfacing - Danny Banks.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a1c8743d891391339ea8048b90d372e7eb37bcae",
+      "size": 9065410,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/a1c8743d891391339ea8048b90d372e7eb37bcae"
+    },
+    {
+      "path": "Micromechanical Photonics - H. Ukita.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e78d17c38789ff703b350d365c8a885cb8d39d76",
+      "size": 15494084,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e78d17c38789ff703b350d365c8a885cb8d39d76"
+    },
+    {
+      "path": "Microsensors, MEMS and Smart Devices  - Gardner Varadhan and Awadelkarim.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "919c493f30141492993f420d2f56a6c0cce20393",
+      "size": 41678305,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/919c493f30141492993f420d2f56a6c0cce20393"
+    },
+    {
+      "path": "Mobile Robots Inspiration to Implementation - Flynn and Jones.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "62db89b7a145ade26dee1722dbdbc9fdcec7b914",
+      "size": 34366706,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/62db89b7a145ade26dee1722dbdbc9fdcec7b914"
+    },
+    {
+      "path": "Modern Robotics Building Versatile Macines - Harry Henderson.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "227f6115fef7260f3eef42181f4b2b13db00546c",
+      "size": 5539146,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/227f6115fef7260f3eef42181f4b2b13db00546c"
+    },
+    {
+      "path": "Multi-Arm Cooperating Robots- Dynamics and Control - Zivanovic and Vukobratovic.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2d6a124ee1816b52f2b03e82cf1f0c02739a432e",
+      "size": 4166540,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2d6a124ee1816b52f2b03e82cf1f0c02739a432e"
+    },
+    {
+      "path": "Multi-Robot Systems From Swarms to Intelligent Automata - Parker et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "081cd2c30514c77e09e9c4a29455dbf32935d7aa",
+      "size": 7380214,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/081cd2c30514c77e09e9c4a29455dbf32935d7aa"
+    },
+    {
+      "path": "Nano- and Micro Eelectromechanical Systems - S.E. Lyshevski.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a8fae8504013825a320c1801d450c7d22a550c1f",
+      "size": 6642272,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/a8fae8504013825a320c1801d450c7d22a550c1f"
+    },
+    {
+      "path": "Neural Preprocessing and Control of Reactive Walking Machines - Manoonpong.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "14df6c64945dadeba2e422cb241ecf7256658e4c",
+      "size": 7014357,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/14df6c64945dadeba2e422cb241ecf7256658e4c"
+    },
+    {
+      "path": "Neurotechnology for Biomimetic Robots - Joseph Ayers.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "32d5b19c62c7f34212b69c715c5db555282447f3",
+      "size": 68163261,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/32d5b19c62c7f34212b69c715c5db555282447f3"
+    },
+    {
+      "path": "PDA Robotics  - Douglas H Williams.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "21bb72819ca3ccd5c2949950c77e82a90b69abd3",
+      "size": 2979596,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/21bb72819ca3ccd5c2949950c77e82a90b69abd3"
+    },
+    {
+      "path": "PIC Robotics - John Iovine.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7a6c32c478b3f2e7eb8f7f389718e2115cdddf05",
+      "size": 32252832,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/7a6c32c478b3f2e7eb8f7f389718e2115cdddf05"
+    },
+    {
+      "path": "Practical and Experimental Robotics - Ferat Sahin & Pushkin Kachroo.djvu",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5f45ea2e53a4af743e230ca201cab2e7f1b32c8a",
+      "size": 9474467,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/5f45ea2e53a4af743e230ca201cab2e7f1b32c8a"
+    },
+    {
+      "path": "Principles and Applications of NanoMEMS Physics - Hector J. De Los Santos.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3cf427dcd505fae14060e86bc59c8811cf50aa49",
+      "size": 4976298,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/3cf427dcd505fae14060e86bc59c8811cf50aa49"
+    },
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2eca7c82154b2655e9ba26f6e085ffddbf418431",
+      "size": 281,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2eca7c82154b2655e9ba26f6e085ffddbf418431"
+    },
+    {
+      "path": "Rapid Learning in Robotics - Jorg Walter.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e4c4c57ec4c661c94ef09a3fc04857dd42a46840",
+      "size": 1792568,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e4c4c57ec4c661c94ef09a3fc04857dd42a46840"
+    },
+    {
+      "path": "Recent Advances in Mechatronics - Ryszard Jabonski et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7ab8eea7f47d2a4453a7e000c7783118ca2d3135",
+      "size": 44633560,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/7ab8eea7f47d2a4453a7e000c7783118ca2d3135"
+    },
+    {
+      "path": "Robot Builders Bonanza - Gordon Mccomb.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6174c7becca42db442d22bae2fb6dd0debfcfd9b",
+      "size": 11499562,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/6174c7becca42db442d22bae2fb6dd0debfcfd9b"
+    },
+    {
+      "path": "Robot Builders Source Book - Gordon McComb.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "542340fd47a8a1cc545c498eaf76f78857106a1a",
+      "size": 56776486,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/542340fd47a8a1cc545c498eaf76f78857106a1a"
+    },
+    {
+      "path": "Robot Manipulator Control Theory and Practice - Frank L.Lewis.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e0924e3f3b191b8240695e2a821f2800ee75e0b2",
+      "size": 11505077,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e0924e3f3b191b8240695e2a821f2800ee75e0b2"
+    },
+    {
+      "path": "Robot Mechanisms and Mechanical Devices Illustrated - Paul E Sandin.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "13a1090f6c5c36a8c2d0b0bd5bb4a4bdd0921741",
+      "size": 6791134,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/13a1090f6c5c36a8c2d0b0bd5bb4a4bdd0921741"
+    },
+    {
+      "path": "Robot Motion Planning and Control - J.P. Laumond.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e6159145e934bc4326eb89bbacebf1db1c1af444",
+      "size": 22385582,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e6159145e934bc4326eb89bbacebf1db1c1af444"
+    },
+    {
+      "path": "Robot Motion and Control - M Thoma & M Morari.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9c15e6505660e1cadcb23936a14671ce89205bed",
+      "size": 23770113,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/9c15e6505660e1cadcb23936a14671ce89205bed"
+    },
+    {
+      "path": "Robot Vision - Stefan Florczyk.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9e4d9eda08cc2be4001117a8152a9fd700d3f72e",
+      "size": 2399881,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/9e4d9eda08cc2be4001117a8152a9fd700d3f72e"
+    },
+    {
+      "path": "Robotics Demystified - Edwin Wise.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6d2f28fd33c2c7d03a6578707dbd441b21de2dca",
+      "size": 6843539,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/6d2f28fd33c2c7d03a6578707dbd441b21de2dca"
+    },
+    {
+      "path": "Robotics Designing the Mechanisms for Automated Machinery - Sandier.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b778a79ce8a22c995dca4db569d2eaa8e5913a74",
+      "size": 10475224,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/b778a79ce8a22c995dca4db569d2eaa8e5913a74"
+    },
+    {
+      "path": "Robots Androids and Animatrons - John Lovine.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e916f31179ce448901174a7863121f42aeb6a192",
+      "size": 6085695,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/e916f31179ce448901174a7863121f42aeb6a192"
+    },
+    {
+      "path": "Scientific Methods in Mobile Robotics - Ulrich Nehmzow.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "0ef2274d0e076e106772a2fe2b373fc15cb3e108",
+      "size": 5823430,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/0ef2274d0e076e106772a2fe2b373fc15cb3e108"
+    },
+    {
+      "path": "Sensing Intelligence Motion - How Robots & Humans Move - Vladimir J. Lumelsky.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b04f269582b0bf23b7db691aa7daa3e7533c12e1",
+      "size": 7433988,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/b04f269582b0bf23b7db691aa7daa3e7533c12e1"
+    },
+    {
+      "path": "Smart Material Systems and MEMS - Vijay K. Varadan.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5ea4dcdc8935465f20b8053d5244c26523f04726",
+      "size": 19031081,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/5ea4dcdc8935465f20b8053d5244c26523f04726"
+    },
+    {
+      "path": "Socially Intel. Agents Creating Rels. with Comp. & Robots - Dautenhahn et al (Eds).pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "01d979bf57262ef3a42378c3cdec9f87fc76c8ed",
+      "size": 2110369,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/01d979bf57262ef3a42378c3cdec9f87fc76c8ed"
+    },
+    {
+      "path": "Software Engineering for Experimental Robotics - Davide Brugali et al.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "5ecfd4b42745912b18fa5e403ffe85a384c2ab85",
+      "size": 10596858,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/5ecfd4b42745912b18fa5e403ffe85a384c2ab85"
+    },
+    {
+      "path": "Squeak Learn Programming with Robots - Stephane Ducasse.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "911cfaf81f5e81d46e339c166170a6fefc535f6b",
+      "size": 2917986,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/911cfaf81f5e81d46e339c166170a6fefc535f6b"
+    },
+    {
+      "path": "The Definitive Guide to Building Java Robots - Scott Preston.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "510ea7f4bfd389d211400c31918eb33a5e275e60",
+      "size": 18488933,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/510ea7f4bfd389d211400c31918eb33a5e275e60"
+    },
+    {
+      "path": "The MEMS Handbook (1st Ed) - M. Gad el Hak.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "dfea1ca68836d5d9f7ca5bd1f8f709fc60de544f",
+      "size": 70181180,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/dfea1ca68836d5d9f7ca5bd1f8f709fc60de544f"
+    },
+    {
+      "path": "The MEMS Handbook Introduction & Fundamentals (2nd Ed) - M. Gad el Hak.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2d6184b0ae8779b1750adb867a8f7a044c838d17",
+      "size": 17539882,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2d6184b0ae8779b1750adb867a8f7a044c838d17"
+    },
+    {
+      "path": "The MEMS Handbook MEMS Applications (2nd Ed) - M. Gad el Hak.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "01ff0624287c007490377767f46da9c4695c84e9",
+      "size": 27333938,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/01ff0624287c007490377767f46da9c4695c84e9"
+    },
+    {
+      "path": "The MEMS Handbook MEMS Design (2nd Ed) - M. Gad el Hak.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b25269050276db3ad79a68fab0ae9d6ac124ca36",
+      "size": 45611346,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/b25269050276db3ad79a68fab0ae9d6ac124ca36"
+    },
+    {
+      "path": "The Ultimate Palm Robot - Kevin Mukhar and Dave Johnson.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b9b6c8ed271d092f15bcdf03b8ff56a053b184ae",
+      "size": 6124839,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/b9b6c8ed271d092f15bcdf03b8ff56a053b184ae"
+    },
+    {
+      "path": "Underwater Robots - Gianluca Antonelli.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "8f954e89ca756b44727d3f353cdb57a0eb4748fb",
+      "size": 7966293,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/8f954e89ca756b44727d3f353cdb57a0eb4748fb"
+    },
+    {
+      "path": "Vision And Action - The Control of Grasping - Goodale M.A.(Ed).djvu",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4cfaa6cc6eab97e7088d2c2346d71c06c6030858",
+      "size": 9097142,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/4cfaa6cc6eab97e7088d2c2346d71c06c6030858"
+    },
+    {
+      "path": "Visual Perception and Robotic Manipulation - Taylor & Kleeman.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2814a2f16d68e264d35fc049d5b32bf04f33f4a7",
+      "size": 6697916,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/2814a2f16d68e264d35fc049d5b32bf04f33f4a7"
+    },
+    {
+      "path": "Welding Robots Technology System Issues and Applications - J Norberto Pires.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "aed04c495c2b3611df8ef07970f5bea336971f88",
+      "size": 2569002,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/aed04c495c2b3611df8ef07970f5bea336971f88"
+    },
+    {
+      "path": "Who Needs Emotions The Brain Meets the Robot - Fellous & Arbib.pdf",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "03bbdb5d3e3f34027d41b38b2773b1b64a6c3299",
+      "size": 6914225,
+      "url": "https://api.github.com/repos/jimmyval92/robotics_ebooks/git/blobs/03bbdb5d3e3f34027d41b38b2773b1b64a6c3299"
+    }
+  ],
+  "truncated": false
+}
