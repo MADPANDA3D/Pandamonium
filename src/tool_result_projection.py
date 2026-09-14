@@ -65,7 +65,8 @@ def project_result(value: dict, max_chars: int) -> dict:
         truncated=True,
         omitted_items={},
         reason="Whole records omitted to fit the model result budget. Reread this page with a "
-        "smaller limit before advancing its original cursor; do not infer omitted content.",
+        "smaller limit from the same server cursor, or use a precise name/ID resolver tool "
+        "for one target instead of a full list; do not infer omitted content.",
     )
 
     def pages(node: Any, path: str = "") -> list:
