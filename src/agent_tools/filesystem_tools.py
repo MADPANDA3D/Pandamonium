@@ -489,14 +489,23 @@ class GetWorkspaceTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.tool_execution import get_active_workspace
         ws = get_active_workspace()
+        if not ws:
+            # No per-turn binding (e.g. a scheduled turn): fall back to the
+            # workspace persisted on the chat (MAD-883) so the agent still sees
+            # the user's selection instead of claiming none is set.
+            from src.workspace_store import read_session_workspace
+            ws = read_session_workspace((ctx or {}).get("session_id"))
         if ws:
             return {
                 "output": f"{ws}\n(File tools are confined to this folder; the shell starts "
                           f"here but is not sandboxed and can reach outside it.)",
+                "workspace": ws,
                 "exit_code": 0,
             }
         return {
             "output": "No workspace is set. File tools use the default allowed roots; "
-                      "resolve paths from the user or use absolute paths.",
+                      "resolve paths from the user or use absolute paths. To bind a "
+                      'folder, call manage_workspace with {"action": "set", "path": "<folder>"}.',
+            "workspace": "",
             "exit_code": 0,
         }

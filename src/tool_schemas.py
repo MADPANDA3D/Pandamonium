@@ -189,6 +189,22 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_workspace",
+            "description": "Set, clear, or report the active workspace folder for this chat. The workspace is the folder file tools are confined to; it is stored on the chat so every client sees the same value. Use action=set with an existing absolute directory when the user says to work out of / switch to a folder, action=clear to remove it, action=show (default) to report the current one. The server validates the folder with the same rules as the picker: it must exist and cannot be a filesystem root or a sensitive path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["show", "set", "clear"], "description": "show (default) reports the current workspace; set binds the folder in `path`; clear removes it"},
+                    "path": {"type": "string", "maxLength": 1024, "description": "Absolute folder path (required for set), e.g. /home/leo/project"}
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ssh_node",
             "description": "Run a bounded, read-only-by-default operation on one SAVED SSH connection (Settings > SSH Connections): list a folder, read a file, or run a command the connection's allowlist permits. Never invents a target: the connection must already be saved. Output and run time are bounded; every call is audited. Results cite the exact node and path.",
             "parameters": {
@@ -1587,6 +1603,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = json.dumps(args) if args else "{}"
     elif tool_type == "get_workspace":
         content = ""
+    elif tool_type == "manage_workspace":
+        content = json.dumps(args) if args else "{}"
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
     elif tool_type == "edit_file":

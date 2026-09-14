@@ -312,6 +312,7 @@ _ADMIN_TOOLS = {
     "manage_webhooks",
     "manage_tokens",
     "manage_settings",
+    "manage_workspace",
     "manage_extensions",
     "download_model",
     "serve_model",
@@ -765,10 +766,19 @@ async def _execute_tool_block_impl(
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
     elif tool in ("grep", "glob", "ls", "get_workspace"):
         # Code-navigation tools — no MCP server; run the direct implementation.
+        # get_workspace gets session_id/owner so it can report the workspace
+        # persisted on the chat when no per-turn binding is active.
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _direct_fallback(tool, content, progress_cb=progress_cb) \
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb,
+                                        session_id=session_id, owner=owner) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool == "manage_workspace":
+        # Set/clear/report the chat's active workspace (MAD-883); needs the
+        # session to persist to and the owner for the admin gate.
+        desc = f"manage_workspace: {content.split(chr(10))[0][:80]}"
+        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
+            or {"error": "manage_workspace: execution failed", "exit_code": 1}
     elif tool == "manage_bg_jobs":
         # Inspect/kill detached `bash` jobs; needs session_id to scope to chat.
         desc = f"manage_bg_jobs: {content.split(chr(10))[0][:80]}"

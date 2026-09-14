@@ -406,7 +406,7 @@ _DOMAIN_TOOL_MAP = {
     "notes_calendar_tasks": {"manage_notes", "manage_calendar", "read_calendar", "manage_tasks"},
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
-    "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
+    "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "manage_workspace", "manage_bg_jobs"},
     "network_inspection": {"inspect_network"},
     # Deep research is an agent-decided capability, not a user toggle: when
     # research intent fires, seed the job starter and the report reader so the
@@ -758,6 +758,12 @@ Edit an EXISTING file by exact string replacement. PREFER this over bash (sed/ec
 ```get_workspace
 ```
 Return the absolute path of the active workspace folder. File tools are CONFINED to it (paths can be RELATIVE to it); the shell starts there (cwd) but is NOT sandboxed. Call this first when the user says "the project"/"the code"/"this folder" without a path, instead of asking them. No arguments.""",
+
+    "manage_workspace": """\
+```manage_workspace
+{"action": "show|set|clear", "path": "<absolute folder, required for set>"}
+```
+Set, clear, or report the active workspace folder for this chat. Use `set` when the user says to work out of / switch to / use a folder (e.g. "work out of /srv/app", "use the Home Lab folder"): the server validates it (must exist, not a filesystem root or sensitive path) and saves it on the chat so the picker/pill and every client see the same value. Use `clear` when they say to stop confining to a folder. `show` (or no action) reports the current workspace. Setting it takes effect for the rest of this request; never claim a folder is active without calling this or `get_workspace`.""",
 
     "ssh_node": """\
 ```ssh_node
@@ -5929,6 +5935,33 @@ async def stream_agent_loop(
                         logger.info(
                             "[tool-rag] mounted tools for the remainder of the request: %s",
                             sorted(_new_mounts),
+                        )
+
+            # MAD-883: `manage_workspace` results carry `workspace_changed`.
+            # Rebind the turn's workspace so the NEXT round's tool calls and
+            # schema selection use the folder the agent just set (or drop the
+            # confinement on clear), and tell the client to update its pill.
+            if isinstance(result, dict) and result.get("workspace_changed"):
+                _new_workspace = str(result.get("workspace") or "").strip()
+                workspace = _new_workspace or None
+                yield (
+                    f'data: {json.dumps({"type": "workspace_changed", "data": {"path": _new_workspace, "session": session_id}})}\n\n'
+                )
+                if _new_workspace and _relevant_tools is not None:
+                    # A freshly bound folder is the file-work signal: surface
+                    # the file tool objects for the next round instead of
+                    # waiting for the following user message.
+                    _file_tools = {
+                        _name
+                        for _name in _DOMAIN_TOOL_MAP["files"]
+                        if _name not in disabled_tools
+                        and _name not in _intent_pruned_tools
+                    }
+                    if _file_tools - _relevant_tools:
+                        _relevant_tools.update(_file_tools)
+                        logger.info(
+                            "[tool-rag] workspace set mid-turn; file tools unlocked: %s",
+                            sorted(_file_tools),
                         )
 
             # MAD-913: `manage_extensions action=mount` results carry
