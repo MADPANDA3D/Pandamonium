@@ -3068,7 +3068,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
             "hermes": "home-lab",
         }.get(target_switch, _workspace_for_text(text))
         label = _voice_target_display(target_switch)
-        chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
+        chat_session = _voice_chat_session(chat_session_id)
         origin_target = _voice_origin_target(voice_session, chat_session)
         target_connected = True
         if target_switch in DIRECT_MODEL_TARGETS and target_switch != origin_target:
@@ -3441,7 +3441,7 @@ async def _server_routed_events(chat_session_id: str, text: str, owner: str, voi
 async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_session: dict):
     if not chat_session_id:
         raise RuntimeError("voice_chat_session_missing")
-    chat_session = _SESSION_MANAGER.get_session(chat_session_id) if _SESSION_MANAGER else None
+    chat_session = _voice_chat_session(chat_session_id)
     if not chat_session:
         raise RuntimeError("voice_chat_session_not_found")
     operator_text = text
