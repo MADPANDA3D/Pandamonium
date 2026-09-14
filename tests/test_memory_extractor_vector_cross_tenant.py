@@ -74,10 +74,11 @@ class FakeMemoryManager:
         t = text.strip().lower()
         return [r for r in subset if r.get("text", "").strip().lower() == t]
 
-    def add_entry(self, text, source="auto", category="fact", owner=None):
+    def add_entry(self, text, source="auto", category="fact", owner=None, **kwargs):
         self._n += 1
         entry = {"id": f"new-{self._n}", "text": text, "owner": owner,
                  "source": source, "category": category}
+        entry.update(kwargs)
         self.rows.append(entry)
         return entry
 

@@ -24,6 +24,7 @@ class MemoryRecord:
     admitted_at: int = 0
     admitted_by: str = "unknown"
     supersedes: Optional[str] = None
+    confidence: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -120,6 +121,7 @@ class NativeMemoryProvider(MemoryProvider):
         "admitted_at",
         "admitted_by",
         "supersedes",
+        "confidence",
         "metadata",
     }
 
@@ -151,6 +153,7 @@ class NativeMemoryProvider(MemoryProvider):
             admitted_at=entry.get("admitted_at", 0),
             admitted_by=entry.get("admitted_by", "unknown"),
             supersedes=entry.get("supersedes"),
+            confidence=entry.get("confidence"),
             metadata=metadata,
         )
 

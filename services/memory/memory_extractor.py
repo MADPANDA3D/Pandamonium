@@ -175,13 +175,21 @@ def _fallback_memory_candidates(messages) -> list[dict]:
         if not text:
             continue
 
-        m = re.search(r"\bmy name is\s+([A-Za-z][A-Za-z0-9 .'\-]{1,50})\b", text, re.I)
+        m = re.search(
+            r"\bmy name is\s+([A-Za-z][A-Za-z0-9 .'\-]{0,49}?)\s*(?:[,.!?]|\band\b|\bbut\b|\bwho\b|$)",
+            text,
+            re.I,
+        )
         if m:
             name = _clean_memory_value(m.group(1), 50)
             if name:
                 add(f"User's name is {name}.", "identity")
 
-        m = re.search(r"\bcall me\s+([A-Za-z][A-Za-z0-9 .'\-]{1,50})\b", text, re.I)
+        m = re.search(
+            r"\bcall me\s+([A-Za-z][A-Za-z0-9 .'\-]{0,49}?)\s*(?:[,.!?]|\band\b|\bbut\b|$)",
+            text,
+            re.I,
+        )
         if m:
             name = _clean_memory_value(m.group(1), 50)
             if name:
@@ -381,7 +389,17 @@ async def extract_and_store(
             facts = []
 
         if fallback_facts:
-            facts = list(facts) + fallback_facts
+            facts = list(facts)
+            for fallback_fact in fallback_facts:
+                if isinstance(fallback_fact, dict):
+                    fallback_fact = dict(fallback_fact)
+                    # Pattern matches are high-precision literal statements; the
+                    # LLM extraction is provisional. Carry the distinction into
+                    # the stored confidence instead of flattening both to one.
+                    fallback_fact["_extractor"] = "pattern"
+                    facts.append(fallback_fact)
+                else:
+                    facts.append(fallback_fact)
 
         if not facts:
             logger.info("Auto memory extraction ran: 0 candidates")
@@ -447,7 +465,17 @@ async def extract_and_store(
                 logger.debug(f"Memory dedup (fuzzy): '{fact_text[:50]}' too similar to existing")
                 continue
 
-            entry = memory_manager.add_entry(fact_text, source="auto", category=category, owner=_owner)
+            entry = memory_manager.add_entry(
+                fact_text,
+                source="auto",
+                category=category,
+                owner=_owner,
+                confidence=(
+                    0.8
+                    if isinstance(fact, dict) and fact.get("_extractor") == "pattern"
+                    else 0.6
+                ),
+            )
             # Auto-pin identity facts (name, job, location) — core context
             if category == "identity":
                 entry["pinned"] = True
@@ -640,6 +668,7 @@ async def audit_memories(
                         source_ref=f"memory:{mid}",
                         admitted_by="policy:auto_memory_audit",
                         supersedes=mid,
+                        confidence=original.get("confidence"),
                     )
                     for inherited in ("session_id", "pinned", "metadata"):
                         if inherited in original:
@@ -662,6 +691,15 @@ async def audit_memories(
         # returned far fewer entries than it was given (over-consolidation, a
         # dropped/truncated list, or it ignored ids), treat it as a misfire and
         # DON'T save. Better to no-op than to silently lose memories.
+        if before_count >= 1 and after_count == 0:
+            # A model that returns [] means "keep nothing". For any non-empty
+            # store that is a misfire (a truncated or failed reply parses as an
+            # empty list), and the >=8 half-store guard below never fires for
+            # smaller stores, so it would otherwise silently delete every fact.
+            logger.warning(
+                f"Memory audit returned 0 of {before_count} entries — refusing as unsafe, keeping originals"
+            )
+            return {"before": before_count, "after": before_count, "error": "unsafe_removal"}
         if before_count >= 8 and after_count < before_count * 0.5:
             logger.warning(
                 f"Memory audit would cut {before_count} -> {after_count} "
