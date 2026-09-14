@@ -1168,6 +1168,11 @@
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Choose who to talk to" aria-haspopup="listbox" aria-controls="model-picker-list"><span id="model-picker-label">Choose who</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="composer-effort-btn composer-model-btn" id="identity-model-btn" aria-haspopup="listbox" aria-expanded="false" title="Identity default model" hidden>
+            <span class="model-picker-logo" id="identity-model-logo" aria-hidden="true"></span>
+            <span id="identity-model-label">Select model</span>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
+          </button>
           <button type="button" class="composer-effort-btn" id="composer-effort-btn" aria-haspopup="dialog" aria-expanded="false" title="Reasoning effort" hidden>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/><circle cx="19" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>
             <span id="composer-effort-value">Default</span>
@@ -1189,7 +1194,7 @@
             <div class="model-picker-list" id="model-picker-list" role="listbox" aria-label="Configured conversation identities"></div>
           </div>
           <div id="conversation-effort-card" class="conversation-effort-card composer-effort-popover" hidden>
-            <div class="effort-card-heading"><label for="conversation-effort" id="conversation-effort-label">Reasoning</label><button type="button" id="conversation-effort-reset" title="Use the default effort" aria-label="Reset effort">↺</button></div>
+            <div class="effort-card-heading"><label for="conversation-effort" id="conversation-effort-label">Reasoning</label><button type="button" id="conversation-effort-reset" title="Reset to the session default" aria-label="Reset effort">↺</button></div>
             <output id="conversation-effort-value" for="conversation-effort">Default</output>
             <div id="codex-model-controls" class="codex-model-controls" hidden>
               <label for="codex-model" class="sr-only">Codex model</label>

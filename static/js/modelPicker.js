@@ -87,6 +87,12 @@ let _selectorCatalogError = '';
 let _agentCatalogVerified = false;
 let _lastConversationTargetEvent = '';
 const _PENDING_AGENT_KEY = '__pending__';
+// MAD-930: saved identities from the MAD-929 registry. The composer's first
+// chip lists them alongside the conversation targets, and the second chip shows
+// the bound identity's attached default model.
+let _identityItems = [];
+let _identityActiveId = '';
+let _identityMenuMode = 'identity';
 
 function _workspaceAliases(values) {
   return (Array.isArray(values) ? values : [])
@@ -311,6 +317,116 @@ function _isChatEndpoint(item) {
   return (item && (item.model_type || 'llm')) === 'llm';
 }
 
+/* ── Saved identities (MAD-930, backed by the MAD-929 registry) ── */
+
+async function _refreshIdentityCatalog() {
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/identities`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`identities_${response.status}`);
+    const payload = await response.json();
+    _identityItems = (Array.isArray(payload?.identities) ? payload.identities : [])
+      .filter(item => item && typeof item.id === 'string' && item.id.trim())
+      .map(item => ({
+        id: String(item.id).trim(),
+        display: String(item.display_name || item.id).slice(0, 80),
+        modelProfile: (item.model_profile && typeof item.model_profile === 'object') ? item.model_profile : {},
+      }));
+    _identityActiveId = String(payload?.active_id || '');
+    if (_identityActiveId && !_identityItems.some(item => item.id === _identityActiveId)) {
+      _identityActiveId = _identityItems[0]?.id || '';
+    }
+  } catch (_) {
+    // Additive discovery: without the registry the conversation-target list
+    // keeps its pre-MAD-929 behavior.
+    _identityItems = [];
+    _identityActiveId = '';
+  }
+}
+
+function _identityById(identityId) {
+  const id = String(identityId || '').trim();
+  if (!id) return null;
+  return _identityItems.find(item => item.id === id) || null;
+}
+
+function _defaultIdentity() {
+  return _identityById(_identityActiveId) || _identityItems[0] || null;
+}
+
+function _boundIdentityId() {
+  let session = null;
+  let pending = null;
+  try {
+    session = (_deps?.getSessions?.() || []).find(s => s.id === _deps?.getCurrentSessionId?.());
+    pending = _deps?.getPendingChat?.();
+  } catch (_) { /* deps not ready yet */ }
+  return String((session && session.identity_id) || (pending && pending.identityId) || '').trim();
+}
+
+function _boundIdentity() {
+  return _identityById(_boundIdentityId()) || null;
+}
+
+function _identityChatModel(identity) {
+  return String(identity?.modelProfile?.chat?.model || '').trim();
+}
+
+function _identityChoices() {
+  return _identityItems.map(item => ({
+    kind: 'identity',
+    identityId: item.id,
+    target: '',
+    display: item.display,
+    epName: _identityChatModel(item)
+      ? `Identity · ${_identityChatModel(item).split('/').pop()}`
+      : 'Saved identity',
+    providerText: `identity ${item.id}`,
+    stale: false,
+    disabled: false,
+    offline: false,
+  }));
+}
+
+function _modelChoices() {
+  const items = (window.modelsModule && window.modelsModule.getCachedItems)
+    ? (window.modelsModule.getCachedItems() || [])
+    : [];
+  const choices = [];
+  for (const item of items) {
+    if (!item || item.offline) continue;
+    if (!_isChatEndpoint(item)) continue;
+    const models = (item.models || []).concat(item.models_extra || []);
+    const displays = (item.models_display || []).concat(item.models_extra_display || []);
+    models.forEach((rawId, index) => {
+      const mid = String(rawId || '').trim();
+      if (!mid) return;
+      choices.push({
+        kind: 'model',
+        mid,
+        display: String(displays[index] || mid).split('/').pop(),
+        url: item.url || '',
+        endpointId: item.endpoint_id || '',
+        epName: [item.endpoint_name || item.host || '', item.category || ''].filter(Boolean).join(' · '),
+        providerText: [item.endpoint_name || '', item.url || ''].filter(Boolean).join(' '),
+        stale: false,
+        disabled: false,
+        offline: false,
+      });
+    });
+  }
+  return choices;
+}
+
+function _findModelChoice(modelId, endpointId) {
+  const wanted = String(modelId || '').trim();
+  if (!wanted) return null;
+  const ep = String(endpointId || '').trim();
+  const choices = _modelChoices();
+  return choices.find(item => item.mid === wanted && (!ep || item.endpointId === ep))
+    || choices.find(item => item.mid === wanted)
+    || null;
+}
+
 function _modelExists(modelId, url) {
   if (!modelId || !window.modelsModule || !window.modelsModule.getCachedItems) return false;
   const items = window.modelsModule.getCachedItems() || [];
@@ -422,13 +538,17 @@ async function _ensureDefaultPendingChat() {
 export function initModelPicker(deps) {
   _deps = deps;
   _initModelPickerDropdown();
-  _refreshSelectorCatalog().then(() => updateModelPicker()).catch(() => {});
+  Promise.all([_refreshSelectorCatalog(), _refreshIdentityCatalog()])
+    .then(() => updateModelPicker())
+    .catch(() => {});
 }
 
 function _initModelPickerDropdown() {
   const wrap = document.getElementById('model-picker-wrap');
   const btn = document.getElementById('model-picker-btn');
+  const modelBtn = document.getElementById('identity-model-btn');
   const menu = document.getElementById('model-picker-menu');
+  const heading = document.getElementById('model-picker-heading');
   const search = document.getElementById('model-picker-search');
   const listEl = document.getElementById('model-picker-list');
   const searchRow = menu ? menu.querySelector('.model-picker-search-row') : null;
@@ -452,6 +572,8 @@ function _initModelPickerDropdown() {
     menu.classList.remove('closing');
     menu.classList.add('hidden');
     search.value = '';
+    btn.setAttribute('aria-expanded', 'false');
+    if (modelBtn) modelBtn.setAttribute('aria-expanded', 'false');
     document.dispatchEvent(new CustomEvent('odysseus:model-picker-closed'));
   }
 
@@ -526,7 +648,11 @@ function _initModelPickerDropdown() {
   }
 
   function _getConversationTargets() {
-    const choices = [..._selectorItems];
+    // Saved identities lead the list. The catalog's own "jarvis" row is
+    // redundant once the registry exposes identities, so it is dropped then.
+    const choices = _identityItems.length
+      ? [..._identityChoices(), ..._selectorItems.filter(item => item.target !== 'jarvis')]
+      : [..._selectorItems];
     const selected = _selectedAgent();
     if (selected?.available === false && !choices.some(item => item.target === selected.target)) {
       choices.push({
@@ -549,7 +675,9 @@ function _initModelPickerDropdown() {
     }
     const seen = new Set();
     return choices.filter(item => {
-      const keys = [`target:${item.target}`, `name:${item.display.trim().toLowerCase()}`];
+      const keys = item.identityId
+        ? [`identity:${item.identityId}`]
+        : [`target:${item.target}`, `name:${item.display.trim().toLowerCase()}`];
       if (keys.some(key => seen.has(key))) return false;
       keys.forEach(key => seen.add(key));
       return true;
@@ -558,19 +686,24 @@ function _initModelPickerDropdown() {
 
   function _populate(filter) {
     listEl.innerHTML = '';
-    const all = _getConversationTargets();
+    const modelMode = _identityMenuMode === 'model';
+    const all = modelMode ? _modelChoices() : _getConversationTargets();
     const q = (filter || '').trim().toLowerCase();
     const hasAnyChoice = all.length > 0;
     listEl.classList.toggle('is-empty', !hasAnyChoice);
     menu.classList.toggle('no-models', !hasAnyChoice);
+    if (heading) heading.textContent = modelMode ? 'Choose a model for this session' : 'Select who to talk to';
+    listEl.setAttribute('aria-label', modelMode ? 'Models available for this session' : 'Configured conversation identities');
     if (search) {
-      search.placeholder = hasAnyChoice ? 'Search who you can talk to…' : 'No identities discovered';
+      search.placeholder = modelMode
+        ? (hasAnyChoice ? 'Search models…' : 'No models discovered')
+        : (hasAnyChoice ? 'Search who you can talk to…' : 'No identities discovered');
     }
     if (searchRow) {
       searchRow.classList.toggle('searching', !!q);
     }
 
-    if (_selectorCatalogState === 'loading') {
+    if (!modelMode && _selectorCatalogState === 'loading') {
       listEl.classList.remove('is-empty');
       menu.classList.remove('no-models');
       const loading = document.createElement('div');
@@ -580,7 +713,7 @@ function _initModelPickerDropdown() {
       listEl.appendChild(loading);
       return;
     }
-    if (_selectorCatalogState === 'error') {
+    if (!modelMode && _selectorCatalogState === 'error') {
       listEl.classList.remove('is-empty');
       menu.classList.remove('no-models');
       const failure = document.createElement('div');
@@ -596,7 +729,15 @@ function _initModelPickerDropdown() {
       const empty = document.createElement('div');
       empty.className = 'model-switch-status';
       empty.setAttribute('role', 'status');
-      if (window._isAdmin === false) {
+      if (modelMode) {
+        empty.textContent = window._isAdmin === false
+          ? MANAGED_BY_ADMIN_COPY
+          : 'No models are available for this session.';
+        if (window._isAdmin !== false) {
+          empty.appendChild(document.createElement('br'));
+          empty.appendChild(createModelSetupEntry());
+        }
+      } else if (window._isAdmin === false) {
         empty.textContent = MANAGED_BY_ADMIN_COPY;
       } else {
         empty.textContent = 'No configured identities are available.';
@@ -652,7 +793,8 @@ function _initModelPickerDropdown() {
       const _selectedNow = _selectedAgent();
       const _sessionModel = (_deps.getSessions().find(s => s.id === _deps.getCurrentSessionId()) || {}).model || '';
       const _isSelected = (m.target && _selectedNow?.target === m.target)
-        || (!m.target && !!m.mid && m.mid === _sessionModel);
+        || (m.kind === 'identity' && m.identityId === _boundIdentityId())
+        || (!m.target && !m.identityId && !!m.mid && m.mid === _sessionModel);
       row.setAttribute('aria-selected', _isSelected ? 'true' : 'false');
       if (_isSelected) {
         row.classList.add('is-selected');
@@ -711,6 +853,57 @@ function _initModelPickerDropdown() {
       const _ta = document.getElementById('message');
       if (_ta) setTimeout(() => _ta.focus(), 50);
     }
+    if (m.kind === 'identity') {
+      // Bind a saved identity (MAD-929). For an existing session the server
+      // also applies the identity's attached model profile and reasoning level;
+      // for a new chat we preload them into the pending chat so the session
+      // materializes already bound.
+      const identityId = String(m.identityId || '');
+      if (currentSessionId) {
+        const fd = new FormData();
+        fd.append('identity_id', identityId);
+        try {
+          const response = await fetch(`${API_BASE}/api/session/${currentSessionId}`, {
+            method: 'PATCH',
+            body: fd,
+          });
+          if (!response.ok) throw new Error(`identity_${response.status}`);
+          const payload = await response.json().catch(() => ({}));
+          const session = _deps.getSessions().find(item => item.id === currentSessionId);
+          if (session) {
+            session.identity_id = identityId;
+            if (payload.model) session.model = payload.model;
+            if (payload.endpoint_url) session.endpoint_url = payload.endpoint_url;
+            if ('reasoning_level' in payload) session.reasoning_level = payload.reasoning_level || '';
+          }
+        } catch (_) {
+          uiModule.showError(`Failed to select ${m.display}`);
+          return;
+        }
+        try { document.dispatchEvent(new CustomEvent('odysseus:model-picked', { detail: m })); } catch {}
+        updateModelPicker();
+        uiModule.showToast(`Talking to ${m.display} — its default model is loaded for this session`);
+        return;
+      }
+      const pending = _pendingChat || {};
+      const identity = _identityById(identityId);
+      const chat = (identity?.modelProfile?.chat) || {};
+      const next = { ...pending, identityId, reasoningLevel: String(chat.reasoning_level || '') };
+      if (chat.model) {
+        next.modelId = String(chat.model);
+        next.source = 'identity';
+        const resolved = _findModelChoice(chat.model, chat.endpoint_id || '');
+        if (resolved) {
+          next.url = resolved.url;
+          next.endpointId = resolved.endpointId || chat.endpoint_id || '';
+        }
+      }
+      _deps.setPendingChat(next);
+      try { document.dispatchEvent(new CustomEvent('odysseus:model-picked', { detail: m })); } catch {}
+      updateModelPicker();
+      uiModule.showToast(`Talking to ${m.display}`);
+      return;
+    }
     if (m.kind === 'agent' || m.kind === 'worker') {
       if (currentSessionId) {
         const fd = new FormData();
@@ -755,11 +948,19 @@ function _initModelPickerDropdown() {
       _saveAgentSelections();
     };
     if (!currentSessionId && _pendingChat) {
-      // Already have a deferred session — just update the model
-      _deps.setPendingChat({ url: m.url, modelId: m.mid, endpointId: m.endpointId, source: 'manual' });
+      // Already have a deferred session — just update the model. Any pending
+      // identity (and its reasoning level) survives a composer model override.
+      _deps.setPendingChat({
+        ..._pendingChat,
+        url: m.url,
+        modelId: m.mid,
+        endpointId: m.endpointId,
+        source: 'manual',
+      });
       clearSelectedAgent();
       // Header stays as session name — model switch only updates picker
       updateModelPicker();
+      try { document.dispatchEvent(new CustomEvent('odysseus:model-picked', { detail: m })); } catch {}
       uiModule.showToast(`Using ${m.display}`);
       return;
     } else if (!currentSessionId) {
@@ -791,6 +992,9 @@ function _initModelPickerDropdown() {
     }
     // Update picker visibility — model is now set
     updateModelPicker();
+    // The reasoning chip follows the session's active model, so re-render it
+    // once the async session update has landed (MAD-930).
+    try { document.dispatchEvent(new CustomEvent('odysseus:model-picked', { detail: m })); } catch {}
     uiModule.showToast(`Using ${m.display}`);
   }
 
@@ -841,38 +1045,64 @@ function _initModelPickerDropdown() {
     if (match) await _pick(match);
   });
 
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (menu.classList.contains('hidden') || menu.classList.contains('closing')) {
-      // Force-clear any in-progress close animation
-      _cancelPendingClose();
-      menu.classList.remove('closing', 'hidden');
-      _populate('');
-      _fitMenuToViewport();
-      if (window.modelsModule && window.modelsModule.refreshModels) {
-        window.modelsModule.refreshModels().then(() => {
-          if (!menu.classList.contains('hidden')) {
-            _populate(search.value || '');
-            _fitMenuToViewport();
-          }
-          updateModelPicker();
-        }).catch(() => {});
-      }
-      _refreshSelectorCatalog().then(() => {
+  function _openMenu(mode) {
+    _identityMenuMode = mode === 'model' ? 'model' : 'identity';
+    // Force-clear any in-progress close animation
+    _cancelPendingClose();
+    menu.classList.remove('closing', 'hidden');
+    _populate('');
+    _fitMenuToViewport();
+    btn.setAttribute('aria-expanded', String(_identityMenuMode === 'identity'));
+    if (modelBtn) modelBtn.setAttribute('aria-expanded', String(_identityMenuMode === 'model'));
+    if (window.modelsModule && window.modelsModule.refreshModels) {
+      window.modelsModule.refreshModels().then(() => {
         if (!menu.classList.contains('hidden')) {
           _populate(search.value || '');
           _fitMenuToViewport();
         }
-        updateModelPicker();
       }).catch(() => {});
-      if (window.innerWidth >= 768) search.focus();
-      // Hide scroll button so it doesn't overlap
-      const _scrollBtn = document.getElementById('scroll-bottom-btn');
-      if (_scrollBtn) _scrollBtn.style.display = 'none';
-    } else {
-      _close();
     }
+    _refreshSelectorCatalog().then(() => {
+      if (!menu.classList.contains('hidden') && _identityMenuMode === 'identity') {
+        _populate(search.value || '');
+        _fitMenuToViewport();
+      }
+      updateModelPicker();
+    }).catch(() => {});
+    _refreshIdentityCatalog().then(() => {
+      if (!menu.classList.contains('hidden')) {
+        _populate(search.value || '');
+        _fitMenuToViewport();
+      }
+      updateModelPicker();
+    }).catch(() => {});
+    if (window.innerWidth >= 768) search.focus();
+    // Hide scroll button so it doesn't overlap
+    const _scrollBtn = document.getElementById('scroll-bottom-btn');
+    if (_scrollBtn) _scrollBtn.style.display = 'none';
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = !menu.classList.contains('hidden') && !menu.classList.contains('closing');
+    if (open && _identityMenuMode === 'identity') {
+      _close();
+      return;
+    }
+    _openMenu('identity');
   });
+
+  if (modelBtn) {
+    modelBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = !menu.classList.contains('hidden') && !menu.classList.contains('closing');
+      if (open && _identityMenuMode === 'model') {
+        _close();
+        return;
+      }
+      _openMenu('model');
+    });
+  }
 
   search.addEventListener('input', () => _populate(search.value));
   window.addEventListener('resize', () => {
@@ -890,6 +1120,7 @@ function _initModelPickerDropdown() {
         }
         await _refreshLocalProbe();
         await _refreshSelectorCatalog();
+        await _refreshIdentityCatalog();
         if (!menu.classList.contains('hidden')) _populate(search.value || '');
         updateModelPicker();
       } catch (_) {
@@ -911,7 +1142,12 @@ function _initModelPickerDropdown() {
     });
   }
   document.addEventListener('click', (e) => {
-    if (!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== btn) {
+    if (
+      !menu.classList.contains('hidden')
+      && !menu.contains(e.target)
+      && e.target !== btn
+      && !(modelBtn && (e.target === modelBtn || modelBtn.contains(e.target)))
+    ) {
       _close();
     }
   });
@@ -943,14 +1179,25 @@ export function updateModelPicker() {
   const _pendingChat = _deps.getPendingChat();
   const s = sessions.find(x => x.id === currentSessionId);
   const selectedAgent = _selectedAgent();
+  const target = (selectedAgent && selectedAgent.target) || (s && s.agent_target) || 'jarvis';
+  if (!currentSessionId && !_deps.getPendingChat()) _ensureDefaultPendingChat();
+  if (selectedAgent) _emitConversationTarget(selectedAgent);
+  // A saved identity owns the jarvis-routed chip label (MAD-930). Worker and
+  // other conversation targets keep their existing labels and routing.
+  const boundIdentity = target === 'jarvis' ? _boundIdentity() : null;
+  if (boundIdentity) {
+    label.title = `Talking to ${boundIdentity.display}`;
+    label.textContent = boundIdentity.display;
+    _renderIdentityModelChip();
+    return;
+  }
   if (selectedAgent) {
-    if (!currentSessionId && !_deps.getPendingChat()) _ensureDefaultPendingChat();
     label.title = selectedAgent.label;
     label.textContent = selectedAgent.label || selectedAgent.target;
     if (selectedAgent.available === false) {
       label.title = `${selectedAgent.label}: ${selectedAgent.reason || 'unavailable'}`;
     }
-    _emitConversationTarget(selectedAgent);
+    _renderIdentityModelChip();
     return;
   }
   let modelId = null;
@@ -1013,4 +1260,58 @@ export function updateModelPicker() {
   } else {
     label.textContent = displayName;
   }
+  _renderIdentityModelChip();
+}
+
+/**
+ * Render the identity-default model chip (MAD-930).
+ *
+ * Shows the model that will load for this session: the session's own model
+ * (which the server seeds from the bound identity's attached profile), the
+ * pending pick for a new chat, or the identity's saved default. A model picked
+ * in the composer only PATCHes the session, so it is flagged as an override
+ * while the identity's saved default stays untouched.
+ */
+function _renderIdentityModelChip() {
+  const chip = document.getElementById('identity-model-btn');
+  if (!chip || !_deps) return;
+  const labelEl = document.getElementById('identity-model-label');
+  const logoEl = document.getElementById('identity-model-logo');
+  const selectedAgent = _selectedAgent();
+  let session = null;
+  let pending = null;
+  try {
+    session = (_deps.getSessions() || []).find(x => x.id === _deps.getCurrentSessionId()) || null;
+    pending = _deps.getPendingChat ? _deps.getPendingChat() : null;
+  } catch (_) { /* deps not ready */ }
+  const target = (selectedAgent && selectedAgent.target) || (session && session.agent_target) || 'jarvis';
+  const applicable = target === 'jarvis';
+  chip.hidden = !applicable;
+  if (!applicable) {
+    chip.classList.remove('is-override');
+    return;
+  }
+  const identity = _boundIdentity() || _defaultIdentity();
+  const identityModel = _identityChatModel(identity);
+  let modelId = '';
+  if (session && session.model) modelId = String(session.model);
+  else if (pending && pending.modelId) modelId = String(pending.modelId);
+  if (!modelId && identityModel) modelId = identityModel;
+  const isIdentityDefault = !!(modelId && identityModel && modelId === identityModel);
+  const isOverride = !!(modelId && identityModel && modelId !== identityModel);
+  const display = modelId ? _modelDisplayName(modelId) : 'Select model';
+  if (labelEl) labelEl.textContent = display;
+  if (logoEl) logoEl.innerHTML = modelId ? (providerLogo(modelId) || '') : '';
+  chip.classList.toggle('is-override', isOverride);
+  const owner = identity ? identity.display : '';
+  if (isOverride) {
+    chip.title = `${modelId} — session override; ${owner ? `${owner}'s` : 'the identity'} saved default (${identityModel}) is unchanged`;
+  } else if (isIdentityDefault) {
+    chip.title = `${modelId} — default from ${owner || 'the identity'}`;
+  } else if (modelId) {
+    chip.title = modelId;
+  } else {
+    chip.title = 'Choose the model for this session';
+  }
+  chip.setAttribute('aria-label', `Model: ${display}. Click to change.`);
 }

@@ -43690,6 +43690,31 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Identity-default model chip (MAD-930) — sits between the identity selector
+   and the reasoning chip and reuses the compact conversation-control styling. */
+.composer-model-btn #identity-model-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-model-btn .model-picker-logo {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.composer-model-btn .model-picker-logo:empty { display: none; }
+.composer-model-btn.is-override {
+  color: var(--fg);
+}
+.composer-model-btn.is-override::after {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent, var(--red));
+  flex-shrink: 0;
+}
+.composer-model-btn[hidden] { display: none; }
 .composer-effort-popover {
   display: none;
   position: absolute;
