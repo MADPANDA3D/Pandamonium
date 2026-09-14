@@ -18,3 +18,11 @@ condition = "AND"
 regexTarget = "match"
 paths = ['''^tests/(?:browser/mad-935-ssh-connections\.spec\.js|test_ssh_connections\.py|test_ssh_agent_governance\.py)$''']
 regexes = ['''fake-(?:[a-z]+-)?(?:key|secret)-material''']
+
+[[allowlists]]
+description = "Test-only tampered credential fixture (MAD-797 dataset screening)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''^tests/test_training_datasets\.py$''']
+regexes = ['''api_key = abcdef123456''']

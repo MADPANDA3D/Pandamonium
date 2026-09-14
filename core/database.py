@@ -2109,6 +2109,97 @@ class Integration(TimestampMixin, Base):
     enabled = Column(Boolean, default=True)
 
 
+class TrainingDataset(TimestampMixin, Base):
+    """Reviewed dataset manifest for an operator-approved training job (MAD-797).
+
+    Installation-level (admin-configured; ``owner`` is NULL). A dataset is
+    created empty and only ever gains items through an explicit per-item
+    ``add_item`` call — nothing scans conversations, memories, files, books,
+    or tool traces. ``fingerprint`` is the SHA-256 over the approved item
+    snapshots and is what a job preview/start pins.
+    """
+    __tablename__ = "training_datasets"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    owner = Column(String, nullable=True, index=True)
+    status = Column(String, default="draft")  # draft | reviewed | retired
+    license_summary = Column(String, nullable=True)
+    item_count = Column(Integer, default=0)
+    fingerprint = Column(String, nullable=True)
+    reviewed_by = Column(String, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+
+class TrainingDatasetItem(TimestampMixin, Base):
+    """One explicitly selected dataset item with provenance and review state.
+
+    ``content`` is the bounded, screened snapshot that was reviewed; it is
+    Fernet-encrypted at rest because it can hold private conversation or book
+    text. ``content_hash`` covers exactly that stored snapshot, so the dataset
+    fingerprint cannot drift from what was reviewed.
+    """
+    __tablename__ = "training_dataset_items"
+
+    id = Column(String, primary_key=True, index=True)
+    dataset_id = Column(
+        String,
+        ForeignKey("training_datasets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_kind = Column(String, nullable=False)  # manual|file|conversation|memory|book|tool_trace
+    source_ref = Column(Text, nullable=True)      # JSON provenance, redacted
+    owner = Column(String, nullable=True)         # source owner (or actor for manual)
+    consent_license = Column(String, nullable=True)
+    consent_attested_by = Column(String, nullable=True)
+    review_state = Column(String, default="pending")  # pending|approved|rejected|redacted|excluded
+    review_reason = Column(String, nullable=True)
+    content_hash = Column(String, nullable=True)
+    content = Column(EncryptedText, nullable=True)
+    redaction = Column(Text, nullable=True)       # JSON screening report
+    exclusion_path = Column(String, nullable=True)
+    reviewed_by = Column(String, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+
+class TrainingJob(TimestampMixin, Base):
+    """One observable training job against the external runtime (MAD-797).
+
+    Lifecycle: queued | running | checkpointing | completed | failed | canceled.
+    ``preview`` stores the exact spec the operator confirmed and
+    ``confirm_fingerprint`` is checked at start, so a job can never be started
+    with a different spec than the one previewed. ``retained_artifacts`` is the
+    explicit allowlist of artifacts kept on the runtime host after cancel.
+    """
+    __tablename__ = "training_jobs"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=True, index=True)
+    dataset_id = Column(String, nullable=True, index=True)
+    dataset_fingerprint = Column(String, nullable=True)
+    state = Column(String, default="queued")
+    model = Column(String, nullable=True)
+    method = Column(String, nullable=True)
+    params = Column(Text, nullable=True)          # JSON job parameters
+    output_location = Column(String, nullable=True)
+    dataset_path = Column(String, nullable=True)
+    runtime_job_id = Column(String, nullable=True, index=True)
+    preview = Column(Text, nullable=True)         # JSON confirmed preview
+    confirm_fingerprint = Column(String, nullable=True)
+    progress = Column(Text, nullable=True)        # JSON progress summary
+    metrics = Column(Text, nullable=True)         # JSON bounded metrics
+    checkpoints = Column(Text, nullable=True)     # JSON list
+    logs = Column(Text, nullable=True)            # bounded, redacted log tail
+    retained_artifacts = Column(Text, nullable=True)  # JSON explicit retention list
+    resume_of = Column(String, nullable=True)
+    error = Column(Text, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 
 
 
