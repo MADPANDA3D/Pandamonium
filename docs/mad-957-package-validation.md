@@ -14,6 +14,11 @@ Implementation: `71e83a7040f31123797671562b1d75b808a82cbe` on
 - Marketplace browser regression suite: **9 passed**. Error-copy captures:
   **2 passed**, desktop and mobile, using a rejected-package API fixture.
 - `git diff --check`, Python compileall and JavaScript syntax checks passed.
+- First PR CI run: Python **6,421 passed / 5 skipped**; browsers **181 passed**
+  with one existing composer test race. Model discovery replaced the SVG after
+  `toBeVisible()` and before `boundingBox()`, returning null. The assertion now
+  retries visibility/positive-size/maximum-size together during that rerender;
+  production composer behavior is unchanged. Final-head CI is required before merge.
 - A disposable **running full app** passed authenticated HTTP catalog discovery,
   install preview, native authority approval, execution, Plugins listing, native
   agent Skills index, disable, enable and remove. The archive was built and

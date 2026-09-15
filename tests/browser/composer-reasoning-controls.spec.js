@@ -43,10 +43,15 @@ test('composer shows capability reasoning tiers and icon-sized logos', async ({ 
   await expect(effort).toBeVisible();
 
   const logo = page.locator('#identity-model-logo svg');
-  await expect(logo).toBeVisible();
-  const box = await logo.boundingBox();
-  expect(box.width).toBeLessThanOrEqual(16);
-  expect(box.height).toBeLessThanOrEqual(16);
+  // Model discovery can replace the SVG between visibility and measurement.
+  await expect(async () => {
+    const box = await logo.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.height).toBeGreaterThan(0);
+    expect(box.width).toBeLessThanOrEqual(16);
+    expect(box.height).toBeLessThanOrEqual(16);
+  }).toPass({ timeout: 20000 });
 
   await expect(page.locator('#composer-effort-value')).toHaveText('Model default', { timeout: 20000 });
 
