@@ -55,7 +55,7 @@ test('installed plugins stay visible and detailed when the marketplace is offlin
   await expect(page.locator('#marketplace-installed-list')).toContainText('ORACLE');
   await expect(page.locator('#marketplace-installed-list')).toContainText('Atlas Lab');
 
-  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
+  await page.getByRole('tab', { name: 'Marketplace' }).click();
   await expect(page.locator('#marketplace-results')).toContainText('Marketplace offline');
   await page.getByRole('tab', { name: 'Installed plugins' }).click();
 

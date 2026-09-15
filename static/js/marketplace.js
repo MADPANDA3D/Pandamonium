@@ -38,8 +38,10 @@ let installedDetail;
 let installedDetailContent;
 let installedBack;
 let tabInstalled;
+let tabMarketplace;
 let tabAdd;
 let panelInstalled;
+let panelMarketplace;
 let panelAdd;
 let activeTab = 'installed';
 const SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'report'];
@@ -75,16 +77,19 @@ function close() {
   (previousFocus?.isConnected ? previousFocus : launcher)?.focus();
 }
 
+const TAB_ORDER = ['installed', 'marketplace', 'add'];
+
 function setTab(tab, focus = false) {
-  activeTab = tab === 'add' ? 'add' : 'installed';
+  activeTab = TAB_ORDER.includes(tab) ? tab : 'installed';
   [
     [tabInstalled, panelInstalled, 'installed'],
+    [tabMarketplace, panelMarketplace, 'marketplace'],
     [tabAdd, panelAdd, 'add'],
   ].forEach(([button, panel, name]) => {
     button?.setAttribute('aria-selected', String(activeTab === name));
     if (panel) panel.hidden = activeTab !== name;
   });
-  if (focus) (activeTab === 'add' ? tabAdd : tabInstalled)?.focus({ preventScroll: true });
+  if (focus) ({ installed: tabInstalled, marketplace: tabMarketplace, add: tabAdd })[activeTab]?.focus({ preventScroll: true });
 }
 
 function showInstalledList() {
@@ -854,8 +859,10 @@ function init() {
   installedDetailContent = document.getElementById('marketplace-installed-detail-content');
   installedBack = document.getElementById('marketplace-installed-back');
   tabInstalled = document.getElementById('marketplace-tab-installed');
+  tabMarketplace = document.getElementById('marketplace-tab-marketplace');
   tabAdd = document.getElementById('marketplace-tab-add');
   panelInstalled = document.getElementById('marketplace-panel-installed');
+  panelMarketplace = document.getElementById('marketplace-panel-marketplace');
   panelAdd = document.getElementById('marketplace-panel-add');
   if (!modal || !launcher || !search || !category || !results || !summary || !workspace || !detail || !detailContent || !installedDetailContent) return;
   launcher.addEventListener('click', open);
@@ -869,11 +876,14 @@ function init() {
     }
   });
   tabInstalled?.addEventListener('click', () => setTab('installed'));
+  tabMarketplace?.addEventListener('click', () => setTab('marketplace'));
   tabAdd?.addEventListener('click', () => setTab('add'));
   modal.querySelector('.marketplace-tabs')?.addEventListener('keydown', event => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
-    setTab(activeTab === 'installed' ? 'add' : 'installed', true);
+    const index = TAB_ORDER.indexOf(activeTab);
+    const next = event.key === 'ArrowRight' ? (index + 1) % TAB_ORDER.length : (index - 1 + TAB_ORDER.length) % TAB_ORDER.length;
+    setTab(TAB_ORDER[next], true);
   });
   installedBack?.addEventListener('click', () => {
     const previous = installedSelectedId;
