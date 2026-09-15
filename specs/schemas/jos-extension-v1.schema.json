@@ -14,6 +14,17 @@
     "extension_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
     "name": {"type": "string", "minLength": 1, "maxLength": 200},
     "version": {"type": "string", "minLength": 1, "maxLength": 80},
+    "metadata": {
+      "type": "object", "additionalProperties": false, "required": ["summary"],
+      "properties": {
+        "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "icon": {"type": "string", "minLength": 1, "maxLength": 16},
+        "categories": {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}},
+        "examples": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+        "requirements": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+        "skill_descriptions": {"type": "object", "maxProperties": 64, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 1000}}
+      }
+    },
     "source": {
       "type": "object", "additionalProperties": false, "required": ["url", "revision"],
       "properties": {

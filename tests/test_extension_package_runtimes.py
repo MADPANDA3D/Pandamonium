@@ -87,6 +87,7 @@ with urllib.request.urlopen(request,timeout=3) as response: print(response.read(
     state = next((root / "runtime-state").glob("*.json"))
     unit = json.loads(state.read_text())["unit"]
     resources.verify_scope(unit)
+    assert adapter.readiness(record, "operator")["state"] == "ready"
     # A failed new revision leaves the original running; a successful replacement
     # stops it, and rollback restores that exact package at the same source commit.
     original = manager._read_state()["extensions"]["demo-tools"]["active_revision"]

@@ -153,6 +153,11 @@ and [mobile](docs/screenshots/workspace-context-mobile.png).
   with **Needs setup**. Managed services, encrypted endpoint setup and indexed
   knowledge use the same native lifecycle; see the
   [runtime setup and evidence](docs/mad-960-package-runtimes.md).
+- Plugins share package purpose, categories, capabilities, examples and setup
+  across intake, installed detail, marketplace and agent discovery. Ready reflects
+  current runtime evidence or native Skills admission; browsing never mounts tools.
+  Configuration stays editable and technical diagnostics remain expandable. See
+  [UI behavior and isolated browser evidence](docs/mad-961-plugin-ui.md).
 - Signed plugin marketplace discovery and approval-gated install, update,
   enable/disable, rollback, and recoverable removal through the native lifecycle.
   Marketplace installation uses the verified archive, preserving generated

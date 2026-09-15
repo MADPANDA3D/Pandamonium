@@ -10,13 +10,13 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 from core.atomic_io import atomic_write_json
 from core.constants import DATA_DIR
-
 
 MANIFEST_VERSION = "jos-extension.v1"
 REGISTRY_VERSION = "jos-extension-registry.v1"
@@ -36,9 +36,9 @@ SKILL_BUNDLE_FORMATS = frozenset({"agent_skill", "codex_plugin"})
 _TOP_LEVEL_FIELDS = frozenset({
     "protocol_version", "extension_id", "name", "version", "source", "runtime",
     "capabilities", "permissions", "health", "lifecycle", "data_boundaries",
-    "removal", "rollback", "configuration",
+    "removal", "rollback", "configuration", "metadata",
 })
-_REQUIRED_FIELDS = _TOP_LEVEL_FIELDS - {"configuration"}
+_REQUIRED_FIELDS = _TOP_LEVEL_FIELDS - {"configuration", "metadata"}
 
 
 class ExtensionContractError(ValueError):
@@ -302,6 +302,27 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
         raise ExtensionContractError("extension_rollback_retention_invalid")
 
     normalized = dict(value)
+    if "metadata" in value:
+        metadata = _object(value["metadata"], "extension_metadata_invalid")
+        _strict_fields(metadata, {"summary", "categories", "icon", "examples", "requirements", "skill_descriptions"}, "extension_metadata_unknown_field")
+        if not isinstance(metadata.get("summary"), str) or not isinstance(metadata.get("icon", "◈"), str):
+            raise ExtensionContractError("extension_metadata_invalid")
+        display: dict[str, Any] = {
+            "summary": _bounded_text(metadata.get("summary"), "extension_metadata_summary_invalid", maximum=1000),
+            "icon": _bounded_text(metadata.get("icon", "◈"), "extension_metadata_icon_invalid", maximum=16),
+        }
+        for key in ("categories", "examples", "requirements"):
+            values = metadata.get(key, [])
+            if not isinstance(values, list) or len(values) > 32 or any(not isinstance(item, str) for item in values):
+                raise ExtensionContractError("extension_metadata_invalid")
+            display[key] = [_bounded_text(item, "extension_metadata_invalid", maximum=1000) for item in values]
+        if any(not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", item) for item in display["categories"]):
+            raise ExtensionContractError("extension_metadata_category_invalid")
+        descriptions = _object(metadata.get("skill_descriptions", {}), "extension_metadata_invalid")
+        if set(descriptions) - set(descriptor.get("include", [])) or any(not isinstance(text, str) for text in descriptions.values()):
+            raise ExtensionContractError("extension_metadata_skill_invalid")
+        display["skill_descriptions"] = {name: _bounded_text(text, "extension_metadata_invalid", maximum=1000) for name, text in descriptions.items()}
+        normalized["metadata"] = display
     normalized.update({
         "extension_id": extension_id,
         "name": _bounded_text(value.get("name"), "extension_name_invalid"),

@@ -635,7 +635,7 @@ class GeneratedCliAdapter:
                 if package_tree_digest(path) != digest:
                     raise ExtensionLifecycleError("extension_package_content_changed")
                 atomic_write_json(
-                    receipt,
+                    str(receipt),
                     {
                         "digest": digest,
                         "source_revision": revision,
@@ -692,7 +692,7 @@ class GeneratedCliAdapter:
                     {**config, "PANDAMONIUM_PORT": str(service["port"])},
                     validation=False,
                 )
-                atomic_write_json(self._service_state(runtime), service)
+                atomic_write_json(str(self._service_state(runtime)), service)
                 self._activations[manifest["extension_id"]] = (
                     path,
                     manifest,
@@ -754,77 +754,80 @@ class GeneratedCliAdapter:
         with _LOCK:
             pass  # Each bounded invocation exits; preserve private runtime/user data.
 
+    def _validated_context(self, record: dict, owner: str, revision: str | None = None) -> tuple:
+        """Read the same current package/configuration/health evidence used by calls."""
+        manifest = record["manifest"]
+        state = json.loads((self.root / "lifecycle.json").read_text())
+        installed = state["extensions"].get(manifest["extension_id"])
+        if not installed or not installed["enabled"] or not record.get("enabled"):
+            raise ExtensionLifecycleError("extension_disabled")
+        if installed["owner_scope"] != owner:
+            raise ExtensionLifecycleError("extension_owner_scope_mismatch")
+        if revision is not None and revision != installed["active_revision"]:
+            raise ExtensionLifecycleError(
+                "extension_cli_revision_changed_remount_required"
+            )
+        revision = installed["active_revision"]
+        path = (
+            self.root
+            / "installed"
+            / manifest["extension_id"]
+            / "revisions"
+            / revision
+        )
+        if json.loads((path / "jarvis-extension.json").read_text()) != manifest:
+            from src.extension_registry import validate_extension_manifest
+
+            if (
+                validate_extension_manifest(
+                    json.loads((path / "jarvis-extension.json").read_text())
+                )
+                != manifest
+            ):
+                raise ExtensionLifecycleError("extension_cli_manifest_changed")
+        digest = package_tree_digest(path)
+        runtime = self._runtime(manifest, digest, owner)
+        receipt = json.loads((runtime / "validated.json").read_text())
+        config = configuration.values(manifest, owner)
+        if receipt.get("configuration") != configuration.fingerprint(config):
+            raise ExtensionLifecycleError(
+                "extension_needs_setup:Configuration changed; enable to revalidate."
+            )
+        contract = _read_contract(path, manifest)
+        if contract["execution"]["service"]:
+            state_path = self._service_state(runtime)
+            if not state_path.exists():
+                raise ExtensionLifecycleError(
+                    "extension_service_offline:Disable and enable to restart."
+                )
+            service = json.loads(state_path.read_text())
+            resources.verify_scope(service["unit"])
+            config = {**config, "PANDAMONIUM_PORT": str(service["port"])}
+        if receipt["digest"] != digest:
+            raise ExtensionLifecycleError("extension_cli_validation_required")
+        return path, runtime, manifest, contract, config
+
+    def readiness(self, record: dict, owner: str) -> dict[str, str]:
+        # Do not block the UI behind an install or a running tool.
+        if not _LOCK.acquire(blocking=False):
+            return {"state": "preparing", "message": "A package operation is running. Refresh after it finishes."}
+        try:
+            self._validated_context(record, owner)
+            return {"state": "ready", "message": "Operation checks passed for this package and configuration. Each call rechecks runtime state."}
+        except (ExtensionLifecycleError, OSError, ValueError, KeyError, TypeError):
+            return {"state": "needs_setup", "message": "Runtime validation is unavailable or stale. Check setup, then disable and enable to revalidate."}
+        finally:
+            _LOCK.release()
+
     def execute(
-        self,
-        record: dict,
-        name: str,
-        arguments: dict,
-        owner: str,
-        cancel: threading.Event,
-        revision: str | None = None,
+        self, record: dict, name: str, arguments: dict, owner: str,
+        cancel: threading.Event, revision: str | None = None,
     ) -> dict:
         with _LOCK:
-            manifest = record["manifest"]
-            state = json.loads((self.root / "lifecycle.json").read_text())
-            installed = state["extensions"].get(manifest["extension_id"])
-            if not installed or not installed["enabled"] or not record.get("enabled"):
-                raise ExtensionLifecycleError("extension_disabled")
-            if installed["owner_scope"] != owner:
-                raise ExtensionLifecycleError("extension_owner_scope_mismatch")
-            if revision is not None and revision != installed["active_revision"]:
-                raise ExtensionLifecycleError(
-                    "extension_cli_revision_changed_remount_required"
-                )
-            revision = installed["active_revision"]
-            path = (
-                self.root
-                / "installed"
-                / manifest["extension_id"]
-                / "revisions"
-                / revision
-            )
-            if json.loads((path / "jarvis-extension.json").read_text()) != manifest:
-                from src.extension_registry import validate_extension_manifest
-
-                if (
-                    validate_extension_manifest(
-                        json.loads((path / "jarvis-extension.json").read_text())
-                    )
-                    != manifest
-                ):
-                    raise ExtensionLifecycleError("extension_cli_manifest_changed")
-            digest = package_tree_digest(path)
-            runtime = self._runtime(manifest, digest, owner)
-            receipt = json.loads((runtime / "validated.json").read_text())
-            config = configuration.values(manifest, owner)
-            if receipt.get("configuration") != configuration.fingerprint(config):
-                raise ExtensionLifecycleError(
-                    "extension_needs_setup:Configuration changed; enable to revalidate."
-                )
-            contract = _read_contract(path, manifest)
-            if contract["execution"]["service"]:
-                state_path = self._service_state(runtime)
-                if not state_path.exists():
-                    raise ExtensionLifecycleError(
-                        "extension_service_offline:Disable and enable to restart."
-                    )
-                service = json.loads(state_path.read_text())
-                resources.verify_scope(service["unit"])
-                config = {**config, "PANDAMONIUM_PORT": str(service["port"])}
-            if receipt["digest"] != digest or name not in {
-                c["name"] for c in record["effective_capabilities"]
-            }:
+            path, runtime, manifest, contract, config = self._validated_context(record, owner, revision)
+            if name not in {c["name"] for c in record["effective_capabilities"]}:
                 raise ExtensionLifecycleError("extension_cli_validation_required")
-            return _invoke(
-                path,
-                runtime,
-                manifest,
-                contract,
-                name,
-                arguments,
-                cancel,
-                config=config,
-            )
+            return _invoke(path, runtime, manifest, contract, name, arguments, cancel, config=config)
 
 
 async def execute_cli_tool(
@@ -838,12 +841,15 @@ async def execute_cli_tool(
 
     cancel = threading.Event()
     try:
+        identity = operator_identity(owner)
+        if identity is None:
+            raise ExtensionLifecycleError("extension_owner_scope_mismatch")
         result = await asyncio.to_thread(
             GeneratedCliAdapter().execute,
             record,
             name,
             arguments,
-            operator_identity(owner),
+            identity,
             cancel,
             revision,
         )

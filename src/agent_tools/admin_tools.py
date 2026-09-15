@@ -979,7 +979,7 @@ async def do_manage_extensions(content: str, owner: Optional[str] = None) -> Dic
         registry = ExtensionRegistry()
 
         if action == "list":
-            rows = extension_catalog_rows(registry)
+            rows = extension_catalog_rows(registry, owner=owner)
             summary = ", ".join(
                 f"{row['name']} ({row['id']}, {'enabled' if row['enabled'] else 'disabled'}, "
                 f"{row['capability_count']} capabilities)"
@@ -996,7 +996,7 @@ async def do_manage_extensions(content: str, owner: Optional[str] = None) -> Dic
             extension_id = str(args.get("extension_id") or args.get("id") or "").strip()
             if not extension_id:
                 return {"error": "extension_id is required for inspect", "exit_code": 1}
-            detail = inspect_extension(registry, extension_id)
+            detail = inspect_extension(registry, extension_id, owner=owner)
             if detail is None:
                 return {"error": f"Unknown extension: {extension_id}", "exit_code": 1}
             if not detail["inventory_available"]:
