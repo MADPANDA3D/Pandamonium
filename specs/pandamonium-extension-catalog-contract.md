@@ -38,12 +38,13 @@ rollback retention, and removal/preservation paths.
    dependencies, configuration names, restart requirement, health, removal,
    and rollback contract.
 5. Download the artifact without executing it; verify its exact size and digest.
-6. Pass the manifest's canonical Git URL and full 40/64-character revision to
-   the existing extension source preview. `HEAD`, branches, mutable tags,
-   `self`, and arbitrary repository scripts are not catalog install inputs.
-7. Reconcile the checked-out manifest with the signed entry before the existing
-   authority decision can execute. `POST /api/extensions/marketplace/plans`
-   now owns this seam and reuses the native lifecycle manager.
+6. Extract the verified archive through the bounded package installer. The
+   catalog's canonical source URL/full revision is provenance; never clone Git
+   after verifying the artifact or regenerate its integration.
+7. Reconcile the extracted manifest and content fingerprint with the signed
+   entry before the existing authority decision can execute.
+   `POST /api/extensions/marketplace/plans` owns this seam.
+
 
 An update is another signed entry for the same extension ID at a different
 version and immutable revision. The existing `upgrade` preview must show the
@@ -80,10 +81,13 @@ and preserve paths, defaults to retention, and remains recoverable.
 
 ## Review, deprecation, revocation, and advisories
 
-Publication requires source/license review, a reproducible artifact, immutable
-revision, manifest validation, compatibility proof, permission/data review,
-malware/secret scanning, and signatures from trusted catalog and publisher
-keys. The signed record names its reviewer and review time.
+The developer's Add to marketplace action authorizes publication without another
+editorial approval. The publisher verifies license, immutable provenance, manifest,
+secret findings, native admission/isolated operation checks, and compatibility;
+it signs the exact tested artifact and catalog with the pinned publisher key.
+The signed record identifies developer-action validation and its time. Failed
+functional validation blocks publication with setup/error guidance. See the
+[publication runbook](../docs/marketplace-publishing-runbook.md).
 
 Deprecation keeps an entry visible with a warning and successor guidance; it
 does not silently remove an installed plugin. Revocation changes the signed

@@ -140,8 +140,8 @@ test('installed GitHub intake plugins appear in the marketplace with provenance'
     data_boundaries: { read: [], write: [], network: [] },
     capabilities: [], configuration: [], notes: [],
   } }));
-  await page.route('**/api/extensions/installed/superpowers/submissions', route => route.fulfill({ json: {
-    state: 'submitted', duplicate: false, digest: `sha256:${'e'.repeat(64)}`,
+  await page.route('**/api/extensions/installed/superpowers/publish', route => route.fulfill({ json: {
+    state: 'published', version: '1.0.0', artifact_url: 'https://github.com/MADPANDA3D/Pandamonium/releases/download/test/artifact.tar.gz', digest: `sha256:${'e'.repeat(64)}`,
     path: '/srv/odysseus/data/extensions/submissions/superpowers/444444444444/submission.json',
     extension_id: 'superpowers', source_revision: '4'.repeat(40),
   } }));
@@ -162,10 +162,10 @@ test('installed GitHub intake plugins appear in the marketplace with provenance'
   await expect(detail.getByRole('button', { name: 'Disable' })).toBeVisible();
   await expect(detail.getByRole('button', { name: 'Remove' })).toBeVisible();
 
-  await detail.getByRole('button', { name: 'Offer to marketplace…' }).click();
-  await expect(detail).toContainText('Submission bundle written for review.');
+  await detail.getByRole('button', { name: 'Add to marketplace' }).click();
+  await expect(detail).toContainText('Published — the tested package');
   await expect(detail).toContainText(`sha256:${'e'.repeat(64)}`);
-  await expect(detail).toContainText('Offline — catalog signing stays with the release tooling');
+  await expect(detail).toContainText('Published artifact');
 });
 
 test('marketplace renders loading, offline, empty, and mobile detail navigation', async ({ page }) => {

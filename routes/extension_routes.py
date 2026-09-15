@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import platform
+import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -27,7 +27,7 @@ from src.extension_installer import (
     normalize_git_source_url,
 )
 from src.extension_mcp_adapter import mcp_extension_adapter
-from src.extension_package import PackageError
+from src.extension_package import PackageError, build_prepared_package
 from src.extension_plugin_view import installed_plugin_detail, installed_plugin_rows
 from src.extension_registry import ExtensionContractError
 from src.extension_scan import (
@@ -40,7 +40,6 @@ from src.extension_scan import (
     start_scan,
 )
 from src.extension_skill_adapter import SkillBundleAdapter
-from src.extension_submission import SubmissionError, build_submission_bundle
 from src.marketplace_catalog import (
     MarketplaceCatalogError,
     catalog_dependency_status,
@@ -49,25 +48,14 @@ from src.marketplace_catalog import (
     preview_catalog_install,
     verify_catalog_artifact,
 )
+from src.marketplace_channel import channel_status, load_channel
+from src.marketplace_publish import PublicationError, PublicationJobs
 
 MARKETPLACE_DIR = Path(DATA_DIR) / "marketplace"
 
 
 def _marketplace_files() -> tuple[Any, Mapping[str, str | bytes]] | None:
-    catalog_path = MARKETPLACE_DIR / "catalog.json"
-    keys_path = MARKETPLACE_DIR / "trusted_keys.json"
-    if not catalog_path.exists() and not keys_path.exists():
-        return None
-    if not catalog_path.is_file() or not keys_path.is_file():
-        raise MarketplaceCatalogError("marketplace_configuration_incomplete")
-    try:
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-        keys = json.loads(keys_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError) as exc:
-        raise MarketplaceCatalogError("marketplace_configuration_invalid") from exc
-    if not isinstance(keys, Mapping):
-        raise MarketplaceCatalogError("marketplace_trust_store_invalid")
-    return catalog, keys
+    return load_channel(MARKETPLACE_DIR)
 
 
 def _runtime_platform() -> tuple[str, str]:
@@ -117,6 +105,12 @@ class MarketplacePlanRequest(BaseModel):
     extension_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     version: str | None = Field(default=None, max_length=80)
     target_revision: str | None = Field(default=None, max_length=64)
+
+
+class PublicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = Field(default="1.0.0", pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$", max_length=40)
 
 
 class ConfigurationRequest(BaseModel):
@@ -171,6 +165,7 @@ def setup_extension_routes(
         [], tuple[Any, Mapping[str, str | bytes]] | None
     ] = _marketplace_files,
     artifact_loader: Callable[[Mapping[str, Any]], bytes] = download_catalog_artifact,
+    publication_jobs: PublicationJobs | None = None,
 ) -> APIRouter:
     manager = manager or ExtensionLifecycleManager(
         adapters=[
@@ -189,6 +184,7 @@ def setup_extension_routes(
         prefix="/api/extensions",
         tags=["extensions"],
     )
+    publications = publication_jobs or PublicationJobs(MARKETPLACE_DIR / "publications")
 
     def _operator(owner: str) -> str:
         identity = operator_identity(owner)
@@ -326,16 +322,7 @@ def setup_extension_routes(
     async def offer_installed_plugin(
         extension_id: str, owner: str = Depends(require_user)
     ):
-        try:
-            return await asyncio.to_thread(
-                build_submission_bundle,
-                manager.registry,
-                extension_id,
-                operator_id=_operator(owner),
-            )
-        except SubmissionError as exc:
-            status = 404 if exc.code == "extension_not_installed" else 409
-            raise HTTPException(status, exc.code) from exc
+        return await publish_installed(extension_id, PublicationRequest(), owner)
 
     @router.get("/marketplace")
     async def list_marketplace(_owner: str = Depends(require_user)):
@@ -353,7 +340,7 @@ def setup_extension_routes(
                     online=False,
                 )
             catalog, trusted_keys = loaded
-            return await asyncio.to_thread(
+            view = await asyncio.to_thread(
                 marketplace_catalog_view,
                 catalog,
                 trusted_keys=trusted_keys,
@@ -363,6 +350,9 @@ def setup_extension_routes(
                 platform=system,
                 architecture=architecture,
             )
+            if marketplace_loader is _marketplace_files:
+                view["channel"] = channel_status(MARKETPLACE_DIR)
+            return view
         except MarketplaceCatalogError as exc:
             return {
                 "schema_version": "pandamonium.marketplace-view.v1",
@@ -370,6 +360,59 @@ def setup_extension_routes(
                 "failure": exc.code,
                 "plugins": [],
             }
+
+    @router.post("/marketplace/refresh", dependencies=[Depends(require_admin)])
+    async def refresh_marketplace(owner: str = Depends(require_user)):
+        try:
+            await asyncio.to_thread(load_channel, MARKETPLACE_DIR, refresh=True)
+        except MarketplaceCatalogError as exc:
+            raise _http_error(exc) from exc
+        return await list_marketplace(owner)
+
+    @router.post("/scans/{scan_id}/publish", dependencies=[Depends(require_admin)])
+    async def publish_scan(scan_id: str, payload: PublicationRequest, owner: str = Depends(require_user)):
+        operator = _operator(owner)
+        job = await asyncio.to_thread(get_scan, scan_id)
+        if not job or job.get("operator_id") != operator:
+            raise HTTPException(404, "extension_scan_not_found")
+        if job.get("status") != "succeeded":
+            raise HTTPException(409, "extension_scan_unavailable")
+        try:
+            artifact = await asyncio.to_thread(validate_scan_artifact, job["artifact"], require_complete=True)
+            content = await asyncio.to_thread(scan_package_content, artifact)
+            if not content:
+                raise PublicationError("marketplace_prepared_package_required")
+            return await asyncio.to_thread(publications.start, content, operator, artifact["source_revision"], payload.version)
+        except (PublicationError, ExtensionScanError, PackageError) as exc:
+            raise HTTPException(409, exc.code) from exc
+
+    @router.post("/installed/{extension_id}/publish", dependencies=[Depends(require_admin)])
+    async def publish_installed(extension_id: str, payload: PublicationRequest, owner: str = Depends(require_user)):
+        operator = _operator(owner)
+
+        def prepare() -> dict:
+            with manager._lock:
+                record = manager._read_state()["extensions"].get(extension_id)
+                if not record or record.get("owner_scope") != operator:
+                    raise PublicationError("extension_not_installed")
+                source = manager._revision_path(extension_id, record["active_revision"])
+                with tempfile.TemporaryDirectory(prefix="marketplace-installed-") as temp:
+                    archive = Path(temp) / "package.tar.gz"
+                    build_prepared_package(source, archive)
+                    revision = manager._installed_source_revision(record, record["active_revision"], source)
+                    return publications.start(archive.read_bytes(), operator, revision, payload.version)
+
+        try:
+            return await asyncio.to_thread(prepare)
+        except (PublicationError, PackageError) as exc:
+            raise HTTPException(409, exc.code) from exc
+
+    @router.get("/publications/{job_id}", dependencies=[Depends(require_admin)])
+    async def publication_status(job_id: str, owner: str = Depends(require_user)):
+        try:
+            return await asyncio.to_thread(publications.get, job_id, _operator(owner))
+        except PublicationError as exc:
+            raise HTTPException(404, exc.code) from exc
 
     @router.post("/marketplace/plans", dependencies=[Depends(require_admin)])
     async def preview_marketplace_plan(

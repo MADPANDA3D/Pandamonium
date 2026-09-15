@@ -1,0 +1,35 @@
+{
+  "receipt": {
+    "id": "d5c6a85213033bf758e385900846054482552ca9b0075c0902666ac3409d8e17",
+    "state": "published",
+    "message": "Published",
+    "stage": "Publishing catalog and verifying readback",
+    "input_digest": "5f61d19d005bf02f81eb07d02250913377b01c8232ee1f947452ea3de63e4b3e",
+    "digest": "4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27",
+    "extension_id": "ponytail",
+    "version": "1.0.0",
+    "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-ponytail-1.0.0-4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27/pandamonium-plugin-ponytail-4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27.tar.gz",
+    "catalog_generated_at": "2026-09-15T23:08:11.391340+00:00",
+    "validation": {
+      "kind": "native_skills",
+      "count": 6
+    }
+  },
+  "source": "https://github.com/dietrichgebert/ponytail",
+  "revision": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
+  "prepared_digest": "5f61d19d005bf02f81eb07d02250913377b01c8232ee1f947452ea3de63e4b3e",
+  "installed_digest": "4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27",
+  "native_skills": 6,
+  "publisher_account_installs": 0,
+  "remaining_plugins": 0,
+  "compatibility_test_version": "1.0.68",
+  "checks": [
+    "real authenticated developer action",
+    "real GitHub release and signed catalog CAS",
+    "fresh app with bundled public keys and no publisher key",
+    "exact tested archive installation",
+    "native Skills admission",
+    "desktop/mobile",
+    "removal and disposable cleanup"
+  ]
+}
