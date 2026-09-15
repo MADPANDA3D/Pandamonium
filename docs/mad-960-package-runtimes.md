@@ -75,8 +75,9 @@ A connected API receives only the owner configuration explicitly supplied to it.
 ## Knowledge and collection setup
 
 Selected immutable files become at most 2,048 bounded chunks (8 MiB total input).
-The native SQLite FTS index lives in that package's private runtime; optional
-vectors use the existing embedding client. `knowledge.search`, `knowledge.status`
+The native SQLite FTS index lives beside that package's private runtime, outside
+the sandbox write mount; optional vectors use the existing embedding client.
+`knowledge.search`, `knowledge.status`
 and `knowledge.refresh` are explicit platform bindings with fixed schemas. Results
 include source path/line, immutable revision, source URL and content hash. Refresh
 atomically replaces the prior index; a changed embedding model requires refresh.
@@ -152,6 +153,11 @@ The browser exposed a stale-approval bug during setup changes. Saving now cancel
 pending decisions, revokes prior receipts and invalidates old plans before a new
 preview. Configuration fingerprints also bind connection changes to revalidation.
 The regression verifies that the fresh preview can be approved and executed.
+Setup commands rerun when the validated configuration fingerprint changes. The
+old validation receipt is removed first, so a failed reconfiguration cannot leave
+partially changed artifacts authorized. Citations use the source host's GitHub,
+GitLab or Codeberg route and encode filename characters. The final focused runtime
+matrix covers these review fixes with **13 passed**.
 
 [Desktop setup](screenshots/mad960-setup-desktop.png) and
 [mobile setup](screenshots/mad960-setup-mobile.png) show the editable target selector

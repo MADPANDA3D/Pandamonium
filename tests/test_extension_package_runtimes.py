@@ -15,6 +15,7 @@ from src import extension_resources as resources
 from src.authority_protocol import AuthorityStore
 from src.extension_cli_adapter import GeneratedCliAdapter
 from src.extension_installer import ExtensionLifecycleManager
+from src.extension_package import package_tree_digest
 from src.extension_registry import ExtensionRegistry
 from tests.test_extension_cli_adapter import package, preview_package
 from tests.test_extension_installer import _approve_and_execute
@@ -146,6 +147,75 @@ def test_resource_admission_fails_before_execution(tmp_path, monkeypatch):
     monkeypatch.delenv("ODYSSEUS_EXTENSION_RUNTIME_ROOT")
     with pytest.raises(Exception, match="dedicated filesystem"):
         resources.admit()
+
+
+def test_setup_reruns_after_configuration_changes_and_failure(tmp_path, monkeypatch):
+    path, manifest = package(tmp_path)
+    config = {"BASE_URL": "first"}
+    monkeypatch.setattr(configuration, "values", lambda *_: config)
+    (path / ".pandamonium/setup.py").write_text("""import json
+from pathlib import Path
+value=json.load(open('/run/pandamonium/config.json'))['BASE_URL']
+target=Path('/runtime/configured.txt')
+target.write_text(value)
+if value == 'broken': raise RuntimeError('setup failed')
+count=Path('/runtime/setup-count.txt')
+count.write_text(str(int(count.read_text() if count.exists() else '0')+1))
+""")
+    metadata = path / ".pandamonium/integration.json"
+    data = json.loads(metadata.read_text())
+    data["execution"]["install"] = [["python", "/package/.pandamonium/setup.py"]]
+    metadata.write_text(json.dumps(data))
+    adapter = GeneratedCliAdapter(tmp_path / "manager")
+    runtime = adapter._runtime(manifest, package_tree_digest(path), "operator")
+
+    def validate():
+        adapter.validate_for_owner(
+            path, manifest, manifest["source"]["revision"], "operator"
+        )
+
+    validate()
+    validate()
+    assert (runtime / "setup-count.txt").read_text() == "1"
+    config["BASE_URL"] = "second"
+    validate()
+    assert (runtime / "configured.txt").read_text() == "second"
+    assert (runtime / "setup-count.txt").read_text() == "2"
+    config["BASE_URL"] = "broken"
+    with pytest.raises(Exception, match="setup failed"):
+        validate()
+    assert not (runtime / "validated.json").exists()
+    config["BASE_URL"] = "second"
+    validate()
+    assert (runtime / "configured.txt").read_text() == "second"
+    assert (runtime / "setup-count.txt").read_text() == "3"
+
+
+@pytest.mark.parametrize(
+    "host,route",
+    [
+        ("github.com", "/blob/"),
+        ("gitlab.com", "/-/blob/"),
+        ("codeberg.org", "/src/commit/"),
+    ],
+)
+def test_knowledge_citations_match_source_host_and_encode_path(tmp_path, host, route):
+    from src import extension_knowledge as knowledge
+
+    path, manifest = package(tmp_path)
+    manifest["source"]["url"] = f"https://{host}/owner/repo.git"
+    relative = "docs/a b#?.md"
+    (path / "docs").mkdir()
+    (path / relative).write_text("Searchable needle\n")
+    runtime = tmp_path / "knowledge"
+    spec = {"files": [relative], "vectorize": False, "graph_artifact": None}
+    knowledge.index(path, runtime, manifest, spec)
+    result = knowledge.execute(
+        "knowledge.search", {"query": "needle"}, path, runtime, manifest, spec
+    )
+    assert result["results"][0]["source_url"] == (
+        f"https://{host}/owner/repo{route}{manifest['source']['revision']}/docs/a%20b%23%3F.md"
+    )
 
 
 def test_interactive_prerequisite_is_needs_setup(tmp_path):

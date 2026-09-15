@@ -592,7 +592,10 @@ class GeneratedCliAdapter:
             receipt = runtime / "validated.json"
             had_receipt = receipt.exists()
             try:
-                if not receipt.exists():
+                previous = json.loads(receipt.read_text()) if had_receipt else {}
+                if previous.get("configuration") != configuration.fingerprint(config):
+                    # A failed setup must never retain approval for partially changed artifacts.
+                    receipt.unlink(missing_ok=True)
                     started = time.monotonic()
                     for argv in contract["execution"]["install"]:
                         remaining = max(1, int(300 - (time.monotonic() - started)))

@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import numpy as np
 
@@ -277,7 +278,21 @@ def execute(
                 if terms
                 else []
             )
-    base = receipt["source_url"].removesuffix(".git")
+    source = urlsplit(receipt["source_url"])
+    base = urlunsplit(
+        (
+            source.scheme,
+            source.netloc,
+            quote(source.path.removesuffix(".git"), safe="/"),
+            "",
+            "",
+        )
+    )
+    route = {
+        "github.com": "/blob/",
+        "gitlab.com": "/-/blob/",
+        "codeberg.org": "/src/commit/",
+    }[source.hostname]
     return {
         "results": [
             {
@@ -285,10 +300,10 @@ def execute(
                 "line": int(line),
                 "text": text,
                 "source_url": base
-                + "/blob/"
-                + receipt["source_revision"]
+                + route
+                + quote(receipt["source_revision"], safe="")
                 + "/"
-                + relative,
+                + quote(relative, safe="/"),
                 "source_revision": receipt["source_revision"],
                 "content_sha256": hashlib.sha256(text.encode()).hexdigest(),
             }
