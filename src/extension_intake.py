@@ -62,9 +62,21 @@ class CliCheck(Record):
     expected: dict | None = None
 
 
+class KnowledgeSpec(Record):
+    files: list[str] = Field(min_length=1, max_length=128)
+    graph_artifact: str | None = Field(default=None, max_length=200)
+    vectorize: bool = False
+
+
 class CliExecution(Record):
     install: list[list[str]] = Field(default_factory=list, max_length=8)
     checks: list[CliCheck] = Field(min_length=1, max_length=64)
+    service: list[str] = Field(default_factory=list, max_length=32)
+    prerequisites: list[Literal["display", "audio", "gpu", "browser"]] = Field(
+        default_factory=list, max_length=4
+    )
+    knowledge: KnowledgeSpec | None = None
+    voice_model: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class Proposal(Record):
@@ -212,7 +224,29 @@ def validate_proposal(
         names.add(interface.name)
         for item in interface.evidence:
             evidence(item)
-        if not any(interface.binding in item.quote for item in interface.evidence):
+        knowledge = interface.binding.startswith("knowledge.")
+        if knowledge:
+            from src.extension_knowledge import schemas
+
+            params, output = schemas(interface.binding)
+            if (
+                proposal.execution is None
+                or proposal.execution.knowledge is None
+                or interface.kind != "tool"
+                or not interface.tool_schema
+                or interface.tool_schema.get("function", {}).get("parameters") != params
+                or interface.output_schema != output
+                or any(
+                    item.path not in proposal.execution.knowledge.files
+                    for item in interface.evidence
+                )
+            ):
+                raise IntakeError(
+                    "Knowledge tools use the exact platform schema and evidence from selected source files."
+                )
+        if not knowledge and not any(
+            interface.binding in item.quote for item in interface.evidence
+        ):
             raise IntakeError(
                 "The exact interface binding must occur in its quoted source evidence."
             )
@@ -227,9 +261,15 @@ def validate_proposal(
                     "Tool names and meaningful descriptions must match their interfaces."
                 )
             _check_schema(function["parameters"])
-            if set(function["parameters"]["properties"]) != set(interface.arguments):
+            if knowledge and interface.arguments:
+                raise IntakeError(
+                    "Platform knowledge arguments use the supplied schema."
+                )
+            if not knowledge and set(function["parameters"]["properties"]) != set(
+                interface.arguments
+            ):
                 raise IntakeError("Every tool argument needs its own source evidence.")
-            for name, item in interface.arguments.items():
+            for name, item in ({} if knowledge else interface.arguments).items():
                 evidence(item)
                 # Lexical support is necessary, not proof that generated code works.
                 argument = re.escape(name).replace("_", "[-_]")
@@ -444,8 +484,23 @@ The Linux isolated runner mounts immutable source at /package and writable priva
 HOME=/runtime/home, caches=/runtime/cache, cwd=/package. Python is available as 'python'.
 Install commands are argv only, run after operator authorization, and must write only to /runtime.
 Use a package-local Python setup script to create private environments/build outputs when necessary.
-No host credentials/configuration or user home is available. CLI tools requiring credentials remain
-Needs setup. Network is disabled unless data_boundaries.network declares requested network access.
+No host credentials or user home is available. Owner setup values are read-only JSON at
+/run/pandamonium/config.json; declared ENDPOINT_ID resolves an existing owned/shared connection
+as PANDAMONIUM_ENDPOINT_URL and PANDAMONIUM_ENDPOINT_TOKEN, without exporting saved credentials.
+Use execution.service=[argv,...] for an HTTP service. A package-local launcher must bind only
+127.0.0.1 at config PANDAMONIUM_PORT; the same value reaches its tool adapter. Start/stop,
+real operation checks, restart and removal use the shared lifecycle. Never launch a daemon at import.
+Declare execution.prerequisites for display/audio/gpu/browser if the LOCAL operation requires them;
+these stay Needs setup until an external endpoint supplies them. For a connected speech runtime,
+execution.voice_model selects its evidenced TTS model after a real operation check and automatically
+connects the selected ENDPOINT_ID in editable voice Settings. Show this effect in the install preview.
+Knowledge collections may use execution.knowledge={files:[exact source paths],graph_artifact:null,
+vectorize:false}. Optional graph_artifact is a relative runtime path produced by a package-local
+Graphify setup; vectorize=true then uses the existing embedding client. knowledge.search,
+knowledge.status and knowledge.refresh are PLATFORM bindings, not upstream APIs. Their schemas
+are supplied in platform_knowledge_schemas; retain actual source quotes for the selected documents.
+Never execute collection examples, follow linked tools, or claim structural graphs are semantic graphs.
+Network is disabled unless data_boundaries.network declares requested network access.
 Use package-local Go bridge files when an interactive Go command needs noninteractive API calls.
 source_exclusions may name optional source files not needed by the supported operations. Exclusions
 are recorded in the package and preview; remaining source still passes the same secret checks.
@@ -530,12 +585,25 @@ def generate_integration(
         progress(
             f"Understanding source / preparing package ({attempt + 1}/{MAX_MODEL_CALLS})"
         )
+        from src.extension_knowledge import schemas as knowledge_schemas
+
         messages = [
             {
                 "role": "system",
                 "content": SYSTEM_PROMPT
                 + "\nResponse schema:\n"
-                + json.dumps(Reply.model_json_schema()),
+                + json.dumps(Reply.model_json_schema())
+                + "\nplatform_knowledge_schemas (parameters, output):\n"
+                + json.dumps(
+                    {
+                        name: knowledge_schemas(name)
+                        for name in (
+                            "knowledge.search",
+                            "knowledge.status",
+                            "knowledge.refresh",
+                        )
+                    }
+                ),
             },
             {
                 "role": "user",

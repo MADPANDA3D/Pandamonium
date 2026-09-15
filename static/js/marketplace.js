@@ -308,12 +308,103 @@ function renderInstalledDetail(payload) {
   ));
   configuration.append(element('p', 'marketplace-action-status', 'Values live in Settings/Connections; no secret values are shown here.'));
   installedDetailContent.append(configuration);
+  if (payload.origin !== 'configured' && payload.configuration?.length) {
+    configuration.replaceChildren(element('h4', '', 'Runtime setup'));
+    renderRuntimeSetup(configuration, payload.id, null, () => selectInstalled(payload.id));
+  }
+  if (payload.origin !== 'configured') renderInstalledLifecycle(payload);
 
   if (payload.notes?.length) {
     const notes = detailSection('Notes');
     notes.append(listOrNone(payload.notes, value => value));
     installedDetailContent.append(notes);
   }
+}
+
+async function renderRuntimeSetup(container, id, planId, onSaved) {
+  const status = element('p', 'marketplace-action-status', 'Reading setup…');
+  status.setAttribute('role', 'status');
+  container.append(status);
+  try {
+    const url = `/api/extensions/runtime/${encodeURIComponent(id)}/configuration`;
+    const setup = await api(url + (planId ? `?plan_id=${encodeURIComponent(planId)}` : ''));
+    const form = element('form', 'marketplace-runtime-setup');
+    const inputs = [];
+    for (const field of setup.fields || []) {
+      const label = element('label', '', `${field.key} · ${field.description}${field.secret ? ' · secret' : ''}${field.required ? ' (required)' : ''}`);
+      const input = element(field.key === 'ENDPOINT_ID' ? 'select' : 'input');
+      if (field.key === 'ENDPOINT_ID') {
+        label.prepend(element('strong', '', 'Deployment node / connected service — '));
+        const empty = element('option', '', 'Choose a configured endpoint');
+        empty.value = '';
+        input.append(empty);
+        for (const target of setup.targets || []) {
+          const option = element('option', '', `${target.name} · ${target.kind} · ${target.base_url}`);
+          option.value = target.id;
+          input.append(option);
+        }
+      } else {
+        input.type = field.secret ? 'password' : 'text';
+        input.autocomplete = 'off';
+        input.maxLength = 8192;
+      }
+      input.name = field.key;
+      input.value = field.value || '';
+      input.required = field.required && !field.configured;
+      if (field.secret && field.configured) input.placeholder = 'Saved — leave blank to keep';
+      label.append(input);
+      form.append(label);
+      inputs.push([field, input]);
+    }
+    if (setup.targets) form.append(element('p', '', 'Choose the node running this service. Add or edit its address and credential in Settings → Endpoints. Installation verifies a real operation before connecting voice.'));
+    const save = element('button', 'marketplace-action-primary', 'Save setup');
+    save.type = 'submit';
+    form.append(save);
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      save.disabled = true;
+      try {
+        const values = Object.fromEntries(inputs.filter(([field, input]) => !field.secret || input.value).map(([field, input]) => [field.key, input.value || null]));
+        await api(url, { method: 'PUT', body: JSON.stringify({ values, ...(planId ? { plan_id: planId } : {}) }) });
+        inputs.filter(([field]) => field.secret).forEach(([, input]) => { input.value = ''; });
+        status.textContent = 'Saved. Revalidating setup requires a fresh install or enable preview.';
+        await onSaved();
+      } catch (error) {
+        status.textContent = humanSetupError(error);
+      } finally { save.disabled = false; }
+    });
+    container.append(form);
+    status.textContent = 'Configuration is editable. Saving disables an installed package until it passes validation again.';
+    return (setup.fields || []).some(field => field.required && !field.configured);
+  } catch (error) {
+    status.textContent = humanSetupError(error);
+    return true;
+  }
+}
+
+function renderInstalledLifecycle(payload) {
+  const section = detailSection('Manage runtime');
+  const status = element('p', 'marketplace-action-status');
+  status.setAttribute('role', 'status');
+  const actions = element('div', 'marketplace-action-buttons');
+  for (const operation of [payload.state === 'enabled' ? 'disable' : 'enable', 'uninstall']) {
+    const button = element('button', '', actionLabel(operation));
+    button.type = 'button';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const plan = await api('/api/extensions/plans/lifecycle', { method: 'POST', body: JSON.stringify({ operation, extension_id: payload.id }) });
+        const approve = element('button', 'marketplace-action-primary', `Approve ${actionLabel(operation).toLowerCase()} once`);
+        approve.type = 'button';
+        approve.addEventListener('click', () => executeAction(plan, payload, operation, status, actions));
+        actions.replaceChildren(approve);
+        status.textContent = operation === 'uninstall' ? 'Remove this package and its tools. Retained user data stays available.' : 'Review and approve this runtime change.';
+      } catch (error) { status.textContent = humanSetupError(error); button.disabled = false; }
+    });
+    actions.append(button);
+  }
+  section.append(actions, status);
+  installedDetailContent.append(section);
 }
 
 async function selectInstalled(id) {
@@ -599,6 +690,7 @@ async function prepareSourceAction(artifact, section, actions) {
       ].join(' · ')),
     );
     if (plan.execution_recipe) {
+      if (plan.execution_recipe.voice_model) preview.append(element('p', '', `After its operation check, connect the selected node to voice using ${plan.execution_recipe.voice_model}. You can change it in Settings.`));
       const recipe = element('details', '');
       recipe.append(
         element('summary', '', 'Private runtime setup and operation checks'),
@@ -629,6 +721,12 @@ async function prepareSourceAction(artifact, section, actions) {
       element('p', 'marketplace-action-status', 'Nothing has been installed yet. Approve once to install this exact revision, or go back to the scan result.'),
     );
     section.append(preview);
+    if (manifest.configuration?.length) {
+      const setup = detailSection('Required setup');
+      preview.prepend(setup);
+      approve.disabled = await renderRuntimeSetup(setup, plan.extension_id, plan.plan_id,
+        () => prepareSourceAction(artifact, section, actions));
+    }
     scanStatus.textContent = 'Review the exact pinned revision, then approve once or go back.';
     preview.scrollIntoView({ block: 'center' });
     approve.focus({ preventScroll: true });
@@ -659,6 +757,7 @@ function actionLabel(operation) {
 }
 
 async function executeAction(plan, plugin, operation, status, actions) {
+  const installedAction = installedSelectedId === plugin.id;
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
   try {
     const decision = plan.authority_decision || {};
@@ -674,6 +773,10 @@ async function executeAction(plan, plugin, operation, status, actions) {
     if (result.result?.status !== 'succeeded') throw new Error('extension_action_failed');
     window.dispatchEvent(new Event('pandamonium:extensions-changed'));
     await load();
+    if (installedAction) {
+      if (operation === 'uninstall') showInstalledList();
+      else await selectInstalled(plugin.id);
+    }
     status.textContent = `${actionLabel(operation)} completed.`;
     summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
   } catch (error) {
@@ -725,6 +828,12 @@ async function prepareAction(plugin, operation, section, status, actions) {
     actions.replaceChildren();
     section.append(preview);
     status.textContent = 'Review the exact signed package, data, and restart scope before approval.';
+    if (plan.manifest?.configuration?.length && ['install', 'upgrade', 'enable'].includes(operation)) {
+      const setup = detailSection('Runtime setup');
+      preview.prepend(setup);
+      approve.disabled = await renderRuntimeSetup(setup, plan.extension_id, plan.plan_id,
+        () => prepareAction(plugin, operation, section, status, actions));
+    }
     approve.focus();
   } catch (error) {
     status.textContent = `${actionLabel(operation)} unavailable: ${humanSetupError(error)}`;

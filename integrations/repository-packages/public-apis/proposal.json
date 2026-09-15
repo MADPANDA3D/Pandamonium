@@ -1,0 +1,360 @@
+{
+  "purpose": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "| API | Description | Auth | HTTPS | CORS |"
+    }
+  ],
+  "repo_class": "unknown",
+  "interfaces": [
+    {
+      "name": "public_apis__search",
+      "kind": "tool",
+      "binding": "knowledge.search",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "| API | Description | Auth | HTTPS | CORS |"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "public_apis__search",
+          "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "source_url": {
+                  "type": "string"
+                },
+                "source_revision": {
+                  "type": "string"
+                },
+                "content_sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "line",
+                "text",
+                "source_url",
+                "source_revision",
+                "content_sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "vectorized": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "results",
+          "vectorized"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "public_apis__status",
+      "kind": "tool",
+      "binding": "knowledge.status",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "| API | Description | Auth | HTTPS | CORS |"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "public_apis__status",
+          "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "vectorized": {
+            "type": "boolean"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunks",
+          "nodes",
+          "edges",
+          "vectorized",
+          "source_url",
+          "source_revision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "public_apis__refresh",
+      "kind": "tool",
+      "binding": "knowledge.refresh",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "| API | Description | Auth | HTTPS | CORS |"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "public_apis__refresh",
+          "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "vectorized": {
+            "type": "boolean"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunks",
+          "nodes",
+          "edges",
+          "vectorized",
+          "source_url",
+          "source_revision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Choose one search result, read its linked API documentation, then configure that API package with its endpoint and credential.",
+    "This index never follows collection links or installs their projects."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "public-apis",
+    "name": "Public APIs",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/public-apis/public-apis.git",
+      "revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "public_apis__search",
+            "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "public_apis__status",
+            "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "public_apis__refresh",
+            "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": []
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "raise RuntimeError('Use the native knowledge tools')\n"
+    }
+  ],
+  "execution": {
+    "install": [],
+    "checks": [
+      {
+        "name": "public_apis__search",
+        "arguments": {
+          "query": "weather",
+          "limit": 3
+        }
+      },
+      {
+        "name": "public_apis__status",
+        "arguments": {}
+      },
+      {
+        "name": "public_apis__refresh",
+        "arguments": {}
+      }
+    ],
+    "knowledge": {
+      "files": [
+        "README.md"
+      ],
+      "vectorize": false
+    }
+  },
+  "source_exclusions": []
+}

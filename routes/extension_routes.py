@@ -119,6 +119,13 @@ class MarketplacePlanRequest(BaseModel):
     target_revision: str | None = Field(default=None, max_length=64)
 
 
+class ConfigurationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    values: dict[str, str | None] = Field(max_length=32)
+    plan_id: str | None = Field(default=None, max_length=64)
+
+
 def public_extension_catalog(registry) -> dict[str, list[dict[str, str]]]:
     """Project installed extension metadata without source or host details."""
     plugins = []
@@ -220,6 +227,64 @@ def setup_extension_routes(
             binder = getattr(adapter, "bind_loop", None)
             if binder:
                 binder(loop)
+
+    def _configuration_manifest(extension_id: str, owner: str, plan_id: str | None = None) -> dict:
+        with manager._lock:
+            state = manager._read_state()
+        if plan_id:
+            plan = state.get("plans", {}).get(plan_id, {})
+            if plan.get("operator_id") == owner and plan.get("extension_id") == extension_id:
+                return plan["manifest"]
+            raise HTTPException(404, "extension_plan_not_found")
+        record = state["extensions"].get(extension_id)
+        if not record or record.get("owner_scope") != owner:
+            raise HTTPException(404, "extension_not_installed")
+        return manager.registry.snapshot()["extensions"][extension_id]["manifest"]
+
+    @router.get("/runtime/{extension_id}/configuration", dependencies=[Depends(require_admin)])
+    async def get_runtime_configuration(extension_id: str, plan_id: str | None = None, owner: str = Depends(require_user)):
+        from src.extension_configuration import public
+
+        manifest = _configuration_manifest(extension_id, _operator(owner), plan_id)
+        return await asyncio.to_thread(public, manifest, _operator(owner))
+
+    @router.put("/runtime/{extension_id}/configuration", dependencies=[Depends(require_admin)])
+    async def save_runtime_configuration(extension_id: str, payload: ConfigurationRequest, owner: str = Depends(require_user)):
+        from src.extension_configuration import save
+        from src.extension_cli_adapter import _LOCK
+
+        def update():
+            with manager._lock, _LOCK:
+                manifest = _configuration_manifest(extension_id, _operator(owner), payload.plan_id)
+                state = manager._read_state()
+                if any(p.get("status") == "executing" and p.get("extension_id") == extension_id
+                       for p in state["plans"].values()):
+                    raise ExtensionLifecycleError("extension_configuration_busy")
+                result = save(manifest, _operator(owner), payload.values)
+                if extension_id in state["extensions"]:
+                    manager._disable(extension_id, _operator(owner))
+                state = manager._read_state()
+                authority_state = manager.authority.list_state(operator_id=_operator(owner))
+                for plan in state["plans"].values():
+                    if (plan.get("extension_id") == extension_id
+                            and plan.get("operator_id") == _operator(owner)
+                            and plan.get("status") != "completed"):
+                        decision_id = plan.get("authority_decision_id")
+                        for decision in authority_state["decisions"]:
+                            if (decision["decision_id"] == decision_id
+                                    and decision["decision"] == "approval_required"
+                                    and decision.get("status") not in {"resolved", "expired"}):
+                                manager.authority.resolve(decision_id, operator_id=_operator(owner), choice="deny", scope="once")
+                        for receipt in authority_state["receipts"]:
+                            if receipt.get("decision_id") == decision_id:
+                                manager.authority.revoke(receipt["receipt_id"], operator_id=_operator(owner))
+                        plan["status"] = "configuration_changed"
+                manager._write_state(state)
+                return {**result, "state": "needs_validation", "next_step": "Preview install or enable again."}
+        try:
+            return await asyncio.to_thread(update)
+        except ExtensionLifecycleError as exc:
+            raise _http_error(exc) from exc
 
     @router.get("", dependencies=[Depends(require_admin)])
     async def list_extensions(owner: str = Depends(require_user)):

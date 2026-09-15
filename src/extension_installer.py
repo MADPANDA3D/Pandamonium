@@ -561,6 +561,16 @@ class ExtensionLifecycleManager:
     def _request_approval(
         self, plan: dict[str, Any], operator_id: str
     ) -> dict[str, Any]:
+        from src.extension_cli_adapter import is_cli
+        from src.extension_configuration import fingerprint, values
+
+        manifest = plan.get("manifest") or {}
+        if (plan["operation"] in {"install", "upgrade", "enable", "rollback"}
+                and is_cli(manifest) and manifest.get("configuration")):
+            try:
+                plan["configuration_fingerprint"] = fingerprint(values(manifest, operator_id))
+            except ExtensionLifecycleError:
+                plan["configuration_fingerprint"] = None  # Setup form remains available.
         call = self._action_call(plan)
         decision = self.authority.decide(
             call, operator_id=operator_id, session_id="extension-control"
@@ -877,8 +887,15 @@ class ExtensionLifecycleManager:
                 raise ExtensionLifecycleError("extension_plan_not_found")
             if plan.get("operator_id") not in {None, operator_id}:
                 raise ExtensionLifecycleError("extension_plan_owner_mismatch")
+            if plan.get("status") == "configuration_changed":
+                raise ExtensionLifecycleError("extension_configuration_changed_preview_again")
             if plan.get("status") == "completed":
                 return self._public_plan(plan)
+            if "configuration_fingerprint" in plan:
+                from src.extension_configuration import fingerprint, values
+
+                if plan["configuration_fingerprint"] != fingerprint(values(plan["manifest"], operator_id)):
+                    raise ExtensionLifecycleError("extension_configuration_changed_preview_again")
             call = self._action_call(plan)
             if not plan.get("authorized"):
                 decision = self.authority.decide(

@@ -215,6 +215,10 @@ export function humanSetupError(value, fallback = "Something went wrong during s
     : (value && (value.detail || value.message)) || '';
   const text = String(raw).trim();
   if (!text) return fallback;
+  if (text.startsWith('extension_needs_setup:')) return `Needs setup. ${text.slice('extension_needs_setup:'.length).trim()}`;
+  if (/^extension_service_/.test(text)) return 'The service could not pass its operation check. Check its dependencies, address and credentials, then disable and enable the plugin to restart it.';
+  if (/^extension_configuration_/.test(text)) return 'The runtime setup is invalid, changed, or busy. Check the declared fields, save again after the current action finishes, and open a fresh install or enable preview.';
+  if (/^extension_knowledge_/.test(text)) return 'The knowledge index could not be prepared or queried. Check the selected source files and embedding model, then refresh or enable the plugin again.';
   if (SETUP_ERROR_MESSAGES[text]) return SETUP_ERROR_MESSAGES[text];
   for (const [pattern, message] of SETUP_ERROR_FAMILIES) {
     if (pattern.test(text)) return message;

@@ -1,0 +1,203 @@
+{
+  "purpose": "Generate speech on a selected Chatterbox node and connect the validated node to voice.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "model = ChatterboxTTS.from_pretrained(device=device)"
+    }
+  ],
+  "repo_class": "service",
+  "interfaces": [
+    {
+      "name": "chatterbox__generate",
+      "kind": "tool",
+      "binding": "generate",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "wav = model.generate(text)"
+        }
+      ],
+      "arguments": {
+        "text": {
+          "path": "src/chatterbox/tts.py",
+          "quote": "def punc_norm(text: str) -> str:"
+        }
+      },
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "chatterbox__generate",
+          "description": "Generate speech on a selected Chatterbox node and connect the validated node to voice.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 44
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact",
+          "bytes",
+          "sha256"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [
+    {
+      "key": "ENDPOINT_ID",
+      "description": "Choose the deployment node with the Chatterbox TTS service",
+      "required": true,
+      "secret": false,
+      "evidence": {
+        "path": "README.md",
+        "quote": "model = ChatterboxTTS.from_pretrained(device=device)"
+      }
+    }
+  ],
+  "requirements": [
+    "Deploy the included OpenAI-compatible speech wrapper in a dedicated Chatterbox environment on the chosen node; the local sandbox does not expose host GPUs.",
+    "Add the node as a TTS endpoint in Settings, select it during installation and run the real synthesis check.",
+    "Settings \u2192 Voice and Endpoints remain editable after setup."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "chatterbox",
+    "name": "Chatterbox",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/resemble-ai/chatterbox.git",
+      "revision": "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "chatterbox__generate",
+            "description": "Generate speech on a selected Chatterbox node and connect the validated node to voice.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://huggingface.co"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": [
+      {
+        "key": "ENDPOINT_ID",
+        "description": "Choose the deployment node with the Chatterbox TTS service",
+        "required": true,
+        "secret": false
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import hashlib,json,urllib.request,wave,io\nfrom pathlib import Path\nconfig=json.load(open('/run/pandamonium/config.json'));args=json.load(__import__('sys').stdin)\nurl=config['PANDAMONIUM_ENDPOINT_URL'].rstrip('/')+'/audio/speech'\nrequest=urllib.request.Request(url,data=json.dumps({'model':'chatterbox','input':args['text'],'response_format':'wav'}).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+config['PANDAMONIUM_ENDPOINT_TOKEN']})\nwith urllib.request.urlopen(request,timeout=25) as response: data=response.read(8*1024*1024+1)\nif len(data)>8*1024*1024: raise RuntimeError('Speech output too large')\nwith wave.open(io.BytesIO(data)) as wav:\n if not wav.getnframes(): raise RuntimeError('Speech response contained no frames')\ndigest=hashlib.sha256(data).hexdigest();path=Path('/runtime/artifacts')/(digest+'.wav');path.parent.mkdir(exist_ok=True);path.write_bytes(data)\nprint(json.dumps({'artifact':str(path),'bytes':len(data),'sha256':digest}))\n"
+    },
+    {
+      "path": ".pandamonium/speech_server.py",
+      "content": "\"\"\"Run on the selected node after installing this pinned Chatterbox source.\"\"\"\nimport argparse,hmac,io,json,os\nfrom http.server import BaseHTTPRequestHandler,HTTPServer\nimport torchaudio\nfrom chatterbox.tts import ChatterboxTTS\nparser=argparse.ArgumentParser();parser.add_argument('--host',default='127.0.0.1');parser.add_argument('--port',type=int,default=8000);parser.add_argument('--device',default='cuda');args=parser.parse_args()\ntoken=os.environ['CHATTERBOX_TOKEN']\nif not token: raise RuntimeError('Set a nonempty CHATTERBOX_TOKEN')\nmodel=ChatterboxTTS.from_pretrained(device=args.device)\nclass Handler(BaseHTTPRequestHandler):\n def log_message(self,*args): pass\n def do_POST(self):\n  if not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+token): self.send_error(401);return\n  if self.path!='/v1/audio/speech': self.send_error(404);return\n  try:\n   length=int(self.headers.get('Content-Length','0'))\n   if not 1<=length<=8192: self.send_error(413);return\n   payload=json.loads(self.rfile.read(length));text=payload['input']\n   if not isinstance(text,str) or not 1<=len(text)<=1000: self.send_error(400);return\n   wav=model.generate(text);output=io.BytesIO();torchaudio.save(output,wav,model.sr,format='wav');data=output.getvalue()\n   self.send_response(200);self.send_header('Content-Type','audio/wav');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)\n  except Exception: self.send_error(503,'Synthesis unavailable; check node dependencies and model access')\nHTTPServer((args.host,args.port),Handler).serve_forever()\n"
+    },
+    {
+      "path": ".pandamonium/SETUP.md",
+      "content": "# Speech node setup\n\nSelect an existing TTS endpoint during installation. If none exists:\n1. On the chosen private node, create a dedicated Python 3.11 environment and install this exact pinned source (see upstream README and pyproject.toml).\n2. Run `.pandamonium/speech_server.py --device cuda` from that environment with a private CHATTERBOX_TOKEN. CPU is also accepted with `--device cpu`; choose hardware capacity before starting. Bind loopback behind the node's authenticated TLS proxy, or use an explicitly selected private bind address.\n3. Add its HTTPS `/v1` address and token in Settings \u2192 Endpoints, type TTS. Return to Plugins and choose that endpoint.\n4. Save setup and approve the fresh install preview. A real WAV synthesis must pass before voice selects `chatterbox`. Credentials stay in the existing encrypted endpoint record.\n5. Edit Settings \u2192 Voice or the endpoint later. Plugin removal retains the operator-selected endpoint and voice setting; remove or change them in Settings when retiring the node.\n\nThis wrapper calls ChatterboxTTS.generate. The original model watermark is retained. Missing model access, dependencies, hardware or endpoint readiness remains Needs setup. This package does not provision a VM or execute an unreviewed remote shell command.\n"
+    }
+  ],
+  "execution": {
+    "install": [],
+    "checks": [
+      {
+        "name": "chatterbox__generate",
+        "arguments": {
+          "text": "Chatterbox connection verified."
+        }
+      }
+    ],
+    "voice_model": "chatterbox"
+  },
+  "source_exclusions": []
+}

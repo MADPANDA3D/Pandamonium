@@ -36,6 +36,7 @@ async function main() {
   assert.match(mod.humanSetupError('extension_already_installed_use_upgrade'), /Installed plugins/);
   assert.match(mod.humanSetupError('extension_adapter_required:skills:skill_bundle'), /support/i);
   assert.match(mod.humanSetupError('extension_lifecycle_install_invalid'), /not supported/i);
+  assert.match(mod.humanSetupError('extension_needs_setup:Configure an embedding model in Settings.'), /Configure an embedding model in Settings/);
 
   // Unknown code-shaped details never leak the code.
   const fallback = "Something went wrong during setup. Check the connection and try again.";

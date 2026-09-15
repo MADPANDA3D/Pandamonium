@@ -189,7 +189,7 @@ def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monke
     assert output["status"] == "succeeded", output
     assert "26" in json.dumps(output)
     # Installed manifest normalization changes its package digest; use its receipt.
-    runtime = next((root / "runtimes").rglob("validated.json")).parent
+    runtime = adapter._runtime(record["manifest"], package_tree_digest(next((root / "installed").rglob("jarvis-extension.json")).parent), "operator")
     saved = runtime.parent / "data/home/keep.txt"
     saved.write_text("owner data")
     installed_path = next((root / "installed").rglob("jarvis-extension.json")).parent
@@ -251,7 +251,7 @@ def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monke
     manager._enable("demo-tools", "operator")
     manager._uninstall("demo-tools", "operator")
     assert registry.snapshot()["extensions"] == {}
-    assert list((root / "runtimes").rglob("validated.json")), (
+    assert list(cli.resources.storage_root().rglob("validated.json")), (
         "removal must preserve user runtime data"
     )
     assert saved.read_text() == "owner data"
@@ -259,8 +259,8 @@ def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monke
 
 def test_real_cli_confinement_timeout_output_and_schema_failure(tmp_path, monkeypatch):
     path, manifest = package(tmp_path)
-    runtime = tmp_path / "runtime"
-    runtime.mkdir()
+    runtime = cli.resources.storage_root() / tmp_path.name / "runtime"
+    runtime.mkdir(parents=True)
     monkeypatch.setenv("MAD959_HOST_SECRET", "must-not-enter-child")
     script = path / ".pandamonium/probe.py"
     script.write_text(

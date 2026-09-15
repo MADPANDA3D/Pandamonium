@@ -1,0 +1,17 @@
+{
+  "source": {
+    "url": "https://github.com/resemble-ai/chatterbox.git",
+    "revision": "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
+  },
+  "package_digest": "de94c4640d94b7f6c1cd15d0f4da6f756e354545e09dc906dcf39b5f7ad3fe3a",
+  "workflow": "Authenticated full app: real source scan, setup save, fresh approval, HTTP WAV check, installation and automatic voice settings",
+  "semantic_reply": "reviewed proposal fixture",
+  "speech": "deterministic authenticated HTTP/WAV transport fixture; no Chatterbox model inference",
+  "voice_settings": {
+    "tts_provider": "endpoint:disposable-speech-node",
+    "tts_model": "chatterbox",
+    "tts_enabled": true
+  },
+  "owner": "disposable runtimeoperator",
+  "configuration_edit": "Saving edited setup disabled the installed package; fresh enable approval reran the HTTP operation and restored native availability."
+}
