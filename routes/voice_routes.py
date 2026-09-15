@@ -44,6 +44,7 @@ from src import document_processor as _document_processor
 from src.endpoint_resolver import resolve_endpoint, resolve_endpoint_by_id
 from src.extension_host import extension_runtime_host
 from src.extension_mcp_adapter import execute_mcp_extension_tool, mcp_extension_tool_specs
+from src.extension_cli_adapter import cli_revision, execute_cli_tool, is_cli
 from src.extension_registry import EXTENSION_ID_PATTERN, ExtensionRegistry
 from src.llm_core import llm_call_async
 from src.model_discovery import installation_capabilities
@@ -1110,10 +1111,19 @@ def _extension_tool_specs(voice_session: dict[str, Any]) -> list[dict[str, Any]]
         descriptor = ((((record or {}).get("manifest") or {}).get("capabilities") or {}).get("descriptor") or {})
         if descriptor.get("type") == "mcp":
             specs.extend(mcp_extension_tool_specs(record))
+        elif record and record.get("enabled") and is_cli(record["manifest"]):
+            specs.extend({
+                "type": "function", "name": item["name"],
+                "description": item["schema"]["function"].get("description", ""),
+                "parameters": item["schema"]["function"]["parameters"],
+                "extension_id": extension_id, "permission_mode": item["permission_mode"],
+                "cli_runtime": True,
+                "package_revision": cli_revision(extension_id),
+            } for item in record.get("effective_capabilities", []))
     for name, capability in effective.items():
         extension_id = str(capability["extension_id"])
         descriptor = ((((records.get(extension_id) or {}).get("manifest") or {}).get("capabilities") or {}).get("descriptor") or {})
-        if descriptor.get("type") == "mcp":
+        if descriptor.get("type") == "mcp" or is_cli((records.get(extension_id) or {}).get("manifest", {})):
             continue
         if name not in client_by_extension.get(extension_id, {}):
             continue
@@ -1156,6 +1166,19 @@ def _extension_tool_schemas(tool_specs: list[dict[str, Any]]) -> list[dict[str, 
     ]
 
 
+def _extension_capability_policies(tool_specs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    policies = {}
+    for tool, schema in zip(tool_specs, _extension_tool_schemas(tool_specs)):
+        policy = {"extension_id": tool["extension_id"], "permission_mode": tool["permission_mode"]}
+        if tool.get("cli_runtime"):
+            policy["mounted_spec"] = {
+                **policy, "name": tool["name"], "schema": schema, "descriptor": "inline",
+                "package_revision": tool["package_revision"],
+            }
+        policies[tool["name"]] = policy
+    return policies
+
+
 def _extension_context(
     voice_session: dict[str, Any], tool_specs: list[dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
@@ -1195,7 +1218,9 @@ def _extension_tool_executor(
                 f"{label} {block.tool_type}",
                 {"ok": False, "action": block.tool_type, "error": f"{label} tool arguments must be a JSON object"},
             )
-        if spec.get("mcp_qualified_name"):
+        if spec.get("mcp_qualified_name") or spec.get("cli_runtime"):
+            if spec.get("cli_runtime") and spec not in _extension_tool_specs(voice_session):
+                return label, {"error": "extension_mount_changed_remount_required", "exit_code": 1}
             try:
                 record = extension_registry.snapshot()["extensions"].get(extension_id)
             except Exception:
@@ -1205,9 +1230,9 @@ def _extension_tool_executor(
                     f"{label} {block.tool_type}",
                     {"error": "extension_mcp_capability_unavailable", "exit_code": 1},
                 )
-            result = await execute_mcp_extension_tool(
-                record, block.tool_type, arguments
-            )
+            result = (await execute_cli_tool(record, block.tool_type, arguments, owner, spec.get("package_revision"))
+                      if spec.get("cli_runtime") else await execute_mcp_extension_tool(
+                          record, block.tool_type, arguments))
             return f"{label} {block.tool_type}", result
         if not voice_session_id:
             return (
@@ -1300,13 +1325,7 @@ def prepare_text_extension_bridge(
     return {
         "tool_names": {tool["name"] for tool in requested_specs},
         "extra_tool_schemas": _extension_tool_schemas(requested_specs),
-        "extension_capabilities": {
-            tool["name"]: {
-                "extension_id": tool["extension_id"],
-                "permission_mode": tool["permission_mode"],
-            }
-            for tool in requested_specs
-        },
+        "extension_capabilities": _extension_capability_policies(requested_specs),
         "tool_executor": _extension_tool_executor(turn_session, owner, requested_specs),
         "context_extensions": _extension_context(turn_session, requested_specs),
     }
@@ -3562,13 +3581,7 @@ async def _jarvis_events(chat_session_id: str, text: str, owner: str, voice_sess
         owner=owner,
         relevant_tools=voice_tools,
         extra_tool_schemas=extension_schemas,
-        extension_capabilities={
-            tool["name"]: {
-                "extension_id": tool["extension_id"],
-                "permission_mode": tool["permission_mode"],
-            }
-            for tool in extension_specs
-        },
+        extension_capabilities=_extension_capability_policies(extension_specs),
         tool_executor=(
             _extension_tool_executor(voice_session, owner, extension_specs)
             if extension_specs

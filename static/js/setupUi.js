@@ -86,6 +86,22 @@ const SETUP_ERROR_MESSAGES = {
 // the generic fallback (MAD-953). Specific codes above always win.
 const SETUP_ERROR_FAMILIES = [
   [
+    /^extension_disabled$/,
+    'This plugin is disabled. Enable it in Installed plugins before calling its tools.',
+  ],
+  [
+    /^extension_cli_needs_setup/,
+    'This CLI package needs runtime setup. Use a Linux host with bubblewrap and util-linux, and complete the package prerequisites before retrying.',
+  ],
+  [
+    /^extension_cli_(?:timeout|cancelled|output_limit)/,
+    'The CLI operation stopped at its execution limit or was cancelled. Use a smaller operation or ask the publisher to revise its bounded checks.',
+  ],
+  [
+    /^extension_cli_/,
+    'This CLI package did not pass its operation or schema checks. Review the package requirements and scan a corrected package before retrying.',
+  ],
+  [
     /^extension_package_/,
     'This plugin package is damaged, changed, or incomplete. Download it again from the marketplace; if the problem continues, the publisher needs to rebuild it.',
   ],

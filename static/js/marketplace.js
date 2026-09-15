@@ -594,10 +594,22 @@ async function prepareSourceAction(artifact, section, actions) {
         `${Object.values(plan.lifecycle_commands || {}).flat().length} lifecycle command entries`,
         plan.manifest_origin === 'scan_draft'
           ? 'generated draft manifest (repository has no jarvis-extension.json)'
-          : 'repository manifest',
+          : plan.manifest_origin === 'scan_package' ? 'prepared source package' : 'repository manifest',
         'static scan completed before install',
       ].join(' · ')),
     );
+    if (plan.execution_recipe) {
+      const recipe = element('details', '');
+      recipe.append(
+        element('summary', '', 'Private runtime setup and operation checks'),
+        element('p', '', 'Runs after approval in an isolated Linux runtime. Source stays read-only; runtime files are preserved on removal.'),
+        element('p', '', plan.manifest?.data_boundaries?.network?.length
+          ? 'Network access is enabled for setup and tool calls. Declared destinations are descriptive; this runtime does not enforce a destination allowlist.'
+          : 'Network access is disabled for setup and tool calls.'),
+        element('pre', '', JSON.stringify(plan.execution_recipe, null, 2)),
+      );
+      preview.append(recipe);
+    }
     const approvalActions = element('div', 'marketplace-action-buttons');
     const approve = element('button', 'marketplace-action-primary', 'Approve once');
     approve.type = 'button';

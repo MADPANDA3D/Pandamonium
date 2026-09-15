@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from src.extension_capability_inventory import advisory_capability_items
+from src.extension_cli_adapter import is_cli
 from src.extension_registry import ExtensionRegistry
 
 MAX_DESCRIPTION_CHARS = 300
@@ -120,7 +121,9 @@ def _registry_detail(extension_id: str, record: Mapping[str, Any]) -> dict[str, 
     )
     descriptor = _text((descriptor_block or {}).get("type"), 40)
     notes: list[str] = []
-    if str(runtime.get("type") or "") == "web" or descriptor in {"live_catalog", "inline"}:
+    if is_cli(manifest):
+        notes.append("Native CLI tools: discover and mount these capabilities through manage_extensions.")
+    elif str(runtime.get("type") or "") == "web" or descriptor in {"live_catalog", "inline"}:
         notes.append(BROWSER_SURFACE_NOTE)
     return {
         "id": extension_id,

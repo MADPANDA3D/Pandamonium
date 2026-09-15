@@ -18,6 +18,7 @@ from core.middleware import require_admin
 from src.auth_helpers import require_user
 from src.authority_protocol import operator_identity
 from src.extension_capability_inventory import validate_scan_artifact
+from src.extension_cli_adapter import GeneratedCliAdapter
 from src.extension_host import live_catalog_web_adapter
 from src.extension_installer import (
     ExtensionLifecycleError,
@@ -169,6 +170,7 @@ def setup_extension_routes(
             InlineWebAdapter(),
             live_catalog_web_adapter,
             mcp_extension_adapter,
+            GeneratedCliAdapter(),
             *(
                 [SkillBundleAdapter(skills_manager)]
                 if skills_manager is not None

@@ -4556,6 +4556,17 @@ async def stream_agent_loop(
     # MAD-913: extension tools mounted mid-request through manage_extensions.
     # name -> {extension_id, permission_mode, descriptor, schema}
     _mounted_extension_specs: Dict[str, Dict[str, Any]] = {}
+    # The operator's approval resumes a new turn; retain its mounted schema and
+    # package identity. Dispatch still checks current lifecycle state.
+    _retained_spec = ((_approved_call or {}).get("capability_policy") or {}).get("mounted_spec")
+    if isinstance(_retained_spec, dict) and _retained_spec.get("name") == _approved_call.get("name"):
+        _retained_name = _retained_spec["name"]
+        _mounted_extension_specs[_retained_name] = _retained_spec
+        extra_tool_schemas.append(_retained_spec["schema"])
+        extension_capabilities[_retained_name] = dict(_approved_call["capability_policy"])
+        _mounted_tools.add(_retained_name)
+        if _relevant_tools is not None:
+            _relevant_tools.add(_retained_name)
     # Frequency of each exact call signature (tool + args), for the runaway
     # backstop. Counting identical repeats — not distinct same-tool calls —
     # lets a legit batch (e.g. 18 calendar events at once) through.
@@ -5816,13 +5827,12 @@ async def stream_agent_loop(
 
                 async def _run_tool():
                     try:
-                        if tool_executor:
+                        if tool_executor and block.tool_type not in _mounted_extension_specs:
                             custom_result = await tool_executor(block, _push_progress)
                             if custom_result is not None:
                                 return custom_result
                         # MAD-913: extension tools mounted this request execute
-                        # through the existing MCP extension adapter, which
-                        # re-reconciles the live catalog before every call.
+                        # through native adapters with live lifecycle checks.
                         _extension_spec = _mounted_extension_specs.get(block.tool_type)
                         if _extension_spec is not None:
                             from src.extension_agent_mount import (
@@ -5836,7 +5846,8 @@ async def stream_agent_loop(
                             if not isinstance(_extension_args, dict):
                                 _extension_args = {}
                             _extension_result = await execute_mounted_extension_tool(
-                                _extension_spec, _extension_args
+                                _extension_spec, _extension_args,
+                                **({"owner": owner} if _extension_spec.get("descriptor") == "inline" else {}),
                             )
                             return (
                                 f"Extension tool: {block.tool_type}",
@@ -6018,6 +6029,7 @@ async def stream_agent_loop(
                             "permission_mode": str(
                                 _spec.get("permission_mode") or "read_only"
                             ),
+                            "mounted_spec": dict(_spec),
                         }
                         _relevant_tools.add(_ext_name)
                         _mounted_tools.add(_ext_name)

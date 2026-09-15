@@ -113,6 +113,64 @@ def source_tree(tmp_path):
     return root
 
 
+def test_literal_source_search_reads_definition_beyond_first_excerpt(tmp_path):
+    root = source_tree(tmp_path)
+    (root / "odd/place/command.py").write_text("# padding\n" * 4000 + CODE)
+    calls = []
+
+    def model(messages, check):
+        calls.append(messages)
+        if len(calls) == 1:
+            return json.dumps({"find_text": {"odd/place/command.py": "p.add_argument"}})
+        return json.dumps({"proposal": proposal()})
+
+    artifact = ExtensionStaticScanner(git_client=_CopyGitClient(root),
+        staging_root=tmp_path / "staging", data_dir=tmp_path / "scans", model=model).run(SOURCE_URL, "HEAD", operator_id="operator")
+    assert artifact["integration"]["readiness"] == "needs_validation"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("assignment", [
+    "api_key = 'syntheticfixturecredential'",
+    "token = syntheticfixturecredential # production token",
+    "password: syntheticfixturecredential,",
+    '"secret_key": syntheticfixturecredential}',
+])
+def test_optional_source_exclusions_keep_packaged_secret_gate(tmp_path, assignment):
+    root = source_tree(tmp_path)
+    (root / "optional.yaml").write_text(assignment + "\n")
+    data = proposal()
+
+    def model(messages, check):
+        assert "syntheticfixturecredential" not in json.dumps(messages)
+        if "odd/place/command.py" not in json.loads(messages[-1]["content"])["untrusted_source_excerpts"]:
+            return json.dumps({"read_paths": ["odd/place/command.py"]})
+        return json.dumps({"proposal": data})
+
+    scanner = ExtensionStaticScanner(git_client=_CopyGitClient(root), staging_root=tmp_path / "staging", data_dir=tmp_path / "scans", model=model)
+    with pytest.raises(ExtensionScanError, match="source_secret"):
+        scanner.run(SOURCE_URL, "HEAD", operator_id="operator")
+    data["source_exclusions"] = ["optional.yaml"]
+    artifact = scanner.run(SOURCE_URL, "HEAD", operator_id="operator")
+    assert all(f.get("evidence") == "[redacted]" for f in artifact["findings"] if f["category"] == "secret")
+    extract_package((scanner.data_dir / artifact["package"]["id"] / "package.tar.gz").read_bytes(), tmp_path / "extracted")
+    assert not (tmp_path / "extracted/optional.yaml").exists()
+    assert (tmp_path / "extracted/LICENSE").exists()
+    from src.extension_scan import (
+        SECRET_PATTERNS,
+        _redact_source_secrets,
+        _source_secrets,
+    )
+
+    reference = '"token": variable_reference,\n'
+    python_source = 'data = {\n' + reference + '}\n'
+    assert not _source_secrets(root / "code.py", python_source)
+    assert _redact_source_secrets(root / "code.py", python_source) == python_source
+    assert _source_secrets(root / "config.yaml", reference)
+    assert not any(regex.search("password = self.get_password()\n") for _, regex, _ in SECRET_PATTERNS)
+    assert any(regex.search("TOKEN=syntheticfixturecredential\n") for _, regex, _ in SECRET_PATTERNS)
+
+
 def test_unknown_layout_reads_interfaces_repairs_and_preserves_real_adapter(tmp_path):
     root = source_tree(tmp_path)
     calls = []

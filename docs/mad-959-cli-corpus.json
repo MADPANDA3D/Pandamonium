@@ -1,0 +1,147 @@
+[
+  {
+    "source": {
+      "url": "https://github.com/yt-dlp/yt-dlp.git",
+      "revision": "bbc809a1161d3bfca51fa36f59dda35556ee85a0"
+    },
+    "package": {
+      "id": "58d55655-ec5c-4af6-bf0b-eaf12abe871a",
+      "sha256": "1ab56f4f862b3dee5db421fd8411a98dfd90098490dac333158d36f42d9b827c",
+      "size_bytes": 3023625,
+      "tree_digest": "7d855fdbb90350b4f3dcc3f32ae41e139a40d77c37a6fe65fec579f136dbe1e2"
+    },
+    "operations": [
+      {
+        "tool": "yt_dlp__inspect_media",
+        "arguments": {
+          "url": "file:///runtime/check.wav"
+        },
+        "result": {
+          "id": "check",
+          "title": "check",
+          "extension": "wav"
+        }
+      },
+      {
+        "tool": "yt_dlp__download_media",
+        "arguments": {
+          "url": "file:///runtime/check.wav"
+        },
+        "result": {
+          "id": "check",
+          "title": "check",
+          "extension": "wav",
+          "artifact": "artifacts/check.wav",
+          "bytes": 1644
+        }
+      }
+    ],
+    "lifecycle": [
+      "install",
+      "disable",
+      "enable",
+      "uninstall"
+    ],
+    "model": "reviewed proposal fixture",
+    "cleanup_verified": true
+  },
+  {
+    "source": {
+      "url": "https://github.com/MADPANDA3D/pandaflix.git",
+      "revision": "f6484787ba5a23d4453d5bbd8eb34f05054ecfbb"
+    },
+    "package": {
+      "id": "2e3cf1df-91f4-4086-af11-1c83c76b00b3",
+      "sha256": "5569bd435706bb2bf979ab1c1ee155411976f18fcda21dbd66a0963313ecc9a7",
+      "size_bytes": 59643239,
+      "tree_digest": "4392348312a25e422e34761e63d6a56577afe428af918e7f7ec5da3dc9540635"
+    },
+    "operations": [
+      {
+        "tool": "pandaflix__episode_range",
+        "arguments": {
+          "s": "2-4"
+        },
+        "result": {
+          "episodes": [
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      {
+        "tool": "pandaflix__youtube_playback_plan",
+        "arguments": {
+          "urlStr": "https://youtu.be/BaW_jenozKc"
+        },
+        "result": {
+          "media_id": "BaW_jenozKc",
+          "playback_url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+          "requires_player": true
+        }
+      },
+      {
+        "tool": "pandaflix__watch_history",
+        "arguments": {},
+        "result": {
+          "shows": []
+        }
+      }
+    ],
+    "lifecycle": [
+      "install",
+      "disable",
+      "enable",
+      "uninstall"
+    ],
+    "model": "reviewed proposal fixture",
+    "cleanup_verified": true
+  },
+  {
+    "source": {
+      "url": "https://github.com/dietrichgebert/ponytail",
+      "revision": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156"
+    },
+    "package": {
+      "id": "1d5cd0d7-ab66-4a13-8585-a849f25d792b",
+      "sha256": "122f6b24a2e4d05dabef90f78db6583aca3a02a70235425bd6216d8cdcc11cad",
+      "size_bytes": 1127636,
+      "tree_digest": "da184d52c6e88ef0c9da431d1b93e62b3e252bfeba1ac5dbc2e2d911122e0e8a"
+    },
+    "operations": [
+      {
+        "skill": "ponytail",
+        "native_body_chars": 6668
+      },
+      {
+        "skill": "ponytail-audit",
+        "native_body_chars": 1821
+      },
+      {
+        "skill": "ponytail-debt",
+        "native_body_chars": 1885
+      },
+      {
+        "skill": "ponytail-gain",
+        "native_body_chars": 1985
+      },
+      {
+        "skill": "ponytail-help",
+        "native_body_chars": 2917
+      },
+      {
+        "skill": "ponytail-review",
+        "native_body_chars": 2527
+      }
+    ],
+    "lifecycle": [
+      "install",
+      "disable",
+      "enable",
+      "uninstall"
+    ],
+    "model": "native descriptor",
+    "cleanup_verified": true
+  }
+]

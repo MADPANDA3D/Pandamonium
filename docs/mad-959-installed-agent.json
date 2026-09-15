@@ -1,0 +1,40 @@
+{
+  "owner": "disposable browser-created admin",
+  "source_install": "actual browser URL scan, approval and package install",
+  "model": "deterministic transport fixture; no external model endpoint",
+  "mounted_schema_seen": true,
+  "approval_decision_id": "fcd754b8-ad6b-4adf-9d52-1d27d974b912",
+  "native_agent_result": {
+    "type": "tool_output",
+    "tool": "yt_dlp__download_media",
+    "command": "{\"url\":\"file:///runtime/check.wav\"}",
+    "output": "{\"id\": \"check\", \"title\": \"check\", \"extension\": \"wav\", \"artifact\": \"artifacts/check.wav\", \"bytes\": 1644}",
+    "exit_code": 0,
+    "request_id": "6ed30124-57a5-41b5-91bd-5bfafa8213d5",
+    "call_id": "installed-2",
+    "status": "succeeded",
+    "evidence": {
+      "kind": "native_result",
+      "verified": true,
+      "exit_code": 0
+    },
+    "authority_ref": "fcd754b8-ad6b-4adf-9d52-1d27d974b912"
+  },
+  "artifact_bytes": 1644,
+  "authenticated_lifecycle": [
+    {
+      "operation": "disable",
+      "http_status": 200
+    },
+    {
+      "operation": "enable",
+      "http_status": 200
+    },
+    {
+      "operation": "uninstall",
+      "http_status": 200
+    }
+  ],
+  "uninstall_preserved_artifact": true,
+  "browser_and_runtime_cleanup_verified": true
+}
