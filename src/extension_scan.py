@@ -43,8 +43,9 @@ from src.extension_capability_inventory import (
     scan_stage_progress,
     validate_scan_artifact,
 )
-from src.extension_installer import GitSourceClient
+from src.extension_installer import ExtensionLifecycleError, GitSourceClient
 from src.extension_registry import ExtensionContractError, validate_extension_manifest
+from src.extension_skill_adapter import SkillBundleAdapter
 
 SCAN_DIR = Path(DATA_DIR) / "extension_scans"
 
@@ -384,11 +385,20 @@ class ExtensionStaticScanner:
         return files, total_bytes
 
     @staticmethod
+    def _admitted_skill_name(skill_file: Path) -> str | None:
+        """Return the skill name only when the installer would admit the file."""
+        try:
+            skill, _text = SkillBundleAdapter.validate_skill_document(skill_file)
+        except ExtensionLifecycleError:
+            return None
+        return skill.name
+
+    @staticmethod
     def _agent_skill_layout(
         entrypoint: str, skill_file: Path
     ) -> dict[str, Any] | None:
-        identity = _read_skill_identity(skill_file)
-        if identity is None:
+        name = ExtensionStaticScanner._admitted_skill_name(skill_file)
+        if name is None:
             return None
         assets = ExtensionStaticScanner._skill_bundle_assets(skill_file.parent)
         if assets is None:
@@ -398,7 +408,7 @@ class ExtensionStaticScanner:
         return {
             "format": "agent_skill",
             "entrypoint": entrypoint,
-            "include": [identity["name"]],
+            "include": [name],
             "excluded": [],
         }
 
@@ -434,9 +444,9 @@ class ExtensionStaticScanner:
             skill_file = skill_dir / "SKILL.md"
             if not skill_file.is_file() or skill_file.is_symlink():
                 continue
-            identity = _read_skill_identity(skill_file)
+            name = self._admitted_skill_name(skill_file)
             assets = self._skill_bundle_assets(skill_dir)
-            if identity is None or assets is None or identity["name"] != skill_dir.name:
+            if name is None or assets is None or name != skill_dir.name:
                 excluded.append(skill_dir.name)
                 continue
             files_count, bytes_count = assets
@@ -446,7 +456,7 @@ class ExtensionStaticScanner:
             ):
                 excluded.append(skill_dir.name)
                 continue
-            include.append(identity["name"])
+            include.append(name)
             total_files += files_count
             total_bytes += bytes_count
         if not include:
@@ -482,11 +492,11 @@ class ExtensionStaticScanner:
             parent = Path(key).parent.name
             if not parent:
                 continue
-            identity = _read_skill_identity(relative[key])
+            name = self._admitted_skill_name(relative[key])
             assets = self._skill_bundle_assets(relative[key].parent)
-            if identity is None or assets is None or identity["name"] != parent:
+            if name is None or assets is None or name != parent:
                 continue
-            candidates.append((key, identity["name"]))
+            candidates.append((key, name))
         if len(candidates) != 1:
             return None
         entrypoint, name = candidates[0]
@@ -802,7 +812,7 @@ class ExtensionStaticScanner:
                         "category": "skill_asset",
                         "title": (
                             f"{len(excluded)} skill(s) stay out of the draft: "
-                            "their assets are not importable text"
+                            "frontmatter or assets did not pass import checks"
                         )[:200],
                         "evidence": redact_scan_evidence(", ".join(excluded)[:200]),
                     }

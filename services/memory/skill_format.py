@@ -77,11 +77,38 @@ def slugify(text: str, fallback: str = "skill") -> str:
 # ---------------------------------------------------------------------------
 
 # We accept a tiny subset of YAML: scalar `key: value`, inline lists `[a, b]`,
-# and block lists with `-`. That covers everything in our schema and avoids
-# a new dependency.
+# block lists with `-`, and folded/literal block scalars (`>`/`|`). That covers
+# everything in our schema and avoids a new dependency.
 
-_FM_KEY_RE = re.compile(r"^([a-z_][a-z0-9_]*):\s*(.*)$", re.IGNORECASE)
+_FM_KEY_RE = re.compile(r"^([a-z_][a-z0-9_-]*):\s*(.*)$", re.IGNORECASE)
 _FM_BLOCK_LIST_RE = re.compile(r"^\s*-\s*(.*)$")
+_FM_BLOCK_SCALAR_RE = re.compile(r"^([a-z_][a-z0-9_-]*):\s*([>|][+-]?)\s*$", re.IGNORECASE)
+
+
+def _parse_block_scalar(lines: List[str], style: str) -> str:
+    """Fold or keep a YAML block scalar body collected from indented lines."""
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return ""
+    indents = [len(line) - len(line.lstrip(" \t")) for line in lines if line.strip()]
+    base = min(indents) if indents else 0
+    normalized = [line[base:].rstrip() if line.strip() else "" for line in lines]
+    if style == "|":
+        return "\n".join(normalized)
+    paragraphs: List[str] = []
+    current: List[str] = []
+    for line in normalized:
+        if line.strip():
+            current.append(line.strip())
+        elif current:
+            paragraphs.append(" ".join(current))
+            current = []
+    if current:
+        paragraphs.append(" ".join(current))
+    return "\n\n".join(paragraphs)
 
 
 def _parse_scalar(raw: str) -> Any:
@@ -100,6 +127,11 @@ def _parse_scalar(raw: str) -> Any:
     if raw.lower() in ("null", "none", "~"):
         return None
     if (raw[0] == raw[-1]) and raw[0] in ("'", '"'):
+        if raw[0] == '"':
+            try:
+                return json.loads(raw)
+            except ValueError:
+                pass
         return raw[1:-1]
     # Try number
     try:
@@ -149,8 +181,24 @@ def parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
     body = text[end + 4:].lstrip("\n")
     fm: Dict[str, Any] = {}
     pending_key: Optional[str] = None
-    for line in fm_text.splitlines():
+    lines = fm_text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
         if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        block = _FM_BLOCK_SCALAR_RE.match(line)
+        if block:
+            block_lines: List[str] = []
+            while index < len(lines):
+                candidate = lines[index]
+                if candidate.strip() and not candidate[0].isspace():
+                    break
+                block_lines.append(candidate)
+                index += 1
+            fm[block.group(1)] = _parse_block_scalar(block_lines, block.group(2)[0])
+            pending_key = None
             continue
         m = _FM_KEY_RE.match(line)
         if m:
