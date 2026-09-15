@@ -26,6 +26,7 @@ from src.extension_installer import (
     normalize_git_source_url,
 )
 from src.extension_mcp_adapter import mcp_extension_adapter
+from src.extension_package import PackageError
 from src.extension_registry import ExtensionContractError
 from src.extension_plugin_view import installed_plugin_detail, installed_plugin_rows
 from src.extension_scan import ExtensionScanError, get_scan, start_scan
@@ -179,7 +180,7 @@ def setup_extension_routes(
         return identity
 
     def _http_error(
-        exc: ExtensionLifecycleError | ExtensionContractError | MarketplaceCatalogError,
+        exc: ExtensionLifecycleError | ExtensionContractError | MarketplaceCatalogError | PackageError,
     ) -> HTTPException:
         status = (
             404
@@ -383,11 +384,13 @@ def setup_extension_routes(
                 operator_id=operator_id,
                 expected_manifest=preview["manifest"],
                 distribution=distribution,
+                artifact_content=artifact_content,
             )
         except (
             ExtensionLifecycleError,
             ExtensionContractError,
             MarketplaceCatalogError,
+            PackageError,
         ) as exc:
             raise _http_error(exc) from exc
 
@@ -426,7 +429,7 @@ def setup_extension_routes(
                 scan_revision=scan_revision,
                 draft_manifest=draft_manifest,
             )
-        except (ExtensionLifecycleError, ExtensionContractError) as exc:
+        except (ExtensionLifecycleError, ExtensionContractError, PackageError) as exc:
             raise _http_error(exc) from exc
 
     @router.post("/scans", dependencies=[Depends(require_admin)])
@@ -463,7 +466,7 @@ def setup_extension_routes(
                 operator_id=_operator(owner),
                 target_revision=payload.target_revision,
             )
-        except (ExtensionLifecycleError, ExtensionContractError) as exc:
+        except (ExtensionLifecycleError, ExtensionContractError, PackageError) as exc:
             raise _http_error(exc) from exc
 
     @router.post("/plans/{plan_id}/execute", dependencies=[Depends(require_admin)])
@@ -473,7 +476,7 @@ def setup_extension_routes(
             return await asyncio.to_thread(
                 manager.execute_plan, plan_id, operator_id=_operator(owner)
             )
-        except (ExtensionLifecycleError, ExtensionContractError) as exc:
+        except (ExtensionLifecycleError, ExtensionContractError, PackageError) as exc:
             raise _http_error(exc) from exc
 
     return router

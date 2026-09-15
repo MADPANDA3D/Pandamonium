@@ -51,6 +51,28 @@ rewrites its `source.revision` to the resolved commit so the catalog entry is
 pinned. Configuration declarations from the manifest are mirrored into the
 catalog entry (names/flags only, never values).
 
+### Generated integrations (MAD-957)
+
+A generated manifest or adapter does not have to exist upstream. Add
+`"prepared_path": "/absolute/path/to/prepared-package"` to the package spec and
+set `ref` to the full immutable upstream commit (40 or 64 hexadecimal characters).
+The prepared directory must contain `jarvis-extension.json` at its root with
+that exact source URL/revision, the selected source files, and generated adapters,
+skills and references. The publisher archives that directory without cloning Git.
+It produces deterministic bytes for identical contents and executable modes.
+
+Keep this directory separate from the running plugin's environment and data.
+Links, Git metadata, `.env` credential files and private-key files are rejected;
+configuration declarations and `.env.example` are allowed. These file checks do
+not replace the release secret scan. Never copy account configuration into a
+prepared tree.
+
+Installations extract the verified archive directly, with bounded file counts
+and size, no links or traversal, and exact manifest/source matching. A content
+fingerprint binds preview to activation. The artifact SHA-256 identifies the
+installed package; upstream revision remains provenance. Rebuilt integrations
+at one upstream commit can therefore upgrade and roll back independently.
+
 ## 3. Build
 
 ```bash

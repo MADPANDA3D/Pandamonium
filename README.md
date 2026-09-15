@@ -144,6 +144,10 @@ and [mobile](docs/screenshots/workspace-context-mobile.png).
   rollback without giving extensions authority over the host.
 - Signed plugin marketplace discovery and approval-gated install, update,
   enable/disable, rollback, and recoverable removal through the native lifecycle.
+  Marketplace installation uses the verified archive, preserving generated
+  integration files. The [publishing runbook](docs/marketplace-publishing-runbook.md)
+  covers prepared packages; the [ingestion program](docs/repository-plugin-ingestion-plan.md)
+  tracks the remaining URL-to-tool and marketplace work.
 - Scoped client-state and foreground-action bridges for extensions that need
   to interact with the active browser surface.
 - ORACLE remains an optional reference extension; clean installations start

@@ -43,8 +43,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
 
 from src.extension_registry import (  # noqa: E402
     ExtensionContractError,
+    IMMUTABLE_REVISION_PATTERN,
     validate_extension_manifest,
 )
+from src.extension_installer import normalize_git_source_url  # noqa: E402
+from src.extension_package import build_prepared_package  # noqa: E402
 
 CATALOG_VERSION = "pandamonium.extension-catalog.v1"
 DEFAULT_MANIFEST = "jarvis-extension.json"
@@ -140,12 +143,23 @@ def build_artifact(
 ) -> dict[str, Any]:
     source_url = str(spec["source_url"])
     ref = str(spec["ref"])
-    clone_dir = workdir / "src"
-    if clone_dir.exists():
-        shutil.rmtree(clone_dir)
-    _run(["git", "clone", "--quiet", "--depth", "1", "--branch", ref, source_url, str(clone_dir)])
-    revision = _run(["git", "rev-parse", "HEAD"], cwd=clone_dir)
+    prepared = spec.get("prepared_path")
+    if prepared:
+        clone_dir = Path(str(prepared)).resolve()
+        if not clone_dir.is_dir() or not IMMUTABLE_REVISION_PATTERN.fullmatch(ref):
+            raise CatalogPublishError("prepared package requires a directory and an immutable source revision")
+        if spec.get("manifest_path", DEFAULT_MANIFEST) != DEFAULT_MANIFEST:
+            raise CatalogPublishError("prepared manifest must be at the package root")
+        revision = ref
+    else:
+        clone_dir = workdir / "src"
+        if clone_dir.exists():
+            shutil.rmtree(clone_dir)
+        _run(["git", "clone", "--quiet", "--depth", "1", "--branch", ref, source_url, str(clone_dir)])
+        revision = _run(["git", "rev-parse", "HEAD"], cwd=clone_dir)
     manifest_path = clone_dir / str(spec.get("manifest_path") or DEFAULT_MANIFEST)
+    if not manifest_path.resolve().is_relative_to(clone_dir.resolve()) or manifest_path.is_symlink():
+        raise CatalogPublishError("package manifest path must stay inside its source tree")
     if not manifest_path.is_file():
         raise CatalogPublishError(f"{ref}: missing {DEFAULT_MANIFEST}")
     try:
@@ -154,16 +168,27 @@ def build_artifact(
         )
     except (ValueError, ExtensionContractError) as exc:
         raise CatalogPublishError(f"{ref}: invalid manifest ({exc})") from exc
+    if (normalize_git_source_url(manifest["source"]["url"], check_public=False)
+            != normalize_git_source_url(source_url, check_public=False)
+            or manifest["source"]["revision"] not in {"self", revision}):
+        raise CatalogPublishError("package source does not match its manifest")
+    if prepared and manifest["source"]["revision"] != revision:
+        raise CatalogPublishError("prepared manifest must record the immutable upstream revision")
     extension_id = str(spec.get("extension_id") or manifest["extension_id"])
     if extension_id != manifest["extension_id"]:
         raise CatalogPublishError("package extension_id does not match its manifest")
     version = manifest["version"]
     filename = str(spec.get("artifact_filename") or f"pandamonium-plugin-{extension_id}-{version}.tar.gz")
+    if Path(filename).name != filename or "\\" in filename or not filename.endswith(".tar.gz"):
+        raise CatalogPublishError("artifact filename must be a local .tar.gz filename")
     tar_path = workdir / filename
-    _run(
-        ["git", "archive", "--format=tar.gz", f"--prefix={extension_id}-{version}/", "-o", str(tar_path), "HEAD"],
-        cwd=clone_dir,
-    )
+    if prepared:
+        build_prepared_package(clone_dir, tar_path)
+    else:
+        _run(
+            ["git", "archive", "--format=tar.gz", f"--prefix={extension_id}-{version}/", "-o", str(tar_path), "HEAD"],
+            cwd=clone_dir,
+        )
     size = tar_path.stat().st_size
     if size <= 0 or size > MAX_ARTIFACT_BYTES:
         raise CatalogPublishError(f"{ref}: artifact size out of bounds ({size})")

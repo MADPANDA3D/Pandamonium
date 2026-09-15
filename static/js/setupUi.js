@@ -66,6 +66,10 @@ const SETUP_ERROR_MESSAGES = {
 // the generic fallback (MAD-953). Specific codes above always win.
 const SETUP_ERROR_FAMILIES = [
   [
+    /^extension_package_/,
+    'This plugin package is damaged, changed, or incomplete. Download it again from the marketplace; if the problem continues, the publisher needs to rebuild it.',
+  ],
+  [
     /^extension_skill_/,
     'One of the skills in this repository did not pass the install checks, so nothing was installed. Start a new scan; if it keeps failing, ask the publisher to fix the skill files.',
   ],

@@ -51,7 +51,7 @@ async function main() {
     .map((name) => path.join(__dirname, '..', 'src', name));
   backendFiles.push(path.join(__dirname, '..', 'routes', 'extension_routes.py'));
   const codePattern =
-    /(?:ExtensionLifecycleError|ExtensionScanError|ExtensionContractError|MarketplaceCatalogError|HTTPException)\([^)\n]*?["']([a-z][a-z0-9_]+)["']/g;
+    /(?:ExtensionLifecycleError|ExtensionScanError|ExtensionContractError|MarketplaceCatalogError|PackageError|HTTPException)\([^)\n]*?["']([a-z][a-z0-9_]+)["']/g;
   const backendCodes = new Set();
   for (const file of backendFiles) {
     for (const match of fs.readFileSync(file, 'utf8').matchAll(codePattern)) {

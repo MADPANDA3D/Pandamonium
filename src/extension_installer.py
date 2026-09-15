@@ -36,6 +36,7 @@ from src.extension_registry import (
     ExtensionRegistry,
     validate_extension_manifest,
 )
+from src.extension_package import PackageError, extract_package, package_tree_digest
 from src.operational_protocol import record_operational_event
 from src.runtime_paths import get_app_root
 from src.url_security import validate_public_http_url
@@ -586,6 +587,7 @@ class ExtensionLifecycleManager:
         scan_id: str | None = None,
         scan_revision: str | None = None,
         draft_manifest: Mapping[str, Any] | None = None,
+        artifact_content: bytes | None = None,
     ) -> dict[str, Any]:
         if operation not in {"install", "upgrade"}:
             raise ExtensionLifecycleError("extension_source_operation_invalid")
@@ -607,11 +609,27 @@ class ExtensionLifecycleManager:
             metadata={"operation": f"preview_{operation}"},
         )
         try:
-            source, ref, revision = self.git.resolve_revision(source_url, requested_ref)
+            if artifact_content is not None:
+                from src.marketplace_catalog import verify_catalog_artifact
+
+                if expected_manifest is None or draft_manifest is not None:
+                    raise PackageError("extension_package_manifest_required")
+                source = normalize_git_source_url(source_url, check_public=False)
+                revision = str(expected_manifest.get("source", {}).get("revision", ""))
+                if not IMMUTABLE_REVISION_PATTERN.fullmatch(revision) or requested_ref != revision:
+                    raise PackageError("extension_package_revision_invalid")
+                ref = revision
+                artifact = (distribution or {}).get("artifact") or {}
+                verify_catalog_artifact(artifact, artifact_content)
+                extract_package(artifact_content, staging)
+                content_digest = package_tree_digest(staging)
+            else:
+                source, ref, revision = self.git.resolve_revision(source_url, requested_ref)
+                self.git.checkout(source, ref, revision, staging)
+                content_digest = None
             if draft_manifest is not None and scan_revision != revision:
                 raise ExtensionLifecycleError("extension_scan_revision_mismatch")
-            self.git.checkout(source, ref, revision, staging)
-            manifest_origin = "repository"
+            manifest_origin = "package" if artifact_content is not None else "repository"
             try:
                 manifest = self._load_manifest(staging)
             except ExtensionLifecycleError as exc:
@@ -658,6 +676,8 @@ class ExtensionLifecycleManager:
                     "staging_path": str(staging),
                     "manifest": manifest,
                     "manifest_origin": manifest_origin,
+                    "package_revision": artifact["sha256"] if artifact_content is not None else None,
+                    "content_digest": content_digest,
                     "scan_id": str(scan_id) if manifest_origin == "scan_draft" else None,
                     "scan_revision": (
                         str(scan_revision) if manifest_origin == "scan_draft" else None
@@ -778,6 +798,7 @@ class ExtensionLifecycleManager:
                 "source_url",
                 "requested_ref",
                 "source_revision",
+                "package_revision",
                 "target_revision",
                 "manifest_origin",
                 "status",
@@ -971,12 +992,17 @@ class ExtensionLifecycleManager:
     def _activate_source_plan(self, plan: Mapping[str, Any]) -> dict[str, Any]:
         extension_id = plan["extension_id"]
         revision = plan["source_revision"]
+        package_revision = plan.get("package_revision") or revision
         staging = Path(plan["staging_path"]).resolve()
         expected_staging = (self.root / "staging").resolve()
         if not staging.is_relative_to(expected_staging):
             raise ExtensionLifecycleError("extension_staging_path_invalid")
-        destination = self._revision_path(extension_id, revision)
+        destination = self._revision_path(extension_id, package_revision)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if plan.get("content_digest"):
+            candidate = destination if destination.exists() else staging
+            if candidate.is_symlink() or package_tree_digest(candidate) != plan["content_digest"]:
+                raise PackageError("extension_package_content_changed")
         if not destination.exists():
             if not staging.is_dir():
                 raise ExtensionLifecycleError("extension_staging_missing")
@@ -1032,14 +1058,21 @@ class ExtensionLifecycleManager:
             history = list(previous.get("history") or [])
             if (
                 old_revision
-                and old_revision != revision
+                and old_revision != package_revision
                 and old_revision not in history
             ):
                 history.append(old_revision)
             retain = registry_record["manifest"]["rollback"]["retain_revisions"]
+            revisions = dict(previous.get("package_revisions") or {})
+            if plan.get("package_revision"):
+                revisions[package_revision] = {
+                    "source_revision": revision,
+                    "content_digest": plan["content_digest"],
+                }
             state["extensions"][extension_id] = {
                 "source_url": plan["source_url"],
-                "active_revision": revision,
+                "active_revision": package_revision,
+                "package_revisions": revisions,
                 "enabled": True,
                 "owner_scope": owner_scope,
                 "admitted_skills": [
@@ -1050,7 +1083,16 @@ class ExtensionLifecycleManager:
                 "updated_at": utc_now(),
             }
             self._write_state(state)
-        return {"extension_id": extension_id, "revision": revision, "enabled": True}
+        return {"extension_id": extension_id, "revision": package_revision, "source_revision": revision, "enabled": True}
+
+    @staticmethod
+    def _installed_source_revision(record: Mapping[str, Any], revision: str, path: Path) -> str:
+        package = (record.get("package_revisions") or {}).get(revision)
+        if package:
+            if path.is_symlink() or package_tree_digest(path) != package["content_digest"]:
+                raise PackageError("extension_package_content_changed")
+            return str(package["source_revision"])
+        return revision
 
     def _active_record(
         self, extension_id: str
@@ -1076,13 +1118,14 @@ class ExtensionLifecycleManager:
                     "idempotent": True,
                 }
             adapter = self._adapter_for(manifest)
+            source_revision = self._installed_source_revision(record, record["active_revision"], path)
             catalog, healthy = self._validate_adapter(
-                adapter, path, manifest, record["active_revision"], owner_scope
+                adapter, path, manifest, source_revision, owner_scope
             )
             if not healthy:
                 raise ExtensionLifecycleError("extension_health_unavailable")
             self._activate_and_register(
-                adapter, path, manifest, catalog, record["active_revision"], owner_scope
+                adapter, path, manifest, catalog, source_revision, owner_scope
             )
             state = self._read_state()
             state["extensions"][extension_id]["enabled"] = True
@@ -1138,13 +1181,14 @@ class ExtensionLifecycleManager:
             path = self._revision_path(extension_id, target_revision)
             manifest = self._load_manifest(path)
             adapter = self._adapter_for(manifest)
+            source_revision = self._installed_source_revision(current, target_revision, path)
             catalog, healthy = self._validate_adapter(
-                adapter, path, manifest, target_revision, owner_scope
+                adapter, path, manifest, source_revision, owner_scope
             )
             if not healthy:
                 raise ExtensionLifecycleError("extension_health_unavailable")
             registry_record = self._activate_and_register(
-                adapter, path, manifest, catalog, target_revision, owner_scope
+                adapter, path, manifest, catalog, source_revision, owner_scope
             )
             old_revision = current["active_revision"]
             current["history"] = [
