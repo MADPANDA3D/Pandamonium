@@ -360,5 +360,8 @@
         }
       }
     ]
-  }
+  },
+  "source_exclusions": [
+    "core/providers/vixsrc_test.go"
+  ]
 }

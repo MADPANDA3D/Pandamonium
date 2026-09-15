@@ -138,7 +138,7 @@ def test_literal_source_search_reads_definition_beyond_first_excerpt(tmp_path):
 ])
 def test_optional_source_exclusions_keep_packaged_secret_gate(tmp_path, assignment):
     root = source_tree(tmp_path)
-    (root / "optional.py").write_text(assignment + "\n")
+    (root / "optional.yaml").write_text(assignment + "\n")
     data = proposal()
 
     def model(messages, check):
@@ -150,14 +150,23 @@ def test_optional_source_exclusions_keep_packaged_secret_gate(tmp_path, assignme
     scanner = ExtensionStaticScanner(git_client=_CopyGitClient(root), staging_root=tmp_path / "staging", data_dir=tmp_path / "scans", model=model)
     with pytest.raises(ExtensionScanError, match="source_secret"):
         scanner.run(SOURCE_URL, "HEAD", operator_id="operator")
-    data["source_exclusions"] = ["optional.py"]
+    data["source_exclusions"] = ["optional.yaml"]
     artifact = scanner.run(SOURCE_URL, "HEAD", operator_id="operator")
     assert all(f.get("evidence") == "[redacted]" for f in artifact["findings"] if f["category"] == "secret")
     extract_package((scanner.data_dir / artifact["package"]["id"] / "package.tar.gz").read_bytes(), tmp_path / "extracted")
-    assert not (tmp_path / "extracted/optional.py").exists()
+    assert not (tmp_path / "extracted/optional.yaml").exists()
     assert (tmp_path / "extracted/LICENSE").exists()
-    from src.extension_scan import SECRET_PATTERNS
+    from src.extension_scan import (
+        SECRET_PATTERNS,
+        _redact_source_secrets,
+        _source_secrets,
+    )
 
+    reference = '"token": variable_reference,\n'
+    python_source = 'data = {\n' + reference + '}\n'
+    assert not _source_secrets(root / "code.py", python_source)
+    assert _redact_source_secrets(root / "code.py", python_source) == python_source
+    assert _source_secrets(root / "config.yaml", reference)
     assert not any(regex.search("password = self.get_password()\n") for _, regex, _ in SECRET_PATTERNS)
     assert any(regex.search("TOKEN=syntheticfixturecredential\n") for _, regex, _ in SECRET_PATTERNS)
 

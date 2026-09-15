@@ -6,6 +6,7 @@ Repository build, install, and lifecycle commands never run during intake.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -81,6 +82,46 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
         r"|(?im:^\s*['\"]?(?:token|password|passwd|secret|api[_-]?key|secret[_-]?key)['\"]?\s*[:=]\s*[A-Za-z0-9_\-./+]{12,}(?=\s*(?:$|[#;,}\]])))"
     ), "medium"),
 )
+
+
+def _source_secrets(path: Path, text: str) -> list[tuple[str, str, re.Match[str]]]:
+    # Python names/attributes are references, not unquoted configuration literals.
+    references: set[int] = set()
+    if path.suffix == ".py":
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError, RecursionError):
+            pass  # Unparseable source keeps the conservative lexical scan.
+        else:
+            lines = text.splitlines(keepends=True)
+            offsets = [0]
+            for line in lines:
+                offsets.append(offsets[-1] + len(line))
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Name, ast.Attribute)) and node.end_lineno:
+                    line = lines[node.end_lineno - 1]
+                    column = len(line.encode()[:node.end_col_offset].decode())
+                    references.add(offsets[node.end_lineno - 1] + column)
+    return [
+        (name, severity, match)
+        for name, pattern, severity in SECRET_PATTERNS
+        for match in pattern.finditer(text)
+        if name != "assigned-secret" or match.end() not in references
+    ]
+
+
+def _redact_source_secrets(path: Path, text: str) -> str:
+    spans: list[tuple[int, int]] = []
+    for start, end in sorted({m.span() for _, _, m in _source_secrets(path, text)}):
+        if spans and start <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(end, spans[-1][1]))
+        else:
+            spans.append((start, end))
+    for start, end in reversed(spans):
+        text = text[:start] + "[REDACTED]" + text[end:]
+    return text
+
+
 DANGEROUS_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("curl-pipe-shell", re.compile(r"(?i)\bcurl\b[^\n|]{0,200}\|\s*(?:ba)?sh\b"), "high"),
     ("wget-pipe-shell", re.compile(r"(?i)\bwget\b[^\n|]{0,200}\|\s*(?:ba)?sh\b"), "high"),
@@ -746,16 +787,14 @@ class ExtensionStaticScanner:
                 continue
             if not text:
                 continue
-            for pattern_id, pattern, severity in SECRET_PATTERNS:
-                match = pattern.search(text)
-                if match:
-                    add(
-                        f"secret-{pattern_id}",
-                        severity,
-                        "secret",
-                        f"Possible {pattern_id} in {relative}",
-                        "[redacted]",
-                    )
+            for pattern_id, severity, _ in _source_secrets(path, text):
+                add(
+                    f"secret-{pattern_id}",
+                    severity,
+                    "secret",
+                    f"Possible {pattern_id} in {relative}",
+                    "[redacted]",
+                )
             for pattern_id, pattern, severity in DANGEROUS_PATTERNS:
                 match = pattern.search(text)
                 if match:
@@ -942,9 +981,7 @@ class ExtensionStaticScanner:
                     text = self._read_text(path, source_remaining)
                     if "\x00" in text or "\ufffd" in text:
                         return ""
-                    for _name, pattern, _severity in SECRET_PATTERNS:
-                        text = pattern.sub("[REDACTED]", text)
-                    return text
+                    return _redact_source_secrets(path, text)
 
                 report("understand", "Reading purpose and interface definitions")
                 try:
@@ -962,7 +999,7 @@ class ExtensionStaticScanner:
                     "evidence_path": item["evidence"][0]["path"]} for item in integration["interfaces"]]
                 for relative, content in generated["files"].items():
                     check()
-                    if any(pattern.search(content) for _name, pattern, _severity in SECRET_PATTERNS):
+                    if _source_secrets(Path(relative), content):
                         raise ExtensionScanError("extension_scan_generated_secret")
                     target = staging / relative
                     target.parent.mkdir(parents=True, exist_ok=True)
