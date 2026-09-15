@@ -118,7 +118,7 @@ const SETUP_ERROR_FAMILIES = [
     'That plugin\u2019s MCP runtime did not pass validation, so nothing was installed. Ask the publisher to fix the plugin, or try a different repository.',
   ],
   [
-    /^extension_manifest_/,
+    /^extension_(?:manifest|metadata)_/,
     'That plugin manifest did not pass validation, so nothing was installed. Scan the repository again, or ask the publisher to fix the manifest.',
   ],
   [

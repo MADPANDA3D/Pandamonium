@@ -106,6 +106,7 @@ function setTab(tab, focus = false) {
     [tabAdd, panelAdd, 'add'],
   ].forEach(([button, panel, name]) => {
     button?.setAttribute('aria-selected', String(activeTab === name));
+    if (button) button.tabIndex = activeTab === name ? 0 : -1;
     if (panel) panel.hidden = activeTab !== name;
   });
   if (focus) ({ installed: tabInstalled, marketplace: tabMarketplace, add: tabAdd })[activeTab]?.focus({ preventScroll: true });
@@ -191,20 +192,11 @@ function renderCards() {
     const badges = element('div', 'marketplace-card-badges');
     badges.append(...statusBadges(plugin));
     const facts = element('div', 'marketplace-card-facts');
-    const dependencyCount = plugin.dependencies?.length || 0;
-    const restart = plugin.restart_required === 'none' ? 'No restart' : `${plugin.restart_required} restart`;
-    facts.append(
-      element('span', '', plugin.publisher?.name || 'Unknown publisher'),
-      element('span', '', plugin.license),
-      element('span', '', `${plugin.permissions?.default || 'unknown'} permission`),
-      element('span', '', `${dependencyCount} dependenc${dependencyCount === 1 ? 'y' : 'ies'}`),
-      element('span', '', restart),
-      element('span', '', (plugin.categories || []).join(' · ')),
-      element('span', '', plugin.provenance?.sha256
-        ? `sha256:${plugin.provenance.sha256.slice(0, 10)}…`
-        : `revision ${(plugin.provenance?.source_revision || 'unrecorded').slice(0, 10)}`),
-    );
-    card.append(head, badges, element('p', 'marketplace-card-summary', plugin.summary), facts);
+    const icon = element('span', 'marketplace-plugin-icon', plugin.icon || '◈');
+    icon.setAttribute('aria-hidden', 'true');
+    head.prepend(icon);
+    facts.append(element('span', '', (plugin.categories || []).join(' · ')));
+    card.append(head, element('p', 'marketplace-card-summary', plugin.summary), facts, renderReadiness(plugin), badges);
     card.addEventListener('click', () => selectPlugin(plugin.id));
     results.append(card);
   });
@@ -225,18 +217,12 @@ function renderInstalled() {
     const row = element('button', `marketplace-installed-row${plugin.origin === 'configured' ? ' is-configured' : ''}`);
     row.type = 'button';
     row.dataset.installedId = plugin.id;
-    row.setAttribute('role', 'listitem');
     row.setAttribute('aria-pressed', String(plugin.id === installedSelectedId));
-    row.append(
-      element('strong', '', plugin.name),
-      element(
-        'span',
-        'marketplace-installed-state',
-        plugin.origin === 'configured'
-          ? 'configured'
-          : `${plugin.state}${plugin.capability_count ? ` · ${plugin.capability_count} cap` : ''}`,
-      ),
-    );
+    const head = element('div', 'marketplace-card-head');
+    const icon = element('span', 'marketplace-plugin-icon', plugin.icon || '◈');
+    icon.setAttribute('aria-hidden', 'true');
+    head.append(icon, element('strong', '', plugin.name));
+    row.append(head, element('p', 'marketplace-card-summary', plugin.summary || 'Open to inspect capabilities and setup.'), element('span', 'marketplace-categories', (plugin.categories || []).join(' · ')), renderReadiness(plugin));
     row.addEventListener('click', () => selectInstalled(plugin.id));
     installedList.append(row);
   });
@@ -256,69 +242,66 @@ async function loadInstalled(generation) {
   }
 }
 
+function renderReadiness(plugin) {
+  const value = plugin.readiness || { state: plugin.state === 'disabled' ? 'disabled' : 'needs_setup', message: 'Install or enable to verify setup and capabilities.' };
+  const names = { ready: 'Ready', needs_setup: 'Needs setup', preparing: 'Preparing', failed: 'Failed', disabled: 'Disabled' };
+  const section = element('div', 'marketplace-readiness');
+  section.dataset.readiness = value.state;
+  section.setAttribute('role', 'status');
+  section.append(badge(names[value.state] || 'Needs setup', value.state === 'ready' ? 'positive' : value.state === 'failed' ? 'danger' : 'warning'), element('p', '', value.message));
+  return section;
+}
+
+function productSections(container, plugin) {
+  const capabilities = detailSection('What you can do');
+  capabilities.append(listOrNone(plugin.capability_summaries || plugin.capabilities,
+    item => `${item.description || item.name}${item.description ? ` — ${item.name}` : ''}${item.kind === 'skill' ? ' · skill' : ''}`));
+  const examples = detailSection('Try asking');
+  if (plugin.examples?.length) examples.append(listOrNone(plugin.examples, value => value));
+  else examples.append(element('p', '', 'No usage examples were provided with this package.'));
+  const setup = detailSection('Setup');
+  const requirements = [...(plugin.requirements || []), ...(plugin.configuration || []).map(item => `${item.description}${item.required ? ' (required)' : ' (optional)'}`)];
+  setup.append(requirements.length ? listOrNone(requirements, value => value) : element('p', '', 'No configuration declared. Installation still validates available capabilities.'));
+  if ((plugin.capability_summaries || []).some(item => item.kind === 'skill')) {
+    setup.append(element('p', '', 'This bundle also appears in Memory → Skills after installation. Skills provide guidance and supporting files.'));
+  }
+  container.append(capabilities, examples, setup);
+  return setup;
+}
+
+function technicalDetails() {
+  const details = element('details', 'marketplace-technical');
+  details.append(element('summary', '', 'Technical details'));
+  return details;
+}
+
+function pluginHeading(plugin) {
+  const heading = element('div', 'marketplace-product-heading');
+  const icon = element('span', 'marketplace-plugin-icon', plugin.icon || '◈');
+  icon.setAttribute('aria-hidden', 'true');
+  heading.append(icon, element('h3', '', plugin.name), element('p', 'marketplace-card-summary', plugin.summary || 'Open this integration to inspect its capabilities and setup.'), element('p', 'marketplace-categories', (plugin.categories || []).join(' · ')));
+  return heading;
+}
+
 function renderInstalledDetail(payload) {
-  installedDetailContent.replaceChildren();
-  const heading = element('div');
-  heading.append(element('h3', '', `${payload.name}${payload.version ? ` ${payload.version}` : ''}`));
-  const badges = element('div', 'marketplace-detail-badges');
-  badges.append(
-    badge(
-      payload.origin === 'configured' ? 'Configured' : payload.state === 'enabled' ? 'Enabled' : 'Disabled',
-      payload.state === 'disabled' ? 'warning' : 'positive',
-    ),
-    badge(payload.runtime || 'unknown', ''),
-  );
-  heading.append(badges, element('p', '', payload.origin === 'configured' ? 'Configured surface' : 'Installed plugin'));
-  installedDetailContent.append(heading);
-
-  const identity = detailSection('Identity');
-  appendFacts(identity, [
-    ['Origin', payload.origin],
-    ['Runtime', payload.runtime || 'unknown'],
-    ['Descriptor', payload.descriptor || 'unknown'],
-    ['Revision', payload.source_revision || 'not recorded'],
-  ]);
-  installedDetailContent.append(identity);
-
-  const capabilities = detailSection('Capabilities and tools');
-  capabilities.append(listOrNone(
-    payload.capabilities,
-    item => `${item.name} · ${item.kind} · ${item.permission_mode}${item.description ? ` — ${item.description}` : ''}`,
-  ));
-  installedDetailContent.append(capabilities);
-
-  const permissions = detailSection('Permissions');
-  const permissionItems = [`Default: ${payload.permissions?.default || 'unknown'}`];
-  Object.entries(payload.permissions?.capabilities || {}).forEach(([name, mode]) => permissionItems.push(`${name}: ${mode}`));
-  permissions.append(listOrNone(permissionItems, value => value));
-  installedDetailContent.append(permissions);
-
-  const boundaries = detailSection('Data boundaries');
-  const boundary = payload.data_boundaries || {};
-  boundaries.append(listOrNone(
-    ['read', 'write', 'network'].map(kind => `${kind}: ${(boundary[kind] || []).length ? (boundary[kind] || []).join(', ') : 'none'}`),
-    value => value,
-  ));
-  installedDetailContent.append(boundaries);
-
-  const configuration = detailSection('Configuration');
-  configuration.append(listOrNone(
-    payload.configuration,
-    item => `${item.key}${item.required ? ' · required' : ' · optional'}${item.secret ? ' · secret' : ''} — ${item.description}`,
-  ));
-  configuration.append(element('p', 'marketplace-action-status', 'Values live in Settings/Connections; no secret values are shown here.'));
-  installedDetailContent.append(configuration);
+  installedDetailContent.replaceChildren(pluginHeading(payload), renderReadiness(payload));
+  const setup = productSections(installedDetailContent, payload);
   if (payload.origin !== 'configured' && payload.configuration?.length) {
-    configuration.replaceChildren(element('h4', '', 'Runtime setup'));
-    renderRuntimeSetup(configuration, payload.id, null, () => selectInstalled(payload.id));
+    renderRuntimeSetup(setup, payload.id, null, () => selectInstalled(payload.id));
   }
   if (payload.origin !== 'configured') renderInstalledLifecycle(payload);
-
-  if (payload.notes?.length) {
-    const notes = detailSection('Notes');
-    notes.append(listOrNone(payload.notes, value => value));
-    installedDetailContent.append(notes);
-  }
+  const diagnostics = technicalDetails();
+  const identity = detailSection('Identity');
+  appendFacts(identity, [['Origin', payload.origin], ['State', payload.state], ['Version', payload.version || 'unversioned'], ['Runtime', payload.runtime || 'unknown'], ['Descriptor', payload.descriptor || 'unknown'], ['Revision', payload.source_revision || 'not recorded']]);
+  const capabilities = detailSection('Capabilities and tools');
+  capabilities.append(listOrNone(payload.capabilities, item => `${item.name} · ${item.kind} · ${item.permission_mode}${item.description ? ` — ${item.description}` : ''}`));
+  const permissions = detailSection('Permissions and data boundaries');
+  permissions.append(listOrNone([`Default: ${payload.permissions?.default || 'unknown'}`, ...Object.entries(payload.permissions?.capabilities || {}).map(([name, mode]) => `${name}: ${mode}`), ...['read', 'write', 'network'].map(kind => `${kind}: ${(payload.data_boundaries?.[kind] || []).join(', ') || 'none'}`)], value => value));
+  const configuration = detailSection('Configuration keys');
+  configuration.append(listOrNone(payload.configuration, item => `${item.key}${item.required ? ' · required' : ' · optional'}${item.secret ? ' · secret' : ''} — ${item.description}`));
+  diagnostics.append(identity, capabilities, permissions, configuration);
+  if (payload.notes?.length) diagnostics.append(listOrNone(payload.notes, value => value));
+  installedDetailContent.append(diagnostics);
 }
 
 async function renderRuntimeSetup(container, id, planId, onSaved) {
@@ -420,6 +403,7 @@ async function selectInstalled(id) {
   installedDetailContent.append(state);
   try {
     const payload = await api(`/api/extensions/installed/${encodeURIComponent(id)}`);
+    if (installedSelectedId !== id || activeTab !== 'installed') return;
     renderInstalledDetail(payload);
   } catch (error) {
     installedDetailContent.replaceChildren();
@@ -427,7 +411,7 @@ async function selectInstalled(id) {
     failure.append(element('strong', '', 'Plugin detail unavailable'), element('span', '', humanSetupError(error, 'Try again in a moment.')));
     installedDetailContent.append(failure);
   }
-  installedDetail.focus();
+  if (installedSelectedId === id && activeTab === 'installed') installedDetail.focus();
 }
 
 function appendFacts(container, facts) {
@@ -513,16 +497,14 @@ function renderScanArtifact(artifact) {
   scanResults.scrollTop = 0;
   scanResults.hidden = false;
 
+  const plugin = { requirements: artifact.integration?.requirements || [], configuration: artifact.integration?.setup || [], ...artifact.plugin, name: artifact.draft_manifest?.name || 'Repository scan' };
+  if (!plugin.summary && artifact.integration) plugin.summary = artifact.integration.purpose;
+  scanResults.append(pluginHeading(plugin), renderReadiness({ readiness: { state: artifact.draft_manifest ? 'needs_setup' : 'failed', message: artifact.draft_manifest ? 'Package prepared. Operations have not been executed or verified. Install to complete setup and validation.' : 'No installable integration was produced. Review the findings below.' } }));
+  productSections(scanResults, plugin);
+  const diagnostics = technicalDetails();
   const heading = detailSection('Scan result');
-  if (artifact.integration) {
-    heading.append(element('p', '', artifact.integration.purpose));
-    heading.append(element('p', '', artifact.integration.readiness === 'needs_setup'
-      ? 'Needs setup. Generated operations have not been executed or verified.'
-      : 'Needs validation. Generated operations have not been executed or verified.'));
-    heading.append(listOrNone(artifact.integration.setup, item => `${item.key}: ${item.description}`));
-    heading.append(listOrNone(artifact.integration.requirements, item => item));
-    heading.append(listOrNone(artifact.integration.validation, item => item));
-  }
+  heading.append(listOrNone(plugin.configuration, item => `${item.key}: ${item.description}`));
+  if (artifact.integration?.validation) heading.append(listOrNone(artifact.integration.validation, item => item));
   const classLabel = REPO_CLASS_LABELS[artifact.repo_class] || `a ${artifact.repo_class} repository`;
   heading.append(element('p', '', `Repository classified as ${classLabel} at revision ${(artifact.source_revision || '').slice(0, 12)}…`));
   appendFacts(heading, [
@@ -531,11 +513,11 @@ function renderScanArtifact(artifact) {
     ['Bytes scanned', String(artifact.bounds?.bytes_scanned ?? 0)],
     ['No execution', 'Static scan only — no repository build or install command ran'],
   ]);
-  scanResults.append(heading);
+  diagnostics.append(heading);
 
   const capabilities = detailSection('Extracted capabilities');
   capabilities.append(listOrNone(artifact.capabilities, item => `${item.name} · ${item.kind} · ${item.descriptor} — ${item.evidence_path}`));
-  scanResults.append(capabilities);
+  diagnostics.append(capabilities);
 
   const findings = detailSection('Findings');
   if (artifact.findings?.length) {
@@ -551,23 +533,17 @@ function renderScanArtifact(artifact) {
   } else {
     findings.append(listOrNone([], value => value));
   }
-  scanResults.append(findings);
+  diagnostics.append(findings);
 
   const inventory = detailSection('Dependencies and licenses');
   inventory.append(
     listOrNone(artifact.dependencies, item => `${item.ecosystem}: ${item.name}${item.version ? ` ${item.version}` : ''}`),
     listOrNone(artifact.licenses, value => value),
   );
-  scanResults.append(inventory);
+  diagnostics.append(inventory);
 
-  const draft = detailSection('Draft manifest');
+  const draft = detailSection('Install');
   if (artifact.draft_manifest) {
-    appendFacts(draft, [
-      ['Extension id', artifact.draft_manifest.extension_id],
-      ['Name', artifact.draft_manifest.name],
-      ['Runtime', `${artifact.draft_manifest.runtime?.type} · ${artifact.draft_manifest.runtime?.entrypoint}`],
-      ['Default permission', artifact.draft_manifest.permissions?.default || 'read_only'],
-    ]);
     const actions = element('div', 'marketplace-action-buttons');
     const install = element('button', 'marketplace-action-primary', 'Install plugin…');
     install.type = 'button';
@@ -583,7 +559,7 @@ function renderScanArtifact(artifact) {
     const classLabel = REPO_CLASS_LABELS[artifact.repo_class] || `a ${artifact.repo_class} repository`;
     draft.append(element('p', '', `This looks like ${classLabel} — Pandamonium scanned its dependencies, licenses, and findings but does not install this repository type as a plugin yet. Nothing was ingested.`));
   }
-  scanResults.append(draft);
+  scanResults.append(draft, diagnostics);
 }
 
 async function pollScan(scanId, generation) {
@@ -603,7 +579,7 @@ async function pollScan(scanId, generation) {
       state,
       title: job.status === 'succeeded' ? 'Scan complete' : stopped ? 'Scan stopped' : `${job.message || 'Scanning…'}${elapsed}`,
       detail: job.status === 'succeeded'
-        ? `Classified as ${REPO_CLASS_LABELS[job.artifact?.repo_class] || job.artifact?.repo_class || 'unknown'}`
+        ? 'Review this package’s capabilities and setup below.'
         : humanSetupError(job.error || job.message || ''),
       progress: job.progress,
       stage: job.stage,
@@ -768,7 +744,8 @@ async function executeAction(plan, plugin, operation, status, actions) {
     } else if (decision.decision !== 'allow') {
       throw new Error('extension_action_denied');
     }
-    status.textContent = `${actionLabel(operation)} in progress…`;
+    status.textContent = `Preparing · ${actionLabel(operation)} in progress…`;
+    status.dataset.readiness = 'preparing';
     const result = await api(`/api/extensions/plans/${encodeURIComponent(plan.plan_id)}/execute`, { method: 'POST' });
     if (result.result?.status !== 'succeeded') throw new Error('extension_action_failed');
     window.dispatchEvent(new Event('pandamonium:extensions-changed'));
@@ -780,7 +757,8 @@ async function executeAction(plan, plugin, operation, status, actions) {
     status.textContent = `${actionLabel(operation)} completed.`;
     summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
   } catch (error) {
-    status.textContent = `${actionLabel(operation)} failed: ${humanSetupError(error)}`;
+    status.textContent = `Failed · ${actionLabel(operation)}: ${humanSetupError(error)}`;
+    status.dataset.readiness = 'failed';
     actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
   }
 }
@@ -893,13 +871,15 @@ function renderSubmission(plugin) {
 function renderDetail(plugin) {
   detailContent.replaceChildren();
   const isCatalogEntry = !plugin.origin;
-  const heading = element('div');
-  heading.append(element('h3', '', `${plugin.name} ${plugin.version}`));
-  const badges = element('div', 'marketplace-detail-badges');
-  badges.append(...statusBadges(plugin));
-  heading.append(badges, element('p', '', plugin.summary));
-  detailContent.append(heading);
-
+  detailContent.append(pluginHeading(plugin), renderReadiness(plugin));
+  const setup = productSections(detailContent, plugin);
+  if (plugin.installation?.current_version && plugin.configuration?.length && plugin.origin !== 'configured') {
+    renderRuntimeSetup(setup, plugin.id, null, () => load());
+  }
+  detailContent.append(renderActions(plugin));
+  if (plugin.origin === 'intake') detailContent.append(renderSubmission(plugin));
+  const diagnostics = technicalDetails();
+  detailContent.append(diagnostics);
   const provenance = detailSection('Package and provenance');
   const publisherLink = plugin.publisher?.url
     ? externalLink(plugin.publisher.name, plugin.publisher.url)
@@ -929,7 +909,7 @@ function renderDetail(plugin) {
     );
   }
   appendFacts(provenance, provenanceFacts);
-  detailContent.append(provenance);
+  diagnostics.append(provenance);
 
   const compatibility = detailSection('Compatibility and installation');
   const installation = plugin.installation || {};
@@ -950,7 +930,7 @@ function renderDetail(plugin) {
       ['Restart', 'No restart'],
     ]);
   }
-  detailContent.append(compatibility);
+  diagnostics.append(compatibility);
 
   const permissions = detailSection('Permissions and data boundaries');
   const permissionItems = [`Default: ${plugin.permissions?.default || 'unknown'}`];
@@ -961,15 +941,15 @@ function renderDetail(plugin) {
     permissionItems.push(`${kind}: ${values.length ? values.join(', ') : 'none'}`);
   });
   permissions.append(listOrNone(permissionItems, value => value));
-  detailContent.append(permissions);
+  diagnostics.append(permissions);
 
   const dependencies = detailSection('Dependencies');
   dependencies.append(listOrNone(plugin.dependencies, item => `${item.id} ${item.minimum_version}–${item.maximum_version}${item.optional ? ' · optional' : ''} · ${item.dependency_type}`));
-  detailContent.append(dependencies);
+  diagnostics.append(dependencies);
 
   const configuration = detailSection('Configuration keys');
   configuration.append(listOrNone(plugin.configuration, item => `${item.key} · ${item.required ? 'required' : 'optional'}${item.secret ? ' · secret reference' : ''} — ${item.description}`));
-  detailContent.append(configuration);
+  diagnostics.append(configuration);
 
   const removal = detailSection('Removal and rollback');
   removal.append(listOrNone([
@@ -978,15 +958,13 @@ function renderDetail(plugin) {
     'Removal defaults to retaining user data and archives the package for recovery',
     `Retained revisions: ${plugin.rollback?.retain_revisions || 0}`,
   ], value => value));
-  detailContent.append(removal);
+  diagnostics.append(removal);
 
   if (plugin.review?.security_advisories?.length) {
     const advisories = detailSection('Security advisories');
     advisories.append(listOrNone(plugin.review.security_advisories, item => `${item.id} · ${item.severity} — ${item.summary}`));
-    detailContent.append(advisories);
+    diagnostics.append(advisories);
   }
-  detailContent.append(renderActions(plugin));
-  if (plugin.origin === 'intake') detailContent.append(renderSubmission(plugin));
 }
 
 function selectPlugin(id, focus = true) {
@@ -1007,10 +985,13 @@ function installedMarketplaceEntry(plugin) {
     id: plugin.id,
     name: plugin.name,
     version: plugin.version || 'unversioned',
-    summary: intake
-      ? 'Installed from GitHub intake — reviewed and pinned locally, not from the signed catalog.'
-      : 'Configured surface — available in this workspace without a catalog package.',
-    categories: [],
+    summary: plugin.summary,
+    categories: plugin.categories || [],
+    icon: plugin.icon,
+    examples: plugin.examples || [],
+    requirements: plugin.requirements || [],
+    capability_summaries: plugin.capability_summaries || [],
+    readiness: plugin.readiness,
     availability: 'available',
     publisher: { name: intake ? 'GitHub intake' : 'Configured surface', url: null },
     license: 'Not catalog-signed',
@@ -1039,7 +1020,7 @@ function mergeInstalledIntoMarketplace(catalogPlugins) {
   const extras = installedPlugins
     .filter(plugin => !known.has(plugin.id))
     .map(installedMarketplaceEntry);
-  return [...catalogPlugins, ...extras];
+  return [...catalogPlugins.map(plugin => ({ ...plugin, readiness: installedPlugins.find(item => item.id === plugin.id)?.readiness || { state: 'needs_setup', message: 'Not installed in this account. Install to complete setup and validation.' } })), ...extras];
 }
 
 async function load() {
@@ -1063,7 +1044,6 @@ async function load() {
     if (payload.status === 'error' && !hasInstalledExtras) return renderState('Catalog verification failed', humanSetupError(payload.failure || 'The marketplace catalog could not be verified.'));
     if (payload.status === 'empty' && !hasInstalledExtras) return renderState('No plugins published', 'The verified catalog is empty. Installed plugins remain unchanged.');
     renderCards();
-    if (plugins[0] && window.innerWidth > 720) selectPlugin(plugins[0].id, false);
     if (payload.status === 'offline') {
       prependResultsNotice('Marketplace offline', 'The signed catalog is unavailable — showing installed plugins.');
     } else if (payload.status === 'error') {
@@ -1115,7 +1095,7 @@ function trapFocus(event) {
     return;
   }
   if (event.key !== 'Tab') return;
-  const focusable = [...modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]')]
+  const focusable = [...modal.querySelectorAll('button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href]')]
     .filter(node => node.offsetParent !== null);
   if (!focusable.length) return;
   const first = focusable[0];
@@ -1207,8 +1187,9 @@ function init() {
     workspace.classList.remove('has-detail');
     results.querySelector(`[data-plugin-id="${CSS.escape(selectedId || '')}"]`)?.focus();
   });
-  search.addEventListener('input', renderCards);
-  category.addEventListener('change', renderCards);
+  const filterCards = () => { workspace.classList.remove('has-detail'); renderCards(); };
+  search.addEventListener('input', filterCards);
+  category.addEventListener('change', filterCards);
   modal.addEventListener('keydown', trapFocus);
   modal.addEventListener('click', event => {
     if (event.target === modal) close();

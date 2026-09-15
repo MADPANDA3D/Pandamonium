@@ -438,6 +438,8 @@ def marketplace_catalog_view(
     lifecycle_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project a verified catalog and existing registry into a read-only UI view."""
+    from src.extension_metadata import package_metadata
+
     if not online:
         return {
             "schema_version": "pandamonium.marketplace-view.v1",
@@ -527,6 +529,9 @@ def marketplace_catalog_view(
                 "version": target_version,
                 "summary": entry["summary"],
                 "categories": entry["categories"],
+                **package_metadata(manifest),
+                # Older signed packages keep their existing catalog copy.
+                **({"summary": entry["summary"], "categories": entry["categories"]} if not manifest.get("metadata") else {}),
                 "license": entry["license"],
                 "availability": availability,
                 "publisher": entry["publisher"],

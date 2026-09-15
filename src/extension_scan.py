@@ -1009,6 +1009,29 @@ class ExtensionStaticScanner:
 
             package = None
             if draft:
+                if not _manifest and not draft.get("metadata") and layout:
+                    descriptions = {}
+                    for path in files:
+                        if path.name == "SKILL.md":
+                            try:
+                                skill, _ = SkillBundleAdapter.validate_skill_document(path)
+                            except ExtensionLifecycleError:
+                                continue
+                            if skill.name in draft["capabilities"]["descriptor"].get("include", []):
+                                descriptions[skill.name] = " ".join(skill.description.split())[:1000]
+                    summary = ""
+                    entrypoint = staging / layout["entrypoint"]
+                    if entrypoint.suffix == ".json":
+                        try:
+                            native = json.loads(self._read_text(entrypoint, [MAX_FILE_READ_BYTES]))
+                            summary = str(native.get("description") or "")
+                        except (ValueError, AttributeError):
+                            pass
+                    if not summary:
+                        summary = "; ".join(re.split(r"(?<=[.!?])\s+", value, maxsplit=1)[0] for value in list(descriptions.values())[:2])
+                    draft["metadata"] = {"summary": " ".join(summary.split())[:1000] or "Guidance for " + ", ".join(layout["include"]),
+                                         "categories": ["skills"], "icon": "✦", "skill_descriptions": descriptions}
+                    draft = validate_extension_manifest(draft)
                 report("package", "Preserving source and integration package; runtime validation still required")
                 package_findings = findings
                 if integration and integration.get("source_exclusions"):
@@ -1059,6 +1082,9 @@ class ExtensionStaticScanner:
                 artifact["integration"] = integration
             if package is not None:
                 artifact["package"] = package
+            from src.extension_metadata import package_metadata
+
+            artifact["plugin"] = package_metadata(draft or {})
             artifact["artifact_digest"] = scan_artifact_digest(artifact)
             result = validate_scan_artifact(artifact, require_complete=True)
             completed = True
