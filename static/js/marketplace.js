@@ -125,6 +125,12 @@ function renderState(title, message) {
   summary.textContent = message;
 }
 
+function prependResultsNotice(title, message) {
+  const state = element('div', 'marketplace-state');
+  state.append(element('strong', '', title), element('span', '', message));
+  results.prepend(state);
+}
+
 function renderCategories() {
   const selected = category.value;
   const values = [...new Set(plugins.flatMap(plugin => plugin.categories || []))].sort();
@@ -147,7 +153,13 @@ function statusBadges(plugin) {
   } else if (plugin.compatibility?.state === 'compatible') {
     nodes.push(badge('Compatible', 'positive'));
   }
-  nodes.push(badge('Verified', 'positive'));
+  if (plugin.origin === 'intake') {
+    nodes.push(badge('GitHub intake', 'warning'));
+  } else if (plugin.origin === 'configured') {
+    nodes.push(badge('Configured', 'warning'));
+  } else {
+    nodes.push(badge('Verified', 'positive'));
+  }
   return nodes;
 }
 
@@ -187,7 +199,9 @@ function renderCards() {
       element('span', '', `${dependencyCount} dependenc${dependencyCount === 1 ? 'y' : 'ies'}`),
       element('span', '', restart),
       element('span', '', (plugin.categories || []).join(' · ')),
-      element('span', '', `sha256:${(plugin.provenance?.sha256 || '').slice(0, 10)}…`),
+      element('span', '', plugin.provenance?.sha256
+        ? `sha256:${plugin.provenance.sha256.slice(0, 10)}…`
+        : `revision ${(plugin.provenance?.source_revision || 'unrecorded').slice(0, 10)}`),
     );
     card.append(head, badges, element('p', 'marketplace-card-summary', plugin.summary), facts);
     card.addEventListener('click', () => selectPlugin(plugin.id));
@@ -598,6 +612,7 @@ async function prepareSourceAction(artifact, section, actions) {
 function actionOptions(plugin) {
   const installation = plugin.installation || {};
   const actions = [];
+  if (plugin.origin === 'configured') return actions;
   if (!installation.current_version && plugin.availability === 'available') {
     actions.push(['install', 'Install']);
   } else if (installation.current_version) {
@@ -707,6 +722,7 @@ function renderActions(plugin) {
 
 function renderDetail(plugin) {
   detailContent.replaceChildren();
+  const isCatalogEntry = !plugin.origin;
   const heading = element('div');
   heading.append(element('h3', '', `${plugin.name} ${plugin.version}`));
   const badges = element('div', 'marketplace-detail-badges');
@@ -720,28 +736,50 @@ function renderDetail(plugin) {
     : plugin.publisher?.name || 'Unknown';
   const sourceLink = plugin.provenance?.source_url
     ? externalLink(plugin.provenance.source_url, plugin.provenance.source_url)
-    : 'Unavailable';
-  appendFacts(provenance, [
+    : plugin.origin === 'intake'
+      ? 'Recorded at install time (source URL stays off this list)'
+      : 'Not applicable';
+  const provenanceFacts = [
     ['Publisher', publisherLink],
     ['License', plugin.license],
     ['Source', sourceLink],
     ['Revision', plugin.provenance?.source_revision || 'Unavailable'],
-    ['Digest', `sha256:${plugin.provenance?.sha256 || 'unavailable'}`],
-    ['Signature', 'Catalog + artifact verified'],
-    ['Review', `${labels[plugin.review?.status] || plugin.review?.status} · ${plugin.review?.reviewer || 'unknown reviewer'}`],
-  ]);
+  ];
+  if (isCatalogEntry) {
+    provenanceFacts.push(
+      ['Digest', `sha256:${plugin.provenance?.sha256 || 'unavailable'}`],
+      ['Signature', 'Catalog + artifact verified'],
+      ['Review', `${labels[plugin.review?.status] || plugin.review?.status} · ${plugin.review?.reviewer || 'unknown reviewer'}`],
+    );
+  } else {
+    provenanceFacts.push(
+      ['Digest', plugin.provenance?.sha256 ? `sha256:${plugin.provenance.sha256}` : 'Not recorded'],
+      ['Signature', plugin.origin === 'intake' ? 'Not catalog-signed — installed from GitHub intake' : 'Not applicable'],
+      ['Review', plugin.origin === 'intake' ? 'Locally reviewed intake scan' : 'Configured surface'],
+    );
+  }
+  appendFacts(provenance, provenanceFacts);
   detailContent.append(provenance);
 
   const compatibility = detailSection('Compatibility and installation');
   const installation = plugin.installation || {};
-  appendFacts(compatibility, [
-    ['Compatibility', `${labels[plugin.compatibility?.state] || plugin.compatibility?.state} with Pandamonium ${plugin.compatibility?.pandamonium_min}–${plugin.compatibility?.pandamonium_max}`],
-    ['Platforms', (plugin.compatibility?.platforms || []).join(', ')],
-    ['Architectures', (plugin.compatibility?.architectures || []).join(', ')],
-    ['Installed state', labels[installation.state] || installation.state],
-    ['Version', installation.current_version ? `${installation.current_version} installed · ${installation.target_version} published` : `${installation.target_version} published`],
-    ['Restart', plugin.restart_required === 'none' ? 'No restart' : `${plugin.restart_required} restart required`],
-  ]);
+  if (isCatalogEntry) {
+    appendFacts(compatibility, [
+      ['Compatibility', `${labels[plugin.compatibility?.state] || plugin.compatibility?.state} with Pandamonium ${plugin.compatibility?.pandamonium_min}–${plugin.compatibility?.pandamonium_max}`],
+      ['Platforms', (plugin.compatibility?.platforms || []).join(', ')],
+      ['Architectures', (plugin.compatibility?.architectures || []).join(', ')],
+      ['Installed state', labels[installation.state] || installation.state],
+      ['Version', installation.current_version ? `${installation.current_version} installed · ${installation.target_version} published` : `${installation.target_version} published`],
+      ['Restart', plugin.restart_required === 'none' ? 'No restart' : `${plugin.restart_required} restart required`],
+    ]);
+  } else {
+    appendFacts(compatibility, [
+      ['Origin', plugin.origin === 'intake' ? 'GitHub intake' : 'Configured surface'],
+      ['Installed state', labels[installation.state] || installation.state],
+      ['Version', installation.current_version || 'unversioned'],
+      ['Restart', 'No restart'],
+    ]);
+  }
   detailContent.append(compatibility);
 
   const permissions = detailSection('Permissions and data boundaries');
@@ -792,30 +830,90 @@ function selectPlugin(id, focus = true) {
   if (focus) detail.focus();
 }
 
+function installedMarketplaceEntry(plugin) {
+  const intake = plugin.origin !== 'configured';
+  return {
+    id: plugin.id,
+    name: plugin.name,
+    version: plugin.version || 'unversioned',
+    summary: intake
+      ? 'Installed from GitHub intake — reviewed and pinned locally, not from the signed catalog.'
+      : 'Configured surface — available in this workspace without a catalog package.',
+    categories: [],
+    availability: 'available',
+    publisher: { name: intake ? 'GitHub intake' : 'Configured surface', url: null },
+    license: 'Not catalog-signed',
+    provenance: { source_url: null, source_revision: plugin.source_revision || '', sha256: '' },
+    compatibility: { state: 'unknown' },
+    installation: {
+      state: plugin.state === 'enabled' ? 'installed' : plugin.state,
+      current_version: plugin.version || '',
+      target_version: plugin.version || '',
+      enabled: plugin.state === 'enabled',
+      update_available: false,
+    },
+    permissions: plugin.permissions || { default: 'read_only', capabilities: {}, data_boundaries: { read: [], write: [], network: [] } },
+    dependencies: [],
+    configuration: plugin.configuration || [],
+    restart_required: 'none',
+    removal: {},
+    rollback: {},
+    review: { status: intake ? 'intake' : 'configured', reviewer: 'local install' },
+    origin: intake ? 'intake' : 'configured',
+  };
+}
+
+function mergeInstalledIntoMarketplace(catalogPlugins) {
+  const known = new Set(catalogPlugins.map(plugin => plugin.id));
+  const extras = installedPlugins
+    .filter(plugin => !known.has(plugin.id))
+    .map(installedMarketplaceEntry);
+  return [...catalogPlugins, ...extras];
+}
+
 async function load() {
   const generation = ++loadGeneration;
   selectedId = null;
   workspace.classList.remove('has-detail');
   detailContent.replaceChildren();
   renderState('Loading plugins…', 'Verifying the signed catalog and local registry.');
-  loadInstalled(generation);
+  await loadInstalled(generation);
+  if (generation !== loadGeneration) return;
   try {
     const response = await fetch(`${API_BASE}/api/extensions/marketplace`, { credentials: 'same-origin' });
     if (!response.ok) throw new Error(`marketplace_http_${response.status}`);
     const payload = await response.json();
     if (generation !== loadGeneration) return;
-    plugins = Array.isArray(payload.plugins) ? payload.plugins : [];
+    const catalogPlugins = Array.isArray(payload.plugins) ? payload.plugins : [];
+    plugins = mergeInstalledIntoMarketplace(catalogPlugins);
+    const hasInstalledExtras = plugins.length > catalogPlugins.length;
     renderCategories();
-    if (payload.status === 'offline') return renderState('Marketplace offline', 'No verified catalog is available. Refresh after connectivity or catalog configuration is restored.');
-    if (payload.status === 'error') return renderState('Catalog verification failed', humanSetupError(payload.failure || 'The marketplace catalog could not be verified.'));
-    if (payload.status === 'empty') return renderState('No plugins published', 'The verified catalog is empty. Installed plugins remain unchanged.');
+    if (payload.status === 'offline' && !hasInstalledExtras) return renderState('Marketplace offline', 'No verified catalog is available. Refresh after connectivity or catalog configuration is restored.');
+    if (payload.status === 'error' && !hasInstalledExtras) return renderState('Catalog verification failed', humanSetupError(payload.failure || 'The marketplace catalog could not be verified.'));
+    if (payload.status === 'empty' && !hasInstalledExtras) return renderState('No plugins published', 'The verified catalog is empty. Installed plugins remain unchanged.');
     renderCards();
     if (plugins[0] && window.innerWidth > 720) selectPlugin(plugins[0].id, false);
+    if (payload.status === 'offline') {
+      prependResultsNotice('Marketplace offline', 'The signed catalog is unavailable — showing installed plugins.');
+    } else if (payload.status === 'error') {
+      prependResultsNotice('Catalog verification failed', humanSetupError(payload.failure || 'The marketplace catalog could not be verified.'));
+    } else if (payload.status === 'empty') {
+      prependResultsNotice('No plugins published', 'The verified catalog is empty — showing installed plugins.');
+    }
+    if (hasInstalledExtras && payload.status !== 'ready') {
+      summary.textContent = 'Signed catalog unavailable · showing installed plugins';
+    }
   } catch (error) {
     if (generation !== loadGeneration) return;
-    plugins = [];
+    plugins = mergeInstalledIntoMarketplace([]);
     renderCategories();
-    renderState('Marketplace unavailable', humanSetupError(error, 'The marketplace request failed.'));
+    renderCards();
+    if (plugins.length) {
+      prependResultsNotice('Marketplace unavailable', humanSetupError(error, 'The marketplace request failed.'));
+      summary.textContent = 'Signed catalog unavailable · showing installed plugins';
+    } else {
+      renderState('Marketplace unavailable', humanSetupError(error, 'The marketplace request failed.'));
+    }
   }
 }
 
