@@ -21,7 +21,8 @@ Readiness uses local lifecycle and execution evidence:
   lacks native admission, or needs a live connection check.
 - **Ready:** the shared CLI call checks accept the package digest, installing
   owner, configuration receipt, resource prerequisites and managed service scope;
-  native skill bundles instead show admitted Skills with an explicit instruction-only
+  native skill bundles require every declared skill to be admitted for the
+  requesting owner and show Skills with an explicit instruction-only
   explanation. These checks do not execute another package operation while browsing.
 - **Failed:** the latest owned lifecycle operation failed for a disabled plugin.
 - **Disabled:** the plugin needs enabling before use. Saving configuration retains
@@ -66,7 +67,9 @@ after the one-line installed-card height fix, **5 focused Chromium passed** and
 the authenticated smoke passed again. Scoped Ruff, isort (Black profile), mypy
 (four shared modules), Python compilation, Node syntax and diff hygiene passed.
 The two-line owner forwarding in legacy `admin_tools.py` adds no lint findings:
-its 52 existing findings exactly match the predecessor.
+its 52 existing findings exactly match the predecessor. Final owner-isolation
+review added a regression for another account and partial admission; all 16
+focused metadata, plugin-view and agent checks pass.
 
 ## Publication and rollback
 

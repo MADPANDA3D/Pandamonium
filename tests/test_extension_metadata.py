@@ -127,3 +127,26 @@ def test_readiness_distinguishes_work_failure_and_reconfiguration(tmp_path):
     assert check("failed") == "failed"
     assert check("configuration_changed") == "needs_setup"
     assert check("completed") == "disabled"
+
+
+def test_skill_readiness_requires_every_declared_skill_for_requesting_owner():
+    record = {
+        "manifest": {
+            "extension_id": "bundle",
+            "runtime": {"type": "skills"},
+            "capabilities": {"descriptor": {"include": ["first", "second"]}},
+        },
+        "enabled": True,
+        "admitted_skills": [
+            {"id": name, "owner_scope": "alice"} for name in ["first", "second"]
+        ],
+    }
+
+    def check(owner):
+        return plugin_readiness(record, owner=owner, lifecycle={})["state"]
+
+    assert check("alice") == "ready"
+    assert check("bob") == "needs_setup"
+    assert check(None) == "needs_setup"
+    record["admitted_skills"].pop()
+    assert check("alice") == "needs_setup"

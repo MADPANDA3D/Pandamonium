@@ -52,9 +52,11 @@ def plugin_readiness(record: Mapping[str, Any], *, owner: str | None = None, roo
 
         return GeneratedCliAdapter(root).readiness(dict(record), owner)
     if manifest["runtime"]["type"] == "skills":
-        if record.get("admitted_skills"):
+        declared = set(manifest["capabilities"]["descriptor"].get("include", []))
+        admitted = {item["id"] for item in record.get("admitted_skills", []) if item.get("owner_scope") == owner}
+        if owner and declared and declared <= admitted:
             return {"state": "ready", "message": "Skills are admitted in the native Skills manager. Skills provide instructions; they are not executable tools."}
-        return {"state": "needs_setup", "message": "Enable to admit the declared skills."}
+        return {"state": "needs_setup", "message": "The declared skills are not all admitted for this account. Open Plugins as the installing owner to check setup."}
     return {"state": "needs_setup", "message": "Connect or open the configured surface to check its live capabilities. An enabled record alone does not verify execution."}
 
 BROWSER_SURFACE_NOTE = (
