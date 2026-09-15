@@ -757,6 +757,7 @@ function actionLabel(operation) {
 }
 
 async function executeAction(plan, plugin, operation, status, actions) {
+  const installedAction = installedSelectedId === plugin.id;
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
   try {
     const decision = plan.authority_decision || {};
@@ -772,6 +773,10 @@ async function executeAction(plan, plugin, operation, status, actions) {
     if (result.result?.status !== 'succeeded') throw new Error('extension_action_failed');
     window.dispatchEvent(new Event('pandamonium:extensions-changed'));
     await load();
+    if (installedAction) {
+      if (operation === 'uninstall') showInstalledList();
+      else await selectInstalled(plugin.id);
+    }
     status.textContent = `${actionLabel(operation)} completed.`;
     summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
   } catch (error) {

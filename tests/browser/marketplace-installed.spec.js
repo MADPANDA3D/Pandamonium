@@ -37,6 +37,14 @@ async function mockApp(page) {
     if (path === '/api/extensions/installed/oracle') return route.fulfill({ json: oracleDetail });
     if (path === '/api/extensions/installed/atlas') return route.fulfill({ json: atlasDetail });
     if (path === '/api/extensions/runtime/atlas/configuration') return route.fulfill({ json: { fields: atlasDetail.configuration } });
+    if (path === '/api/extensions/plans/lifecycle') return route.fulfill({ json: {
+      plan_id: 'disable-atlas', authority_decision: { decision: 'approval_required', decision_id: 'disable-atlas' },
+    } });
+    if (path === '/api/authority/decisions/disable-atlas') return route.fulfill({ json: { decision: 'allow' } });
+    if (path === '/api/extensions/plans/disable-atlas/execute') {
+      atlasDetail.state = 'disabled';
+      return route.fulfill({ json: { result: { status: 'succeeded' } } });
+    }
     if (path === '/api/extensions/marketplace') {
       return route.fulfill({ json: { schema_version: 'pandamonium.marketplace-view.v1', status: 'offline', failure: 'marketplace_catalog_offline', plugins: [] } });
     }
@@ -75,4 +83,8 @@ test('installed plugins stay visible and detailed when the marketplace is offlin
   await expect(page.locator('#marketplace-installed-detail-content')).toContainText('Create a mesh');
   await expect(page.locator('#marketplace-installed-detail-content')).toContainText('ATLAS_API_TOKEN');
   await expect(page.locator('#marketplace-installed-detail-content')).toContainText('secret');
+  await page.getByRole('button', { name: 'Disable', exact: true }).click();
+  await page.getByRole('button', { name: 'Approve disable once' }).click();
+  await expect(page.getByRole('button', { name: 'Enable', exact: true })).toBeVisible();
+  await expect(page.locator('#marketplace-installed-detail-content')).toContainText('Disabled');
 });
