@@ -67,7 +67,7 @@ async function mockApp(page, scannedArtifact = artifact) {
   });
 }
 
-test('Add from GitHub scans, reviews, and installs through approval', async ({ page }) => {
+test('Add from GitHub scans, reviews, and installs through approval', async ({ page }, testInfo) => {
   await mockApp(page);
   await page.goto('/static/index.html');
   await page.getByRole('button', { name: 'Browse plugins' }).click();
@@ -90,6 +90,11 @@ test('Add from GitHub scans, reviews, and installs through approval', async ({ p
   expect(sent.postDataJSON().scan_id).toBe('scan-1');
   await expect(page.getByText('Approval required: Install Demo Tools')).toBeVisible();
   await expect(page.getByText('Private runtime setup and operation checks')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Approve once' })).toBeInViewport();
+  await page.getByText('Private runtime setup and operation checks', { exact: true }).click();
+  await expect(page.getByText('Network access is disabled for setup and tool calls.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Approve once' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('cli-approval-desktop.png') });
   await expect(page.locator('#marketplace-scan-results')).toContainText('generated draft manifest');
   await expect(page.getByRole('button', { name: 'Approve once' })).toBeInViewport();
   await expect(page.getByRole('button', { name: '← Back to scan' })).toBeVisible();
@@ -155,7 +160,7 @@ test('Add from GitHub rejects non-https sources without scanning', async ({ page
 test.describe('mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('intake stays usable on mobile', async ({ page }) => {
+  test('intake stays usable on mobile', async ({ page }, testInfo) => {
     await mockApp(page);
     await page.goto('/static/index.html');
     await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -170,6 +175,11 @@ test.describe('mobile', () => {
     await page.locator('#marketplace-source-url').fill(SOURCE_URL);
     await scanButton.click();
     await expect(page.locator('#marketplace-scan-progress')).toHaveAttribute('data-state', 'complete', { timeout: 15000 });
+    await page.getByRole('button', { name: 'Install plugin…' }).click();
+    await page.getByText('Private runtime setup and operation checks', { exact: true }).click();
+    await page.getByRole('button', { name: 'Approve once' }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole('button', { name: 'Approve once' })).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath('cli-approval-mobile.png') });
   });
 });
 
