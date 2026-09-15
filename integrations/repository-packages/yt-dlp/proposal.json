@@ -1,0 +1,313 @@
+{
+  "purpose": "Inspect media URLs and download bounded media artifacts using the pinned yt-dlp CLI library.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "yt-dlp is a feature-rich command-line audio/video downloader with support for [thousands of sites](supportedsites.md)."
+    }
+  ],
+  "repo_class": "python_cli",
+  "interfaces": [
+    {
+      "name": "yt_dlp__inspect_media",
+      "kind": "tool",
+      "binding": "extract_info",
+      "evidence": [
+        {
+          "path": "yt_dlp/YoutubeDL.py",
+          "quote": "def extract_info(self, url, download=True, ie_key=None, extra_info=None,"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "yt_dlp__inspect_media",
+          "description": "Inspect a single media URL without downloading",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {
+        "url": {
+          "path": "yt_dlp/networking/common.py",
+          "quote": "url: str,"
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "extension": {
+            "type": "string",
+            "maxLength": 20
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "extension"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "yt_dlp__download_media",
+      "kind": "tool",
+      "binding": "extract_info",
+      "evidence": [
+        {
+          "path": "yt_dlp/YoutubeDL.py",
+          "quote": "def extract_info(self, url, download=True, ie_key=None, extra_info=None,"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "yt_dlp__download_media",
+          "description": "Download a single media item up to 16 MiB into private plugin artifacts",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {
+        "url": {
+          "path": "yt_dlp/networking/common.py",
+          "quote": "url: str,"
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "extension": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "artifact": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16777216
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "extension",
+          "artifact",
+          "bytes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Linux with bubblewrap and prlimit",
+    "Python 3.10+; yt-dlp runs directly from the pinned source",
+    "Optional ffmpeg/browser/credentials for media sites requiring them; the declared tools need no owner credentials",
+    "Direct-media URLs only; optional provider modules containing embedded credentials are excluded from this package."
+  ],
+  "validation": [
+    "Install in disposable state and run every declared operation check before native tool registration."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "yt-dlp",
+    "name": "yt-dlp",
+    "version": "0.1.0",
+    "source": {
+      "url": "https://github.com/yt-dlp/yt-dlp.git",
+      "revision": "bbc809a1161d3bfca51fa36f59dda35556ee85a0"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "yt_dlp__inspect_media",
+            "description": "Inspect a single media URL without downloading",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "yt_dlp__download_media",
+            "description": "Download a single media item up to 16 MiB into private plugin artifacts",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://*"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    }
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "\"\"\"Package-local yt-dlp adapter; source and dependencies stay pinned with this package.\"\"\"\nimport json\nimport sys\nfrom pathlib import Path\nfrom urllib.parse import urlparse\n\nsys.path.insert(0, \"/package\")\nfrom yt_dlp import YoutubeDL\nfrom yt_dlp.extractor.generic import GenericIE\n\nname = sys.argv[1]\nargs = json.load(sys.stdin)\nurl = args[\"url\"]\nparsed = urlparse(url)\nif parsed.scheme not in {\"http\", \"https\", \"file\"} or parsed.username or parsed.password:\n    raise ValueError(\"Use a media URL without credentials\")\nif parsed.scheme == \"file\" and not Path(parsed.path).resolve().is_relative_to(Path(\"/runtime\")):\n    raise ValueError(\"Local inputs must be in this plugin's private runtime\")\ndownload = name == \"yt_dlp__download_media\"\nif name not in {\"yt_dlp__inspect_media\", \"yt_dlp__download_media\"}:\n    raise ValueError(\"Unknown tool\")\nout = Path(\"/runtime/artifacts\")\nout.mkdir(exist_ok=True)\nwith YoutubeDL({\n    \"quiet\": True, \"no_warnings\": True, \"noprogress\": True, \"noplaylist\": True,\n    \"socket_timeout\": 8, \"retries\": 0, \"extractor_retries\": 0,\n    \"enable_file_urls\": parsed.scheme == \"file\", \"max_filesize\": 16 * 1024 * 1024,\n    \"outtmpl\": str(out / \"%(id)s.%(ext)s\"), \"restrictfilenames\": True,\n}, auto_init=False) as client:\n    # This package supports direct media; optional provider modules are excluded.\n    client.add_info_extractor(GenericIE())\n    info = client.extract_info(url, download=download)\n    if not info or info.get(\"_type\") == \"playlist\":\n        raise ValueError(\"A single media item is required\")\n    result = {\"id\": str(info[\"id\"]), \"title\": str(info.get(\"title\") or \"\"), \"extension\": str(info.get(\"ext\") or \"\")}\n    if download:\n        artifact = Path(client.prepare_filename(info)).resolve()\n        if not artifact.is_relative_to(out) or not artifact.is_file():\n            raise ValueError(\"Download did not produce the requested bounded artifact\")\n        result.update({\"artifact\": artifact.relative_to(Path(\"/runtime\")).as_posix(), \"bytes\": artifact.stat().st_size})\n    print(json.dumps(result))\n"
+    },
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "\"\"\"Disposable, locally generated audio input for actual yt-dlp operation checks.\"\"\"\nimport wave\n\nwith wave.open(\"/runtime/check.wav\", \"wb\") as audio:\n    audio.setnchannels(1)\n    audio.setsampwidth(2)\n    audio.setframerate(8000)\n    audio.writeframes(b\"\\0\\0\" * 800)\n"
+    }
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "yt_dlp__inspect_media",
+        "arguments": {
+          "url": "file:///runtime/check.wav"
+        },
+        "expected": {
+          "id": "check",
+          "title": "check",
+          "extension": "wav"
+        }
+      },
+      {
+        "name": "yt_dlp__download_media",
+        "arguments": {
+          "url": "file:///runtime/check.wav"
+        },
+        "expected": {
+          "id": "check",
+          "title": "check",
+          "extension": "wav",
+          "artifact": "artifacts/check.wav",
+          "bytes": 1644
+        }
+      }
+    ]
+  },
+  "source_exclusions": [
+    "public.key",
+    "test/testcert.pem",
+    "test/testdata/certificate/ca.key",
+    "test/testdata/certificate/client.key",
+    "test/testdata/certificate/clientencrypted.key",
+    "yt_dlp/extractor/asobichannel.py",
+    "yt_dlp/extractor/berufetv.py",
+    "yt_dlp/extractor/foxsports.py",
+    "yt_dlp/extractor/npr.py",
+    "yt_dlp/extractor/ntvcojp.py",
+    "yt_dlp/extractor/polskieradio.py",
+    "yt_dlp/extractor/redbulltv.py",
+    "yt_dlp/extractor/shahid.py",
+    "yt_dlp/extractor/tver.py",
+    "yt_dlp/extractor/tvw.py",
+    "yt_dlp/extractor/weverse.py",
+    "yt_dlp/extractor/wykop.py",
+    "yt_dlp/extractor/zingmp3.py"
+  ]
+}

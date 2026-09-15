@@ -19,7 +19,7 @@ analysis. Native descriptors are reused; core code has no repository-name cases.
 
 ## Package contract
 
-Generated Python adapters, JSON descriptors and Markdown live under
+Generated Python adapters, Go bridges, JSON descriptors and Markdown live under
 `.pandamonium/`; source files cannot be overwritten. The generated manifest uses
 an exact upstream URL/revision. `.pandamonium/integration.json` records purpose,
 interfaces, setup and validation requirements. The scanner retains a deterministic
@@ -34,7 +34,8 @@ object on stdin and a JSON result on stdout. Python syntax, declared schemas,
 paths and quoted evidence are checked without importing or running the adapter.
 Generated tools require `external_side_effect` permission until separately
 validated; model text cannot grant read-only execution authority. Runtime
-execution/admission for CLI and service adapters belongs to MAD-959/MAD-960.
+execution/admission for CLI packages uses the [private CLI runner](mad-959-cli-runtime.md).
+Long-lived services and interactive runtimes belong to MAD-960.
 An unsupported runtime fails at the existing adapter gate and mounts no tools.
 
 **Needs validation** and **Needs setup** are preparation states. Neither means a
@@ -52,6 +53,8 @@ the immutable package tree. No dependencies or lifecycle commands run at intake.
   An expired package requires a new scan. No periodic service is added.
 - At most 2,000 indexed filenames, 160,000 excerpt characters, 24,000 characters
   per selected file, 200,000 response characters and four model calls.
+  `find_text` requests an 8,000-character window around a literal symbol outside
+  the first excerpt, within the same total budget and source-read bounds.
 - At most two repairs after an initial invalid proposal; actionable validation
   errors feed the next attempt. Provider calls have a 90-second timeout, one
   gateway attempt per candidate, and use the existing configured fallback chain.
@@ -63,6 +66,11 @@ the immutable package tree. No dependencies or lifecycle commands run at intake.
 - Secret findings, private files, symlinks, invalid evidence, malformed schemas,
   generated syntax errors and archive tampering fail closed. Start a new scan after
   repairing source or configuration; there is no silent fallback to invented tools.
+  Secret findings retain a path/type and a redaction marker, never the matched value.
+  Explicit `source_exclusions` can remove at most 128 optional regular files from
+  the disposable package. Required interface evidence and license notices remain;
+  the retained source is audited again under the same secret gate. Exclusions are
+  preserved in integration metadata and the execution approval preview.
 
 See the [approved M17 plan](repository-plugin-ingestion-plan.md) for the remaining
 runtime, marketplace, inventory and release batons.

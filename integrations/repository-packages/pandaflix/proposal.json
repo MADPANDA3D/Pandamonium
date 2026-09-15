@@ -1,0 +1,364 @@
+{
+  "purpose": "Plan media playback, expand episode selections and read private watch history through PandaFlix's actual Go interfaces.",
+  "evidence": [
+    {
+      "path": "cmd/root.go",
+      "quote": "Short:   \"Watch movies and TV shows from the commandline\","
+    }
+  ],
+  "repo_class": "go_cli",
+  "interfaces": [
+    {
+      "name": "pandaflix__episode_range",
+      "kind": "tool",
+      "binding": "ParseEpisodeRange",
+      "evidence": [
+        {
+          "path": "core/episodes.go",
+          "quote": "func ParseEpisodeRange(s string) ([]int, error) {"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "pandaflix__episode_range",
+          "description": "Expand a bounded episode selection with PandaFlix's own parser",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "s": {
+                "type": "string",
+                "maxLength": 7
+              }
+            },
+            "required": [
+              "s"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {
+        "s": {
+          "path": "core/episodes.go",
+          "quote": "func ParseEpisodeRange(s string) ([]int, error) {"
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "episodes": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "episodes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pandaflix__youtube_playback_plan",
+      "kind": "tool",
+      "binding": "GetMediaID",
+      "evidence": [
+        {
+          "path": "core/providers/youtube.go",
+          "quote": "func (y *YouTube) GetMediaID(urlStr string) (string, error) {"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "pandaflix__youtube_playback_plan",
+          "description": "Resolve a YouTube URL into a PandaFlix playback plan without opening an interactive player",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "urlStr": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "urlStr"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {
+        "urlStr": {
+          "path": "core/providers/youtube.go",
+          "quote": "func (y *YouTube) GetMediaID(urlStr string) (string, error) {"
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "media_id": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "playback_url": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "requires_player": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "media_id",
+          "playback_url",
+          "requires_player"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pandaflix__watch_history",
+      "kind": "tool",
+      "binding": "ListShows",
+      "evidence": [
+        {
+          "path": "core/history.go",
+          "quote": "func (db *DB) ListShows() ([]ShowSummary, error) {"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "pandaflix__watch_history",
+          "description": "Read watch history from this plugin's private account runtime",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "shows": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "season": {
+                  "type": "integer"
+                },
+                "episode": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "title",
+                "url",
+                "season",
+                "episode"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "shows"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Linux x86_64 with bubblewrap, prlimit, a C compiler, pkg-config and libmpv development files",
+    "Private checksum-verified Go 1.26.0 toolchain; Go dependencies remain in runtime cache",
+    "Actual playback remains interactive and requires a configured player/display on the target node"
+  ],
+  "validation": [
+    "Install in disposable state and run every declared operation check before native tool registration."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "pandaflix",
+    "name": "PandaFlix",
+    "version": "0.1.0",
+    "source": {
+      "url": "https://github.com/MADPANDA3D/pandaflix.git",
+      "revision": "f6484787ba5a23d4453d5bbd8eb34f05054ecfbb"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "pandaflix__episode_range",
+            "description": "Expand a bounded episode selection with PandaFlix's own parser",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "s": {
+                  "type": "string",
+                  "maxLength": 7
+                }
+              },
+              "required": [
+                "s"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "pandaflix__youtube_playback_plan",
+            "description": "Resolve a YouTube URL into a PandaFlix playback plan without opening an interactive player",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "urlStr": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "urlStr"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "pandaflix__watch_history",
+            "description": "Read watch history from this plugin's private account runtime",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://go.dev",
+        "https://dl.google.com",
+        "https://proxy.golang.org",
+        "https://sum.golang.org"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    }
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "\"\"\"Noninteractive calls into PandaFlix's real Go core and provider interfaces.\"\"\"\nimport json\nimport re\nimport subprocess\nimport sys\n\nargs = json.load(sys.stdin)\nif sys.argv[1] == \"pandaflix__episode_range\" and not re.fullmatch(r\"[0-9]{1,3}(?:-[0-9]{1,3})?\", args[\"s\"]):\n    raise ValueError(\"Use one episode or a range from 0 to 999\")\nresult = subprocess.run([\"/runtime/bin/pandaflix-agent\", sys.argv[1]],\n                        input=json.dumps(args), capture_output=True,\n                        text=True, check=True, timeout=20)\nprint(result.stdout, end=\"\")\n"
+    },
+    {
+      "path": ".pandamonium/main.go",
+      "content": "package main\n\nimport (\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"os\"\n    \"time\"\n\n    \"github.com/MADPANDA3D/pandaflix/core\"\n    \"github.com/MADPANDA3D/pandaflix/core/providers\"\n)\n\nfunc main() {\n    var args struct { S string `json:\"s\"`; URL string `json:\"urlStr\"` }\n    if err := json.NewDecoder(os.Stdin).Decode(&args); err != nil { panic(err) }\n    var result any\n    switch os.Args[1] {\n    case \"pandaflix__episode_range\":\n        episodes, err := core.ParseEpisodeRange(args.S)\n        if err != nil { panic(err) }\n        result = map[string]any{\"episodes\": episodes}\n    case \"pandaflix__youtube_playback_plan\":\n        provider := providers.NewYouTube(&http.Client{Timeout: 8*time.Second})\n        id, err := provider.GetMediaID(args.URL)\n        if err != nil { panic(err) }\n        link, err := provider.GetLink(id)\n        if err != nil { panic(err) }\n        result = map[string]any{\"media_id\": id, \"playback_url\": link, \"requires_player\": true}\n    case \"pandaflix__watch_history\":\n        db, err := core.OpenHistory()\n        if err != nil { panic(err) }\n        defer db.Close()\n        shows, err := db.ListShows()\n        if err != nil { panic(err) }\n        rows := []map[string]any{}\n        for _, show := range shows {\n            if len(rows) == 100 { break }\n            rows = append(rows, map[string]any{\"title\": show.Title, \"url\": show.URL, \"season\": show.Season, \"episode\": show.Episode})\n        }\n        result = map[string]any{\"shows\": rows}\n    default: panic(fmt.Errorf(\"unknown operation\"))\n    }\n    if err := json.NewEncoder(os.Stdout).Encode(result); err != nil { panic(err) }\n}\n"
+    },
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "\"\"\"Build the pinned source with a checksum-verified private Go toolchain.\"\"\"\nimport hashlib\nimport io\nimport os\nimport platform\nimport subprocess\nimport tarfile\nimport urllib.request\nfrom pathlib import Path\n\nif platform.machine() != \"x86_64\":\n    raise RuntimeError(\"This prepared package currently requires Linux x86_64\")\ncompiler = Path(\"/runtime/toolchain/go/bin/go\")\nif not compiler.exists():\n    with urllib.request.urlopen(\"https://go.dev/dl/go1.26.0.linux-amd64.tar.gz\", timeout=45) as response:\n        content = response.read(70 * 1024 * 1024)\n    if hashlib.sha256(content).hexdigest() != \"aac1b08a0fb0c4e0a7c1555beb7b59180b05dfc5a3d62e40e9de90cd42f88235\":\n        raise RuntimeError(\"Go archive digest mismatch\")\n    root = Path(\"/runtime/toolchain\")\n    root.mkdir(exist_ok=True)\n    with tarfile.open(fileobj=io.BytesIO(content)) as archive:\n        archive.extractall(root, filter=\"data\")\nenv = {**os.environ, \"GOMAXPROCS\": \"2\", \"GOTOOLCHAIN\": \"local\", \"GOCACHE\": \"/runtime/cache/go-build\", \"GOPATH\": \"/runtime/go-modules\"}\nsubprocess.run([str(compiler), \"build\", \"-p=2\", \"-o\", \"/runtime/bin/pandaflix-agent\", \"/package/.pandamonium/main.go\"],\n               env=env, check=True, timeout=240)\n"
+    }
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "pandaflix__episode_range",
+        "arguments": {
+          "s": "2-4"
+        },
+        "expected": {
+          "episodes": [
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      {
+        "name": "pandaflix__youtube_playback_plan",
+        "arguments": {
+          "urlStr": "https://youtu.be/BaW_jenozKc"
+        },
+        "expected": {
+          "media_id": "BaW_jenozKc",
+          "playback_url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+          "requires_player": true
+        }
+      },
+      {
+        "name": "pandaflix__watch_history",
+        "arguments": {},
+        "expected": {
+          "shows": []
+        }
+      }
+    ]
+  }
+}

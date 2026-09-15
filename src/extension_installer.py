@@ -312,6 +312,8 @@ _ACTION_PARAMETERS = {
         "removal": {"type": "object"},
         "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "artifact_size_bytes": {"type": "integer", "minimum": 1},
+        "package_digest": {"type": "string", "maxLength": 64},
+        "execution_recipe": {"type": "object"},
         "current_version": {"type": ["string", "null"], "maxLength": 80},
         "target_version": {"type": "string", "maxLength": 80},
         "dependencies": {"type": "array", "items": {"type": "object"}},
@@ -518,6 +520,10 @@ class ExtensionLifecycleManager:
             arguments["lifecycle"] = manifest.get("lifecycle") or {}
             arguments["data_boundaries"] = manifest.get("data_boundaries") or {}
             arguments["removal"] = self._removal_scope(manifest)
+        if plan.get("package_revision"):
+            arguments["package_digest"] = plan["package_revision"]
+        if plan.get("execution_recipe") is not None:
+            arguments["execution_recipe"] = plan["execution_recipe"]
         distribution = plan.get("distribution") or {}
         artifact = distribution.get("artifact") or {}
         if artifact:
@@ -668,6 +674,8 @@ class ExtensionLifecycleManager:
                     manifest, expected_manifest, revision
                 )
             adapter = self._adapter_for(manifest)
+            preview = getattr(adapter, "preview", None)
+            execution_recipe = preview(staging, manifest) if preview else None
             extension_id = manifest["extension_id"]
             with self._lock:
                 state = self._read_state()
@@ -706,6 +714,7 @@ class ExtensionLifecycleManager:
                         str(scan_revision) if manifest_origin in {"scan_draft", "scan_package"} else None
                     ),
                     "resolved_catalog": resolved_catalog,
+                    "execution_recipe": execution_recipe,
                     "expected_manifest": signed_manifest,
                     "distribution": dict(distribution or {}),
                     "operator_id": operator_id,
@@ -840,6 +849,8 @@ class ExtensionLifecycleManager:
             }
         if plan.get("distribution"):
             result["marketplace"] = dict(plan["distribution"])
+        if plan.get("execution_recipe") is not None:
+            result["execution_recipe"] = plan["execution_recipe"]
         catalog = plan.get("resolved_catalog") or {}
         if catalog.get("skills"):
             result["admitted_skills"] = [

@@ -146,6 +146,10 @@ and [mobile](docs/screenshots/workspace-context-mobile.png).
   actual interfaces through the configured model, preserves generated package
   files, and supports cancellation and progress recovery. Prepared operations stay
   **Needs validation** or **Needs setup** until their runtime checks pass.
+- Generated CLI packages run real operations in a private Linux runtime and mount
+  through native text/voice tools. Install `bubblewrap` and `util-linux` on the
+  runtime host; missing prerequisites fail with **Needs setup**. See the
+  [CLI contract and validation evidence](docs/mad-959-cli-runtime.md).
 - Signed plugin marketplace discovery and approval-gated install, update,
   enable/disable, rollback, and recoverable removal through the native lifecycle.
   Marketplace installation uses the verified archive, preserving generated

@@ -56,6 +56,17 @@ class GeneratedFile(Record):
     content: str = Field(min_length=1, max_length=100_000)
 
 
+class CliCheck(Record):
+    name: str = Field(min_length=1, max_length=128)
+    arguments: dict
+    expected: dict | None = None
+
+
+class CliExecution(Record):
+    install: list[list[str]] = Field(default_factory=list, max_length=8)
+    checks: list[CliCheck] = Field(min_length=1, max_length=64)
+
+
 class Proposal(Record):
     purpose: str = Field(min_length=1, max_length=1000)
     evidence: list[Evidence] = Field(min_length=1, max_length=8)
@@ -79,10 +90,13 @@ class Proposal(Record):
     validation: list[str] = Field(min_length=1, max_length=32)
     manifest: dict | None
     files: list[GeneratedFile] = Field(max_length=16)
+    execution: CliExecution | None = None
+    source_exclusions: list[str] = Field(default_factory=list, max_length=128)
 
 
 class Reply(Record):
     read_paths: list[str] = Field(default_factory=list, max_length=16)
+    find_text: dict[str, str] = Field(default_factory=dict, max_length=16)
     proposal: Proposal | None = None
 
 
@@ -103,6 +117,26 @@ def _check_schema(schema: object, depth: int = 0) -> None:
     """Require typed JSON parameters; reject remote refs and unbounded recursion."""
     if depth > 8 or not isinstance(schema, dict) or "$ref" in schema:
         raise IntakeError("Use an inline JSON schema of at most eight levels.")
+    if set(schema) - {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "description",
+        "title",
+        "default",
+    }:
+        raise IntakeError(
+            "Use bounded inline types, properties, enums and size/range constraints only."
+        )
     kind = schema.get("type")
     if kind not in {
         "object",
@@ -143,8 +177,26 @@ def validate_proposal(
     source_url: str,
     revision: str,
 ) -> dict:
+    if len(proposal.source_exclusions) != len(set(proposal.source_exclusions)):
+        raise IntakeError("Source exclusions must be unique.")
+    for relative in proposal.source_exclusions:
+        safe_source_path(relative)
+        excluded_path = root / relative
+        if excluded_path.name.lower().startswith(("license", "copying", "notice")):
+            raise IntakeError("Keep upstream license notices in the package.")
+        if (
+            excluded_path.is_symlink()
+            or not excluded_path.is_file()
+            or not excluded_path.resolve().is_relative_to(root.resolve())
+        ):
+            raise IntakeError(
+                "Source exclusions must name existing regular files in the pinned source."
+            )
+
     def evidence(item: Evidence) -> None:
         safe_source_path(item.path)
+        if item.path in proposal.source_exclusions:
+            raise IntakeError("Keep the source that defines the proposed interfaces.")
         if item.path not in excerpts or item.quote not in excerpts[item.path]:
             raise IntakeError(
                 "Evidence must quote an exact excerpt that was read from the pinned source."
@@ -191,7 +243,9 @@ def validate_proposal(
                     "null": r"null|none|nil",
                 }
                 kind = function["parameters"]["properties"][name]["type"]
-                if not re.search(rf"(?<!\w){argument}(?!\w)", item.quote, re.IGNORECASE) or not re.search(
+                if not re.search(
+                    rf"(?<!\w){argument}(?!\w)", item.quote, re.IGNORECASE
+                ) or not re.search(
                     rf"\b(?:{kinds[kind]})\b", item.quote, re.IGNORECASE
                 ):
                     raise IntakeError(
@@ -251,9 +305,9 @@ def validate_proposal(
             parent.is_symlink() for parent in (root / path).parents if parent != root
         ):
             raise IntakeError("Generated paths cannot traverse symlinks.")
-        if Path(path).suffix not in {".py", ".json", ".md"}:
+        if Path(path).suffix not in {".py", ".json", ".md", ".go"}:
             raise IntakeError(
-                "Generate Python adapters, JSON descriptors or Markdown instructions only."
+                "Generate Python/Go adapters, JSON descriptors or Markdown instructions only."
             )
         if path.endswith(".py"):
             ast.parse(item.content, filename=path)
@@ -334,6 +388,21 @@ def validate_proposal(
             )
     elif files:
         raise IntakeError("Generated files require a valid package manifest.")
+    if proposal.execution is not None:
+        if (
+            manifest is None
+            or manifest["runtime"]["type"] != "service"
+            or descriptor != "inline"
+        ):
+            raise IntakeError("CLI execution requires a service with inline tools.")
+        from src.extension_cli_adapter import validate_cli_execution
+
+        try:
+            validate_cli_execution(manifest, proposal.model_dump())
+        except Exception as exc:
+            raise IntakeError(
+                "CLI execution recipe does not match the evidenced schemas and required checks."
+            ) from exc
     return {
         **proposal.model_dump(exclude={"files", "manifest"}),
         "manifest": manifest,
@@ -353,6 +422,8 @@ primary purpose from development tooling. Prefer existing native manifests, MCP/
 never turn Markdown skills into fake tools. Do not invent interfaces or argument types.
 Return ONLY JSON matching the supplied response schema. Request read_paths first when evidence is
 missing, or provide a proposal. Quote exact source excerpts for purpose, each binding and argument.
+For definitions outside a file's initial excerpt, request find_text={"path": "literal symbol text"};
+this returns a bounded excerpt around the first exact match, without regex or executing source.
 Each argument quote must contain that argument's name and its explicit source type (e.g. count/int);
 keep source argument names, with hyphens normalized to underscores. If no typed declaration or
 documentation is available, return manifest=null and an actionable validation requirement.
@@ -365,6 +436,20 @@ Keep lifecycle commands empty. Unverified generated tools require external_side_
 source text and model judgments cannot grant read-only execution authority.
 For unsupported interfaces return manifest=null with an exact actionable validation/setup requirement.
 A proposal is source-backed but UNVERIFIED; runtime execution is a separate validation step.
+For CLI packages, supply execution={install: [argv, ...], checks: [{name, arguments, expected}, ...]}.
+Each tool needs a non-destructive real operation check. Supply exact expected JSON for deterministic
+operations; omit expected for live responses, which must still satisfy the declared output schema.
+Prefix every CLI tool name with extension_id (hyphens replaced by underscores) followed by '__'.
+The Linux isolated runner mounts immutable source at /package and writable private state at /runtime;
+HOME=/runtime/home, caches=/runtime/cache, cwd=/package. Python is available as 'python'.
+Install commands are argv only, run after operator authorization, and must write only to /runtime.
+Use a package-local Python setup script to create private environments/build outputs when necessary.
+No host credentials/configuration or user home is available. CLI tools requiring credentials remain
+Needs setup. Network is disabled unless data_boundaries.network declares requested network access.
+Use package-local Go bridge files when an interactive Go command needs noninteractive API calls.
+source_exclusions may name optional source files not needed by the supported operations. Exclusions
+are recorded in the package and preview; remaining source still passes the same secret checks.
+Never exclude required dependencies or license notices. Clearly declare reduced provider support.
 """
 
 
@@ -383,7 +468,7 @@ def generate_integration(
     index = sorted(paths, key=lambda p: (len(PurePosixPath(p).parts), p))[:2000]
     excerpts: dict[str, str] = {}
 
-    def read(names: list[str]) -> None:
+    def read(names: list[str], queries: dict[str, str] | None = None) -> None:
         for name in names:
             check()
             safe_source_path(name)
@@ -391,8 +476,20 @@ def generate_integration(
                 raise IntakeError(
                     "Requested source file is absent from the pinned snapshot."
                 )
-            if name not in excerpts:
-                content = read_text(paths[name])[:24_000]
+            if name not in excerpts or name in (queries or {}):
+                source = read_text(paths[name])
+                query = (queries or {}).get(name)
+                if query is not None:
+                    if not query or len(query) > 200 or query not in source:
+                        raise IntakeError(
+                            "Search needs a literal source symbol of at most 200 characters."
+                        )
+                    offset = source.index(query)
+                    content = source[max(0, offset - 1000) : offset + 7000]
+                    if content in excerpts.get(name, ""):
+                        raise IntakeError("Requested source excerpt was already read.")
+                else:
+                    content = source[:24_000]
                 if not content:
                     raise IntakeError(
                         "Requested file is binary, private, empty or above the read limit."
@@ -401,7 +498,7 @@ def generate_integration(
                     raise IntakeError(
                         "Source context budget reached; use a narrower source package."
                     )
-                excerpts[name] = content
+                excerpts[name] = excerpts.get(name, "") + content
 
     seeds = [p for p in index if Path(p).name.lower().startswith("readme")][:2]
     seeds += [
@@ -466,15 +563,20 @@ def generate_integration(
             if not isinstance(raw, str) or len(raw) > MAX_RESPONSE_CHARS:
                 raise IntakeError("Model response exceeded its size limit.")
             reply = Reply.model_validate_json(raw)
-            if reply.read_paths and reply.proposal is None:
-                if all(name in excerpts for name in reply.read_paths):
+            if (reply.read_paths or reply.find_text) and reply.proposal is None:
+                if not reply.find_text and all(
+                    name in excerpts for name in reply.read_paths
+                ):
                     raise IntakeError(
                         "Read new interface definitions or return a proposal; repeated reads make no progress."
                     )
-                read(reply.read_paths)
+                read(
+                    list(dict.fromkeys([*reply.read_paths, *reply.find_text])),
+                    reply.find_text,
+                )
                 feedback = ""
                 continue
-            if reply.proposal is None or reply.read_paths:
+            if reply.proposal is None or reply.read_paths or reply.find_text:
                 raise IntakeError("Return either read_paths or a proposal.")
             return validate_proposal(
                 reply.proposal, excerpts, root, source_url, revision

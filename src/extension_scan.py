@@ -77,7 +77,8 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("openai-key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"), "high"),
     ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "critical"),
     ("assigned-secret", re.compile(
-        r"(?i)\b(?:token|password|passwd|secret|api[_-]?key)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-./+]{12,}"
+        r"(?i)\b(?:token|password|passwd|secret|api[_-]?key|secret[_-]?key)\b['\"]?\s*[:=]\s*['\"][A-Za-z0-9_\-./+]{12,}['\"]"
+        r"|(?im:^\s*(?:token|password|passwd|secret|api[_-]?key|secret[_-]?key)\s*=\s*[A-Za-z0-9_\-./+]{12,}\s*$)"
     ), "medium"),
 )
 DANGEROUS_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
@@ -753,7 +754,7 @@ class ExtensionStaticScanner:
                         severity,
                         "secret",
                         f"Possible {pattern_id} in {relative}",
-                        match.group(0)[:200],
+                        "[redacted]",
                     )
             for pattern_id, pattern, severity in DANGEROUS_PATTERNS:
                 match = pattern.search(text)
@@ -972,7 +973,12 @@ class ExtensionStaticScanner:
             package = None
             if draft:
                 report("package", "Preserving source and integration package; runtime validation still required")
-                if any(item["category"] == "secret" for item in findings):
+                package_findings = findings
+                if integration and integration.get("source_exclusions"):
+                    for relative in integration["source_exclusions"]:
+                        (staging / relative).unlink()
+                    package_findings = self._audit(staging, [p for p in files if p.is_file()], repo_class, licenses, [MAX_TOTAL_READ_BYTES])
+                if any(item["category"] == "secret" for item in package_findings):
                     raise ExtensionScanError("extension_scan_source_secret")
                 # Only this scan's disposable checkout is moved/modified.
                 if not _manifest:

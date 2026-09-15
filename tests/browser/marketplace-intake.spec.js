@@ -55,6 +55,7 @@ async function mockApp(page, scannedArtifact = artifact) {
         manifest: { name: 'Demo Tools' },
         requested_permissions: { default: 'read_only', capabilities: {} },
         lifecycle_commands: { install: [], start: [], stop: [], remove: [] },
+        execution_recipe: { install: [['python', '/package/.pandamonium/setup.py']], checks: [{ name: 'demo_tools__inspect', arguments: {} }] },
       } });
     }
     if (path.startsWith('/api/authority/decisions/')) return route.fulfill({ json: { decision: 'allow' } });
@@ -88,6 +89,7 @@ test('Add from GitHub scans, reviews, and installs through approval', async ({ p
   const sent = await planRequest;
   expect(sent.postDataJSON().scan_id).toBe('scan-1');
   await expect(page.getByText('Approval required: Install Demo Tools')).toBeVisible();
+  await expect(page.getByText('Private runtime setup and operation checks')).toBeVisible();
   await expect(page.locator('#marketplace-scan-results')).toContainText('generated draft manifest');
   await expect(page.getByRole('button', { name: 'Approve once' })).toBeInViewport();
   await expect(page.getByRole('button', { name: '← Back to scan' })).toBeVisible();
