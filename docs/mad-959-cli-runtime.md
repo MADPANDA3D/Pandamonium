@@ -54,14 +54,14 @@ disable/enable/uninstall. Each temporary data directory was removed.
 | Package | Actual operations | Limits |
 |---|---|---|
 | yt-dlp | Inspected and downloaded an actual generated WAV, 1,644 bytes | Direct-media URLs; optional credential-bearing provider modules and test/private-key files are explicitly excluded. Full site coverage is not claimed. |
-| PandaFlix | Compiled pinned Go source; parsed episodes 2–4, produced a YouTube playback plan and read an empty disposable watch history | Linux x86_64; private checksum-verified Go 1.26.0; host C compiler/pkg-config/libmpv headers. Playback needs a player/display and is not claimed. |
+| PandaFlix | Compiled pinned Go source; parsed episodes 2–4, produced a YouTube playback plan and read an empty disposable watch history | Linux x86_64; credential-shaped provider test fixture excluded; private checksum-verified Go 1.26.0; host C compiler/pkg-config/libmpv headers. Playback needs a player/display and is not claimed. |
 | Ponytail | Admitted and read all selected SKILL.md bodies through native manage_skills | Instructions remain skills; no fake callable skill tools. |
 
 The reviewed package recipes are under `integrations/repository-packages/`.
 Core code has no repository-name dispatch. The scanner reads and validates their
 source evidence through the same bounded proposal protocol. The real yt-dlp scan
 exposed source credentials and Python-expression false positives. Detection now
-distinguishes literal assignments from function calls. Explicit package exclusions
+distinguishes literal assignments from function calls and Python AST name/attribute references. Unquoted configuration literals followed by comments or delimiters remain detected and redacted; malformed Python keeps conservative lexical scanning. Explicit package exclusions
 retain the secret gate; the remaining source must still pass it.
 
 Reproduce with an empty disposable runtime (created/removed by the script):
@@ -109,7 +109,7 @@ Ruff passes the new/scoped modules, with no added diagnostics in the larger
 pre-existing route/agent modules; five runtime/intake modules pass scoped mypy.
 The plugin-view module retains its existing 27 mypy diagnostics. Node setup-copy
 checks, JavaScript syntax, isort and diff hygiene pass. Protected PR CI is the
-final publication gate.
+final publication gate. After review, 41 focused source/runtime checks pass, including unquoted-credential redaction/rejection and Python reference preservation. Both real-source CLI packages were rebuilt and rerun successfully; the receipts above reflect the final recipes. A full local run before the Python-reference refinement passed 6,449 tests / 5 skipped; final-head CI remains authoritative.
 
 Ubuntu CI also installs and loads the distribution's `bwrap-userns-restrict`
 profile from [`apparmor-profiles`](https://packages.ubuntu.com/noble-updates/all/apparmor-profiles/filelist).
