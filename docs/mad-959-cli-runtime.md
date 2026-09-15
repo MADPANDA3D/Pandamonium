@@ -103,4 +103,12 @@ The plugin-view module retains its existing 27 mypy diagnostics. Node setup-copy
 checks, JavaScript syntax, isort and diff hygiene pass. Protected PR CI is the
 final publication gate.
 
+Ubuntu CI also installs and loads the distribution's `bwrap-userns-restrict`
+profile from [`apparmor-profiles`](https://packages.ubuntu.com/noble-updates/all/apparmor-profiles/filelist).
+This permits bubblewrap's namespace setup while denying capabilities to its
+children; the global AppArmor/user-namespace restrictions remain enabled.
+A real unprivileged namespace preflight runs before pytest. Without a suitable
+host profile, Ubuntu can reject setup with `Failed RTM_NEWADDR`; installing the
+binary alone is insufficient. No unsandboxed execution fallback is provided.
+
 Rollback: revert this scoped source change while preserving extension runtime data.
