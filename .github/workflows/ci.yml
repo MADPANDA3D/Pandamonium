@@ -186,10 +186,27 @@ jobs:
           sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
           sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
           bwrap --unshare-all --ro-bind / / -- /usr/bin/true
+          # Aggregate resource controls are required before any package executes.
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          runtime_root="$RUNNER_TEMP/package-runtime"
+          mkdir -p "$runtime_root"
+          sudo mount -t tmpfs -o size=2g,nr_inodes=100000 tmpfs "$runtime_root"
+          sudo chown "$(id -u):$(id -g)" "$runtime_root"
+          echo "ODYSSEUS_EXTENSION_RUNTIME_ROOT=$runtime_root" >> "$GITHUB_ENV"
       - run: mkdir -p data  # sqlite DB lives at ./data/app.db
         if: steps.docs-check.outputs.docs_only != 'true'
       - run: python -m pytest -q
         if: steps.docs-check.outputs.docs_only != 'true'
+      - name: Remove disposable package runtime
+        if: always() && steps.docs-check.outputs.docs_only != 'true'
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/package-runtime"; then
+            sudo umount "$RUNNER_TEMP/package-runtime"
+            rmdir "$RUNNER_TEMP/package-runtime"
+          fi
 
   voice-orb-tests:
     name: Voice Orb focused tests

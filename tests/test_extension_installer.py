@@ -611,6 +611,7 @@ def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixt
         "/api/extensions/marketplace",
         "/api/extensions/marketplace/plans",
         "/api/extensions/plans/source",
+        "/api/extensions/runtime/{extension_id}/configuration",
         "/api/extensions/plans/lifecycle",
         "/api/extensions/plans/{plan_id}/execute",
         "/api/extensions/scans",

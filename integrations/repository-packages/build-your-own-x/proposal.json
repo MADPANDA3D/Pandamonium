@@ -1,0 +1,379 @@
+{
+  "purpose": "Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "This repository is a compilation of well-written, step-by-step guides for re-creating our favorite technologies from scratch. "
+    }
+  ],
+  "repo_class": "unknown",
+  "interfaces": [
+    {
+      "name": "build_your_own_x__status",
+      "kind": "tool",
+      "binding": "knowledge.status",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "This repository is a compilation of well-written, step-by-step guides for re-creating our favorite technologies from scratch. "
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "build_your_own_x__status",
+          "description": "knowledge.status \u2014 Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "vectorized": {
+            "type": "boolean"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunks",
+          "nodes",
+          "edges",
+          "vectorized",
+          "source_url",
+          "source_revision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "build_your_own_x__search",
+      "kind": "tool",
+      "binding": "knowledge.search",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "This repository is a compilation of well-written, step-by-step guides for re-creating our favorite technologies from scratch. "
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "build_your_own_x__search",
+          "description": "knowledge.search \u2014 Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "source_url": {
+                  "type": "string"
+                },
+                "source_revision": {
+                  "type": "string"
+                },
+                "content_sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "line",
+                "text",
+                "source_url",
+                "source_revision",
+                "content_sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "vectorized": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "results",
+          "vectorized"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "build_your_own_x__refresh",
+      "kind": "tool",
+      "binding": "knowledge.refresh",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "This repository is a compilation of well-written, step-by-step guides for re-creating our favorite technologies from scratch. "
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "build_your_own_x__refresh",
+          "description": "knowledge.refresh \u2014 Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "vectorized": {
+            "type": "boolean"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunks",
+          "nodes",
+          "edges",
+          "vectorized",
+          "source_url",
+          "source_revision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Graphify runs its real deterministic Markdown extractor; semantic relationships are not fabricated.",
+    "Configure an embedding endpoint or the existing local FastEmbed fallback.",
+    "Linked projects remain data; install each linked tool separately."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "build-your-own-x",
+    "name": "build-your-own-x",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/codecrafters-io/build-your-own-x.git",
+      "revision": "aa17439b62f384511a5561ce308e9598b94d8989"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "build_your_own_x__status",
+            "description": "knowledge.status \u2014 Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "build_your_own_x__search",
+            "description": "knowledge.search \u2014 Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "build_your_own_x__refresh",
+            "description": "knowledge.refresh \u2014 Find tutorials in build-your-own-x with source citations, a Graphify structural graph and semantic vectors.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://codeload.github.com",
+        "https://pypi.org",
+        "https://files.pythonhosted.org"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "raise RuntimeError('Knowledge operations use the native index')\n"
+    },
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "import hashlib,subprocess,sys,urllib.request,venv\nfrom pathlib import Path\nurl='https://codeload.github.com/Graphify-Labs/graphify/tar.gz/c7ec1082083e3e876443f643ecf86ebcfae177c2'\nwith urllib.request.urlopen(url,timeout=30) as response: data=response.read(8*1024*1024)\nif hashlib.sha256(data).hexdigest()!='9662f9eff349331fef3a41a9731f709b91fd6ddf661eb39c9309a55696a6dc1f': raise RuntimeError('Graphify checksum mismatch')\nPath('/runtime/graphify.tar.gz').write_bytes(data)\nvenv.EnvBuilder(with_pip=True,symlinks=False).create('/runtime/venv')\nsubprocess.run(['/runtime/venv/bin/python','-m','pip','install','--disable-pip-version-check','--no-cache-dir','/runtime/graphify.tar.gz'],check=True,stdout=subprocess.DEVNULL,timeout=240)\nsubprocess.run(['/runtime/venv/bin/python','/package/.pandamonium/graph.py'],check=True,timeout=30)\n"
+    },
+    {
+      "path": ".pandamonium/graph.py",
+      "content": "import json\nfrom pathlib import Path\nfrom graphify.extractors.markdown import extract_markdown\nresult=extract_markdown(Path('/package/README.md'))\nPath('/runtime/graph.json').write_text(json.dumps(result))\n"
+    }
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "build_your_own_x__status",
+        "arguments": {}
+      },
+      {
+        "name": "build_your_own_x__search",
+        "arguments": {
+          "query": "Build your own database",
+          "limit": 3
+        }
+      },
+      {
+        "name": "build_your_own_x__refresh",
+        "arguments": {}
+      }
+    ],
+    "knowledge": {
+      "files": [
+        "README.md"
+      ],
+      "graph_artifact": "graph.json",
+      "vectorize": true
+    }
+  },
+  "source_exclusions": []
+}

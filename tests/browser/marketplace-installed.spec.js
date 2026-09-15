@@ -36,6 +36,7 @@ async function mockApp(page) {
     if (path === '/api/extensions/installed') return route.fulfill({ json: installed });
     if (path === '/api/extensions/installed/oracle') return route.fulfill({ json: oracleDetail });
     if (path === '/api/extensions/installed/atlas') return route.fulfill({ json: atlasDetail });
+    if (path === '/api/extensions/runtime/atlas/configuration') return route.fulfill({ json: { fields: atlasDetail.configuration } });
     if (path === '/api/extensions/marketplace') {
       return route.fulfill({ json: { schema_version: 'pandamonium.marketplace-view.v1', status: 'offline', failure: 'marketplace_catalog_offline', plugins: [] } });
     }

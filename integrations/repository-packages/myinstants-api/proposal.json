@@ -1,0 +1,186 @@
+{
+  "purpose": "List recent sound effects and return their source and audio URLs.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "<h1 align=\"center\">MyInstants REST API</h1>"
+    }
+  ],
+  "repo_class": "service",
+  "interfaces": [
+    {
+      "name": "myinstants_api__recent",
+      "kind": "tool",
+      "binding": "GET /recent",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "| `GET /recent`    | Recently uploaded sounds |            |"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "myinstants_api__recent",
+          "description": "GET /recent \u2014 List recent sound effects and return their source and audio URLs.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "sounds": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "mp3": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "url",
+                "mp3"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sounds"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Linux x86_64 with glibc compatible with pinned PHP 8.5.10; package setup fails on incompatible hosts.",
+    "Upstream TLS verification is restored in the private runtime copy before serving."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "myinstants-api",
+    "name": "myinstants-api",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/MADPANDA3D/myinstants-api.git",
+      "revision": "435d40d309ab2790e21567b00c9727509badeedd"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "myinstants_api__recent",
+            "description": "GET /recent \u2014 List recent sound effects and return their source and audio URLs.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://arch.mirror.constant.com",
+        "https://www.myinstants.com"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "import hashlib,platform,shutil,subprocess,urllib.request\nfrom pathlib import Path\nif platform.machine()!='x86_64': raise RuntimeError('Needs setup: this PHP recipe requires Linux x86_64')\nwith urllib.request.urlopen('https://arch.mirror.constant.com/extra/os/x86_64/php-8.5.10-1-x86_64.pkg.tar.zst',timeout=30) as response: data=response.read(8*1024*1024)\nif hashlib.sha256(data).hexdigest()!='0354a6573db83afa3918d2e1555f3a2d9914a66e43cab00e00e449070f973dd2': raise RuntimeError('PHP checksum mismatch')\nPath('/runtime/php.pkg.tar.zst').write_bytes(data)\nPath('/runtime/php').mkdir(exist_ok=True)\nsubprocess.run(['tar','--zstd','-xf','/runtime/php.pkg.tar.zst','-C','/runtime/php','usr/bin/php','usr/lib/php/modules/curl.so'],check=True)\nshutil.copytree('/package/api','/runtime/api',dirs_exist_ok=True)\nshutil.copy2('/package/router.php','/runtime/router.php')\nhelper=Path('/runtime/api/helper.php')\ntext=helper.read_text()\nif 'CURLOPT_SSL_VERIFYPEER, false' not in text: raise RuntimeError('Upstream TLS code changed')\nhelper.write_text(text.replace('CURLOPT_SSL_VERIFYPEER, false','CURLOPT_SSL_VERIFYPEER, true'))\n"
+    },
+    {
+      "path": ".pandamonium/service.py",
+      "content": "import json,os\nconfig=json.load(open('/run/pandamonium/config.json'))\nos.chdir('/runtime')\nos.execv('/runtime/php/usr/bin/php',['php','-n','-d','extension=/runtime/php/usr/lib/php/modules/curl.so','-d','error_reporting=1','-d','curl.cainfo=/etc/ssl/cert.pem','-S','127.0.0.1:'+config['PANDAMONIUM_PORT'],'/runtime/router.php'])\n"
+    },
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import json,urllib.request\nconfig=json.load(open('/run/pandamonium/config.json'))\nwith urllib.request.urlopen('http://127.0.0.1:'+config['PANDAMONIUM_PORT']+'/recent',timeout=20) as response: data=json.load(response)\nsounds=data['data'][:10]\nif not sounds: raise RuntimeError('No sound records returned; upstream availability needs checking')\nprint(json.dumps({'sounds':sounds}))\n"
+    }
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "myinstants_api__recent",
+        "arguments": {}
+      }
+    ],
+    "service": [
+      "python",
+      "/package/.pandamonium/service.py"
+    ]
+  },
+  "source_exclusions": []
+}

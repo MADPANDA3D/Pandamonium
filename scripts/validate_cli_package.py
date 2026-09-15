@@ -6,6 +6,7 @@ Native skills: --url https://github.com/dietrichgebert/ponytail --ref <commit>
 
 import argparse
 import asyncio
+import atexit
 import json
 import os
 import sys
@@ -50,16 +51,25 @@ def main():
         os.environ["ODYSSEUS_DATA_DIR"] = directory
         os.environ["ODYSSEUS_EXTENSIONS_DIR"] = directory + "/runtime-extensions"
         os.environ["DATABASE_URL"] = "sqlite:///" + directory + "/app.db"
+        from core.database import Base, engine
         from services.memory.skills import SkillsManager
         from src.agent_tools.admin_tools import do_manage_extensions
         from src.authority_protocol import AuthorityStore
         from src.extension_agent_mount import execute_mounted_extension_tool
-        from src.extension_cli_adapter import GeneratedCliAdapter
+        from src.extension_cli_adapter import (
+            _SERVICES,
+            GeneratedCliAdapter,
+            _stop_service,
+        )
         from src.extension_installer import ExtensionLifecycleManager
         from src.extension_registry import ExtensionRegistry
         from src.extension_scan import ExtensionStaticScanner
         from src.extension_skill_adapter import SkillBundleAdapter
         from src.tools.system import do_manage_skills
+
+        Base.metadata.create_all(engine)
+        # This process uses only the disposable installation above. Reap even on failure.
+        atexit.register(lambda: [_stop_service(unit) for unit in list(_SERVICES)])
 
         owner = "disposable-cli-validation"
         scanner = ExtensionStaticScanner(

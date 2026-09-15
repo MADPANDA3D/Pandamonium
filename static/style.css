@@ -43742,6 +43742,9 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
 .marketplace-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .marketplace-facts a { color: var(--accent, var(--red)); }
 .marketplace-detail-section { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--fg) 9%, transparent); }
+.marketplace-runtime-setup { display: grid; gap: 12px; }
+.marketplace-runtime-setup label { display: grid; gap: 6px; font-size: 12px; }
+.marketplace-runtime-setup input, .marketplace-runtime-setup select { box-sizing: border-box; min-width: 0; width: 100%; height: auto; }
 .marketplace-detail-section ul { margin: 0; padding-left: 18px; font-size: 11px; line-height: 1.6; }
 .marketplace-action-status { min-height: 18px; }
 .marketplace-action-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
