@@ -274,11 +274,15 @@ class ExtensionStaticScanner:
         self, root: Path, files: list[Path], repo_class: str
     ) -> list[dict[str, Any]]:
         capabilities: list[dict[str, Any]] = []
+        seen: set[str] = set()
         relative = {path.relative_to(root).as_posix(): path for path in files}
 
         def add(name: str, kind: str, descriptor: str, evidence: str) -> None:
+            if name in seen:
+                return
             if len(capabilities) >= MAX_ARTIFACT_CAPABILITIES:
                 return
+            seen.add(name)
             capabilities.append({
                 "name": name,
                 "kind": kind,

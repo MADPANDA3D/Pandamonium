@@ -32,6 +32,8 @@ const SETUP_ERROR_MESSAGES = {
     'This repository has no jarvis-extension.json, and no reviewed scan draft was available. Scan the repository, then install from the scan result.',
   extension_scan_bounds_exceeded:
     'That repository is too large to scan. Follow its own install instructions instead.',
+  extension_scan_capability_duplicate:
+    'That repository declares the same capability more than once, so no manifest could be reviewed. Report it to the publisher, or try a different repository.',
   extension_plugin_not_found:
     'That plugin is no longer in the catalog. Refresh the plugin list and try again.',
   extension_not_installed:
