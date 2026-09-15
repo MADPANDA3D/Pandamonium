@@ -521,6 +521,8 @@ async function _ensureDefaultPendingChat() {
       _deps.setPendingChat({ ...fallback, source: 'fallback' });
       updateModelPicker();
     }
+    updateModelPicker();
+    try { document.dispatchEvent(new CustomEvent('odysseus:model-picked')); } catch (_) {}
   } finally {
     _defaultChatPickInFlight = false;
   }

@@ -4,7 +4,7 @@ import { sidePanelDocked, watchSidePanelDock } from './modalSnap.js';
 const byId = id => document.getElementById(id);
 const levels = ['low', 'medium', 'high', 'xhigh', 'max'];
 const rounds = [20, 40, 80, 120, 200];
-const names = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Very high', max: 'Maximum', ultra: 'Ultra', minimal: 'Minimal', none: 'Off' };
+const names = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra', ultra: 'Ultra', minimal: 'Minimal', none: 'Off' };
 let agentEffort = '';
 let reasoningMode = false;
 let details = null;
@@ -49,12 +49,21 @@ function activeModelReasoningLevels() {
     const modelId = String(session.model || pending?.modelId || window.sessionModule?.getCurrentModel?.() || '').trim();
     const url = String(session.endpoint_url || pending?.url || '').replace(/\/+$/, '');
     if (!modelId) return [];
-    for (const item of (window.modelsModule?.getCachedItems?.() || [])) {
-      if (url && String(item.url || '').replace(/\/+$/, '') !== url) continue;
-      const models = (item.models || []).concat(item.models_extra || []);
-      if (!models.includes(modelId)) continue;
+    const items = window.modelsModule?.getCachedItems?.() || [];
+    const levelsFor = item => {
       const levelList = item.reasoning_levels && item.reasoning_levels[modelId];
       return Array.isArray(levelList) ? levelList.filter(level => names[level]) : [];
+    };
+    if (url) {
+      for (const item of items) {
+        if (String(item.url || '').replace(/\/+$/, '') !== url) continue;
+        const found = levelsFor(item);
+        if (found.length) return found;
+      }
+    }
+    for (const item of items) {
+      const found = levelsFor(item);
+      if (found.length) return found;
     }
   } catch (_) { /* the work-budget control remains available */ }
   return [];
@@ -407,6 +416,15 @@ function bind() {
   // dock state govern it from the first mutation onward (MAD-932).
   watchSidePanelDock(_syncDetailsWithSidePanel);
   renderEffort();
+  // Startup data resolves independently of this module's evaluation order
+  // (models cache, default/pending chat), so the reasoning control also
+  // re-renders whenever the composer picker text settles.
+  const _effortSettle = { timer: 0 };
+  const _scheduleEffort = () => { clearTimeout(_effortSettle.timer); _effortSettle.timer = setTimeout(renderEffort, 80); };
+  for (const id of ['model-picker-label', 'identity-model-label']) {
+    const node = byId(id);
+    if (node) new MutationObserver(_scheduleEffort).observe(node, { childList: true, characterData: true, subtree: true });
+  }
   loadHistory();
 }
 

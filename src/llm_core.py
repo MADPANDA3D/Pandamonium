@@ -1248,7 +1248,7 @@ def _supports_thinking(model: str) -> bool:
 # supports one. `apply_reasoning_effort` maps the chosen level onto the
 # provider's own field; unsupported providers/models are left untouched so a
 # chat turn never 400s on an unknown parameter.
-REASONING_EFFORT_LEVELS = ("low", "medium", "high")
+REASONING_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 # Reasoning-capable model families per reasoning-effort provider. Matching is
 # substring-based on the lowercased model id, mirroring _THINKING_MODEL_PATTERNS.
@@ -1270,15 +1270,18 @@ def reasoning_levels(provider: str, model: str) -> tuple:
     """Reasoning-effort levels offered for a provider/model pair.
 
     Empty tuple means the composer keeps its existing work-budget control.
+    OpenRouter normalizes effort across providers and accepts the full
+    five-tier vocabulary ("max", "xhigh", "high", "medium", "low"); the
+    OpenAI-compatible native providers cap at their own three tiers.
     """
     if not model:
         return ()
     if provider == "openrouter":
         return REASONING_EFFORT_LEVELS if _model_matches_any(model, _OPENROUTER_REASONING_PATTERNS) else ()
     if provider == "openai":
-        return REASONING_EFFORT_LEVELS if _model_matches_any(model, _OPENAI_REASONING_PATTERNS) else ()
+        return ("low", "medium", "high") if _model_matches_any(model, _OPENAI_REASONING_PATTERNS) else ()
     if provider == "mistral":
-        return REASONING_EFFORT_LEVELS if _supports_thinking(model) else ()
+        return ("low", "medium", "high") if _supports_thinking(model) else ()
     return ()
 
 
@@ -1291,12 +1294,13 @@ def apply_reasoning_effort(payload: Dict, provider: str, model: str, effort: Opt
     """Apply an explicit operator reasoning level to an OpenAI-compat payload.
 
     Returns True when the level was applied. No-op for unknown levels or
-    provider/model pairs without a reasoning-effort contract.
+    provider/model pairs without a reasoning-effort contract. The accepted
+    vocabulary is the provider/model-specific tier list, so a five-tier
+    level can never leak onto a provider that only supports three.
     """
+    supported = reasoning_levels(provider, model)
     level = str(effort or "").strip().lower()
-    if level not in REASONING_EFFORT_LEVELS:
-        return False
-    if not reasoning_levels(provider, model):
+    if level not in supported:
         return False
     if provider == "openrouter":
         payload["reasoning"] = {"effort": level}

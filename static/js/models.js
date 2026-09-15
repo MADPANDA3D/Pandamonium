@@ -203,6 +203,7 @@ export async function refreshModels(force = false) {
       if (seq < _fetchSeq) return;
       _lastFetchTime = Date.now();
       _cachedItems = data.items || [];
+      try { document.dispatchEvent(new CustomEvent('odysseus:model-picked')); } catch (_) {}
     } catch (e) {
       console.error(e);
       if (box) box.textContent = '(scan failed)';
