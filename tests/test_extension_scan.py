@@ -148,6 +148,49 @@ def test_scan_skill_bundle_descriptor_draft_marks_unimportable_skills(tmp_path):
     assert _staging_empty(tmp_path)
 
 
+def test_scan_skill_bundle_draft_matches_installer_admission(tmp_path):
+    source = tmp_path / "source"
+    _write(
+        source,
+        ".codex-plugin/plugin.json",
+        json.dumps({"name": "bundle", "skills": "./skills/"}),
+    )
+    _write(
+        source,
+        "skills/folded-skill/SKILL.md",
+        (
+            "---\n"
+            "name: folded-skill\n"
+            "description: >\n"
+            "  Folded summary across\n"
+            "  two lines.\n"
+            "---\n\n"
+            "# Procedure\n\n1. Do it.\n"
+        ),
+    )
+    _write(
+        source,
+        "skills/unsupported-skill/SKILL.md",
+        (
+            "---\n"
+            "name: unsupported-skill\n"
+            "description: Declares authority metadata the installer rejects\n"
+            "owner: another-user\n"
+            "---\n\n"
+            "# Procedure\n\n1. Do it.\n"
+        ),
+    )
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    draft = validate_extension_manifest(artifact["draft_manifest"])
+    descriptor = draft["capabilities"]["descriptor"]
+    assert descriptor["include"] == ["folded-skill"]
+    findings = {item["id"]: item for item in artifact["findings"]}
+    assert "unsupported-skill" in findings["skill-assets-excluded"]["evidence"]
+    assert _staging_empty(tmp_path)
+
+
 def test_scan_skill_bundle_without_descriptor_or_single_skill_has_no_draft(tmp_path):
     source = tmp_path / "source"
     for name in ("alpha-skill", "beta-skill"):

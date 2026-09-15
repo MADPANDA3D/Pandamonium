@@ -26,12 +26,18 @@ from src.extension_registry import MANIFEST_VERSION, SKILL_ID_PATTERN
 _FRONTMATTER_FIELDS = frozenset({
     "name", "description", "version", "tags", "platforms",
     "requires_toolsets", "fallback_for_toolsets",
+    # Common publisher metadata: recorded where supported, otherwise ignored.
+    # Pandamonium grants authority only through the reviewed manifest, so these
+    # fields cannot escalate access.
+    "license", "argument-hint", "allowed-tools",
+    "disable-model-invocation", "user-invocable",
 })
 _LIST_FIELDS = frozenset({
     "tags", "platforms", "requires_toolsets", "fallback_for_toolsets",
 })
-_FRONTMATTER_KEY = re.compile(r"^([a-z_][a-z0-9_]*):", re.IGNORECASE)
+_FRONTMATTER_KEY = re.compile(r"^([a-z_][a-z0-9_-]*):", re.IGNORECASE)
 _FRONTMATTER_LIST_ITEM = re.compile(r"^\s+-\s+.+$")
+_BLOCK_SCALAR_MARKS = frozenset({">", "|", ">-", "|-", ">+", "|+"})
 
 
 class SkillBundleAdapter:
@@ -86,21 +92,35 @@ class SkillBundleAdapter:
             raise ExtensionLifecycleError("extension_skill_asset_unreadable") from exc
 
     @classmethod
-    def _strict_skill(cls, skill_file: Path) -> tuple[Skill, str]:
+    def validate_skill_document(cls, skill_file: Path) -> tuple[Skill, str]:
+        """Strictly validate one SKILL.md exactly as the adapter admits it."""
         text = cls._read_text(skill_file)
         if not text.startswith("---\n") or "\n---\n" not in text[4:]:
             raise ExtensionLifecycleError("extension_skill_frontmatter_required")
         frontmatter_text = text[4:text.find("\n---\n", 4)]
         keys = []
         pending_list = None
+        block_scalar = False
         for line in frontmatter_text.splitlines():
+            if block_scalar:
+                if not line.strip() or line[0].isspace():
+                    continue
+                block_scalar = False
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             match = _FRONTMATTER_KEY.match(line)
             if match:
                 keys.append(match.group(1))
-                pending_list = match.group(1) if not line.partition(":")[2].strip() else None
-            elif not pending_list or not _FRONTMATTER_LIST_ITEM.match(line):
+                raw_value = line.partition(":")[2].strip()
+                block_scalar = raw_value in _BLOCK_SCALAR_MARKS
+                pending_list = (
+                    match.group(1)
+                    if not raw_value and not block_scalar
+                    else None
+                )
+            elif pending_list and _FRONTMATTER_LIST_ITEM.match(line):
+                continue
+            else:
                 raise ExtensionLifecycleError("extension_skill_frontmatter_malformed")
         metadata, body = parse_frontmatter(text)
         if len(keys) != len(set(keys)) or set(metadata) != set(keys):
@@ -181,7 +201,7 @@ class SkillBundleAdapter:
             skill_file = self._checkout_path(checkout, entrypoint)
             if skill_file.name != "SKILL.md":
                 raise ExtensionLifecycleError("extension_skill_entrypoint_invalid")
-            skill, _text = self._strict_skill(skill_file)
+            skill, _text = self.validate_skill_document(skill_file)
             candidates[skill.name] = skill_file.parent
             if include != [skill.name]:
                 raise ExtensionLifecycleError("extension_skill_catalog_mismatch")
@@ -205,7 +225,7 @@ class SkillBundleAdapter:
                 if not skill_dir.is_dir() or skill_dir.name not in include:
                     continue
                 skill_file = self._checkout_path(checkout, (skill_dir / "SKILL.md").relative_to(checkout).as_posix())
-                skill, _text = self._strict_skill(skill_file)
+                skill, _text = self.validate_skill_document(skill_file)
                 if skill.name != skill_dir.name or skill.name in candidates:
                     raise ExtensionLifecycleError("extension_skill_id_invalid")
                 candidates[skill.name] = skill_dir
@@ -242,7 +262,7 @@ class SkillBundleAdapter:
         total_bytes = 0
         for skill_id in include:
             root = candidates[skill_id]
-            skill, _text = self._strict_skill(root / "SKILL.md")
+            skill, _text = self.validate_skill_document(root / "SKILL.md")
             files = self._skill_files(root, checkout)
             total_files += len(files)
             total_bytes += sum(len(text.encode("utf-8")) for text in files.values())

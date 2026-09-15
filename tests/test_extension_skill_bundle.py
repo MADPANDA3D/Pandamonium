@@ -39,6 +39,31 @@ def _skill(name: str, description: str, *, toolsets=(), body="Follow the reviewe
     )
 
 
+def _folded_skill(name: str, description: str) -> str:
+    body = "\n".join(f"  {line}" for line in description.split("\n"))
+    return (
+        "---\n"
+        f"name: {name}\n"
+        "description: >\n"
+        f"{body}\n"
+        "version: 1.0.0\n"
+        "---\n\n"
+        "## Procedure\n\n1. Follow the reviewed procedure.\n"
+    )
+
+
+FOLDED_DESCRIPTION = (
+    "Forces the laziest solution that actually works.\n"
+    "\n"
+    "Second paragraph with more detail."
+)
+FOLDED_EXPECTED = (
+    "Forces the laziest solution that actually works.\n"
+    "\n"
+    "Second paragraph with more detail."
+)
+
+
 def _manifest(version: str, *, entrypoint: str, bundle_format: str, include: list[str]) -> dict:
     return {
         "protocol_version": "jos-extension.v1",
@@ -297,6 +322,76 @@ def test_malformed_or_unsafe_skill_metadata_never_reaches_approval(tmp_path, ski
     assert skills.load("operator") == []
     assert registry.snapshot()["extensions"] == {}
     assert manager.snapshot()["plans"] == {}
+
+
+def test_folded_block_scalar_descriptions_install_with_their_real_text(tmp_path, skill_repo):
+    repo, _v1, _v2 = skill_repo
+    for name in ("alpha-skill", "beta-skill"):
+        (repo / "skills" / name / "SKILL.md").write_text(
+            _folded_skill(name, FOLDED_DESCRIPTION), encoding="utf-8"
+        )
+    folded_revision = _commit(
+        repo,
+        _manifest(
+            "5.0.0",
+            entrypoint=".codex-plugin/plugin.json",
+            bundle_format="codex_plugin",
+            include=["alpha-skill", "beta-skill"],
+        ),
+        "folded",
+    )
+    manager, authority, _registry, skills = _manager(tmp_path, repo)
+
+    preview = manager.preview_source(
+        "install", SOURCE_URL, "folded", operator_id="operator"
+    )
+    assert [row["id"] for row in preview["admitted_skills"]] == ["alpha-skill", "beta-skill"]
+    _execute(manager, authority, preview)
+
+    installed = {row["name"]: row for row in skills.load("operator")}
+    assert installed["alpha-skill"]["description"] == FOLDED_EXPECTED
+    assert installed["alpha-skill"]["source"] == f"extension:skill-fixture@{folded_revision}"
+
+
+def test_publisher_metadata_fields_are_accepted_and_ignored(tmp_path, skill_repo):
+    repo, _v1, _v2 = skill_repo
+    (repo / "skills" / "alpha-skill" / "SKILL.md").write_text(
+        (
+            "---\n"
+            "name: alpha-skill\n"
+            "description: >\n"
+            "  Folded summary for the alpha workflow\n"
+            "  with two lines.\n"
+            'argument-hint: "[lite|full|ultra]"\n'
+            "license: MIT\n"
+            "allowed-tools: [Bash]\n"
+            "---\n\n"
+            "## Procedure\n\n1. Follow the reviewed procedure.\n"
+        ),
+        encoding="utf-8",
+    )
+    _commit(
+        repo,
+        _manifest(
+            "6.0.0",
+            entrypoint=".codex-plugin/plugin.json",
+            bundle_format="codex_plugin",
+            include=["alpha-skill"],
+        ),
+        "metadata",
+    )
+    manager, authority, _registry, skills = _manager(tmp_path, repo)
+
+    preview = manager.preview_source(
+        "install", SOURCE_URL, "metadata", operator_id="operator"
+    )
+    assert [row["id"] for row in preview["admitted_skills"]] == ["alpha-skill"]
+    _execute(manager, authority, preview)
+
+    installed = skills.load("operator")[0]
+    assert installed["description"] == (
+        "Folded summary for the alpha workflow with two lines."
+    )
 
 
 def test_registry_failure_restores_previous_native_bundle(tmp_path, skill_repo, monkeypatch):

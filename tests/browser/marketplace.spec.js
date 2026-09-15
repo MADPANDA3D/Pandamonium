@@ -170,7 +170,7 @@ test('marketplace renders loading, offline, empty, and mobile detail navigation'
   await expect(page.locator('#marketplace-results')).toContainText('Catalog verification failed');
   // The raw backend code is mapped to a human message plus next step (MAD-925).
   await expect(page.locator('#marketplace-results')).not.toContainText('marketplace_catalog_unsigned');
-  await expect(page.locator('#marketplace-results')).toContainText('Something went wrong during setup. Check the connection and try again.');
+  await expect(page.locator('#marketplace-results')).toContainText('could not be verified as trusted');
 
   await page.unroute('**/api/**');
   await mockApp(page, { schema_version: 'pandamonium.marketplace-view.v1', status: 'empty', failure: null, plugins: [] });
