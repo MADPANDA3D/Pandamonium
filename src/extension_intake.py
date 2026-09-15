@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -176,8 +177,27 @@ def validate_proposal(
             _check_schema(function["parameters"])
             if set(function["parameters"]["properties"]) != set(interface.arguments):
                 raise IntakeError("Every tool argument needs its own source evidence.")
-            for item in interface.arguments.values():
+            for name, item in interface.arguments.items():
                 evidence(item)
+                # Lexical support is necessary, not proof that generated code works.
+                argument = re.escape(name).replace("_", "[-_]")
+                kinds = {
+                    "string": r"str|string|text",
+                    "integer": r"int(?:eger|8|16|32|64)?|uint(?:8|16|32|64)?|[iu](?:8|16|32|64)|isize|usize",
+                    "number": r"number|float(?:32|64)?|double|decimal|f32|f64",
+                    "boolean": r"bool(?:ean)?|store_true|store_false",
+                    "array": r"array|list|tuple|sequence|vec|slice",
+                    "object": r"object|dict|map|mapping|struct",
+                    "null": r"null|none|nil",
+                }
+                kind = function["parameters"]["properties"][name]["type"]
+                if not re.search(rf"(?<!\w){argument}(?!\w)", item.quote, re.IGNORECASE) or not re.search(
+                    rf"\b(?:{kinds[kind]})\b", item.quote, re.IGNORECASE
+                ):
+                    raise IntakeError(
+                        "Each argument quote must contain its name (hyphen/underscore aliases allowed) "
+                        "and a source type matching its JSON type. Read the actual declaration."
+                    )
             if interface.output_schema is None:
                 raise IntakeError("Executable tools need an output schema.")
             _check_schema(interface.output_schema)
@@ -333,6 +353,9 @@ primary purpose from development tooling. Prefer existing native manifests, MCP/
 never turn Markdown skills into fake tools. Do not invent interfaces or argument types.
 Return ONLY JSON matching the supplied response schema. Request read_paths first when evidence is
 missing, or provide a proposal. Quote exact source excerpts for purpose, each binding and argument.
+Each argument quote must contain that argument's name and its explicit source type (e.g. count/int);
+keep source argument names, with hyphens normalized to underscores. If no typed declaration or
+documentation is available, return manifest=null and an actionable validation requirement.
 Generated files must live under .pandamonium/. Use stdlib Python for adapters: argv[1] is the tool
 name, stdin is a JSON arguments object, stdout is a JSON result matching output_schema, failures
 exit nonzero. Validate input; use subprocess argv without a shell; bound time/output; never install

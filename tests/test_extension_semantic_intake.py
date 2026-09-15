@@ -1,7 +1,9 @@
 """MAD-958: unknown-layout intake, untrusted model output and durable package jobs."""
 
 import asyncio
+import hashlib
 import json
+import os
 import subprocess
 import threading
 import time
@@ -189,6 +191,9 @@ def test_unknown_layout_reads_interfaces_repairs_and_preserves_real_adapter(tmp_
         "quote",
         "path",
         "argument",
+        "unrelated_argument_quote",
+        "invented_argument",
+        "wrong_argument_type",
         "type",
         "syntax",
         "overwrite",
@@ -208,6 +213,20 @@ def test_invalid_generated_bindings_fail_closed(tmp_path, mutation):
         data["files"][0]["path"] = "../escape.py"
     elif mutation == "argument":
         data["interfaces"][0]["arguments"] = {}
+    elif mutation == "unrelated_argument_quote":
+        data["interfaces"][0]["arguments"]["count"] = {
+            "path": "odd/place/command.py", "quote": "import argparse",
+        }
+    elif mutation == "invented_argument":
+        interface = data["interfaces"][0]
+        interface["arguments"]["discount"] = interface["arguments"].pop("count")
+        params = interface["tool_schema"]["function"]["parameters"]
+        params["properties"]["discount"] = params["properties"].pop("count")
+        params["required"] = ["discount"]
+    elif mutation == "wrong_argument_type":
+        data["interfaces"][0]["tool_schema"]["function"]["parameters"]["properties"][
+            "count"
+        ]["type"] = "string"
     elif mutation == "type":
         data["interfaces"][0]["tool_schema"]["function"]["parameters"]["properties"][
             "count"
@@ -265,6 +284,40 @@ def test_generation_attempts_are_bounded_and_cleanup(tmp_path):
     assert not list((tmp_path / "scans").glob("*/package.tar.gz"))
 
 
+def test_scan_retention_bounds_disk_and_cache_without_touching_active_or_foreign_paths(tmp_path, monkeypatch):
+    import src.extension_scan as scans
+
+    monkeypatch.setattr(scans, "SCAN_DIR", tmp_path / "scans")
+    monkeypatch.setattr(scans, "MAX_RETAINED_SCANS", 2)
+    monkeypatch.setattr(scans, "MAX_RETAINED_SCAN_BYTES", 10)
+    scans.reset_scan_jobs()
+    now = time.time()
+    paths = []
+    for age, size in [(1, 6), (2, 6), (3, 3), (4, 1), (90000, 1), (100000, 20)]:
+        target = scans.SCAN_DIR / str(uuid.uuid4())
+        _write(target, "package.tar.gz", "x" * size)
+        _write(target, "prepared/source", "old duplicate source tree")
+        scans._SCAN_JOBS[target.name] = {"scan_id": target.name}
+        os.utime(target, (now - age, now - age))
+        paths.append(target)
+    scans._SCAN_CANCEL[paths[-1].name] = threading.Event()
+    outside = tmp_path / "outside"
+    _write(outside, "keep", "user work")
+    (scans.SCAN_DIR / str(uuid.uuid4())).symlink_to(outside, target_is_directory=True)
+    _write(scans.SCAN_DIR, "not-a-scan/keep", "user work")
+    package = {"id": paths[0].name, "size_bytes": 6, "sha256": hashlib.sha256(b"xxxxxx").hexdigest()}
+    assert scans.scan_package_content({"package": package}) == b"xxxxxx"
+    assert [path.exists() for path in paths] == [True, False, True, False, False, True]
+    assert set(scans._SCAN_JOBS) == {paths[i].name for i in (0, 2, 5)}
+    assert not (paths[0] / "prepared").exists()
+    assert (paths[-1] / "prepared/source").is_file()
+    assert (outside / "keep").read_text() == "user work"
+    assert (scans.SCAN_DIR / "not-a-scan/keep").is_file()
+    with pytest.raises(ExtensionScanError, match="extension_scan_package_unavailable"):
+        scans.scan_package_content({"package": {**package, "id": paths[4].name}})
+    scans.reset_scan_jobs()
+
+
 def test_native_skills_bypass_generation_and_package_survives_real_admission(tmp_path):
     root = tmp_path / "source"
     _write(
@@ -284,6 +337,7 @@ def test_native_skills_bypass_generation_and_package_survives_real_admission(tmp
     )
     artifact = scanner.run(SOURCE_URL, "HEAD", operator_id="temporary-owner")
     package = artifact["package"]
+    assert not (scanner.data_dir / package["id"] / "prepared").exists()
     archive = (scanner.data_dir / package["id"] / "package.tar.gz").read_bytes()
     skills = SkillsManager(str(tmp_path / "skills"))
     manager = ExtensionLifecycleManager(

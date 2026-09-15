@@ -10,7 +10,10 @@ The model receives a bounded file index and source excerpts. It may request
 additional files, then returns a strict JSON proposal with purpose, exact source
 quotes, interface bindings, typed input/output schemas, setup keys, runtime
 requirements and a disposable validation recipe. Every argument must have source
-evidence. Incidental development skills cannot substitute for an application's
+evidence containing the argument name and a matching explicit source type. This
+lexical check rejects unrelated quotes; executable validation must still establish
+correct behavior. Undocumented/inferred types require further validation instead
+of a fabricated typed package. Incidental development skills cannot substitute for an application's
 purpose. Repository instructions are untrusted; no repository command runs during
 analysis. Native descriptors are reused; core code has no repository-name cases.
 
@@ -19,12 +22,12 @@ analysis. Native descriptors are reused; core code has no repository-name cases.
 Generated Python adapters, JSON descriptors and Markdown live under
 `.pandamonium/`; source files cannot be overwritten. The generated manifest uses
 an exact upstream URL/revision. `.pandamonium/integration.json` records purpose,
-interfaces, setup and validation requirements. The scanner retains the prepared
-source tree and deterministic `package.tar.gz` under the scan's managed data
+interfaces, setup and validation requirements. The scanner retains a deterministic
+`package.tar.gz` and removes its duplicate prepared source tree under the managed data
 directory. A package digest distinguishes separate integrations of one upstream
 revision. Source-plan installation verifies that archive, manifest and tree digest
 and passes the same bytes into the existing installer and authority flow; it does
-not reacquire source from Git. Prepared trees can use the existing publisher.
+not reacquire source from Git. Extracted prepared packages can use the existing publisher.
 
 Inline adapters use `python .pandamonium/adapter.py <tool_name>`, a JSON arguments
 object on stdin and a JSON result on stdout. Python syntax, declared schemas,
@@ -43,6 +46,10 @@ the immutable package tree. No dependencies or lifecycle commands run at intake.
 ## Bounds and recovery
 
 - At most two active scans; source limits remain 50,000 files / 512 MiB / 10 minutes.
+- Starting a scan or reading a package prunes terminal scan data older than 24
+  hours, above 32 records, or above 1 GiB of archives, keeping the newest that fit.
+  Up to two active scans are excluded; cleanup never targets installed packages.
+  An expired package requires a new scan. No periodic service is added.
 - At most 2,000 indexed filenames, 160,000 excerpt characters, 24,000 characters
   per selected file, 200,000 response characters and four model calls.
 - At most two repairs after an initial invalid proposal; actionable validation

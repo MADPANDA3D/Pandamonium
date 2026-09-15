@@ -53,6 +53,9 @@ from src.extension_registry import ExtensionContractError, validate_extension_ma
 from src.extension_skill_adapter import SkillBundleAdapter
 
 SCAN_DIR = Path(DATA_DIR) / "extension_scans"
+MAX_RETAINED_SCANS = 32
+MAX_RETAINED_SCAN_BYTES = 1024 * 1024 * 1024
+SCAN_RETENTION_SECONDS = 24 * 60 * 60
 
 MAX_FILE_READ_BYTES = 262_144
 MAX_TOTAL_READ_BYTES = 8 * 1024 * 1024
@@ -986,6 +989,7 @@ class ExtensionStaticScanner:
                 build_prepared_package(prepared, archive)
                 package = {"id": scan_id, "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                            "size_bytes": archive.stat().st_size, "tree_digest": package_tree_digest(prepared)}
+                shutil.rmtree(prepared)
                 check()
 
             report("report", "Building scan artifact")
@@ -1095,6 +1099,35 @@ def _public_job(job: Mapping[str, Any]) -> dict[str, Any]:
     return public
 
 
+def _prune_scan_storage(now: float) -> None:
+    """Bound disposable scan retention; callers hold _SCAN_LOCK."""
+    if not SCAN_DIR.exists():
+        return
+    candidates = []
+    for target in SCAN_DIR.iterdir():
+        if target.is_symlink() or not target.is_dir() or target.name in _SCAN_CANCEL:
+            continue
+        try:
+            if _job_dir(target.name) != target:
+                continue
+        except ExtensionScanError:
+            continue
+        candidates.append((target.stat().st_mtime, target))
+    retained = total = 0
+    for modified, target in sorted(candidates, reverse=True):
+        # Old revisions retained both forms; the verified archive is sufficient.
+        shutil.rmtree(target / "prepared", ignore_errors=True)
+        archive = target / "package.tar.gz"
+        size = archive.lstat().st_size if archive.exists() else 0
+        if (now - modified >= SCAN_RETENTION_SECONDS or retained >= MAX_RETAINED_SCANS
+                or total + size > MAX_RETAINED_SCAN_BYTES):
+            shutil.rmtree(target)
+            _SCAN_JOBS.pop(target.name, None)
+        else:
+            retained += 1
+            total += size
+
+
 def start_scan(
     source_url: str,
     requested_ref: str = "HEAD",
@@ -1136,6 +1169,7 @@ def start_scan(
         _SCAN_JOBS[scan_id] = job
         _SCAN_CANCEL[scan_id] = cancel
         try:
+            _prune_scan_storage(now)
             _persist_job(job)
         except OSError:
             _SCAN_JOBS.pop(scan_id, None)
@@ -1250,13 +1284,15 @@ def scan_package_content(artifact: Mapping[str, Any]) -> bytes | None:
     package = artifact.get("package")
     if not package:
         return None
-    path = _job_dir(package["id"]) / "package.tar.gz"
-    if (not path.is_file() or path.is_symlink() or path.stat().st_size != package["size_bytes"]):
-        raise ExtensionScanError("extension_scan_package_unavailable")
-    content = path.read_bytes()
-    if hashlib.sha256(content).hexdigest() != package["sha256"]:
-        raise ExtensionScanError("extension_scan_package_changed")
-    return content
+    with _SCAN_LOCK:
+        _prune_scan_storage(time.time())
+        path = _job_dir(package["id"]) / "package.tar.gz"
+        if (not path.is_file() or path.is_symlink() or path.stat().st_size != package["size_bytes"]):
+            raise ExtensionScanError("extension_scan_package_unavailable")
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != package["sha256"]:
+            raise ExtensionScanError("extension_scan_package_changed")
+        return content
 
 
 def reset_scan_jobs() -> None:

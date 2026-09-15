@@ -20,7 +20,7 @@ misrepresented as a static web plugin to mount unimplemented tools.
 
 ## Evidence, 2026-09-15
 
-- Focused intake/contracts/package/publisher/installer/sidebar matrix: **91 passed**;
+- Focused intake/contracts/package/publisher/installer/sidebar matrix: **95 passed**;
   includes source-link confinement and generated permission/runtime rejection.
 - Chromium intake suite: 6 passed, including desktop/mobile, unverified purpose,
   setup, reload recovery and cancellation.
@@ -48,6 +48,17 @@ calls wait for interactive quiet, but scan polling and visible-browser heartbeat
 continually reset that gate. Intake now uses the configured candidate resolver and
 foreground LLM gateway on the application's event loop. Unit and full-app checks
 cover the fix and coroutine cancellation.
+
+## Review corrections
+
+Argument evidence must now contain the actual parameter name and a matching
+explicit source type, rejecting real-but-unrelated quotes, invented names and
+wrong types. This is lexical corroboration, not executable correctness proof.
+Retention removes the duplicate prepared tree immediately and prunes terminal
+scan data by age, record count and archive bytes at scan start/package read.
+The disposable quota check also verifies active scans, foreign paths and installed
+data are outside cleanup scope. The 95-test focused suite and disposable full-app
+HTTP smoke passed again after these corrections.
 
 ## Browser evidence
 
