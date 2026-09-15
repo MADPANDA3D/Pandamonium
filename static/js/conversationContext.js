@@ -425,6 +425,10 @@ function bind() {
     const node = byId(id);
     if (node) new MutationObserver(_scheduleEffort).observe(node, { childList: true, characterData: true, subtree: true });
   }
+  // Defensive, order-independent settle: the models cache and the default
+  // pending chat resolve at arbitrary speeds relative to module evaluation,
+  // so re-render the control on staggered startup ticks as well.
+  for (const delay of [50, 300, 900]) setTimeout(renderEffort, delay);
   loadHistory();
 }
 
