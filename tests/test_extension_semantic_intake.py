@@ -130,12 +130,19 @@ def test_literal_source_search_reads_definition_beyond_first_excerpt(tmp_path):
     assert len(calls) == 2
 
 
-def test_optional_source_exclusions_keep_packaged_secret_gate(tmp_path):
+@pytest.mark.parametrize("assignment", [
+    "api_key = 'syntheticfixturecredential'",
+    "token = syntheticfixturecredential # production token",
+    "password: syntheticfixturecredential,",
+    '"secret_key": syntheticfixturecredential}',
+])
+def test_optional_source_exclusions_keep_packaged_secret_gate(tmp_path, assignment):
     root = source_tree(tmp_path)
-    (root / "optional.py").write_text("api_key = 'syntheticfixturecredential'\n")
+    (root / "optional.py").write_text(assignment + "\n")
     data = proposal()
 
     def model(messages, check):
+        assert "syntheticfixturecredential" not in json.dumps(messages)
         if "odd/place/command.py" not in json.loads(messages[-1]["content"])["untrusted_source_excerpts"]:
             return json.dumps({"read_paths": ["odd/place/command.py"]})
         return json.dumps({"proposal": data})

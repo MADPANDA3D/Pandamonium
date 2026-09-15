@@ -78,7 +78,7 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "critical"),
     ("assigned-secret", re.compile(
         r"(?i)\b(?:token|password|passwd|secret|api[_-]?key|secret[_-]?key)\b['\"]?\s*[:=]\s*['\"][A-Za-z0-9_\-./+]{12,}['\"]"
-        r"|(?im:^\s*(?:token|password|passwd|secret|api[_-]?key|secret[_-]?key)\s*=\s*[A-Za-z0-9_\-./+]{12,}\s*$)"
+        r"|(?im:^\s*['\"]?(?:token|password|passwd|secret|api[_-]?key|secret[_-]?key)['\"]?\s*[:=]\s*[A-Za-z0-9_\-./+]{12,}(?=\s*(?:$|[#;,}\]])))"
     ), "medium"),
 )
 DANGEROUS_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (

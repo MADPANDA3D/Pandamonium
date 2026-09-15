@@ -26,6 +26,9 @@ limits are 8 GiB virtual memory, 256 MiB per file, 256 open descriptors and 300 
 seconds. Timeout/cancellation kills the process group and child namespace. These
 are process/file bounds, not aggregate cgroup memory or disk quotas. Execution
 is serialized; use per-package locks if throughput becomes a problem.
+An approved buggy/malicious package can still exhaust host resources. Aggregate
+memory/process/storage enforcement is a tracked MAD-960 resource requirement
+before catalog/release execution; this source-only step does not claim it.
 
 Network is disabled for an empty declaration; otherwise the sandbox shares host
 network connectivity. Destination declarations are descriptive, not a firewall
