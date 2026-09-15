@@ -140,6 +140,11 @@ test('installed GitHub intake plugins appear in the marketplace with provenance'
     data_boundaries: { read: [], write: [], network: [] },
     capabilities: [], configuration: [], notes: [],
   } }));
+  await page.route('**/api/extensions/installed/superpowers/submissions', route => route.fulfill({ json: {
+    state: 'submitted', duplicate: false, digest: `sha256:${'e'.repeat(64)}`,
+    path: '/srv/odysseus/data/extensions/submissions/superpowers/444444444444/submission.json',
+    extension_id: 'superpowers', source_revision: '4'.repeat(40),
+  } }));
   await page.goto('/static/index.html');
   await page.getByRole('button', { name: 'Browse plugins' }).click();
   await page.getByRole('tab', { name: 'Marketplace' }).click();
@@ -156,6 +161,11 @@ test('installed GitHub intake plugins appear in the marketplace with provenance'
   await expect(detail).toContainText('Locally reviewed intake scan');
   await expect(detail.getByRole('button', { name: 'Disable' })).toBeVisible();
   await expect(detail.getByRole('button', { name: 'Remove' })).toBeVisible();
+
+  await detail.getByRole('button', { name: 'Offer to marketplace…' }).click();
+  await expect(detail).toContainText('Submission bundle written for review.');
+  await expect(detail).toContainText(`sha256:${'e'.repeat(64)}`);
+  await expect(detail).toContainText('Offline — catalog signing stays with the release tooling');
 });
 
 test('marketplace renders loading, offline, empty, and mobile detail navigation', async ({ page }) => {
