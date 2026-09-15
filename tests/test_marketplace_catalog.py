@@ -2,6 +2,8 @@ import asyncio
 import base64
 import copy
 import hashlib
+import io
+import tarfile
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -365,29 +367,32 @@ def test_signed_fixture_completes_full_marketplace_lifecycle(tmp_path):
     v1["manifest"]["capabilities"]["schemas"][0]["name"] = "inspect_fixture"
     catalog["entries"] = [v1, v2]
     _resign(catalog, catalog_key)
-    manifests = {
-        entry["manifest"]["source"]["revision"]: entry["manifest"]
-        for entry in catalog["entries"]
-    }
+    artifacts = {}
+    for entry in catalog["entries"]:
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as bundle:
+            for name, value in {
+                "jarvis-extension.json": json.dumps(entry["manifest"]),
+                "index.html": "generated " + entry["manifest"]["version"],
+            }.items():
+                data = value.encode()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                bundle.addfile(info, io.BytesIO(data))
+        content = output.getvalue()
+        digest = hashlib.sha256(content).hexdigest()
+        artifacts[digest] = content
+        entry["publisher"]["key_id"] = "catalog-root-2026"
+        entry["artifact"].update({
+            "sha256": digest, "size_bytes": len(content),
+            "signature": {"algorithm": "ed25519", "key_id": "catalog-root-2026",
+                          "value": _sign(catalog_key, f"sha256:{digest}".encode())},
+        })
+    _resign(catalog, catalog_key)
 
     class FixtureGit:
-        @staticmethod
-        def resolve_revision(source_url, requested_ref="HEAD"):
-            return (
-                normalize_git_source_url(source_url, check_public=False),
-                requested_ref,
-                requested_ref,
-            )
-
-        @staticmethod
-        def checkout(_source_url, _requested_ref, revision, destination):
-            destination.mkdir(parents=True)
-            manifest = copy.deepcopy(manifests[revision])
-            manifest["source"]["revision"] = "self"
-            (destination / "jarvis-extension.json").write_text(
-                json.dumps(manifest), encoding="utf-8"
-            )
-            (destination / "index.html").write_text("fixture", encoding="utf-8")
+        def resolve_revision(self, *args):
+            raise AssertionError("Marketplace installation must never clone Git")
 
     authority = AuthorityStore(tmp_path / "authority.json")
     registry = ExtensionRegistry(tmp_path / "registry.json")
@@ -401,7 +406,7 @@ def test_signed_fixture_completes_full_marketplace_lifecycle(tmp_path):
     router = setup_extension_routes(
         manager,
         marketplace_loader=lambda: (catalog, trusted),
-        artifact_loader=lambda _artifact: ARTIFACT,
+        artifact_loader=lambda artifact: artifacts[artifact["sha256"]],
     )
     endpoint = next(
         item.endpoint
