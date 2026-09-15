@@ -128,6 +128,36 @@ test('Plugins → Add Plugins previews and executes the approved lifecycle', asy
   await expect(page.locator('#add-plugins-btn')).toBeFocused();
 });
 
+test('installed GitHub intake plugins appear in the marketplace with provenance', async ({ page }) => {
+  await mockApp(page, { ...marketplace, status: 'empty', plugins: [] });
+  await page.route('**/api/extensions/installed', route => route.fulfill({ json: { plugins: [
+    { id: 'superpowers', name: 'Superpowers', version: '1.0.0', state: 'enabled', runtime: 'skills', descriptor: 'skill_bundle', origin: 'registry', capability_count: 11, source_revision: '4'.repeat(40) },
+  ] } }));
+  await page.route('**/api/extensions/installed/superpowers', route => route.fulfill({ json: {
+    id: 'superpowers', name: 'Superpowers', version: '1.0.0', state: 'enabled', runtime: 'skills', descriptor: 'skill_bundle', origin: 'registry',
+    source_revision: '4'.repeat(40),
+    permissions: { default: 'read_only', capabilities: {} },
+    data_boundaries: { read: [], write: [], network: [] },
+    capabilities: [], configuration: [], notes: [],
+  } }));
+  await page.goto('/static/index.html');
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+  await page.getByRole('tab', { name: 'Marketplace' }).click();
+
+  await expect(page.locator('#marketplace-results')).toContainText('Superpowers');
+  await expect(page.locator('#marketplace-results')).toContainText('GitHub intake');
+  await expect(page.locator('#marketplace-results')).not.toContainText('Verified');
+  await expect(page.locator('#marketplace-summary')).toContainText('showing installed plugins');
+
+  await page.getByRole('button', { name: /Superpowers/ }).click();
+  const detail = page.locator('#marketplace-detail');
+  await expect(detail).toContainText('GitHub intake');
+  await expect(detail).toContainText('Not catalog-signed');
+  await expect(detail).toContainText('Locally reviewed intake scan');
+  await expect(detail.getByRole('button', { name: 'Disable' })).toBeVisible();
+  await expect(detail.getByRole('button', { name: 'Remove' })).toBeVisible();
+});
+
 test('marketplace renders loading, offline, empty, and mobile detail navigation', async ({ page }) => {
   let resolveCatalog;
   await page.route('**/api/**', route => {
