@@ -1,0 +1,12 @@
+{
+  "schema_version": "pandamonium.extension-catalog.v1",
+  "catalog_id": "pandamonium-community",
+  "generated_at": "2026-09-15T22:51:25.051646+00:00",
+  "expires_at": "2026-12-14T22:51:25.051646+00:00",
+  "entries": [],
+  "signature": {
+    "algorithm": "ed25519",
+    "key_id": "pandamonium-marketplace-2026",
+    "value": "+nc2qw5bmfMx1FmD3YAqV+jgrfom6XatIftlnxO4UoGMAMLTSpJnLuKRzdFMqonUZB9axqBpIBFYOLwoLMN4Dg=="
+  }
+}
