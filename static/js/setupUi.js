@@ -48,6 +48,8 @@ const SETUP_ERROR_MESSAGES = {
     'This plugin is already installed. Use Update from the Installed plugins tab.',
   extension_not_installed_use_install:
     'This plugin is not installed yet. Install it first, then run the action again.',
+  extension_submission_unavailable:
+    'That plugin could not be prepared for marketplace review. Make sure it is installed and enabled, then try again.',
   extension_catalog_unavailable:
     'The plugin catalog is unavailable right now. Check the connection and try again.',
   marketplace_catalog_unsigned:

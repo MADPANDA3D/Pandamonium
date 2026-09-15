@@ -720,6 +720,38 @@ function renderActions(plugin) {
   return section;
 }
 
+function renderSubmission(plugin) {
+  const section = detailSection('Marketplace submission');
+  const status = element('p', 'marketplace-action-status', 'Bundle this exact pinned revision for marketplace review. Nothing is signed or published from here.');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  const actions = element('div', 'marketplace-action-buttons');
+  const offer = element('button', '', 'Offer to marketplace…');
+  offer.type = 'button';
+  offer.addEventListener('click', async () => {
+    offer.disabled = true;
+    status.textContent = 'Preparing submission bundle…';
+    try {
+      const result = await api(`/api/extensions/installed/${encodeURIComponent(plugin.id)}/submissions`, { method: 'POST' });
+      section.querySelectorAll('.marketplace-facts').forEach(node => node.remove());
+      status.textContent = result.duplicate
+        ? 'This revision is already submitted for review.'
+        : 'Submission bundle written for review.';
+      appendFacts(section, [
+        ['Digest', result.digest],
+        ['Bundle', result.path],
+        ['Publishing', 'Offline — catalog signing stays with the release tooling'],
+      ]);
+    } catch (error) {
+      status.textContent = `Offer unavailable: ${humanSetupError(error)}`;
+      offer.disabled = false;
+    }
+  });
+  actions.append(offer);
+  section.append(status, actions);
+  return section;
+}
+
 function renderDetail(plugin) {
   detailContent.replaceChildren();
   const isCatalogEntry = !plugin.origin;
@@ -816,6 +848,7 @@ function renderDetail(plugin) {
     detailContent.append(advisories);
   }
   detailContent.append(renderActions(plugin));
+  if (plugin.origin === 'intake') detailContent.append(renderSubmission(plugin));
 }
 
 function selectPlugin(id, focus = true) {

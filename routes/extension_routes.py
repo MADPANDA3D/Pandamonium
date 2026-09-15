@@ -30,6 +30,7 @@ from src.extension_registry import ExtensionContractError
 from src.extension_plugin_view import installed_plugin_detail, installed_plugin_rows
 from src.extension_scan import ExtensionScanError, get_scan, start_scan
 from src.extension_skill_adapter import SkillBundleAdapter
+from src.extension_submission import SubmissionError, build_submission_bundle
 from src.marketplace_catalog import (
     MarketplaceCatalogError,
     catalog_dependency_status,
@@ -239,6 +240,24 @@ def setup_extension_routes(
         if detail is None:
             raise HTTPException(status_code=404, detail="extension_plugin_not_found")
         return detail
+
+    @router.post(
+        "/installed/{extension_id}/submissions",
+        dependencies=[Depends(require_admin)],
+    )
+    async def offer_installed_plugin(
+        extension_id: str, owner: str = Depends(require_user)
+    ):
+        try:
+            return await asyncio.to_thread(
+                build_submission_bundle,
+                manager.registry,
+                extension_id,
+                operator_id=_operator(owner),
+            )
+        except SubmissionError as exc:
+            status = 404 if exc.code == "extension_not_installed" else 409
+            raise HTTPException(status, exc.code) from exc
 
     @router.get("/marketplace")
     async def list_marketplace(_owner: str = Depends(require_user)):
