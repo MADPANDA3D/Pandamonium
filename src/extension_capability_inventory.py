@@ -114,7 +114,7 @@ SCAN_FIELDS = frozenset(
 SCAN_CAPABILITY_FIELDS = frozenset(
     {"name", "kind", "descriptor", "permission_mode", "evidence_path"}
 )
-SCAN_OPTIONAL_FIELDS = frozenset({"integration", "package"})
+SCAN_OPTIONAL_FIELDS = frozenset({"integration", "package", "plugin"})
 DEPENDENCY_FIELDS = frozenset({"ecosystem", "name", "version"})
 FINDING_FIELDS = frozenset({"id", "severity", "category", "title", "evidence"})
 BOUNDS_FIELDS = frozenset({"files_scanned", "bytes_scanned", "duration_ms"})
@@ -647,6 +647,13 @@ def validate_scan_artifact(value: Any, *, require_complete: bool = False) -> dic
         "executed_repo_commands": [],
     }
     normalized["artifact_digest"] = declared_digest
+    if "plugin" in artifact:
+        from src.extension_metadata import package_metadata
+
+        expected = package_metadata(normalized.get("draft_manifest") or {})
+        if artifact["plugin"] != expected:
+            raise ExtensionContractError("extension_scan_metadata_mismatch")
+        normalized["plugin"] = expected
     if "integration" in artifact:
         from src.extension_intake import Proposal
 

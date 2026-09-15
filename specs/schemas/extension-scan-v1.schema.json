@@ -137,6 +137,10 @@
           "maximum": 536870912
         }
       }
+    },
+    "plugin": {
+      "type": "object",
+      "description": "Public projection derived from draft_manifest; must exactly match package_metadata."
     }
   },
   "$defs": {
@@ -530,6 +534,25 @@
             "needs_setup",
             "needs_validation"
           ]
+        },
+        "categories": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string"
+          }
+        },
+        "icon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "examples": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

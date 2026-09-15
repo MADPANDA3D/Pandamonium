@@ -16,6 +16,8 @@ from src.extension_capability_inventory import (
     resolve_mount_schemas,
 )
 from src.extension_cli_adapter import cli_revision, is_cli
+from src.extension_metadata import package_metadata
+from src.extension_plugin_view import plugin_readiness
 from src.extension_registry import ExtensionContractError, ExtensionRegistry
 
 MAX_EXTENSION_MOUNTS = 32
@@ -25,7 +27,7 @@ MAX_EXTENSION_MOUNTS = 32
 MOUNTABLE_DESCRIPTORS = frozenset({"mcp"})
 
 
-def extension_catalog_rows(registry: ExtensionRegistry) -> list[dict[str, Any]]:
+def extension_catalog_rows(registry: ExtensionRegistry, *, owner: str | None = None) -> list[dict[str, Any]]:
     """Sanitized installed-extension rows; works while an extension is disabled."""
     rows: list[dict[str, Any]] = []
     for extension_id, record in sorted(registry.snapshot()["extensions"].items()):
@@ -35,6 +37,8 @@ def extension_catalog_rows(registry: ExtensionRegistry) -> list[dict[str, Any]]:
         for item in items:
             by_kind[item["kind"]] = by_kind.get(item["kind"], 0) + 1
         rows.append({
+            **package_metadata(record["manifest"], inventory),
+            "readiness": plugin_readiness(record, owner=owner),
             "id": extension_id,
             "name": record["manifest"]["name"],
             "enabled": bool(record["enabled"]),
@@ -46,7 +50,7 @@ def extension_catalog_rows(registry: ExtensionRegistry) -> list[dict[str, Any]]:
 
 
 def inspect_extension(
-    registry: ExtensionRegistry, extension_id: str
+    registry: ExtensionRegistry, extension_id: str, *, owner: str | None = None
 ) -> dict[str, Any] | None:
     """Advisory capability detail for one installed extension, or None."""
     record = registry.snapshot()["extensions"].get(extension_id)
@@ -56,6 +60,8 @@ def inspect_extension(
     items = advisory_capability_items(inventory) if inventory else []
     descriptor = record["manifest"]["capabilities"]["descriptor"]["type"]
     return {
+        **package_metadata(record["manifest"], inventory),
+        "readiness": plugin_readiness(record, owner=owner),
         "id": extension_id,
         "name": record["manifest"]["name"],
         "version": record["manifest"]["version"],

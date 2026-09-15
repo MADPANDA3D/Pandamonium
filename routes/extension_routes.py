@@ -250,8 +250,8 @@ def setup_extension_routes(
 
     @router.put("/runtime/{extension_id}/configuration", dependencies=[Depends(require_admin)])
     async def save_runtime_configuration(extension_id: str, payload: ConfigurationRequest, owner: str = Depends(require_user)):
-        from src.extension_configuration import save
         from src.extension_cli_adapter import _LOCK
+        from src.extension_configuration import save
 
         def update():
             with manager._lock, _LOCK:
@@ -302,6 +302,7 @@ def setup_extension_routes(
                 installed_plugin_rows,
                 manager.registry,
                 configured_surfaces=_configured_plugin_surfaces(),
+                owner=_operator(_owner), root=manager.root,
             )
         }
 
@@ -312,6 +313,7 @@ def setup_extension_routes(
             manager.registry,
             extension_id,
             configured_surfaces=_configured_plugin_surfaces(),
+            owner=_operator(_owner), root=manager.root,
         )
         if detail is None:
             raise HTTPException(status_code=404, detail="extension_plugin_not_found")

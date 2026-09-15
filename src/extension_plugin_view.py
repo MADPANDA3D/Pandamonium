@@ -7,16 +7,57 @@ paths, private endpoints, or owner data.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from src.extension_capability_inventory import advisory_capability_items
 from src.extension_cli_adapter import is_cli
+from src.extension_installer import default_extensions_root
+from src.extension_metadata import package_metadata
 from src.extension_registry import ExtensionRegistry
 
 MAX_DESCRIPTION_CHARS = 300
 MAX_NAME_CHARS = 200
 MAX_VERSION_CHARS = 80
+
+
+def plugin_readiness(record: Mapping[str, Any], *, owner: str | None = None, root=None, lifecycle: Mapping[str, Any] | None = None) -> dict[str, str]:
+    """Read-only readiness; never mount tools or execute a health operation."""
+    from src.authority_protocol import operator_identity
+
+    owner = operator_identity(owner)
+    if lifecycle is None:
+        try:
+            lifecycle = json.loads(((Path(root) if root else default_extensions_root()) / "lifecycle.json").read_text())
+        except (OSError, ValueError):
+            lifecycle = {}
+    manifest = record["manifest"]
+    plans = [p for p in (lifecycle or {}).get("plans", {}).values()
+             if p.get("extension_id") == manifest["extension_id"] and p.get("operator_id") == owner]
+    latest: Mapping[str, Any] = max(plans, key=lambda p: p.get("created_at", ""), default={})
+    if latest.get("status") == "executing":
+        return {"state": "preparing", "message": "An approved package operation is running."}
+    if not record.get("enabled"):
+        if latest.get("status") == "failed":
+            return {"state": "failed", "message": "The last operation failed. Review setup and retry Enable."}
+        if latest.get("status") == "configuration_changed":
+            return {"state": "needs_setup", "message": "Setup changed. Enable to validate the new configuration."}
+        return {"state": "disabled", "message": "Enable this plugin to validate and use it."}
+    if is_cli(manifest):
+        if not owner:
+            return {"state": "needs_setup", "message": "Open Plugins as the installing owner to verify runtime setup."}
+        from src.extension_cli_adapter import GeneratedCliAdapter
+
+        return GeneratedCliAdapter(root).readiness(dict(record), owner)
+    if manifest["runtime"]["type"] == "skills":
+        declared = set(manifest["capabilities"]["descriptor"].get("include", []))
+        admitted = {item["id"] for item in record.get("admitted_skills", []) if item.get("owner_scope") == owner}
+        if owner and declared and declared <= admitted:
+            return {"state": "ready", "message": "Skills are admitted in the native Skills manager. Skills provide instructions; they are not executable tools."}
+        return {"state": "needs_setup", "message": "The declared skills are not all admitted for this account. Open Plugins as the installing owner to check setup."}
+    return {"state": "needs_setup", "message": "Connect or open the configured surface to check its live capabilities. An enabled record alone does not verify execution."}
 
 BROWSER_SURFACE_NOTE = (
     "Browser-surface extension: its tools become available when the surface is engaged."
@@ -27,6 +68,10 @@ CONFIGURED_SURFACE_NOTE = (
 )
 
 
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
 def _text(value: Any, maximum: int) -> str:
     return str(value if value is not None else "").strip()[:maximum]
 
@@ -35,29 +80,31 @@ def _capability_description(inventory: Mapping[str, Any], name: str) -> str:
     for item in inventory.get("capabilities") or []:
         if not isinstance(item, Mapping) or item.get("name") != name or item.get("kind") != "tool":
             continue
-        schema = item.get("schema") if isinstance(item.get("schema"), Mapping) else {}
-        function = schema.get("function") if isinstance(schema.get("function"), Mapping) else {}
+        schema = _mapping(item.get("schema"))
+        function = _mapping(schema.get("function"))
         description = _text(function.get("description"), MAX_DESCRIPTION_CHARS)
         if description:
             return description
     return ""
 
 
-def _registry_rows(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _registry_rows(snapshot: Mapping[str, Any], **context) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for extension_id, record in sorted(snapshot.items()):
         if not isinstance(record, Mapping):
             continue
-        manifest = record.get("manifest") if isinstance(record.get("manifest"), Mapping) else {}
+        manifest = _mapping(record.get("manifest"))
         inventory = record.get("capability_inventory")
         items = advisory_capability_items(inventory) if inventory else []
-        runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), Mapping) else {}
+        runtime = _mapping(manifest.get("runtime"))
         descriptor = (
             manifest.get("capabilities", {}).get("descriptor")
             if isinstance(manifest.get("capabilities"), Mapping)
             else {}
         )
         rows.append({
+            **package_metadata(manifest, inventory),
+            "readiness": plugin_readiness(record, **context),
             "id": extension_id,
             "name": _text(manifest.get("name") or extension_id, MAX_NAME_CHARS),
             "version": _text(manifest.get("version"), MAX_VERSION_CHARS),
@@ -74,15 +121,20 @@ def installed_plugin_rows(
     registry: ExtensionRegistry,
     *,
     configured_surfaces: Sequence[Mapping[str, Any]] = (),
+    owner: str | None = None,
+    root=None,
+    lifecycle: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """List installed registry extensions plus configured surfaces."""
     snapshot = registry.snapshot().get("extensions", {})
-    rows = _registry_rows(snapshot)
+    rows = _registry_rows(snapshot, owner=owner, root=root, lifecycle=lifecycle)
     for surface in configured_surfaces:
         surface_id = _text(surface.get("id"), 64)
         if not surface_id or surface_id in snapshot:
             continue
         rows.append({
+            **package_metadata({}),
+            "readiness": {"state": "needs_setup", "message": CONFIGURED_SURFACE_NOTE},
             "id": surface_id,
             "name": _text(surface.get("name") or surface_id, MAX_NAME_CHARS),
             "version": "",
@@ -96,24 +148,22 @@ def installed_plugin_rows(
     return rows
 
 
-def _registry_detail(extension_id: str, record: Mapping[str, Any]) -> dict[str, Any]:
-    manifest = record.get("manifest") if isinstance(record.get("manifest"), Mapping) else {}
+def _registry_detail(extension_id: str, record: Mapping[str, Any], **context) -> dict[str, Any]:
+    manifest = _mapping(record.get("manifest"))
     inventory = record.get("capability_inventory")
     items = advisory_capability_items(inventory) if inventory else []
     capabilities: list[dict[str, Any]] = []
     for item in items:
         capability = dict(item)
-        description = _capability_description(inventory, str(item.get("name") or ""))
+        description = _capability_description(inventory or {}, str(item.get("name") or ""))
         if description:
             capability["description"] = description
         capabilities.append(capability)
-    permissions = manifest.get("permissions") if isinstance(manifest.get("permissions"), Mapping) else {}
+    permissions = _mapping(manifest.get("permissions"))
     boundaries = (
-        manifest.get("data_boundaries")
-        if isinstance(manifest.get("data_boundaries"), Mapping)
-        else {}
+        _mapping(manifest.get("data_boundaries"))
     )
-    runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), Mapping) else {}
+    runtime = _mapping(manifest.get("runtime"))
     descriptor_block = (
         manifest.get("capabilities", {}).get("descriptor")
         if isinstance(manifest.get("capabilities"), Mapping)
@@ -126,6 +176,8 @@ def _registry_detail(extension_id: str, record: Mapping[str, Any]) -> dict[str, 
     elif str(runtime.get("type") or "") == "web" or descriptor in {"live_catalog", "inline"}:
         notes.append(BROWSER_SURFACE_NOTE)
     return {
+        **package_metadata(manifest, inventory),
+        "readiness": plugin_readiness(record, **context),
         "id": extension_id,
         "name": _text(manifest.get("name") or extension_id, MAX_NAME_CHARS),
         "version": _text(manifest.get("version"), MAX_VERSION_CHARS),
@@ -171,6 +223,8 @@ def _configured_detail(
 ) -> dict[str, Any]:
     surface_id = _text(surface.get("id"), 64)
     return {
+        **package_metadata({}),
+        "readiness": {"state": "needs_setup", "message": CONFIGURED_SURFACE_NOTE},
         "id": surface_id,
         "name": _text(surface.get("name") or surface_id, MAX_NAME_CHARS),
         "version": "",
@@ -192,6 +246,9 @@ def installed_plugin_detail(
     extension_id: str,
     *,
     configured_surfaces: Sequence[Mapping[str, Any]] = (),
+    owner: str | None = None,
+    root=None,
+    lifecycle: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Detail for one installed extension or configured surface, or None."""
     extension_id = _text(extension_id, 64)
@@ -200,7 +257,7 @@ def installed_plugin_detail(
     snapshot = registry.snapshot().get("extensions", {})
     record = snapshot.get(extension_id)
     if isinstance(record, Mapping):
-        return _registry_detail(extension_id, record)
+        return _registry_detail(extension_id, record, owner=owner, root=root, lifecycle=lifecycle)
     for surface in configured_surfaces:
         if _text(surface.get("id"), 64) == extension_id:
             return _configured_detail(surface)

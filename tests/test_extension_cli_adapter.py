@@ -83,6 +83,14 @@ def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monke
     assert spec["permission_mode"] == "external_side_effect"
     record = registry.snapshot()["extensions"]["demo-tools"]
     fresh = cli.GeneratedCliAdapter(root)
+    assert fresh.readiness(record, "operator")["state"] == "ready"
+    assert fresh.readiness(record, "another-owner")["state"] == "needs_setup"
+    installed_path = root / "installed" / "demo-tools" / "revisions" / cli.cli_revision("demo-tools")
+    marker = installed_path / "tampered.txt"
+    marker.write_text("changed after validation")
+    assert fresh.readiness(record, "operator")["state"] == "needs_setup"
+    marker.unlink()
+    assert fresh.readiness(record, "operator")["state"] == "ready"
     assert fresh.execute(record, name, {"count": 7}, "operator", threading.Event()) == {
         "result": 14
     }

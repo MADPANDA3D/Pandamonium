@@ -1,0 +1,54 @@
+{
+  "source": "https://github.com/dietrichgebert/ponytail",
+  "revision": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
+  "package": {
+    "id": "3d41b664-27c1-4121-9b1f-c0a48b6cbb78",
+    "sha256": "5f61d19d005bf02f81eb07d02250913377b01c8232ee1f947452ea3de63e4b3e",
+    "size_bytes": 1128720,
+    "tree_digest": "56d03b59d076f058f85449bd4f817dce06ccc778ba0004d513eae8fbc5040462"
+  },
+  "summary": "Lazy senior dev mode. Forces the simplest, shortest solution that actually works: YAGNI, stdlib first, no unrequested abstractions.",
+  "capabilities": [
+    {
+      "name": "ponytail",
+      "kind": "skill",
+      "description": "Forces the laziest solution that actually works, simplest, shortest, most minimal. Channels a senior dev who has seen everything: question whether the task needs to exist at all (YAGNI), reach for the standard library before custom code, native platform features before dependencies, one line before fifty. Supports intensity levels: lite, full (default), ultra. Use on ANY coding task: writing, adding, refactoring, fixing, reviewing, or designing code, and choosing libraries or dependencies. Also use whenever the user says \"ponytail\", \"be lazy\", \"lazy mode\", \"simplest solution\", \"minimal solution\", \"yagni\", \"do less\", or \"shortest path\", or complains about over-engineering, bloat, boilerplate, or unnecessary dependencies. Do NOT use for non-coding requests (general knowledge, prose, translation, summaries, recipes)."
+    },
+    {
+      "name": "ponytail-audit",
+      "kind": "skill",
+      "description": "Whole-repo audit for over-engineering. Like ponytail-review, but scans the entire codebase instead of a diff: a ranked list of what to delete, simplify, or replace with stdlib/native equivalents. Use when the user says \"audit this codebase\", \"audit for over-engineering\", \"what can I delete from this repo\", \"find bloat\", \"ponytail-audit\", or \"/ponytail-audit\". One-shot report, does not apply fixes."
+    },
+    {
+      "name": "ponytail-debt",
+      "kind": "skill",
+      "description": "Harvest every `ponytail:` comment in the codebase into a debt ledger, so the deliberate shortcuts and deferrals ponytail leaves behind get tracked instead of rotting into \"later means never\". Use when the user says \"ponytail debt\", \"/ponytail-debt\", \"what did ponytail defer\", \"list the shortcuts\", \"ponytail ledger\", or \"what did we mark to do later\". One-shot report, changes nothing."
+    },
+    {
+      "name": "ponytail-gain",
+      "kind": "skill",
+      "description": "Show ponytail's measured impact as a compact scoreboard: less code, less cost, more speed, from the benchmark medians. One-shot display, not a persistent mode, and not a per-repo number. Trigger: /ponytail-gain, \"ponytail gain\", \"what does ponytail save\", \"show ponytail impact\", \"ponytail scoreboard\"."
+    },
+    {
+      "name": "ponytail-help",
+      "kind": "skill",
+      "description": "Quick-reference card for all ponytail modes, skills, and commands. One-shot display, not a persistent mode. Trigger: /ponytail-help, \"ponytail help\", \"what ponytail commands\", \"how do I use ponytail\"."
+    },
+    {
+      "name": "ponytail-review",
+      "kind": "skill",
+      "description": "Code review focused exclusively on over-engineering. Finds what to delete: reinvented standard library, unneeded dependencies, speculative abstractions, dead flexibility. One line per finding: location, what to cut, what replaces it. Use when the user says \"review for over-engineering\", \"what can we delete\", \"is this over-engineered\", \"simplify review\", or invokes /ponytail-review. Complements correctness-focused review, this one only hunts complexity."
+    }
+  ],
+  "skill_count": 6,
+  "checks": [
+    "authenticated native URL scan",
+    "package metadata parity",
+    "native install and Skills admission",
+    "keyboard detail and focus return",
+    "desktop/mobile no overflow",
+    "marketplace parity",
+    "disable/enable/remove"
+  ],
+  "remaining_plugins": 0
+}
