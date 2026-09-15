@@ -49,6 +49,16 @@ continually reset that gate. Intake now uses the configured candidate resolver a
 foreground LLM gateway on the application's event loop. Unit and full-app checks
 cover the fix and coroutine cancellation.
 
+## Browser evidence
+
+The running browser UI with fixture API responses shows source purpose, setup and
+unverified operation status. Two desktop/mobile capture checks passed. Full-app
+backend integration was verified separately through authenticated HTTP above.
+
+![Desktop semantic intake](screenshots/mad958-intake-desktop.png)
+
+![Mobile semantic intake](screenshots/mad958-intake-mobile.png)
+
 ## Limits and next baton
 
 No live model provider was configured in the local checkout. The model HTTP
