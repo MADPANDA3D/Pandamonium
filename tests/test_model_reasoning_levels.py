@@ -16,9 +16,9 @@ REPO = Path(__file__).resolve().parent.parent
 # ── Capability resolver ──
 
 def test_reasoning_levels_openrouter_reasoning_models():
-    assert llm_core.reasoning_levels("openrouter", "deepseek/deepseek-v4.1-flash") == ("low", "medium", "high")
-    assert llm_core.reasoning_levels("openrouter", "qwen/qwen3-235b-a22b") == ("low", "medium", "high")
-    assert llm_core.reasoning_levels("openrouter", "openai/gpt-5-mini") == ("low", "medium", "high")
+    assert llm_core.reasoning_levels("openrouter", "deepseek/deepseek-v4.1-flash") == ("low", "medium", "high", "xhigh", "max")
+    assert llm_core.reasoning_levels("openrouter", "qwen/qwen3-235b-a22b") == ("low", "medium", "high", "xhigh", "max")
+    assert llm_core.reasoning_levels("openrouter", "openai/gpt-5-mini") == ("low", "medium", "high", "xhigh", "max")
 
 
 def test_reasoning_levels_plain_models_empty():
@@ -38,7 +38,7 @@ def test_reasoning_levels_openai_and_mistral():
 def test_reasoning_levels_for_url_uses_provider_detection():
     assert llm_core.reasoning_levels_for_url(
         "https://openrouter.ai/api/v1/chat/completions", "deepseek/deepseek-v4.1-flash",
-    ) == ("low", "medium", "high")
+    ) == ("low", "medium", "high", "xhigh", "max")
     assert llm_core.reasoning_levels_for_url(
         "http://127.0.0.1:11434/v1/chat/completions", "deepseek-r1:8b",
     ) == ()
@@ -62,6 +62,7 @@ def test_apply_reasoning_effort_maps_provider_fields():
 
 def test_apply_reasoning_effort_rejects_unknown_or_unsupported():
     payload = {"reasoning_effort": "high"}
+    # "ultra" is a display name, not a wire effort value.
     assert llm_core.apply_reasoning_effort(payload, "openrouter", "deepseek/deepseek-v4.1-flash", "ultra") is False
     assert payload == {"reasoning_effort": "high"}  # untouched
 
@@ -71,6 +72,17 @@ def test_apply_reasoning_effort_rejects_unknown_or_unsupported():
 
     payload = {}
     assert llm_core.apply_reasoning_effort(payload, "ollama", "qwen3:8b", "high") is False
+    assert payload == {}
+
+
+def test_apply_reasoning_effort_supports_full_openrouter_tiers():
+    for effort in ("xhigh", "max"):
+        payload = {}
+        assert llm_core.apply_reasoning_effort(payload, "openrouter", "deepseek/deepseek-v4.1-flash", effort) is True
+        assert payload["reasoning"] == {"effort": effort}
+
+    payload = {}
+    assert llm_core.apply_reasoning_effort(payload, "openai", "o3-mini", "xhigh") is False
     assert payload == {}
 
 
@@ -184,3 +196,26 @@ def test_chat_posts_reasoning_effort():
     source = (REPO / "static" / "js" / "chat.js").read_text()
     assert "getReasoningEffort" in source
     assert "fd.append('reasoning_effort'" in source
+
+
+# ── Composer control presentation (MAD-952) ──
+
+def test_composer_labels_use_operator_tiers():
+    source = (REPO / "static" / "js" / "conversationContext.js").read_text(encoding="utf-8")
+    assert "xhigh: 'Extra High'" in source
+    assert "max: 'Ultra'" in source
+
+
+def test_composer_chips_match_identity_pill_geometry():
+    css = (REPO / "static" / "style.css").read_text(encoding="utf-8")
+    block = css.split(".composer-effort-btn {", 1)[1].split("}", 1)[0]
+    assert "border-radius: 999px" in block
+    assert "min-height: 26px" in block
+    assert "background: var(--panel)" in block
+
+
+def test_composer_model_logo_is_icon_sized_outside_narrow_viewport_rules():
+    css = (REPO / "static" / "style.css").read_text(encoding="utf-8")
+    block = css.split(".composer-model-btn .model-picker-logo svg", 1)[1].split("}", 1)[0]
+    assert "width: 12px" in block
+    assert "height: 12px" in block

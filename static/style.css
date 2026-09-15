@@ -43769,15 +43769,16 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 21px;
-  padding: 0 6px;
+  min-height: 26px;
+  padding: 3px 10px;
   font-size: 11px;
   font-weight: 500;
   font-family: inherit;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  border-radius: 999px;
+  /* 65% mix matches the identity pill and clears WCAG AA on the dark bar. */
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -43812,6 +43813,16 @@ html.jarvis-voice-minimized .extension-surface-panel.is-open {
   flex-shrink: 0;
 }
 .composer-model-btn .model-picker-logo:empty { display: none; }
+/* Provider logos injected into composer/menu controls are presentational
+   viewBox SVGs; keep them icon-sized everywhere, independent of any
+   viewport-scoped sizing elsewhere in the sheet. */
+.composer-model-btn .model-picker-logo svg,
+.model-picker-menu .model-picker-logo svg {
+  width: 12px;
+  height: 12px;
+  max-width: 12px;
+  max-height: 12px;
+}
 .composer-model-btn.is-override {
   color: var(--fg);
 }
