@@ -36,7 +36,20 @@ CAPABILITY_KINDS = frozenset({"tool", "skill", "endpoint"})
 SCAN_STAGES = ("fetch", "classify", "extract", "audit", "report")
 SCAN_STAGE_PROGRESS = {"fetch": 10, "classify": 30, "extract": 55, "audit": 80, "report": 100}
 REPO_CLASSES = frozenset(
-    {"skill_bundle", "mcp_server", "python_cli", "node_cli", "web_app", "openapi", "unknown"}
+    {
+        "skill_bundle",
+        "mcp_server",
+        "python_cli",
+        "node_cli",
+        "web_app",
+        "openapi",
+        "go_cli",
+        "go_module",
+        "rust_cli",
+        "rust_lib",
+        "service",
+        "unknown",
+    }
 )
 FINDING_SEVERITIES = frozenset({"info", "low", "medium", "high", "critical"})
 FINDING_CATEGORIES = frozenset(

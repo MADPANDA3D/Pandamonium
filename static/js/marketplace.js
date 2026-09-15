@@ -28,6 +28,7 @@ let scanStatus;
 let scanTimer = null;
 let scanInFlight = false;
 let scanGeneration = 0;
+let scanStartedAt = null;
 let scanId = null;
 let installedPlugins = [];
 let installedSelectedId = null;
@@ -45,6 +46,23 @@ let panelMarketplace;
 let panelAdd;
 let activeTab = 'installed';
 const SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'report'];
+const REPO_CLASS_LABELS = {
+  skill_bundle: 'a skill package',
+  mcp_server: 'an MCP server',
+  python_cli: 'a Python tool',
+  node_cli: 'a Node tool',
+  web_app: 'a web app',
+  openapi: 'an OpenAPI service',
+  go_cli: 'a Go command-line tool',
+  go_module: 'a Go module',
+  rust_cli: 'a Rust command-line tool',
+  rust_lib: 'a Rust library',
+  service: 'a container service',
+  unknown: 'an unclassified repository',
+};
+const INSTALLABLE_REPO_CLASSES = new Set([
+  'skill_bundle', 'mcp_server', 'python_cli', 'node_cli', 'web_app', 'openapi',
+]);
 const SCAN_POLL_INTERVAL_MS = 900;
 
 const labels = {
@@ -390,7 +408,8 @@ function renderScanArtifact(artifact) {
   scanResults.hidden = false;
 
   const heading = detailSection('Scan result');
-  heading.append(element('p', '', `Repository classified as ${artifact.repo_class} at revision ${(artifact.source_revision || '').slice(0, 12)}…`));
+  const classLabel = REPO_CLASS_LABELS[artifact.repo_class] || `a ${artifact.repo_class} repository`;
+  heading.append(element('p', '', `Repository classified as ${classLabel} at revision ${(artifact.source_revision || '').slice(0, 12)}…`));
   appendFacts(heading, [
     ['Artifact digest', artifact.artifact_digest || 'unavailable'],
     ['Files scanned', String(artifact.bounds?.files_scanned ?? 0)],
@@ -443,8 +462,11 @@ function renderScanArtifact(artifact) {
       actions,
       element('p', 'marketplace-action-status', 'Nothing is installed yet — the next step shows the approval preview before anything changes.'),
     );
+  } else if (INSTALLABLE_REPO_CLASSES.has(artifact.repo_class)) {
+    draft.append(element('p', '', 'This repository did not produce an installable draft manifest; install stays unavailable.'));
   } else {
-    draft.append(element('p', '', 'This repository class did not produce a draft manifest; install stays unavailable.'));
+    const classLabel = REPO_CLASS_LABELS[artifact.repo_class] || `a ${artifact.repo_class} repository`;
+    draft.append(element('p', '', `This looks like ${classLabel} — Pandamonium scanned its dependencies, licenses, and findings but does not install this repository type as a plugin yet. Nothing was ingested.`));
   }
   scanResults.append(draft);
 }
@@ -456,11 +478,14 @@ async function pollScan(scanId, generation) {
     const job = await api(`/api/extensions/scans/${encodeURIComponent(scanId)}`);
     if (generation !== scanGeneration) return;
     const state = job.status === 'succeeded' ? 'complete' : job.status === 'failed' ? 'error' : 'working';
+    const elapsed = scanStartedAt && state === 'working'
+      ? ` · ${Math.max(1, Math.round((Date.now() - scanStartedAt) / 1000))}s`
+      : '';
     setScanProgress({
       state,
-      title: job.status === 'succeeded' ? 'Scan complete' : job.status === 'failed' ? 'Scan failed' : (job.message || 'Scanning…'),
+      title: job.status === 'succeeded' ? 'Scan complete' : job.status === 'failed' ? 'Scan failed' : `${job.message || 'Scanning…'}${elapsed}`,
       detail: job.status === 'succeeded'
-        ? `Classified as ${job.artifact?.repo_class || 'unknown'}`
+        ? `Classified as ${REPO_CLASS_LABELS[job.artifact?.repo_class] || job.artifact?.repo_class || 'unknown'}`
         : humanSetupError(job.error || job.message || ''),
       progress: job.progress,
       stage: job.stage,
@@ -499,6 +524,7 @@ async function startSourceScan() {
   stopScanPolling();
   const generation = ++scanGeneration;
   scanId = null;
+  scanStartedAt = Date.now();
   scanButton.disabled = true;
   setScanProgress({ state: 'working', title: 'Starting scan…', detail: url, progress: 0, stage: 'fetch' });
   try {
