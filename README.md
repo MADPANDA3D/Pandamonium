@@ -142,6 +142,10 @@ and [mobile](docs/screenshots/workspace-context-mobile.png).
 - Generic extension manifests, installed-plugin visibility, pinned Git source
   installation, capability registration, enable/disable lifecycle, and
   rollback without giving extensions authority over the host.
+- [Source-backed plugin intake](docs/repository-integration-generation.md) reads
+  actual interfaces through the configured model, preserves generated package
+  files, and supports cancellation and progress recovery. Prepared operations stay
+  **Needs validation** or **Needs setup** until their runtime checks pass.
 - Signed plugin marketplace discovery and approval-gated install, update,
   enable/disable, rollback, and recoverable removal through the native lifecycle.
   Marketplace installation uses the verified archive, preserving generated

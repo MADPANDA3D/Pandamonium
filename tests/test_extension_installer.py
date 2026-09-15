@@ -31,8 +31,7 @@ def _run(argv, *, cwd=None):
     return subprocess.run(
         argv,
         cwd=str(cwd) if cwd else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
@@ -104,8 +103,7 @@ def _mapped_git(repo: Path, source_url: str = SOURCE_URL) -> GitSourceClient:
             cwd=str(cwd) if cwd else None,
             env=dict(environment),
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
             timeout=timeout,
             check=False,
@@ -617,6 +615,7 @@ def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixt
         "/api/extensions/plans/{plan_id}/execute",
         "/api/extensions/scans",
         "/api/extensions/scans/{scan_id}",
+        "/api/extensions/scans/{scan_id}/cancel",
     }
     dependencies = {
         path: {dependency.call.__name__ for dependency in route.dependant.dependencies}

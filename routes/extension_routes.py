@@ -27,9 +27,17 @@ from src.extension_installer import (
 )
 from src.extension_mcp_adapter import mcp_extension_adapter
 from src.extension_package import PackageError
-from src.extension_registry import ExtensionContractError
 from src.extension_plugin_view import installed_plugin_detail, installed_plugin_rows
-from src.extension_scan import ExtensionScanError, get_scan, start_scan
+from src.extension_registry import ExtensionContractError
+from src.extension_scan import (
+    ExtensionScanError,
+    ExtensionStaticScanner,
+    cancel_scan,
+    configured_scan_model,
+    get_scan,
+    scan_package_content,
+    start_scan,
+)
 from src.extension_skill_adapter import SkillBundleAdapter
 from src.extension_submission import SubmissionError, build_submission_bundle
 from src.marketplace_catalog import (
@@ -140,7 +148,7 @@ def _configured_plugin_surfaces() -> list[dict[str, str]]:
             from src.extension_host import extension_runtime_host
 
             oracle_url = str(extension_runtime_host.urls.get("oracle") or "").strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - optional surface config must not break plugin discovery
         oracle_url = ""
     if oracle_url:
         surfaces.append({"id": "oracle", "name": "ORACLE", "runtime": "web"})
@@ -402,9 +410,13 @@ def setup_extension_routes(
             _bind_async_adapters()
             draft_manifest = None
             scan_revision = None
+            package_content = None
+            package_metadata = None
             if payload.scan_id:
                 job = await asyncio.to_thread(get_scan, payload.scan_id)
                 if job is None:
+                    raise HTTPException(404, "extension_scan_not_found")
+                if job.get("operator_id") != _operator(owner):
                     raise HTTPException(404, "extension_scan_not_found")
                 if job.get("status") != "succeeded":
                     raise HTTPException(409, "extension_scan_unavailable")
@@ -419,6 +431,8 @@ def setup_extension_routes(
                     raise HTTPException(400, "extension_scan_source_mismatch")
                 scan_revision = artifact["source_revision"]
                 draft_manifest = artifact.get("draft_manifest")
+                package_content = await asyncio.to_thread(scan_package_content, artifact)
+                package_metadata = artifact.get("package")
             return await asyncio.to_thread(
                 manager.preview_source,
                 payload.operation,
@@ -428,8 +442,10 @@ def setup_extension_routes(
                 scan_id=payload.scan_id,
                 scan_revision=scan_revision,
                 draft_manifest=draft_manifest,
+                prepared_content=package_content,
+                prepared_metadata=package_metadata,
             )
-        except (ExtensionLifecycleError, ExtensionContractError, PackageError) as exc:
+        except (ExtensionLifecycleError, ExtensionContractError, PackageError, ExtensionScanError) as exc:
             raise _http_error(exc) from exc
 
     @router.post("/scans", dependencies=[Depends(require_admin)])
@@ -437,11 +453,13 @@ def setup_extension_routes(
         payload: SourceScanRequest, owner: str = Depends(require_user)
     ):
         try:
+            scanner = ExtensionStaticScanner(model=configured_scan_model(owner, asyncio.get_running_loop()))
             return await asyncio.to_thread(
                 start_scan,
                 payload.source_url,
                 payload.ref,
                 operator_id=_operator(owner),
+                scanner=scanner,
             )
         except ExtensionScanError as exc:
             raise HTTPException(status_code=400, detail=str(exc.code)) from exc
@@ -449,8 +467,15 @@ def setup_extension_routes(
     @router.get("/scans/{scan_id}", dependencies=[Depends(require_admin)])
     async def get_source_scan(scan_id: str, owner: str = Depends(require_user)):
         job = await asyncio.to_thread(get_scan, scan_id)
-        if job is None:
+        if job is None or job.get("operator_id") != _operator(owner):
             raise HTTPException(status_code=404, detail="extension_scan_not_found")
+        return job
+
+    @router.post("/scans/{scan_id}/cancel", dependencies=[Depends(require_admin)])
+    async def cancel_source_scan(scan_id: str, owner: str = Depends(require_user)):
+        job = await asyncio.to_thread(cancel_scan, scan_id, operator_id=_operator(owner))
+        if job is None:
+            raise HTTPException(404, "extension_scan_not_found")
         return job
 
     @router.post("/plans/lifecycle", dependencies=[Depends(require_admin)])

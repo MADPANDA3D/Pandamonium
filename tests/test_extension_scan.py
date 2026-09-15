@@ -21,7 +21,6 @@ from src.extension_scan import (
     start_scan,
 )
 
-
 SOURCE_URL = "https://github.com/example/demo-tools.git"
 REVISION = "a" * 40
 
@@ -61,7 +60,7 @@ def _staging_empty(tmp_path: Path) -> bool:
     return not staging.exists() or not any(staging.iterdir())
 
 
-def test_scan_python_cli_reports_capabilities_dependencies_and_draft(tmp_path):
+def test_scan_python_cli_reports_evidence_without_inventing_empty_tool_schemas(tmp_path):
     source = tmp_path / "source"
     _write(source, "pyproject.toml", (
         "[project]\n"
@@ -88,10 +87,7 @@ def test_scan_python_cli_reports_capabilities_dependencies_and_draft(tmp_path):
     } in validated["dependencies"]
     assert validated["licenses"] == ["MIT"]
     assert validated["executed_repo_commands"] == []
-    assert validated["draft_manifest"] is not None
-    draft = validate_extension_manifest(validated["draft_manifest"])
-    assert draft["runtime"]["type"] == "service"
-    assert draft["capabilities"]["descriptor"]["type"] == "inline"
+    assert validated["draft_manifest"] is None
     assert _staging_empty(tmp_path)
 
 
@@ -340,7 +336,10 @@ def test_scan_findings_are_redacted_and_bounds_fail_closed(tmp_path):
 
 
 def test_scan_job_lifecycle_and_routes(tmp_path, monkeypatch):
-    import routes.extension_routes as extension_routes
+    import src.extension_scan as scan_module
+    from routes import extension_routes
+
+    monkeypatch.setattr(scan_module, "SCAN_DIR", tmp_path / "scans")
 
     source = tmp_path / "source"
     _write(source, "README.md", "# Nothing to classify")
@@ -379,7 +378,7 @@ def test_scan_job_lifecycle_and_routes(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         extension_routes, "get_scan",
-        lambda scan_id: {"scan_id": scan_id, "status": "succeeded"}
+        lambda scan_id: {"scan_id": scan_id, "status": "succeeded", "operator_id": "operator"}
         if scan_id == "scan-1" else None,
     )
 
@@ -406,7 +405,7 @@ def test_scan_job_lifecycle_and_routes(tmp_path, monkeypatch):
 
 
 def test_source_plan_route_passes_stored_scan_draft(tmp_path, monkeypatch):
-    import routes.extension_routes as extension_routes
+    from routes import extension_routes
 
     source = tmp_path / "source"
     _write(
@@ -439,11 +438,14 @@ def test_source_plan_route_passes_stored_scan_draft(tmp_path, monkeypatch):
         lambda scan_id: {
             "scan_id": scan_id,
             "status": "succeeded",
+            "operator_id": "operator",
             "artifact": artifact,
         }
         if scan_id == "scan-0001"
         else None,
     )
+
+    monkeypatch.setattr(extension_routes, "scan_package_content", lambda artifact: b"prepared-package")
 
     payload = extension_routes.SourcePlanRequest(
         operation="install",

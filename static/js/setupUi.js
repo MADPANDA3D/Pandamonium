@@ -10,6 +10,26 @@ export const MODEL_SETUP_ENTRY_LABEL = 'Connect a model engine';
 // a message plus next step; any other code-shaped detail falls back to generic
 // recovery copy instead of leaking the code.
 const SETUP_ERROR_MESSAGES = {
+  extension_scan_model_unavailable:
+    'The configured model could not analyze this source. Connect a working Background Tasks or Default model in Settings, then retry.',
+  extension_scan_model_timeout:
+    'Source analysis reached its model time limit. Try a faster configured model or a smaller source package.',
+  extension_scan_cancelled:
+    'Scan cancelled. Temporary package files are being cleaned up; start a new scan when ready.',
+  extension_scan_interrupted:
+    'A restart interrupted this scan. Start a new scan; nothing was installed.',
+  extension_scan_busy:
+    'Two scans are already active. Cancel one or wait for it to finish, then retry.',
+  extension_scan_package_unavailable:
+    'The prepared package is no longer available. Scan the source again.',
+  extension_scan_package_changed:
+    'The prepared package changed after analysis. Start a new scan before installing.',
+  extension_scan_source_secret:
+    'Source audit found a possible credential. Remove it from the source package before retrying.',
+  extension_scan_generated_secret:
+    'The generated adapter contains a possible credential. Use setup key declarations without values, then retry.',
+  extension_scan_storage_unavailable:
+    'Scan progress could not be saved. Check available disk space and data-directory permissions, then retry.',
   extension_scan_source_invalid:
     'That repository link is not supported. Use a public https:// link to a GitHub repository, then start the scan again.',
   extension_scan_not_found:

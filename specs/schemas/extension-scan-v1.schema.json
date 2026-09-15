@@ -6,91 +6,544 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "scan_version", "source_url", "source_revision", "stage", "repo_class",
-    "capabilities", "dependencies", "licenses", "findings", "draft_manifest",
-    "bounds", "executed_repo_commands", "artifact_digest"
+    "scan_version",
+    "source_url",
+    "source_revision",
+    "stage",
+    "repo_class",
+    "capabilities",
+    "dependencies",
+    "licenses",
+    "findings",
+    "draft_manifest",
+    "bounds",
+    "executed_repo_commands",
+    "artifact_digest"
   ],
   "properties": {
-    "scan_version": {"const": "jos-extension-scan.v1"},
-    "source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
-    "source_revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
-    "stage": {"enum": ["fetch", "classify", "extract", "audit", "report"]},
+    "scan_version": {
+      "const": "jos-extension-scan.v1"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "stage": {
+      "enum": [
+        "fetch",
+        "classify",
+        "extract",
+        "audit",
+        "understand",
+        "package",
+        "report"
+      ]
+    },
     "repo_class": {
-      "enum": ["skill_bundle", "mcp_server", "python_cli", "node_cli", "web_app", "openapi", "go_cli", "go_module", "rust_cli", "rust_lib", "service", "unknown"]
+      "enum": [
+        "skill_bundle",
+        "mcp_server",
+        "python_cli",
+        "node_cli",
+        "web_app",
+        "openapi",
+        "go_cli",
+        "go_module",
+        "rust_cli",
+        "rust_lib",
+        "service",
+        "unknown"
+      ]
     },
-    "capabilities": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/capability"}},
-    "dependencies": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dependency"}},
+    "capabilities": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
+    },
     "licenses": {
-      "type": "array", "maxItems": 32,
-      "items": {"type": "string", "minLength": 1, "maxLength": 200}
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
     },
-    "findings": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/finding"}},
-    "draft_manifest": {"type": ["object", "null"]},
-    "bounds": {"$ref": "#/$defs/bounds"},
-    "executed_repo_commands": {"type": "array", "maxItems": 0},
-    "artifact_digest": {"$ref": "#/$defs/digest"}
+    "findings": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "draft_manifest": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "bounds": {
+      "$ref": "#/$defs/bounds"
+    },
+    "executed_repo_commands": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "artifact_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "integration": {
+      "$ref": "#/$defs/integration"
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sha256",
+        "size_bytes",
+        "tree_digest"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "tree_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 536870912
+        }
+      }
+    }
   },
   "$defs": {
-    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
     "relativePath": {
-      "type": "string", "minLength": 1, "maxLength": 500,
-      "not": {"pattern": "^(?:/|.*(?:^|/)\\.\\.(?:/|$))"}
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "not": {
+        "pattern": "^(?:/|.*(?:^|/)\\.\\.(?:/|$))"
+      }
     },
     "permission": {
       "enum": [
-        "read_only", "bounded_write", "external_side_effect",
-        "destructive", "controlled_administrative"
+        "read_only",
+        "bounded_write",
+        "external_side_effect",
+        "destructive",
+        "controlled_administrative"
       ]
     },
     "capability": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "kind", "descriptor", "evidence_path"],
+      "required": [
+        "name",
+        "kind",
+        "descriptor",
+        "evidence_path"
+      ],
       "properties": {
-        "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"},
-        "kind": {"enum": ["tool", "skill", "endpoint"]},
-        "descriptor": {"enum": ["inline", "live_catalog", "mcp", "openapi", "skill_bundle"]},
-        "permission_mode": {"$ref": "#/$defs/permission"},
-        "evidence_path": {"$ref": "#/$defs/relativePath"}
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "tool",
+            "skill",
+            "endpoint"
+          ]
+        },
+        "descriptor": {
+          "enum": [
+            "inline",
+            "live_catalog",
+            "mcp",
+            "openapi",
+            "skill_bundle"
+          ]
+        },
+        "permission_mode": {
+          "$ref": "#/$defs/permission"
+        },
+        "evidence_path": {
+          "$ref": "#/$defs/relativePath"
+        }
       }
     },
     "dependency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ecosystem", "name"],
+      "required": [
+        "ecosystem",
+        "name"
+      ],
       "properties": {
-        "ecosystem": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
-        "name": {"type": "string", "minLength": 1, "maxLength": 200},
-        "version": {"type": "string", "minLength": 1, "maxLength": 80}
+        "ecosystem": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
       }
     },
     "finding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "severity", "category", "title"],
+      "required": [
+        "id",
+        "severity",
+        "category",
+        "title"
+      ],
       "properties": {
-        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
-        "severity": {"enum": ["info", "low", "medium", "high", "critical"]},
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
         "category": {
           "enum": [
-            "secret", "dangerous_pattern", "postinstall", "license",
-            "dependency", "oversized_blob", "network_egress", "privilege",
+            "secret",
+            "dangerous_pattern",
+            "postinstall",
+            "license",
+            "dependency",
+            "oversized_blob",
+            "network_egress",
+            "privilege",
             "skill_asset"
           ]
         },
-        "title": {"type": "string", "minLength": 1, "maxLength": 200},
-        "evidence": {"type": "string", "minLength": 1, "maxLength": 200}
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
       }
     },
     "bounds": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["files_scanned", "bytes_scanned", "duration_ms"],
+      "required": [
+        "files_scanned",
+        "bytes_scanned",
+        "duration_ms"
+      ],
       "properties": {
-        "files_scanned": {"type": "integer", "minimum": 0, "maximum": 50000},
-        "bytes_scanned": {"type": "integer", "minimum": 0, "maximum": 536870912},
-        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 600000}
+        "files_scanned": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50000
+        },
+        "bytes_scanned": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 536870912
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000
+        }
       }
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "quote"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "GeneratedFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 100000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "title": "GeneratedFile",
+      "type": "object"
+    },
+    "Interface": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 96,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "tool",
+            "skill",
+            "endpoint"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "binding": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Binding",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "tool_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Schema"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Arguments",
+          "type": "object"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Schema"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "binding",
+        "evidence"
+      ],
+      "title": "Interface",
+      "type": "object"
+    },
+    "Setup": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "secret": {
+          "title": "Secret",
+          "type": "boolean"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        }
+      },
+      "required": [
+        "key",
+        "description",
+        "required",
+        "secret",
+        "evidence"
+      ],
+      "title": "Setup",
+      "type": "object"
+    },
+    "integration": {
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "repo_class": {
+          "enum": [
+            "skill_bundle",
+            "mcp_server",
+            "python_cli",
+            "node_cli",
+            "web_app",
+            "openapi",
+            "go_cli",
+            "go_module",
+            "rust_cli",
+            "rust_lib",
+            "service",
+            "unknown"
+          ],
+          "title": "Repo Class",
+          "type": "string"
+        },
+        "interfaces": {
+          "items": {
+            "$ref": "#/$defs/Interface"
+          },
+          "maxItems": 64,
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "setup": {
+          "items": {
+            "$ref": "#/$defs/Setup"
+          },
+          "maxItems": 32,
+          "title": "Setup",
+          "type": "array"
+        },
+        "requirements": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Requirements",
+          "type": "array"
+        },
+        "validation": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Validation",
+          "type": "array"
+        },
+        "readiness": {
+          "enum": [
+            "needs_setup",
+            "needs_validation"
+          ]
+        }
+      },
+      "required": [
+        "purpose",
+        "evidence",
+        "repo_class",
+        "interfaces",
+        "setup",
+        "requirements",
+        "validation",
+        "readiness"
+      ],
+      "title": "Proposal",
+      "type": "object"
     }
   }
 }
