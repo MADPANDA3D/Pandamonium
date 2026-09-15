@@ -74,6 +74,11 @@ Reproduce with an empty disposable runtime (created/removed by the script):
 
 ## Agent/browser evidence and limits
 
+Approval-preview regression captures from the running UI with fixture API
+responses: [desktop](screenshots/mad959-cli-desktop.png) and
+[mobile](screenshots/mad959-cli-mobile.png). These demonstrate the disclosure and
+approval controls; the authenticated real-package proof is described below.
+
 A fresh authenticated uvicorn instance at localhost completed the visible URL
 scan, exact recipe/exclusion preview, approval and yt-dlp installation. Installed
 plugins showed both namespaced capabilities after a service restart. The same
