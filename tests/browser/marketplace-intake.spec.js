@@ -29,7 +29,7 @@ const artifact = {
   artifact_digest: `sha256:${'c'.repeat(64)}`,
 };
 
-async function mockApp(page) {
+async function mockApp(page, scannedArtifact = artifact) {
   let scanPolls = 0;
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
@@ -44,7 +44,7 @@ async function mockApp(page) {
       if (scanPolls === 1) {
         return route.fulfill({ json: { scan_id: 'scan-1', status: 'running', stage: 'extract', progress: 55, message: 'Extracting entrypoints' } });
       }
-      return route.fulfill({ json: { scan_id: 'scan-1', status: 'succeeded', stage: 'report', progress: 100, message: 'Scan complete', artifact } });
+      return route.fulfill({ json: { scan_id: 'scan-1', status: 'succeeded', stage: 'report', progress: 100, message: 'Scan complete', artifact: scannedArtifact } });
     }
     if (path === '/api/extensions/plans/source') {
       return route.fulfill({ json: {
@@ -93,6 +93,29 @@ test('Add from GitHub scans, reviews, and installs through approval', async ({ p
   await expect(page.getByRole('button', { name: '← Back to scan' })).toBeVisible();
   await page.getByRole('button', { name: 'Approve once' }).click();
   await expect(page.locator('#marketplace-summary')).toContainText('Demo Tools: Install completed.');
+});
+
+const goCliArtifact = {
+  ...artifact,
+  repo_class: 'go_cli',
+  capabilities: [],
+  draft_manifest: null,
+};
+
+test('Add from GitHub names a non-installable repository honestly', async ({ page }) => {
+  await mockApp(page, goCliArtifact);
+  await page.goto('/static/index.html');
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
+
+  await page.locator('#marketplace-source-url').fill(SOURCE_URL);
+  await page.getByRole('button', { name: 'Scan repository' }).click();
+  await expect(page.locator('#marketplace-scan-progress')).toHaveAttribute('data-state', 'complete', { timeout: 15000 });
+
+  await expect(page.locator('#marketplace-scan-results')).toContainText('a Go command-line tool');
+  await expect(page.locator('#marketplace-scan-results')).toContainText('does not install this repository type as a plugin yet');
+  await expect(page.locator('#marketplace-scan-results')).toContainText('Nothing was ingested');
+  await expect(page.getByRole('button', { name: 'Install plugin…' })).toHaveCount(0);
 });
 
 test('Add from GitHub explains a missing manifest instead of a raw code', async ({ page }) => {

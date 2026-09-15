@@ -206,6 +206,113 @@ def test_scan_skill_bundle_without_descriptor_or_single_skill_has_no_draft(tmp_p
     assert artifact["draft_manifest"] is None
 
 
+def test_scan_go_cli_ignores_incidental_dev_tooling_skills(tmp_path):
+    source = tmp_path / "source"
+    _write(source, "go.mod", (
+        "module github.com/example/movie-cli\n"
+        "\n"
+        "go 1.26\n"
+        "\n"
+        "require (\n"
+        "\tgithub.com/spf13/cobra v1.8.0\n"
+        ")\n"
+    ))
+    _write(source, "main.go", "package main\n\nfunc main() {}\n")
+    _write(source, "cmd/play/main.go", "package main\n\nfunc main() {}\n")
+    _write(
+        source,
+        ".opencode/skills/caveman/SKILL.md",
+        "---\nname: caveman\ndescription: Repository dev tooling\n---\n# Procedure\n",
+    )
+    _write(source, "LICENSE", "MIT License\n")
+    _write(source, "README.md", "# Movie CLI\n")
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+    validated = validate_scan_artifact(artifact, require_complete=True)
+
+    assert validated["repo_class"] == "go_cli"
+    assert validated["draft_manifest"] is None
+    assert [item for item in validated["capabilities"] if item["kind"] == "skill"] == []
+    assert {
+        "ecosystem": "go",
+        "name": "github.com/spf13/cobra",
+        "version": "v1.8.0",
+    } in validated["dependencies"]
+    assert _staging_empty(tmp_path)
+
+
+def test_scan_rust_cli_and_library_are_distinguished(tmp_path):
+    cli = tmp_path / "cli"
+    _write(cli, "Cargo.toml", (
+        "[package]\n"
+        'name = "movie-cli"\n'
+        'version = "0.1.0"\n'
+        "\n"
+        "[dependencies]\n"
+        'clap = "4.5.4"\n'
+    ))
+    _write(cli, "src/main.rs", "fn main() {}\n")
+    cli_artifact = _scanner(tmp_path, cli).run(SOURCE_URL, "HEAD", operator_id="operator")
+    assert cli_artifact["repo_class"] == "rust_cli"
+    assert cli_artifact["draft_manifest"] is None
+    assert {
+        "ecosystem": "cargo",
+        "name": "clap",
+        "version": "4.5.4",
+    } in cli_artifact["dependencies"]
+
+    library = tmp_path / "library"
+    _write(library, "Cargo.toml", '[package]\nname = "movie-core"\nversion = "0.1.0"\n')
+    _write(library, "src/lib.rs", "pub fn play() {}\n")
+    lib_artifact = _scanner(tmp_path, library).run(SOURCE_URL, "HEAD", operator_id="operator")
+    assert lib_artifact["repo_class"] == "rust_lib"
+
+
+def test_scan_declared_skill_plugin_beats_package_json_tooling(tmp_path):
+    source = tmp_path / "source"
+    _write(
+        source,
+        ".codex-plugin/plugin.json",
+        json.dumps({"name": "bundle", "skills": "./skills/"}),
+    )
+    _write(source, "package.json", json.dumps({"name": "tooling", "private": True}))
+    _write(
+        source,
+        "skills/alpha-skill/SKILL.md",
+        "---\nname: alpha-skill\ndescription: Run the alpha workflow\n---\n# Procedure\n\n1. Do it.\n",
+    )
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    assert artifact["repo_class"] == "skill_bundle"
+    assert artifact["draft_manifest"] is not None
+
+
+def test_scan_root_skill_md_classifies_skill_bundle(tmp_path):
+    source = tmp_path / "source"
+    _write(
+        source,
+        "SKILL.md",
+        "---\nname: root-skill\ndescription: Root skill bundle\n---\n# Procedure\n\n1. Do it.\n",
+    )
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    assert artifact["repo_class"] == "skill_bundle"
+    assert artifact["draft_manifest"] is not None
+
+
+def test_scan_container_service_without_toolchain_is_service_class(tmp_path):
+    source = tmp_path / "source"
+    _write(source, "Dockerfile", "FROM alpine:3.20\n")
+    _write(source, "docker-compose.yml", "services:\n  app:\n    build: .\n")
+
+    artifact = _scanner(tmp_path, source).run(SOURCE_URL, "HEAD", operator_id="operator")
+
+    assert artifact["repo_class"] == "service"
+    assert artifact["draft_manifest"] is None
+
+
 def test_scan_findings_are_redacted_and_bounds_fail_closed(tmp_path):
     source = tmp_path / "source"
     _write(source, "package.json", json.dumps({

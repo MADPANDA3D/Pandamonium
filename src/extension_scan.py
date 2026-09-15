@@ -227,6 +227,63 @@ class ExtensionStaticScanner:
 
     # -- stages -------------------------------------------------------------
 
+    @staticmethod
+    def _has_go_binary(relative: Mapping[str, Path]) -> bool:
+        if "main.go" in relative:
+            return True
+        return any(
+            key.startswith("cmd/") and key.endswith(".go") for key in relative
+        )
+
+    @staticmethod
+    def _has_rust_binary(relative: Mapping[str, Path]) -> bool:
+        if "src/main.rs" in relative:
+            return True
+        if any(
+            key.startswith("src/bin/") and key.endswith(".rs") for key in relative
+        ):
+            return True
+        cargo = next(
+            (path for key, path in relative.items() if key.lower() == "cargo.toml"),
+            None,
+        )
+        if cargo is None:
+            return False
+        try:
+            return "[[bin]]" in cargo.read_text(encoding="utf-8")
+        except OSError:
+            return False
+
+    @staticmethod
+    def _declared_skill_plugin(relative: Mapping[str, Path]) -> bool:
+        for descriptor_key in (".codex-plugin/plugin.json", ".claude-plugin/plugin.json"):
+            descriptor_path = relative.get(descriptor_key)
+            if descriptor_path is None:
+                continue
+            try:
+                descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (
+                isinstance(descriptor, Mapping)
+                and isinstance(descriptor.get("skills"), str)
+                and descriptor["skills"].strip()
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _skill_intent(relative: Mapping[str, Path]) -> bool:
+        """Skills classify a repo only when they are its primary surface."""
+        if "SKILL.md" in relative:
+            return True
+        if ExtensionStaticScanner._declared_skill_plugin(relative):
+            return True
+        return any(
+            key.startswith("skills/") and key.lower().endswith("/skill.md")
+            for key in relative
+        )
+
     def _classify(self, root: Path, files: list[Path]) -> tuple[str, dict[str, Any] | None]:
         relative = {path.relative_to(root).as_posix(): path for path in files}
         manifest = None
@@ -254,21 +311,43 @@ class ExtensionStaticScanner:
                 return "node_cli", manifest
             return "python_cli", manifest
 
+        lowered = {key.lower() for key in relative}
         names = {Path(key).name.lower() for key in relative}
-        if any(key.lower().endswith("skill.md") for key in relative):
+
+        # An explicit plugin descriptor that declares skills is distribution
+        # intent and outranks generic language tooling.
+        if self._declared_skill_plugin(relative):
             return "skill_bundle", None
+
+        # A repository is primarily what it builds. Toolchain signals outrank
+        # incidental skill folders that repos keep for their own dev tooling.
+        if "go.mod" in names:
+            return ("go_cli" if self._has_go_binary(relative) else "go_module"), None
+        if "cargo.toml" in names:
+            return ("rust_cli" if self._has_rust_binary(relative) else "rust_lib"), None
         if names & {"mcp.json", ".mcp.json", "mcp-config.json"}:
             return "mcp_server", None
-        if "pyproject.toml" in {key.lower() for key in relative} or "setup.py" in {
-            key.lower() for key in relative
-        }:
+        if names & {"pyproject.toml", "setup.py", "requirements.txt"}:
             return "python_cli", None
         if "package.json" in names:
             return "node_cli", None
-        if any(key.lower().endswith(("openapi.json", "openapi.yaml", "openapi.yml", "swagger.json")) for key in relative):
+        if any(
+            key.endswith(("openapi.json", "openapi.yaml", "openapi.yml", "swagger.json"))
+            for key in lowered
+        ):
             return "openapi", None
         if "index.html" in names:
             return "web_app", None
+        if names & {
+            "dockerfile",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+            "compose.yml",
+            "compose.yaml",
+        }:
+            return "service", None
+        if self._skill_intent(relative):
+            return "skill_bundle", None
         return "unknown", None
 
     def _extract(
@@ -487,7 +566,7 @@ class ExtensionStaticScanner:
                 return layout
         candidates: list[tuple[str, str]] = []
         for key in sorted(relative):
-            if not key.lower().endswith("/skill.md"):
+            if not key.lower().endswith("/skill.md") or not key.startswith("skills/"):
                 continue
             parent = Path(key).parent.name
             if not parent:
@@ -556,6 +635,39 @@ class ExtensionStaticScanner:
                 for key, version in sorted((data.get("devDependencies") or {}).items()):
                     add("npm", key, str(version))
             except (OSError, ValueError):
+                pass
+        go_mod = relative.get("go.mod")
+        if go_mod is not None:
+            try:
+                for raw_line in go_mod.read_text(encoding="utf-8").splitlines():
+                    line = raw_line.split("//", 1)[0].strip()
+                    if not line or line.startswith(("module ", "go ", "toolchain ", "replace ", "exclude ", ")", "require (")):
+                        continue
+                    if line.startswith("require "):
+                        line = line[len("require "):].strip()
+                    parts = line.split()
+                    if (
+                        len(parts) >= 2
+                        and parts[1].startswith("v")
+                        and re.fullmatch(r"[A-Za-z0-9_.\-/]+", parts[0])
+                    ):
+                        add("go", parts[0], parts[1])
+            except OSError:
+                pass
+        cargo = relative.get("Cargo.toml")
+        if cargo is not None:
+            try:
+                data = tomllib.loads(cargo.read_text(encoding="utf-8"))
+                for section in ("dependencies", "dev-dependencies", "build-dependencies"):
+                    for name, spec in sorted((data.get(section) or {}).items()):
+                        if isinstance(spec, str):
+                            version = spec
+                        elif isinstance(spec, Mapping) and spec.get("version"):
+                            version = str(spec["version"])
+                        else:
+                            version = None
+                        add("cargo", name, version)
+            except (OSError, ValueError, tomllib.TOMLDecodeError):
                 pass
         return dependencies
 

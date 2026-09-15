@@ -11614,6 +11614,20 @@ details a:hover {
 .mad-mcp-phase-list li[data-state="complete"] { opacity: 1; }
 .mad-mcp-phase-list li[data-state="complete"] > span { background: #fff8e7; border-color: #fff8e7; box-shadow: 0 0 8px #fff8e7; }
 .mad-mcp-phase-list li[data-state="failed"] { opacity: 1; color: var(--red); }
+/* MAD-955: a long fetch must visibly look alive, not solid. */
+.marketplace-scan-progress[data-state="working"] .updater-progress-meter > span {
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--green, #50fa7b) 82%, var(--bg)) 0 10px,
+    #fff8e7 10px 20px
+  );
+  background-size: 20px 100%;
+  animation: marketplace-scan-stripes 0.9s linear infinite;
+}
+@keyframes marketplace-scan-stripes {
+  from { background-position: 0 0; }
+  to { background-position: 20px 0; }
+}
 
 .mad-mcp-metrics { display: flex; gap: 8px; }
 .mad-mcp-metrics span { border: 1px solid color-mix(in srgb, var(--fg) 18%, var(--border)); border-radius: 8px; padding: 7px 9px; color: var(--fg); font-size: 10px; }
