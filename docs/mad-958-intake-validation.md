@@ -26,7 +26,8 @@ misrepresented as a static web plugin to mount unimplemented tools.
   setup, reload recovery and cancellation.
 - Full Python first run: 6,434 passed, 5 skipped, one stale assertion expecting
   the former five-phase UI. Updated the assertion and added the two new phase
-  elements. Final complete-suite and CI counts belong in the live issue closeout.
+  elements. Final full Python rerun: **6,438 passed / 5 skipped** in 217.51 seconds.
+  Final six-test browser rerun also passed. Required PR CI remains the merge gate.
 - Ruff passes for changed Python sources/tests; mypy passes all five changed
   source modules with `--follow-imports=skip --ignore-missing-imports`; isort
   black-profile checks, Python compileall, JS syntax and diff hygiene pass.
