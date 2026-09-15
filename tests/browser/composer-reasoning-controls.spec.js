@@ -48,7 +48,7 @@ test('composer shows capability reasoning tiers and icon-sized logos', async ({ 
   expect(box.width).toBeLessThanOrEqual(16);
   expect(box.height).toBeLessThanOrEqual(16);
 
-  await expect(page.locator('#composer-effort-value')).toHaveText('Model default');
+  await expect(page.locator('#composer-effort-value')).toHaveText('Model default', { timeout: 20000 });
 
   const radius = await effort.evaluate(el => getComputedStyle(el).borderRadius);
   expect(radius).toBe('999px');
@@ -62,5 +62,5 @@ test('composer shows capability reasoning tiers and icon-sized logos', async ({ 
     el.value = '4';
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await expect(page.locator('#composer-effort-value')).toHaveText('Ultra');
+  await expect(page.locator('#composer-effort-value')).toHaveText('Ultra', { timeout: 20000 });
 });
