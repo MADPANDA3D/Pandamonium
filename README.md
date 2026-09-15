@@ -161,7 +161,10 @@ and [mobile](docs/screenshots/workspace-context-mobile.png).
 - Signed plugin marketplace discovery and approval-gated install, update,
   enable/disable, rollback, and recoverable removal through the native lifecycle.
   Marketplace installation uses the verified archive, preserving generated
-  integration files. The [publishing runbook](docs/marketplace-publishing-runbook.md)
+  integration files. Developer **Add to marketplace** validates in disposable state,
+  signs and publishes the tested package; fresh installations bootstrap the
+  shared signed catalog and public trust key, with refresh and verified cache.
+  The [publishing runbook](docs/marketplace-publishing-runbook.md)
   covers prepared packages; the [ingestion program](docs/repository-plugin-ingestion-plan.md)
   tracks the remaining URL-to-tool and marketplace work.
 - Scoped client-state and foreground-action bridges for extensions that need

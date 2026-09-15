@@ -1,0 +1,8 @@
+{
+  "rollback_commit": "133d4a55da9277132110be2f1997ec33362584bd",
+  "restore_commit": "04ce3250be846b4d53b4e0d7b316f9cf0fb97815",
+  "rollback_count": 0,
+  "restored_count": 1,
+  "artifact_digest": "4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27",
+  "signatures_verified": true
+}

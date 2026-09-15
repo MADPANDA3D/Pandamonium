@@ -289,7 +289,10 @@ function renderInstalledDetail(payload) {
   if (payload.origin !== 'configured' && payload.configuration?.length) {
     renderRuntimeSetup(setup, payload.id, null, () => selectInstalled(payload.id));
   }
-  if (payload.origin !== 'configured') renderInstalledLifecycle(payload);
+  if (payload.origin !== 'configured') {
+    renderInstalledLifecycle(payload);
+    installedDetailContent.append(renderPublication(`/api/extensions/installed/${encodeURIComponent(payload.id)}/publish`, payload.version));
+  }
   const diagnostics = technicalDetails();
   const identity = detailSection('Identity');
   appendFacts(identity, [['Origin', payload.origin], ['State', payload.state], ['Version', payload.version || 'unversioned'], ['Runtime', payload.runtime || 'unknown'], ['Descriptor', payload.descriptor || 'unknown'], ['Revision', payload.source_revision || 'not recorded']]);
@@ -549,6 +552,7 @@ function renderScanArtifact(artifact) {
     install.type = 'button';
     install.addEventListener('click', () => prepareSourceAction(artifact, draft, actions));
     actions.append(install);
+    draft.append(renderPublication(`/api/extensions/scans/${encodeURIComponent(scanId)}/publish`));
     draft.append(
       actions,
       element('p', 'marketplace-action-status', 'Nothing is installed yet — the next step shows the approval preview before anything changes.'),
@@ -836,35 +840,48 @@ function renderActions(plugin) {
   return section;
 }
 
-function renderSubmission(plugin) {
-  const section = detailSection('Marketplace submission');
-  const status = element('p', 'marketplace-action-status', 'Bundle this exact pinned revision for marketplace review. Nothing is signed or published from here.');
+function renderPublication(endpoint, currentVersion = '1.0.0') {
+  const section = detailSection('Publish to marketplace');
+  const status = element('p', 'marketplace-action-status', 'Validate in disposable state, then sign and publish this package. Account configuration and runtime data stay private.');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const actions = element('div', 'marketplace-action-buttons');
-  const offer = element('button', '', 'Offer to marketplace…');
+  const versionLabel = element('label', '', 'Package version ');
+  const version = element('input');
+  version.type = 'text';
+  version.value = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(currentVersion) ? currentVersion : '1.0.0';
+  version.setAttribute('aria-label', 'Marketplace package version');
+  versionLabel.append(version);
+  const offer = element('button', '', 'Add to marketplace');
   offer.type = 'button';
   offer.addEventListener('click', async () => {
     offer.disabled = true;
-    status.textContent = 'Preparing submission bundle…';
+    status.textContent = 'Preparing publication…';
     try {
-      const result = await api(`/api/extensions/installed/${encodeURIComponent(plugin.id)}/submissions`, { method: 'POST' });
+      let result = await api(endpoint, { method: 'POST', body: JSON.stringify({ version: version.value.trim() }) });
+      while (result.state === 'publishing') {
+        status.textContent = result.message;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!section.isConnected) return;
+        result = await api(`/api/extensions/publications/${encodeURIComponent(result.id)}`);
+      }
+      if (result.state !== 'published') throw new Error(`${result.stage ? result.stage + ': ' : ''}${result.message || 'Publication was not confirmed. Retry safely.'}`);
+      status.textContent = 'Published — the tested package is available in the shared marketplace.';
+      offer.textContent = 'Published';
       section.querySelectorAll('.marketplace-facts').forEach(node => node.remove());
-      status.textContent = result.duplicate
-        ? 'This revision is already submitted for review.'
-        : 'Submission bundle written for review.';
-      appendFacts(section, [
-        ['Digest', result.digest],
-        ['Bundle', result.path],
-        ['Publishing', 'Offline — catalog signing stays with the release tooling'],
-      ]);
+      appendFacts(section, [['Package SHA-256', result.digest], ['Version', result.version]]);
+      const link = element('a', '', 'Published artifact');
+      link.href = result.artifact_url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      section.append(link);
+      await api('/api/extensions/marketplace/refresh', { method: 'POST' }).catch(() => {});
     } catch (error) {
-      status.textContent = `Offer unavailable: ${humanSetupError(error)}`;
+      status.textContent = `Publication failed: ${humanSetupError(error)}`;
       offer.disabled = false;
+      offer.textContent = 'Retry Add to marketplace';
     }
   });
-  actions.append(offer);
-  section.append(status, actions);
+  section.append(status, versionLabel, offer);
   return section;
 }
 
@@ -877,7 +894,7 @@ function renderDetail(plugin) {
     renderRuntimeSetup(setup, plugin.id, null, () => load());
   }
   detailContent.append(renderActions(plugin));
-  if (plugin.origin === 'intake') detailContent.append(renderSubmission(plugin));
+  if (plugin.origin === 'intake') detailContent.append(renderPublication(`/api/extensions/installed/${encodeURIComponent(plugin.id)}/publish`, plugin.version));
   const diagnostics = technicalDetails();
   detailContent.append(diagnostics);
   const provenance = detailSection('Package and provenance');
@@ -1044,6 +1061,7 @@ async function load() {
     if (payload.status === 'error' && !hasInstalledExtras) return renderState('Catalog verification failed', humanSetupError(payload.failure || 'The marketplace catalog could not be verified.'));
     if (payload.status === 'empty' && !hasInstalledExtras) return renderState('No plugins published', 'The verified catalog is empty. Installed plugins remain unchanged.');
     renderCards();
+    if (payload.channel?.state === 'last_known_good') prependResultsNotice('Using verified cache', payload.channel.message);
     if (payload.status === 'offline') {
       prependResultsNotice('Marketplace offline', 'The signed catalog is unavailable — showing installed plugins.');
     } else if (payload.status === 'error') {
@@ -1114,6 +1132,18 @@ function init() {
   launcher = document.getElementById('add-plugins-btn');
   search = document.getElementById('marketplace-search');
   category = document.getElementById('marketplace-category');
+  document.getElementById('marketplace-retry')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await api('/api/extensions/marketplace/refresh', { method: 'POST' });
+      await load();
+    } catch (error) {
+      summary.textContent = humanSetupError(error);
+    } finally {
+      button.disabled = false;
+    }
+  });
   results = document.getElementById('marketplace-results');
   summary = document.getElementById('marketplace-summary');
   workspace = document.getElementById('marketplace-workspace');
@@ -1160,7 +1190,6 @@ function init() {
   if (!modal || !launcher || !search || !category || !results || !summary || !workspace || !detail || !detailContent || !installedDetailContent) return;
   launcher.addEventListener('click', open);
   document.getElementById('close-marketplace-modal')?.addEventListener('click', close);
-  document.getElementById('marketplace-retry')?.addEventListener('click', load);
   scanButton?.addEventListener('click', startSourceScan);
   scanUrl?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
