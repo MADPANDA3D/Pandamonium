@@ -12,8 +12,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 from src.extension_registry import (
@@ -33,8 +34,9 @@ SCAN_VERSION = "jos-extension-scan.v1"
 
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 CAPABILITY_KINDS = frozenset({"tool", "skill", "endpoint"})
-SCAN_STAGES = ("fetch", "classify", "extract", "audit", "report")
-SCAN_STAGE_PROGRESS = {"fetch": 10, "classify": 30, "extract": 55, "audit": 80, "report": 100}
+SCAN_STAGES = ("fetch", "classify", "extract", "audit", "understand", "package", "report")
+SCAN_STAGE_PROGRESS = {"fetch": 10, "classify": 25, "extract": 40, "audit": 55,
+                       "understand": 65, "package": 90, "report": 100}
 REPO_CLASSES = frozenset(
     {
         "skill_bundle",
@@ -112,6 +114,7 @@ SCAN_FIELDS = frozenset(
 SCAN_CAPABILITY_FIELDS = frozenset(
     {"name", "kind", "descriptor", "permission_mode", "evidence_path"}
 )
+SCAN_OPTIONAL_FIELDS = frozenset({"integration", "package"})
 DEPENDENCY_FIELDS = frozenset({"ecosystem", "name", "version"})
 FINDING_FIELDS = frozenset({"id", "severity", "category", "title", "evidence"})
 BOUNDS_FIELDS = frozenset({"files_scanned", "bytes_scanned", "duration_ms"})
@@ -467,7 +470,7 @@ def redact_scan_evidence(text: Any, *, maximum: int = MAX_EVIDENCE_CHARS) -> str
     )
     value = re.sub(r"\b(?:sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b", "<redacted>", value)
     value = re.sub(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*", "<redacted-private-key>", value, flags=re.S
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*", "<redacted-private-key>", value, flags=re.DOTALL
     )
     value = value.replace("\x00", "").strip()
     if len(value) > maximum:
@@ -553,7 +556,7 @@ def validate_scan_artifact(value: Any, *, require_complete: bool = False) -> dic
     fetch is intake, not a repository command, and is not represented here.
     """
     artifact = _object(value, "extension_scan_invalid")
-    _strict(artifact, SCAN_FIELDS, "extension_scan_unknown_field")
+    _strict(artifact, SCAN_FIELDS | SCAN_OPTIONAL_FIELDS, "extension_scan_unknown_field")
     if SCAN_FIELDS - set(artifact):
         raise ExtensionContractError("extension_scan_required_field_missing")
     if artifact.get("scan_version") != SCAN_VERSION:
@@ -644,4 +647,31 @@ def validate_scan_artifact(value: Any, *, require_complete: bool = False) -> dic
         "executed_repo_commands": [],
     }
     normalized["artifact_digest"] = declared_digest
+    if "integration" in artifact:
+        from src.extension_intake import Proposal
+
+        raw = _object(artifact["integration"], "extension_scan_integration_invalid")
+        readiness = raw.pop("readiness", None)
+        if readiness not in {"needs_setup", "needs_validation"} or "manifest" in raw or "files" in raw:
+            raise ExtensionContractError("extension_scan_integration_invalid")
+        try:
+            proposal = Proposal.model_validate({**raw, "manifest": None, "files": []})
+        except ValueError as exc:
+            raise ExtensionContractError("extension_scan_integration_invalid") from exc
+        normalized["integration"] = {**proposal.model_dump(exclude={"manifest", "files"}), "readiness": readiness}
+    if "package" in artifact:
+        import uuid
+
+        package = _object(artifact["package"], "extension_scan_package_invalid")
+        if set(package) != {"id", "sha256", "size_bytes", "tree_digest"} or draft_manifest is None:
+            raise ExtensionContractError("extension_scan_package_invalid")
+        try:
+            if str(uuid.UUID(package["id"])) != package["id"]:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ExtensionContractError("extension_scan_package_invalid") from exc
+        if (any(not isinstance(package[key], str) or not re.fullmatch(r"[0-9a-f]{64}", package[key]) for key in ("sha256", "tree_digest"))
+                or type(package["size_bytes"]) is not int or not 0 < package["size_bytes"] <= MAX_SCAN_BYTES):
+            raise ExtensionContractError("extension_scan_package_invalid")
+        normalized["package"] = package
     return normalized

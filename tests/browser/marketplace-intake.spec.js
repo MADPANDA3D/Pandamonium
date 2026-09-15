@@ -170,3 +170,36 @@ test.describe('mobile', () => {
     await expect(page.locator('#marketplace-scan-progress')).toHaveAttribute('data-state', 'complete', { timeout: 15000 });
   });
 });
+
+test('semantic intake shows unverified purpose and resumes cancellation after reload', async ({ page }) => {
+  await mockApp(page, { ...artifact, integration: {
+    purpose: 'Double an integer from an unfamiliar command layout.',
+    readiness: 'needs_setup', setup: [{ key: 'RUNTIME_NODE', description: 'Select a Python node' }],
+    requirements: ['Python 3'], validation: ['Call double_count with count 4 and expect result 8.'],
+  } });
+  await page.goto('/static/index.html');
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
+  await page.locator('#marketplace-source-url').fill(SOURCE_URL);
+  await page.locator('#marketplace-source-scan').click();
+  await expect(page.locator('#marketplace-scan-results')).toContainText('Double an integer');
+  await expect(page.locator('#marketplace-scan-results')).toContainText('not been executed or verified');
+  await expect(page.locator('#marketplace-scan-results')).toContainText('RUNTIME_NODE');
+  let cancelled = false;
+  await page.route('**/api/extensions/scans/scan-1', route => route.fulfill({ json: {
+    scan_id: 'scan-1', status: cancelled ? 'cancelled' : 'running', stage: 'understand',
+    progress: 65, message: cancelled ? 'Scan cancelled' : 'Understanding source',
+  } }));
+  await page.route('**/api/extensions/scans/scan-1/cancel', route => {
+    cancelled = true;
+    return route.fulfill({ json: { status: 'cancelled' } });
+  });
+  await page.reload();
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+  await page.getByRole('tab', { name: 'Add a new plugin' }).click();
+  await expect(page.getByRole('button', { name: 'Cancel scan', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel scan', exact: true }).click();
+  await expect(page.locator('#marketplace-scan-status')).toContainText('cancelled');
+  await expect(page.getByRole('button', { name: 'Cancel scan', exact: true })).toBeHidden();
+  await expect(page.locator('#marketplace-source-scan')).toBeEnabled();
+});

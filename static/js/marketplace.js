@@ -18,6 +18,7 @@ let loadGeneration = 0;
 let actionGeneration = 0;
 let scanUrl;
 let scanButton;
+let scanCancel;
 let scanProgress;
 let scanTitle;
 let scanDetail;
@@ -29,7 +30,7 @@ let scanTimer = null;
 let scanInFlight = false;
 let scanGeneration = 0;
 let scanStartedAt = null;
-let scanId = null;
+let scanId = sessionStorage.getItem('pandamonium-intake-scan');
 let installedPlugins = [];
 let installedSelectedId = null;
 let installedList;
@@ -45,7 +46,7 @@ let panelInstalled;
 let panelMarketplace;
 let panelAdd;
 let activeTab = 'installed';
-const SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'report'];
+const SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'understand', 'package', 'report'];
 const REPO_CLASS_LABELS = {
   skill_bundle: 'a skill package',
   mcp_server: 'an MCP server',
@@ -422,6 +423,15 @@ function renderScanArtifact(artifact) {
   scanResults.hidden = false;
 
   const heading = detailSection('Scan result');
+  if (artifact.integration) {
+    heading.append(element('p', '', artifact.integration.purpose));
+    heading.append(element('p', '', artifact.integration.readiness === 'needs_setup'
+      ? 'Needs setup. Generated operations have not been executed or verified.'
+      : 'Needs validation. Generated operations have not been executed or verified.'));
+    heading.append(listOrNone(artifact.integration.setup, item => `${item.key}: ${item.description}`));
+    heading.append(listOrNone(artifact.integration.requirements, item => item));
+    heading.append(listOrNone(artifact.integration.validation, item => item));
+  }
   const classLabel = REPO_CLASS_LABELS[artifact.repo_class] || `a ${artifact.repo_class} repository`;
   heading.append(element('p', '', `Repository classified as ${classLabel} at revision ${(artifact.source_revision || '').slice(0, 12)}…`));
   appendFacts(heading, [
@@ -491,13 +501,16 @@ async function pollScan(scanId, generation) {
   try {
     const job = await api(`/api/extensions/scans/${encodeURIComponent(scanId)}`);
     if (generation !== scanGeneration) return;
-    const state = job.status === 'succeeded' ? 'complete' : job.status === 'failed' ? 'error' : 'working';
+    const stopped = ['failed', 'cancelled'].includes(job.status);
+    const state = job.status === 'succeeded' ? 'complete' : stopped ? 'error' : 'working';
+    if (scanCancel) scanCancel.hidden = state !== 'working';
+    scanButton.disabled = state === 'working';
     const elapsed = scanStartedAt && state === 'working'
       ? ` · ${Math.max(1, Math.round((Date.now() - scanStartedAt) / 1000))}s`
       : '';
     setScanProgress({
       state,
-      title: job.status === 'succeeded' ? 'Scan complete' : job.status === 'failed' ? 'Scan failed' : `${job.message || 'Scanning…'}${elapsed}`,
+      title: job.status === 'succeeded' ? 'Scan complete' : stopped ? 'Scan stopped' : `${job.message || 'Scanning…'}${elapsed}`,
       detail: job.status === 'succeeded'
         ? `Classified as ${REPO_CLASS_LABELS[job.artifact?.repo_class] || job.artifact?.repo_class || 'unknown'}`
         : humanSetupError(job.error || job.message || ''),
@@ -509,13 +522,15 @@ async function pollScan(scanId, generation) {
       scanStatus.textContent = 'Review the extracted capabilities and findings before installing.';
       return;
     }
-    if (job.status === 'failed') {
+    if (stopped) {
       scanStatus.textContent = `Scan stopped: ${humanSetupError(job.error || job.message || 'unknown error')}`;
       return;
     }
   } catch (error) {
     setScanProgress({ state: 'error', title: 'Scan unavailable', detail: humanSetupError(error), progress: 0, stage: 'fetch' });
     scanStatus.textContent = `Scan request failed: ${humanSetupError(error)}`;
+    scanButton.disabled = false;
+    scanCancel.hidden = true;
     return;
   } finally {
     scanInFlight = false;
@@ -548,11 +563,13 @@ async function startSourceScan() {
     });
     if (generation !== scanGeneration) return;
     scanId = job.scan_id || null;
+    if (scanId) sessionStorage.setItem('pandamonium-intake-scan', scanId);
+    scanCancel.hidden = false;
     pollScan(job.scan_id, generation);
   } catch (error) {
     setScanProgress({ state: 'error', title: 'Scan unavailable', detail: humanSetupError(error), progress: 0, stage: 'fetch' });
   } finally {
-    scanButton.disabled = false;
+    scanButton.disabled = Boolean(scanId);
   }
 }
 
@@ -964,6 +981,7 @@ function open() {
   scanResults.replaceChildren();
   scanStatus.textContent = '';
   scanProgress.hidden = true;
+  if (scanId) pollScan(scanId, scanGeneration);
   load();
   requestAnimationFrame(() => tabInstalled?.focus({ preventScroll: true }));
 }
@@ -1002,6 +1020,23 @@ function init() {
   detailContent = document.getElementById('marketplace-detail-content');
   scanUrl = document.getElementById('marketplace-source-url');
   scanButton = document.getElementById('marketplace-source-scan');
+  if (scanButton) {
+    scanCancel = element('button', 'marketplace-action-secondary', 'Cancel scan');
+    scanCancel.type = 'button';
+    scanCancel.hidden = true;
+    scanButton.after(scanCancel);
+    scanCancel.addEventListener('click', async () => {
+      scanCancel.disabled = true;
+      try {
+        await api(`/api/extensions/scans/${encodeURIComponent(scanId)}/cancel`, { method: 'POST' });
+        scanStatus.textContent = 'Scan cancelled. Nothing was installed.';
+      } catch (error) {
+        scanStatus.textContent = humanSetupError(error);
+      } finally {
+        scanCancel.disabled = false;
+      }
+    });
+  }
   scanProgress = document.getElementById('marketplace-scan-progress');
   scanTitle = document.getElementById('marketplace-scan-title');
   scanDetail = document.getElementById('marketplace-scan-detail');

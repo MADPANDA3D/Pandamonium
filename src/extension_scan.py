@@ -1,14 +1,13 @@
-"""MAD-914: staged, static extension repository scan.
+"""Bounded source assessment and package preparation (MAD-914/MAD-958).
 
-The scanner reuses the pinned installer transport for fetch/checkout, then
-inspects only files: classify -> extract entrypoints/capabilities -> audit
-dependencies/licenses/findings -> report a draft manifest. Repository build,
-install, and lifecycle commands are never executed; the artifact validator
-enforces ``executed_repo_commands == []``.
+Pinned source -> static audit -> optional model understanding -> prepared package.
+Repository build, install, and lifecycle commands never run during intake.
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import os
 import re
@@ -16,8 +15,10 @@ import shutil
 import threading
 import time
 import uuid
+from collections.abc import Callable, Mapping
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 try:  # Python >= 3.11
@@ -26,12 +27,10 @@ except ModuleNotFoundError:  # Python 3.10 test/dev venv
     import tomli as tomllib  # type: ignore[no-redef]
 
 from core.atomic_io import atomic_write_json
-from services.memory.skill_importer import (
-    MAX_FILE_BYTES as SKILL_FILE_BYTES,
-    MAX_FILES as SKILL_BUNDLE_FILES,
-    MAX_TOTAL_BYTES as SKILL_BUNDLE_BYTES,
-    _is_text_file,
-)
+from services.memory.skill_importer import MAX_FILE_BYTES as SKILL_FILE_BYTES
+from services.memory.skill_importer import MAX_FILES as SKILL_BUNDLE_FILES
+from services.memory.skill_importer import MAX_TOTAL_BYTES as SKILL_BUNDLE_BYTES
+from services.memory.skill_importer import _is_text_file
 from src.constants import DATA_DIR
 from src.extension_capability_inventory import (
     MAX_SCAN_BYTES,
@@ -44,10 +43,19 @@ from src.extension_capability_inventory import (
     validate_scan_artifact,
 )
 from src.extension_installer import ExtensionLifecycleError, GitSourceClient
+from src.extension_intake import IntakeError, generate_integration
+from src.extension_package import (
+    PackageError,
+    build_prepared_package,
+    package_tree_digest,
+)
 from src.extension_registry import ExtensionContractError, validate_extension_manifest
 from src.extension_skill_adapter import SkillBundleAdapter
 
 SCAN_DIR = Path(DATA_DIR) / "extension_scans"
+MAX_RETAINED_SCANS = 32
+MAX_RETAINED_SCAN_BYTES = 1024 * 1024 * 1024
+SCAN_RETENTION_SECONDS = 24 * 60 * 60
 
 MAX_FILE_READ_BYTES = 262_144
 MAX_TOTAL_READ_BYTES = 8 * 1024 * 1024
@@ -116,7 +124,7 @@ def _tool_name(value: str) -> str:
 
 def _is_text_path(path: Path) -> bool:
     lowered = path.name.lower()
-    if lowered in TEXT_NAMES or lowered.startswith("license") or lowered.startswith("readme"):
+    if lowered in TEXT_NAMES or lowered.startswith(("license", "readme")):
         return True
     return path.suffix.lower() in TEXT_SUFFIXES
 
@@ -124,8 +132,7 @@ def _is_text_path(path: Path) -> bool:
 def _repo_name(source_url: str) -> str:
     path = urlparse(source_url).path.rstrip("/")
     name = Path(path).name
-    if name.endswith(".git"):
-        name = name[:-4]
+    name = name.removesuffix(".git")
     return name or "extension"
 
 
@@ -173,6 +180,7 @@ class ExtensionStaticScanner:
         max_files: int = MAX_SCAN_FILES,
         max_bytes: int = MAX_SCAN_BYTES,
         max_duration_ms: int = MAX_SCAN_DURATION_MS,
+        model: Callable[[list[dict], Callable[[], None]], str] | None = None,
     ):
         self.git = git_client or GitSourceClient()
         self.staging_root = Path(
@@ -183,21 +191,27 @@ class ExtensionStaticScanner:
         self.max_files = max_files
         self.max_bytes = max_bytes
         self.max_duration_ms = max_duration_ms
+        self.model = model
 
     # -- helpers ------------------------------------------------------------
 
-    def _walk(self, root: Path, *, deadline: float) -> list[Path]:
+    def _walk(self, root: Path, *, deadline: float, check: Callable[[], None] = lambda: None) -> list[Path]:
         files: list[Path] = []
         total_bytes = 0
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(name for name in dirnames if name != ".git")
+            if any((Path(dirpath) / name).is_symlink() for name in dirnames):
+                raise ExtensionScanError("extension_package_member_invalid")
             for filename in sorted(filenames):
+                check()
                 path = Path(dirpath) / filename
                 try:
                     stat = path.lstat()
                 except OSError:
                     continue
-                if path.is_symlink() or not path.is_file():
+                if path.is_symlink():
+                    raise ExtensionScanError("extension_package_member_invalid")
+                if not path.is_file():
                     continue
                 files.append(path)
                 total_bytes += stat.st_size
@@ -619,7 +633,7 @@ class ExtensionStaticScanner:
             try:
                 for line in requirements.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
-                    if not line or line.startswith("#") or line.startswith("-"):
+                    if not line or line.startswith(("#", "-")):
                         continue
                     match = re.match(r"([A-Za-z0-9_.\-]+)\s*(.*)", line)
                     if match:
@@ -675,7 +689,7 @@ class ExtensionStaticScanner:
         licenses: list[str] = []
         for path in files:
             name = path.name.lower()
-            if not (name.startswith("license") or name.startswith("copying")):
+            if not (name.startswith(("license", "copying"))):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")[:8_000]
@@ -800,54 +814,18 @@ class ExtensionStaticScanner:
     ) -> dict[str, Any] | None:
         repo = _repo_name(source_url)
         extension_id = _slug(repo, maximum=63)
-        tool_capabilities = [item for item in capabilities if item["kind"] == "tool"]
-        endpoint_capabilities = [item for item in capabilities if item["kind"] == "endpoint"]
         runtime: dict[str, Any] | None = None
         descriptors: dict[str, Any] | None = None
-        schemas: list[dict[str, Any]] | None = None
-        if repo_class == "skill_bundle":
-            if layout:
-                runtime = {"type": "skills", "entrypoint": layout["entrypoint"]}
-                descriptors = {
-                    "type": "skill_bundle",
-                    "format": layout["format"],
-                    "include": list(layout["include"]),
-                }
-        elif repo_class == "mcp_server":
-            runtime = {"type": "mcp", "entrypoint": "server.py"}
-            descriptors = {"type": "mcp", "reference": f"{extension_id}-runtime"}
-        elif repo_class == "web_app":
-            runtime = {"type": "web", "entrypoint": "index.html"}
-            descriptors = {"type": "live_catalog", "endpoint": "/capabilities"}
-        elif repo_class == "openapi":
-            evidence = endpoint_capabilities[0]["evidence_path"] if endpoint_capabilities else "openapi.json"
-            runtime = {"type": "openapi", "entrypoint": evidence}
-            descriptors = {"type": "openapi", "endpoint": "/" + evidence.lstrip("/")}
-        elif repo_class in {"python_cli", "node_cli"} and tool_capabilities:
-            entrypoint = "pyproject.toml" if repo_class == "python_cli" else "package.json"
-            runtime = {"type": "service", "entrypoint": entrypoint}
-            descriptors = {"type": "inline"}
-            schemas = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": item["name"],
-                        "description": f"Draft capability extracted from {item['evidence_path']}",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": [],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-                for item in tool_capabilities
-            ]
+        if repo_class == "skill_bundle" and layout:
+            runtime = {"type": "skills", "entrypoint": layout["entrypoint"]}
+            descriptors = {
+                "type": "skill_bundle",
+                "format": layout["format"],
+                "include": list(layout["include"]),
+            }
         if runtime is None or descriptors is None:
             return None
         capabilities_block: dict[str, Any] = {"descriptor": descriptors}
-        if schemas:
-            capabilities_block["schemas"] = schemas
         draft = {
             "protocol_version": "jos-extension.v1",
             "extension_id": extension_id,
@@ -877,14 +855,25 @@ class ExtensionStaticScanner:
         *,
         operator_id: str,
         progress: Callable[[int, str, str], None] | None = None,
+        scan_id: str | None = None,
+        cancelled: Callable[[], bool] = lambda: False,
     ) -> dict[str, Any]:
         """Run one bounded scan and return the terminal, validated artifact."""
         started = self.clock()
         deadline = started + (self.max_duration_ms / 1000.0)
-        scan_id = str(uuid.uuid4())
+        scan_id = str(uuid.UUID(scan_id)) if scan_id else str(uuid.uuid4())
         staging = self.staging_root / "staging" / scan_id
+        package_dir = self.data_dir / scan_id
+        completed = False
+
+        def check() -> None:
+            if cancelled():
+                raise ExtensionScanError("extension_scan_cancelled")
+            if self.clock() > deadline:
+                raise ExtensionScanError("extension_scan_bounds_exceeded")
 
         def report(stage: str, message: str) -> None:
+            check()
             if progress is not None:
                 progress(scan_stage_progress(stage), stage, message)
 
@@ -895,11 +884,18 @@ class ExtensionStaticScanner:
             self.git.checkout(source, ref, revision, staging)
 
             report("classify", "Classifying repository")
-            files = self._walk(staging, deadline=deadline)
+            files = self._walk(staging, deadline=deadline, check=check)
+            files_bytes = sum(path.stat().st_size for path in files)
             repo_class, _manifest = self._classify(staging, files)
+            if (staging / "jarvis-extension.json").exists() and _manifest is None:
+                raise ExtensionScanError("extension_manifest_invalid")
 
             report("extract", "Extracting entrypoints and capabilities")
             capabilities = self._extract(staging, files, repo_class)
+            if _manifest and _manifest["capabilities"]["descriptor"]["type"] == "inline":
+                capabilities = [{"name": item["function"]["name"], "kind": "tool", "descriptor": "inline",
+                                 "evidence_path": "jarvis-extension.json"}
+                                for item in _manifest["capabilities"]["schemas"]]
             layout = (
                 self._skill_bundle_layout(staging, files)
                 if repo_class == "skill_bundle"
@@ -930,14 +926,74 @@ class ExtensionStaticScanner:
                     }
                 )
 
+            draft = _manifest or self._draft_manifest(source, repo_class, capabilities, licenses, layout=layout)
+            integration = None
+            if self.model is not None and draft is None:
+                source_remaining = [MAX_TOTAL_READ_BYTES]
+
+                def read_source(path: Path) -> str:
+                    if path.is_symlink() or not path.resolve().is_relative_to(staging.resolve()):
+                        return ""
+                    if (path.name == ".env" or (path.name.startswith(".env.") and path.name not in {".env.example", ".env.sample", ".env.template"})
+                            or path.name.lower() in {"credentials.json", "id_rsa", "id_ed25519"}
+                            or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}):
+                        return ""
+                    text = self._read_text(path, source_remaining)
+                    if "\x00" in text or "\ufffd" in text:
+                        return ""
+                    for _name, pattern, _severity in SECRET_PATTERNS:
+                        text = pattern.sub("[REDACTED]", text)
+                    return text
+
+                report("understand", "Reading purpose and interface definitions")
+                try:
+                    generated = generate_integration(
+                        staging, files, source, revision, lambda messages: self.model(messages, check), read_source, check,
+                        lambda message: report("understand", message),
+                    )
+                except IntakeError as exc:
+                    raise ExtensionScanError(str(exc)) from exc
+                integration = {key: value for key, value in generated.items() if key not in {"manifest", "files"}}
+                repo_class = generated["repo_class"]
+                draft = generated["manifest"]
+                capabilities = [{"name": item["name"], "kind": item["kind"],
+                    "descriptor": (draft or {}).get("capabilities", {}).get("descriptor", {}).get("type", "inline"),
+                    "evidence_path": item["evidence"][0]["path"]} for item in integration["interfaces"]]
+                for relative, content in generated["files"].items():
+                    check()
+                    if any(pattern.search(content) for _name, pattern, _severity in SECRET_PATTERNS):
+                        raise ExtensionScanError("extension_scan_generated_secret")
+                    target = staging / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content, encoding="utf-8")
+                if draft:
+                    atomic_write_json(str(staging / ".pandamonium" / "integration.json"), integration, indent=2)
+
+            package = None
+            if draft:
+                report("package", "Preserving source and integration package; runtime validation still required")
+                if any(item["category"] == "secret" for item in findings):
+                    raise ExtensionScanError("extension_scan_source_secret")
+                # Only this scan's disposable checkout is moved/modified.
+                if not _manifest:
+                    atomic_write_json(str(staging / "jarvis-extension.json"), draft, indent=2)
+                git_dir = staging / ".git"
+                if git_dir.is_dir() and not git_dir.is_symlink():
+                    shutil.rmtree(git_dir)
+                else:
+                    git_dir.unlink(missing_ok=True)
+                package_dir.mkdir(parents=True, exist_ok=True)
+                prepared = package_dir / "prepared"
+                shutil.move(str(staging), str(prepared))
+                archive = package_dir / "package.tar.gz"
+                build_prepared_package(prepared, archive)
+                package = {"id": scan_id, "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                           "size_bytes": archive.stat().st_size, "tree_digest": package_tree_digest(prepared)}
+                shutil.rmtree(prepared)
+                check()
+
             report("report", "Building scan artifact")
             elapsed_ms = max(int((self.clock() - started) * 1000), 0)
-            files_bytes = 0
-            for path in files:
-                try:
-                    files_bytes += path.stat().st_size
-                except OSError:
-                    continue
             artifact: dict[str, Any] = {
                 "scan_version": SCAN_VERSION,
                 "source_url": source_url,
@@ -948,13 +1004,7 @@ class ExtensionStaticScanner:
                 "dependencies": dependencies,
                 "licenses": licenses,
                 "findings": findings,
-                "draft_manifest": self._draft_manifest(
-                    source_url,
-                    repo_class,
-                    capabilities,
-                    licenses,
-                    layout=layout,
-                ),
+                "draft_manifest": draft,
                 "bounds": {
                     "files_scanned": len(files),
                     "bytes_scanned": min(files_bytes, self.max_bytes),
@@ -962,34 +1012,78 @@ class ExtensionStaticScanner:
                 },
                 "executed_repo_commands": [],
             }
+            if integration is not None:
+                artifact["integration"] = integration
+            if package is not None:
+                artifact["package"] = package
             artifact["artifact_digest"] = scan_artifact_digest(artifact)
-            return validate_scan_artifact(artifact, require_complete=True)
+            result = validate_scan_artifact(artifact, require_complete=True)
+            completed = True
+            return result
         finally:
             shutil.rmtree(staging, ignore_errors=True)
+            if not completed:
+                shutil.rmtree(package_dir / "prepared", ignore_errors=True)
+                (package_dir / "package.tar.gz").unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
 # In-process scan jobs (single-worker uvicorn)
 # ---------------------------------------------------------------------------
 
+def configured_scan_model(owner: str, loop: asyncio.AbstractEventLoop) -> Callable:
+    """Use the owner's existing model routing on the application's event loop."""
+    async def request(messages: list[dict]) -> str:
+        from src.llm_core import llm_call_async_with_fallback
+        from src.task_endpoint import resolve_task_candidates
+
+        candidates = await asyncio.to_thread(resolve_task_candidates, owner=owner)
+        if not candidates:
+            raise ExtensionScanError("extension_scan_model_unavailable")
+        # This is explicit user work. The background quiet gate would wait forever
+        # while the user polls this scan's progress or keeps the browser visible.
+        return await asyncio.wait_for(llm_call_async_with_fallback(
+            candidates, messages=messages, max_tokens=12000, temperature=0.1,
+            timeout=90, max_retries=1, workload="foreground",
+        ), timeout=90)
+
+    def invoke(messages: list[dict], check: Callable[[], None]) -> str:
+        future = asyncio.run_coroutine_threadsafe(request(messages), loop)
+        try:
+            while True:
+                check()
+                try:
+                    return future.result(timeout=0.2)
+                except FutureTimeout:
+                    if future.done():
+                        raise ExtensionScanError("extension_scan_model_timeout") from None
+        except ExtensionScanError:
+            raise
+        except Exception:  # noqa: BLE001 - provider errors must not expose credentials
+            raise ExtensionScanError("extension_scan_model_unavailable") from None
+        finally:
+            if not future.done():
+                future.cancel()
+    return invoke
+
+
 _SCAN_JOBS: dict[str, dict[str, Any]] = {}
 _SCAN_LOCK = threading.RLock()
+_SCAN_CANCEL: dict[str, threading.Event] = {}
 
 
 def _job_dir(scan_id: str, data_dir: Path | None = None) -> Path:
+    try:
+        scan_id = str(uuid.UUID(scan_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ExtensionScanError("extension_scan_id_invalid") from exc
     return Path(data_dir or SCAN_DIR) / scan_id
 
 
 def _persist_job(job: Mapping[str, Any]) -> None:
-    try:
-        target = _job_dir(str(job["scan_id"]))
-        target.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(str(target / "status.json"), dict(job), indent=2)
-        artifact = job.get("artifact")
-        if artifact is not None:
-            atomic_write_json(str(target / "artifact.json"), artifact, indent=2)
-    except OSError:
-        pass
+    target = _job_dir(str(job["scan_id"]))
+    target.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(str(target / "status.json"), dict(job), indent=2)
 
 
 def _public_job(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -1003,6 +1097,35 @@ def _public_job(job: Mapping[str, Any]) -> dict[str, Any]:
     if job.get("error_detail"):
         public["error_detail"] = job["error_detail"]
     return public
+
+
+def _prune_scan_storage(now: float) -> None:
+    """Bound disposable scan retention; callers hold _SCAN_LOCK."""
+    if not SCAN_DIR.exists():
+        return
+    candidates = []
+    for target in SCAN_DIR.iterdir():
+        if target.is_symlink() or not target.is_dir() or target.name in _SCAN_CANCEL:
+            continue
+        try:
+            if _job_dir(target.name) != target:
+                continue
+        except ExtensionScanError:
+            continue
+        candidates.append((target.stat().st_mtime, target))
+    retained = total = 0
+    for modified, target in sorted(candidates, reverse=True):
+        # Old revisions retained both forms; the verified archive is sufficient.
+        shutil.rmtree(target / "prepared", ignore_errors=True)
+        archive = target / "package.tar.gz"
+        size = archive.lstat().st_size if archive.exists() else 0
+        if (now - modified >= SCAN_RETENTION_SECONDS or retained >= MAX_RETAINED_SCANS
+                or total + size > MAX_RETAINED_SCAN_BYTES):
+            shutil.rmtree(target)
+            _SCAN_JOBS.pop(target.name, None)
+        else:
+            retained += 1
+            total += size
 
 
 def start_scan(
@@ -1034,12 +1157,29 @@ def start_scan(
         "artifact": None,
         "error": None,
     }
+    cancel = threading.Event()
     with _SCAN_LOCK:
+        if len(_SCAN_CANCEL) >= 2:
+            raise ExtensionScanError("extension_scan_busy")
+        for old_id in list(_SCAN_JOBS):
+            if len(_SCAN_JOBS) < 128:
+                break
+            if old_id not in _SCAN_CANCEL:
+                _SCAN_JOBS.pop(old_id)  # Terminal readback remains available on disk.
         _SCAN_JOBS[scan_id] = job
-    _persist_job(job)
+        _SCAN_CANCEL[scan_id] = cancel
+        try:
+            _prune_scan_storage(now)
+            _persist_job(job)
+        except OSError:
+            _SCAN_JOBS.pop(scan_id, None)
+            _SCAN_CANCEL.pop(scan_id, None)
+            raise ExtensionScanError("extension_scan_storage_unavailable") from None
 
     def _progress(percent: int, stage: str, message: str) -> None:
         with _SCAN_LOCK:
+            if cancel.is_set():
+                raise ExtensionScanError("extension_scan_cancelled")
             job.update({
                 "status": "running",
                 "stage": stage,
@@ -1052,39 +1192,49 @@ def start_scan(
     def _worker() -> None:
         try:
             artifact = scanner.run(
-                source_url, requested_ref, operator_id=operator_id, progress=_progress
+                source_url, requested_ref, operator_id=operator_id, progress=_progress,
+                scan_id=scan_id, cancelled=cancel.is_set,
             )
             with _SCAN_LOCK:
+                if cancel.is_set():
+                    raise ExtensionScanError("extension_scan_cancelled")
                 job.update({
                     "status": "succeeded",
                     "stage": "report",
                     "progress": 100,
-                    "message": "Scan complete",
+                    "message": "Source assessment complete; runtime operations remain unverified",
                     "source_revision": artifact["source_revision"],
                     "artifact_digest": artifact["artifact_digest"],
                     "artifact": artifact,
                     "updated_at": time.time(),
                 })
                 _persist_job(job)
-        except ExtensionScanError as exc:
+        except (ExtensionScanError, ExtensionLifecycleError, ExtensionContractError, PackageError) as exc:
             with _SCAN_LOCK:
                 job.update({
-                    "status": "failed",
+                    "status": "cancelled" if cancel.is_set() else "failed",
                     "message": str(exc.code),
                     "error": str(exc.code),
                     "updated_at": time.time(),
                 })
                 _persist_job(job)
-        except Exception as exc:  # noqa: BLE001 - job boundary must report, not raise
+        except Exception:  # noqa: BLE001 - job boundary must report, not raise
             with _SCAN_LOCK:
                 job.update({
                     "status": "failed",
                     "message": "extension_scan_failed",
                     "error": "extension_scan_failed",
-                    "error_detail": str(exc)[:500],
+                    "error_detail": "Check source access, package bounds and configured model availability, then retry.",
                     "updated_at": time.time(),
                 })
                 _persist_job(job)
+        finally:
+            with _SCAN_LOCK:
+                _SCAN_CANCEL.pop(scan_id, None)
+            if cancel.is_set():
+                target = scanner.data_dir / scan_id
+                shutil.rmtree(target / "prepared", ignore_errors=True)
+                (target / "package.tar.gz").unlink(missing_ok=True)
 
     threading.Thread(target=_worker, name=f"extension-scan-{scan_id}", daemon=True).start()
     return _public_job(job)
@@ -1096,20 +1246,59 @@ def get_scan(scan_id: str) -> dict[str, Any] | None:
         job = _SCAN_JOBS.get(scan_id)
         if job is not None:
             return _public_job(job)
-    status_path = _job_dir(scan_id) / "status.json"
+    try:
+        status_path = _job_dir(scan_id) / "status.json"
+    except ExtensionScanError:
+        return None
     if not status_path.is_file():
         return None
     try:
         record = json.loads(status_path.read_text(encoding="utf-8"))
-        artifact_path = _job_dir(scan_id) / "artifact.json"
-        if artifact_path.is_file():
-            record["artifact"] = json.loads(artifact_path.read_text(encoding="utf-8"))
+        if record.get("status") in {"queued", "running"}:
+            record.update(status="failed", error="extension_scan_interrupted",
+                          message="Scan interrupted by restart. Start a new scan.", updated_at=time.time())
+            _persist_job(record)
+            shutil.rmtree(_job_dir(scan_id) / "prepared", ignore_errors=True)
+            (_job_dir(scan_id) / "package.tar.gz").unlink(missing_ok=True)
         return record
     except (OSError, ValueError):
         return None
 
 
+def cancel_scan(scan_id: str, *, operator_id: str) -> dict[str, Any] | None:
+    with _SCAN_LOCK:
+        job = get_scan(scan_id)
+        if job is None or job.get("operator_id") != operator_id:
+            return None
+        if job["status"] not in {"queued", "running"}:
+            return job
+        _SCAN_CANCEL[scan_id].set()
+        job = _SCAN_JOBS[scan_id]
+        job.update(status="cancelled", message="Scan cancelled; cleaning up temporary package files.",
+                   error="extension_scan_cancelled", updated_at=time.time())
+        _persist_job(job)
+        return _public_job(job)
+
+
+def scan_package_content(artifact: Mapping[str, Any]) -> bytes | None:
+    package = artifact.get("package")
+    if not package:
+        return None
+    with _SCAN_LOCK:
+        _prune_scan_storage(time.time())
+        path = _job_dir(package["id"]) / "package.tar.gz"
+        if (not path.is_file() or path.is_symlink() or path.stat().st_size != package["size_bytes"]):
+            raise ExtensionScanError("extension_scan_package_unavailable")
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != package["sha256"]:
+            raise ExtensionScanError("extension_scan_package_changed")
+        return content
+
+
 def reset_scan_jobs() -> None:
     """Test helper: drop in-memory scan jobs."""
     with _SCAN_LOCK:
+        for event in _SCAN_CANCEL.values():
+            event.set()
+        _SCAN_CANCEL.clear()
         _SCAN_JOBS.clear()

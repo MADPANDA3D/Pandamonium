@@ -47,6 +47,6 @@ def test_plugins_sidebar_uses_sanitized_extension_registry_projection():
     assert 'id="marketplace-source-scan"' in index
     assert 'id="marketplace-scan-phases"' in index
     assert 'id="marketplace-scan-results"' in index
-    assert "SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'report']" in marketplace
+    assert "SCAN_PHASES = ['fetch', 'classify', 'extract', 'audit', 'understand', 'package', 'report']" in marketplace
     assert "/api/extensions/scans" in marketplace
     assert "/api/extensions/plans/source" in marketplace

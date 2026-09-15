@@ -6,6 +6,7 @@ health, catalog resolution, and shutdown stay behind explicit adapters.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -30,13 +31,13 @@ from src.action_protocol import (
 from src.agent_identity import configured_agent_id
 from src.authority_protocol import AuthorityStore, authority_store
 from src.constants import EXTENSIONS_DIR
+from src.extension_package import PackageError, extract_package, package_tree_digest
 from src.extension_registry import (
     IMMUTABLE_REVISION_PATTERN,
     ExtensionContractError,
     ExtensionRegistry,
     validate_extension_manifest,
 )
-from src.extension_package import PackageError, extract_package, package_tree_digest
 from src.operational_protocol import record_operational_event
 from src.runtime_paths import get_app_root
 from src.url_security import validate_public_http_url
@@ -126,8 +127,7 @@ def _default_git_runner(
         cwd=str(cwd) if cwd else None,
         env=dict(environment),
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         timeout=timeout,
         check=False,
@@ -588,6 +588,8 @@ class ExtensionLifecycleManager:
         scan_revision: str | None = None,
         draft_manifest: Mapping[str, Any] | None = None,
         artifact_content: bytes | None = None,
+        prepared_content: bytes | None = None,
+        prepared_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if operation not in {"install", "upgrade"}:
             raise ExtensionLifecycleError("extension_source_operation_invalid")
@@ -609,7 +611,23 @@ class ExtensionLifecycleManager:
             metadata={"operation": f"preview_{operation}"},
         )
         try:
-            if artifact_content is not None:
+            if prepared_content is not None:
+                if (artifact_content is not None or draft_manifest is None or expected_manifest is not None
+                        or not prepared_metadata or prepared_metadata.get("id") != scan_id):
+                    raise ExtensionLifecycleError("extension_scan_binding_invalid")
+                source = normalize_git_source_url(source_url, check_public=False)
+                revision = str(scan_revision or "")
+                if not IMMUTABLE_REVISION_PATTERN.fullmatch(revision) or requested_ref != revision:
+                    raise ExtensionLifecycleError("extension_scan_revision_mismatch")
+                if (len(prepared_content) != prepared_metadata.get("size_bytes")
+                        or hashlib.sha256(prepared_content).hexdigest() != prepared_metadata.get("sha256")):
+                    raise PackageError("extension_package_content_changed")
+                ref = revision
+                extract_package(prepared_content, staging)
+                content_digest = package_tree_digest(staging)
+                if content_digest != prepared_metadata.get("tree_digest"):
+                    raise PackageError("extension_package_content_changed")
+            elif artifact_content is not None:
                 from src.marketplace_catalog import verify_catalog_artifact
 
                 if expected_manifest is None or draft_manifest is not None:
@@ -640,6 +658,10 @@ class ExtensionLifecycleManager:
                 )
                 manifest_origin = "scan_draft"
             self._manifest_source_matches(manifest, source, revision)
+            if prepared_content is not None:
+                assert draft_manifest is not None  # checked before prepared extraction
+                self._signed_manifest_matches(manifest, draft_manifest, revision)
+                manifest_origin = "scan_package"
             signed_manifest = None
             if expected_manifest is not None:
                 signed_manifest = self._signed_manifest_matches(
@@ -676,11 +698,12 @@ class ExtensionLifecycleManager:
                     "staging_path": str(staging),
                     "manifest": manifest,
                     "manifest_origin": manifest_origin,
-                    "package_revision": artifact["sha256"] if artifact_content is not None else None,
+                    "package_revision": (prepared_metadata["sha256"] if prepared_content is not None and prepared_metadata is not None
+                                         else artifact["sha256"] if artifact_content is not None else None),
                     "content_digest": content_digest,
-                    "scan_id": str(scan_id) if manifest_origin == "scan_draft" else None,
+                    "scan_id": str(scan_id) if manifest_origin in {"scan_draft", "scan_package"} else None,
                     "scan_revision": (
-                        str(scan_revision) if manifest_origin == "scan_draft" else None
+                        str(scan_revision) if manifest_origin in {"scan_draft", "scan_package"} else None
                     ),
                     "resolved_catalog": resolved_catalog,
                     "expected_manifest": signed_manifest,

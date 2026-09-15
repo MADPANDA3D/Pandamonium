@@ -28,7 +28,6 @@ from src.extension_registry import (
     validate_extension_manifest,
 )
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "extensions"
 SCHEMAS = Path(__file__).parents[1] / "specs" / "schemas"
 
@@ -115,7 +114,7 @@ def test_contract_schemas_are_strict_and_versioned():
     assert scan_schema["properties"]["scan_version"]["const"] == SCAN_VERSION
     assert scan_schema["properties"]["executed_repo_commands"] == {"type": "array", "maxItems": 0}
     assert scan_schema["$defs"]["finding"]["additionalProperties"] is False
-    assert SCAN_STAGES == ("fetch", "classify", "extract", "audit", "report")
+    assert SCAN_STAGES == ("fetch", "classify", "extract", "audit", "understand", "package", "report")
 
 
 def test_inventory_is_revision_bound_and_advisory_items_hide_schemas():
