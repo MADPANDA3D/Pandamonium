@@ -71,7 +71,7 @@ def publication(tmp_path, monkeypatch):
         if remote["conflict"]:
             remote["conflict"] = False
             remote["sha"] += "1"
-            raise publisher.PublicationError("conflict")
+            raise publisher.PublicationError("marketplace_github_conflict")
         assert payload["sha"] == remote["sha"]
         import base64
 
@@ -186,6 +186,8 @@ def test_jobs_single_flight_owner_isolation_failure_retry_and_restart(
     first = jobs.start(b"package", "owner", version="2.0.0")
     assert entered.wait(2)
     assert jobs.start(b"package", "owner", version="2.0.0")["id"] == first["id"]
+    with pytest.raises(publisher.PublicationError, match="busy"):
+        jobs.start(b"package", "owner", version="3.0.0")
     with pytest.raises(publisher.PublicationError, match="busy"):
         jobs.start(b"different", "owner")
     with pytest.raises(publisher.PublicationError, match="not_found"):
@@ -333,7 +335,7 @@ def test_catalog_cas_preserves_concurrent_entry_and_rollback_aborts_on_conflict(
         remote["catalog"] = signed([*remote["catalog"]["entries"], concurrent], key)
         remote["sha"] += "1"
         monkeypatch.setattr(publisher, "_json", cas)
-        raise publisher.PublicationError("conflict")
+        raise publisher.PublicationError("marketplace_github_conflict")
 
     monkeypatch.setattr(publisher, "_json", race)
     published = publisher.update_catalog(entry, key)
@@ -346,3 +348,45 @@ def test_catalog_cas_preserves_concurrent_entry_and_rollback_aborts_on_conflict(
     with pytest.raises(publisher.PublicationError, match="changed_during_rollback"):
         publisher.update_catalog(None, key, rollback=snapshot)
     assert remote["catalog"] == published
+
+
+@pytest.mark.parametrize("http_status", [401, 403, 500, None])
+def test_catalog_access_failures_are_not_retried_or_masked(
+    publication, monkeypatch, http_status
+):
+    import subprocess
+
+    _archive, remote, key, _keys = publication
+    calls = []
+
+    def failed(*args, **kwargs):
+        calls.append(args)
+        detail = (
+            f"gh: private server details (HTTP {http_status})"
+            if http_status
+            else "gh auth login"
+        )
+        return subprocess.CompletedProcess(args[0], 1, b"", detail.encode())
+
+    # Exercise the real gh boundary as well as the catalog retry decision.
+    monkeypatch.setattr(publisher.subprocess, "run", failed)
+    monkeypatch.setattr(
+        publisher, "_json", lambda *a, **kw: json.loads(publisher._gh(*a, **kw))
+    )
+    for rollback in (None, copy.deepcopy(remote["catalog"])):
+        with pytest.raises(
+            publisher.PublicationError, match="^marketplace_github_failed:"
+        ):
+            publisher.update_catalog(None, key, rollback=rollback)
+    assert len(calls) == 2
+    monkeypatch.setattr(
+        publisher.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(
+            a[0], 1, b"", b"gh: conflict (HTTP 409)"
+        ),
+    )
+    with pytest.raises(
+        publisher.PublicationError, match="^marketplace_github_conflict$"
+    ):
+        publisher._gh("api", "--method", "PUT", "repos/example/contents/catalog.json")

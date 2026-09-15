@@ -75,6 +75,8 @@ def _gh(*args: str, payload: dict | None = None) -> bytes:
         )
         if result.returncode:
             # Never expose gh credential helpers, server bodies or host paths.
+            if args[0] == "api" and b"(HTTP 409)" in result.stderr:
+                raise PublicationError("marketplace_github_conflict")
             raise PublicationError(
                 "marketplace_github_failed:Check publisher access and retry."
             )
@@ -296,7 +298,9 @@ def update_catalog(entry: dict | None, key, *, rollback: dict | None = None) -> 
                     "content": base64.b64encode(content).decode(),
                 },
             )
-        except PublicationError:
+        except PublicationError as exc:
+            if exc.code != "marketplace_github_conflict":
+                raise
             if rollback is not None:
                 raise PublicationError(
                     "marketplace_catalog_changed_during_rollback"
@@ -486,7 +490,13 @@ class PublicationJobs:
         version: str | None = None,
     ) -> dict:
         job_id = hashlib.sha256(
-            owner.encode() + b"\0" + (source_revision or "").encode() + b"\0" + content
+            owner.encode()
+            + b"\0"
+            + (source_revision or "").encode()
+            + b"\0"
+            + (version or "").encode()
+            + b"\0"
+            + content
         ).hexdigest()
         with self.lock:
             if job_id in self.active:

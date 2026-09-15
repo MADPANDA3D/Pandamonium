@@ -79,6 +79,13 @@ modules, Python/Node syntax and diff hygiene passed. Full Python checks require
 pytest invocation correctly failed seven existing resource-admission tests when
 no bounded runtime filesystem was configured. No security gate was relaxed.
 
+Review follow-up: publication job identity includes the requested version, so a
+different version cannot accidentally poll an active job for earlier parameters.
+Only GitHub HTTP 409 triggers catalog compare-and-swap retries; access/auth/server
+failures retain their sanitized error, including during rollback. The expanded
+publication/catalog/installer regression selection passed **35 tests**; scoped
+Ruff, isort and mypy passed again.
+
 ## Boundaries and rollback
 
 No application release or CT103 deployment occurred. The one plugin artifact and
