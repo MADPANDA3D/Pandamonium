@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:07:02.838869+00:00",
-  "expires_at": "2026-12-15T00:07:02.838869+00:00",
+  "generated_at": "2026-09-16T00:07:20.065902+00:00",
+  "expires_at": "2026-12-15T00:07:20.065902+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -234,11 +234,135 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "myinstants-api",
+        "name": "myinstants-api",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/MADPANDA3D/myinstants-api.git",
+          "revision": "435d40d309ab2790e21567b00c9727509badeedd"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "myinstants_api__recent",
+                "description": "GET /recent \u2014 List recent sound effects and return their source and audio URLs.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://arch.mirror.constant.com",
+            "https://www.myinstants.com"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "List recent sound effects and return their source and audio URLs.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux x86_64 with glibc compatible with pinned PHP 8.5.10; package setup fails on incompatible hosts.",
+            "Upstream TLS verification is restored in the private runtime copy before serving."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "List recent sound effects and return their source and audio URLs.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-myinstants-api-1.0.0-6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9/pandamonium-plugin-myinstants-api-6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9.tar.gz",
+        "sha256": "6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9",
+        "size_bytes": 25852,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "SVbEq1T6aa4YMwcMjevFZoDMEJwPka1A7ciop0um1G3rIs1kIu/G6DGhMTH71rFgnn4i2pxo9Hcxmo5mSvfyCg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:07:09.612114+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "Yx/Q7a0IDYH2NRI72hRfdqjj9wws2FcF4+e2KaLZzu30uPjZ/MZ/jLvhLsMH8BkD3/JqerK/weOwFiVvQTYeBg=="
+    "value": "KYlueO+u4FnFjXgNEJeIpEUKTJx96rOPrYLwxWTBBobtQwZg5TPGE+ZCz11vHEA8Fn36L34w9+4tTAeRWM/SAA=="
   }
 }
