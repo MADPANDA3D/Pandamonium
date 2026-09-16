@@ -324,7 +324,7 @@
   ],
   "setup": [],
   "requirements": [
-    "Linux x86_64 with glibc compatible with pinned PHP 8.5.10; package setup fails on incompatible hosts.",
+    "Linux x86_64 with distro PHP 8 CLI and curl; checksum-pinned PHP 8.5.10 fallback supports recent Arch glibc. Incompatible hosts fail setup.",
     "Upstream TLS verification is restored in the private runtime copy before serving."
   ],
   "validation": [
@@ -469,11 +469,11 @@
   "files": [
     {
       "path": ".pandamonium/setup.py",
-      "content": "import hashlib,platform,shutil,subprocess,urllib.request\nfrom pathlib import Path\nif platform.machine()!='x86_64': raise RuntimeError('Needs setup: this PHP recipe requires Linux x86_64')\nwith urllib.request.urlopen('https://arch.mirror.constant.com/extra/os/x86_64/php-8.5.10-1-x86_64.pkg.tar.zst',timeout=30) as response: data=response.read(8*1024*1024)\nif hashlib.sha256(data).hexdigest()!='0354a6573db83afa3918d2e1555f3a2d9914a66e43cab00e00e449070f973dd2': raise RuntimeError('PHP checksum mismatch')\nPath('/runtime/php.pkg.tar.zst').write_bytes(data)\nPath('/runtime/php').mkdir(exist_ok=True)\nsubprocess.run(['tar','--zstd','-xf','/runtime/php.pkg.tar.zst','-C','/runtime/php','usr/bin/php','usr/lib/php/modules/curl.so'],check=True)\nshutil.copytree('/package/api','/runtime/api',dirs_exist_ok=True)\nshutil.copy2('/package/router.php','/runtime/router.php')\nhelper=Path('/runtime/api/helper.php')\ntext=helper.read_text()\nif 'CURLOPT_SSL_VERIFYPEER, false' not in text: raise RuntimeError('Upstream TLS code changed')\nhelper.write_text(text.replace('CURLOPT_SSL_VERIFYPEER, false','CURLOPT_SSL_VERIFYPEER, true'))\n"
+      "content": "import hashlib,json,platform,shutil,subprocess,urllib.request\nfrom pathlib import Path\n# Prefer the distro PHP binary: Arch's bundled fallback cannot run on older glibc.\nphp = next((str(p) for p in sorted(Path('/usr/bin').glob('php[0-9]*'), reverse=True) if p.is_file() and not p.is_symlink()), None)\nif php:\n    extension = subprocess.check_output([php,'-n','-r','echo ini_get(\"extension_dir\");'],text=True).strip()+'/curl.so'\n    subprocess.run([php,'-n','-d','extension='+extension,'-r','if(!function_exists(\"curl_init\")) exit(1);'],check=True)\nelse:\n    if platform.machine()!='x86_64': raise RuntimeError('Needs setup: this PHP recipe requires Linux x86_64')\n    with urllib.request.urlopen('https://arch.mirror.constant.com/extra/os/x86_64/php-8.5.10-1-x86_64.pkg.tar.zst',timeout=30) as response: data=response.read(8*1024*1024)\n    if hashlib.sha256(data).hexdigest()!='0354a6573db83afa3918d2e1555f3a2d9914a66e43cab00e00e449070f973dd2': raise RuntimeError('PHP checksum mismatch')\n    Path('/runtime/php.pkg.tar.zst').write_bytes(data)\n    Path('/runtime/php').mkdir(exist_ok=True)\n    subprocess.run(['tar','--zstd','-xf','/runtime/php.pkg.tar.zst','-C','/runtime/php','usr/bin/php','usr/lib/php/modules/curl.so'],check=True)\n    php='/runtime/php/usr/bin/php'\n    extension='/runtime/php/usr/lib/php/modules/curl.so'\nPath('/runtime/php-runtime.json').write_text(json.dumps({'binary':php,'extension':extension}))\nshutil.copytree('/package/api','/runtime/api',dirs_exist_ok=True)\nshutil.copy2('/package/router.php','/runtime/router.php')\nhelper=Path('/runtime/api/helper.php')\ntext=helper.read_text()\nif 'CURLOPT_SSL_VERIFYPEER, false' not in text: raise RuntimeError('Upstream TLS code changed')\nhelper.write_text(text.replace('CURLOPT_SSL_VERIFYPEER, false','CURLOPT_SSL_VERIFYPEER, true'))\n"
     },
     {
       "path": ".pandamonium/service.py",
-      "content": "import json,os\nconfig=json.load(open('/run/pandamonium/config.json'))\nos.chdir('/runtime')\nos.execv('/runtime/php/usr/bin/php',['php','-n','-d','extension=/runtime/php/usr/lib/php/modules/curl.so','-d','error_reporting=1','-d','curl.cainfo=/etc/ssl/cert.pem','-S','127.0.0.1:'+config['PANDAMONIUM_PORT'],'/runtime/router.php'])\n"
+      "content": "import json,os\nconfig=json.load(open('/run/pandamonium/config.json'))\nruntime=json.load(open('/runtime/php-runtime.json'))\nos.chdir('/runtime')\nos.execv(runtime['binary'],['php','-n','-d','extension='+runtime['extension'],'-d','error_reporting=1','-d','curl.cainfo=/etc/ssl/cert.pem','-S','127.0.0.1:'+config['PANDAMONIUM_PORT'],'/runtime/router.php'])\n"
     },
     {
       "path": ".pandamonium/adapter.py",

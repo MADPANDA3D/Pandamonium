@@ -284,7 +284,8 @@ def timed_cues(audio: bytes, block: str, cues: list[dict], *, block_offset: int,
         pattern = r"\w+(?:['’]\w+)*"
         original = list(re.finditer(pattern, block))
         normalized = list(re.finditer(pattern, metadata["text"]))
-        normalize = lambda word: word[0].replace("’", "'").casefold()
+        def normalize(word):
+            return word[0].replace("’", "'").casefold()
         if list(map(normalize, original)) != list(map(normalize, normalized)):
             return []  # Never attach a cue to substituted/truncated provider text.
         ends = {}
