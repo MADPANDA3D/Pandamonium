@@ -57,6 +57,11 @@ def _extract_thinking_blocks(text: str) -> dict:
         globalThis.MutationObserver = class { observe() {} };
 
         let source = fs.readFileSync('./static/js/markdown.js', 'utf8');
+        // Sound-cue DOM/audio behavior is exercised by tests/browser/soundboard.spec.js.
+        source = source.replace(
+          /import \{ cueHtml, initSoundboard \} from ['"]\.\/soundboard\.js['"];/,
+          'function cueHtml() { throw new Error("Use the soundboard browser harness"); } function initSoundboard() {}'
+        );
         source = source.replace(
           /import uiModule from ['"]\.\/ui\.js['"];/,
           ''
@@ -92,6 +97,7 @@ def _extract_thinking_blocks(text: str) -> dict:
         """
     )
     result = subprocess.run(
+        check=False,
         ["node", "--input-type=module", "-e", script, json.dumps(text)],
         cwd=_REPO,
         capture_output=True,

@@ -52,6 +52,11 @@ def _run_markdown_case(markdown: str, render_expr: str = "mod.mdToHtml(input)", 
         globalThis.MutationObserver = class { observe() {} };
 
         let source = fs.readFileSync('./static/js/markdown.js', 'utf8');
+        // Sound-cue DOM/audio behavior is exercised by tests/browser/soundboard.spec.js.
+        source = source.replace(
+          /import \{ cueHtml, initSoundboard \} from ['"]\.\/soundboard\.js['"];/,
+          'function cueHtml() { throw new Error("Use the soundboard browser harness"); } function initSoundboard() {}'
+        );
         source = source.replace(
           /import uiModule from ['"]\.\/ui\.js['"];/,
           ''
@@ -93,6 +98,7 @@ def _run_markdown_case(markdown: str, render_expr: str = "mod.mdToHtml(input)", 
         "__WITH_KATEX__", "true" if with_katex else "false"
     )
     result = subprocess.run(
+        check=False,
         ["node", "--input-type=module", "-e", script, json.dumps(markdown)],
         cwd=_REPO,
         capture_output=True,

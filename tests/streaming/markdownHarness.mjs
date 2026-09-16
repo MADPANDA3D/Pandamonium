@@ -26,6 +26,11 @@ export async function loadMarkdown() {
   globalThis.MutationObserver = class { observe() {} };
 
   let src = fs.readFileSync(path.join(REPO, 'static/js/markdown.js'), 'utf8');
+  // Sound-cue DOM/audio behavior is exercised by tests/browser/soundboard.spec.js.
+  src = src.replace(
+    /import \{ cueHtml, initSoundboard \} from ['"]\.\/soundboard\.js['"];/,
+    'function cueHtml() { throw new Error("Use the soundboard browser harness"); } function initSoundboard() {}',
+  );
   src = src.replace(/import uiModule from ['"]\.\/ui\.js['"];/, '');
   src = src.replace(
     /import \{ splitTableRow \} from ['"]\.\/markdown\/tableRow\.js['"];/,

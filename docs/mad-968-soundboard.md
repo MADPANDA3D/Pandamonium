@@ -34,7 +34,7 @@ Sanitized measurements: [proof.json](evidence/mad-968/proof.json). Local-only ra
 
 ## Remaining acceptance and rollback
 
-Installed Chatterbox returns WAV without word timestamps; current application events expose PCM/block duration, not word boundaries. Text length or block timing cannot prove the required selected-word occurrence. The governing plan A6 requires discussion before another model or timing mechanism is used. Evaluation of the existing local Whisper as an observer of copied audio is pending Leo's answer; it has not run. No Chatterbox, STT, model-default or speech-scheduling change was made.
+Installed Chatterbox returns WAV without word timestamps; current application events expose PCM/block duration, not word boundaries. Text length or block timing cannot prove the required selected-word occurrence. The governing plan A6 requires discussion before another model or timing mechanism is used. Leo redirected this work to Chatterbox itself, then authorized a local fork and an upstream PR under his account. Experimental Turbo attention capture is now in [upstream draft PR563](https://github.com/resemble-ai/chatterbox/pull/563); three real seed-matched utterances retained bit-identical audio. It exposes diagnostic alignment, not calibrated word timestamps. No Whisper model has run. No Chatterbox, STT, model-default or speech-scheduling change was made.
 
 Still required: verified word alignment, independent voice overlay/cancellation, real loopback showing no early effect and at most 150 ms late, unchanged speech/microphone behavior, full candidate release checks, signed package/application publication, protected CT103 app-only update with backup/rollback, and Leo's feedback. Keep MAD-968 In Progress. No successor task or next plugin.
 
