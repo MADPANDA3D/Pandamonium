@@ -1,6 +1,6 @@
 # MAD-964 held-out ingestion and lifecycle recovery
 
-**In progress. No held-out package is validated or published.** All three original
+**In progress. ani-cli is validated and published with countdown-only coverage.** All three original
 URLs have now been supplied to real configured-model intake in authenticated,
 disposable browser apps. The initial local app lacked an endpoint; read-only
 inspection of the deployed configuration resolved that gate. Only its selected
@@ -17,9 +17,10 @@ Stirling PDF's full shallow fetch completes in 28.3 seconds on the same 60-secon
 Git limit. Removing blob filtering avoids a second lazy-object transport during
 checkout. Source size, timeout and security limits remain unchanged.
 
-The additional source `https://github.com/junegunn/fzf` is reserved and has not
-been read or fetched. Use it as genuinely unseen acceptance after the shared
-repairs stabilize, alongside rerunning the three original URLs.
+fzf was first attempted after the initial semantic repairs; its model request timed
+out. A later retry is recorded separately. `https://github.com/sharkdp/bat` is
+reserved and has not been read or fetched; retain unseen acceptance after the
+latest HTTP argument-evidence changes.
 
 ## Shared recovery repairs
 
@@ -85,3 +86,29 @@ failure cleanup for the admitted held-outs, and rerun affected corpus if generic
 adaptation changes. Preserve the 15 outstanding MAD-963 inventory entries.
 MAD-965 remains Backlog; no successor, application release, deployment or
 personal-account package installation is permitted to masquerade as completion.
+
+## ani-cli live acceptance
+
+The configured Astra model produced an unchanged generated countdown adapter at
+source `2a956db02bf83760bf8f28b720d58fe8014b0e9b`, prepared archive
+`4cfbf3ce2d27a93b69f5a95fb4d687ecabb1df5e6dccf818dbd9fc70075bf4fb`.
+Its first operation failed with curl error 77: the distro CA bundle symlink
+pointed outside the sandbox's mounted certificate directory. A shared read-only
+mount preserves the real trusted bundle path; TLS verification remains enabled.
+A real sandbox regression covers an external CA bundle target.
+
+That exact archive then passed actual AnimeSchedule countdown calls for One Piece,
+native agent mount/dispatch, and install/disable/enable/remove with complete
+disposable cleanup. A fresh authenticated browser restored the exact scan receipt
+and archive, then passed the same lifecycle using the visible approval actions.
+It did not regenerate or substitute the adapter.
+
+The developer **Add to marketplace** action revalidated the package, published
+version **1.0.0** with digest
+`f515d399737761245716afd46e4ec99e220d344155e533e818b88963e1203f83`,
+and verified catalog readback. This package supports release countdowns only;
+playback, downloads and interactive browsing are not included. Exact public URL,
+native responses, lifecycle and publication receipts are in the JSON evidence.
+A browser harness selector failure occurred after publication; the orphaned
+disposable publisher was identified and removed, then the corrected lifecycle
+run passed with cleanup. No personal-account installation occurred.
