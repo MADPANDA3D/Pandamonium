@@ -40,3 +40,32 @@ Installed Chatterbox returns WAV without word timestamps; current application ev
 Still required: verified word alignment, independent voice overlay/cancellation, real loopback showing no early effect and at most 150 ms late, unchanged speech/microphone behavior, full candidate release checks, signed package/application publication, protected CT103 app-only update with backup/rollback, and Leo's feedback. Keep MAD-968 In Progress. No successor task or next plugin.
 
 Production has not changed. The last read-only baseline was CT103 `1.0.67-c890c857`; recheck before any release. Source rollback is a scoped revert; there is no deployed candidate to roll back.
+
+
+## Real Chatterbox timing playback — accepted by Leo
+
+On 2026-09-16, six real Turbo utterances (three sentences, two seeds) were
+synthesized with the current Jarvis reference. All six baseline/capture pairs
+preserved waveform and vocoder tokens exactly, and cleaned up their observer
+hooks. A browser probe played the unchanged speech and a separate Vine Boom
+source scheduled from head (4, 6)'s candidate position for the second target
+word. Dedicated browser-stream loopback confirmed all six scheduled effect
+offsets; effect correlations ranged from 0.999994 to 0.9999998.
+
+Leo listened and explicitly confirmed: “That is working exactly how I want it
+to - no that was a success.” This is accepted audible timing for the requested
+feature. It supersedes the assistant's initial failure classification against
+the earlier strict acoustic-boundary criterion. Preserve the demonstrated
+behavior when integrating it; do not add arbitrary delays or a second model.
+Approximate spectrogram estimates remain diagnostic measurements rather than
+an acceptance veto.
+
+Raw local proof: `/tmp/mad968-real/`, including six captured `recorded-N.wav`
+clips, `generation.json`, `events.json`, `measurement.json` and the browser
+probe. A reproducible opt-in real-model checker and sanitized playback metrics
+are included in upstream Chatterbox PR563 under Leo's authorship. Direct Linear
+acceptance comment: `1ef9df42-9a8b-45b1-bb46-f6a15f110e79`.
+
+The probe is not yet wired into normal Jarvis voice transport/playback. That
+integration, lifecycle checks and scoped deployment remain open under MAD-968.
+Production speech, provider settings and CT103 have not changed.
