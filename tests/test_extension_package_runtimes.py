@@ -91,6 +91,13 @@ with urllib.request.urlopen(request,timeout=3) as response: print(response.read(
     # App/installer exit kills its sandbox. A fresh process must recover the
     # already-enabled, digest-validated service without another install.
     resources.stop(unit)
+    assert adapter.readiness(record, "operator")["state"] == "needs_setup"
+    assert json.loads(state.read_text())["unit"] == unit, "readiness must not activate"
+    with monkeypatch.context() as recovery:
+        def no_replayed_operations(*_args, **_kwargs):
+            raise AssertionError("Recovery must not replay effectful validation operations")
+        recovery.setattr(GeneratedCliAdapter, "_checks", no_replayed_operations)
+        assert GeneratedCliAdapter(root).restore_enabled(registry) == {"demo-tools": "ready"}
     assert GeneratedCliAdapter(root).execute(
         record, name, {"count": 4}, "operator", threading.Event()
     ) == {"result": 8}

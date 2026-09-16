@@ -1268,6 +1268,17 @@ async def _startup_event():
 
     _startup_tasks.append(asyncio.create_task(_startup_mcp_connections()))
 
+    async def _startup_package_services():
+        try:
+            from src.extension_cli_adapter import GeneratedCliAdapter
+
+            result = await asyncio.to_thread(GeneratedCliAdapter().restore_enabled)
+            logger.info("Installed package startup readiness: %s", result)
+        except Exception as exc:
+            logger.warning("Installed package recovery unavailable: %s", type(exc).__name__)
+
+    _startup_tasks.append(asyncio.create_task(_startup_package_services()))
+
     # Startup warmups are opt-in. They make later requests a little warmer, but
     # they also compete with the first seconds of real UI use on slow or busy
     # machines. Default to clear/idle startup and let requests warm what they use.
