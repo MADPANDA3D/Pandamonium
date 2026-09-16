@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:14:12.988787+00:00",
-  "expires_at": "2026-12-15T00:14:12.988787+00:00",
+  "generated_at": "2026-09-16T00:14:38.212089+00:00",
+  "expires_at": "2026-12-15T00:14:38.212089+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -1655,11 +1655,117 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "text-to-cad-robotics",
+        "name": "Text to CAD \u2014 robotics and parts",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/earthtojake/text-to-cad.git",
+          "revision": "3e4dfdeef2cbd5804c369592b59620132188a150"
+        },
+        "runtime": {
+          "type": "skills",
+          "entrypoint": ".pandamonium/plugin.json"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "skill_bundle",
+            "format": "codex_plugin",
+            "include": [
+              "srdf",
+              "step-parts",
+              "urdf"
+            ]
+          }
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 5
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [],
+          "write": [],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 1
+        },
+        "metadata": {
+          "summary": "Use the SRDF, URDF and step.parts workflows from text-to-cad as native skills.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements.",
+            "Executing CAD generation, slicing or printer actions requires the corresponding owner-installed CAD/tool/device runtime; skill admission does not validate those actions."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Use the SRDF, URDF and step.parts workflows from text-to-cad as native skills.",
+      "categories": [
+        "skills"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-text-to-cad-robotics-1.0.0-fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf/pandamonium-plugin-text-to-cad-robotics-fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf.tar.gz",
+        "sha256": "fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf",
+        "size_bytes": 6143869,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "a/r+4nZg+FJf9RXGx/xPDtOLwdHNQChx+3RcY4xQCUw/ATRRU5JulsxowDO8GYWmhrewDo88AwROwEQAKwrPBQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:14:20.505500+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "lQBp37o3tBsUuhJ19MDnHAqZONHeaad61fRSIXpLuodkVI1zSaWLZ1NXce2kEBelB7hfvK2z28TXMdnAfzQrDA=="
+    "value": "gn5SI2mQEvQUTgpy6JxcMh5J1MEbe9idMqFYsAqEF8abmTUE2IxpbyXw+IZOvrm/PAzrrPVR0oTcX9XvMKitBg=="
   }
 }
