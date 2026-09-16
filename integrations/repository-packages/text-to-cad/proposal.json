@@ -1,0 +1,175 @@
+{
+  "purpose": "Use eight text-to-cad workflows for CAD, fabrication and local review as native instructions.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "A library of agent skills for CAD, CAE and CAM"
+    }
+  ],
+  "repo_class": "skill_bundle",
+  "interfaces": [
+    {
+      "name": "bambu-labs",
+      "kind": "skill",
+      "binding": "bambu-labs",
+      "evidence": [
+        {
+          "path": "skills/bambu-labs/SKILL.md",
+          "quote": "name: bambu-labs"
+        }
+      ]
+    },
+    {
+      "name": "cad",
+      "kind": "skill",
+      "binding": "cad",
+      "evidence": [
+        {
+          "path": "skills/cad/SKILL.md",
+          "quote": "name: cad"
+        }
+      ]
+    },
+    {
+      "name": "cad-viewer",
+      "kind": "skill",
+      "binding": "cad-viewer",
+      "evidence": [
+        {
+          "path": "skills/cad-viewer/SKILL.md",
+          "quote": "name: cad-viewer"
+        }
+      ]
+    },
+    {
+      "name": "dfam-check",
+      "kind": "skill",
+      "binding": "dfam-check",
+      "evidence": [
+        {
+          "path": "skills/dfam-check/SKILL.md",
+          "quote": "name: dfam-check"
+        }
+      ]
+    },
+    {
+      "name": "dxf",
+      "kind": "skill",
+      "binding": "dxf",
+      "evidence": [
+        {
+          "path": "skills/dxf/SKILL.md",
+          "quote": "name: dxf"
+        }
+      ]
+    },
+    {
+      "name": "gcode",
+      "kind": "skill",
+      "binding": "gcode",
+      "evidence": [
+        {
+          "path": "skills/gcode/SKILL.md",
+          "quote": "name: gcode"
+        }
+      ]
+    },
+    {
+      "name": "sdf",
+      "kind": "skill",
+      "binding": "sdf",
+      "evidence": [
+        {
+          "path": "skills/sdf/SKILL.md",
+          "quote": "name: sdf"
+        }
+      ]
+    },
+    {
+      "name": "sendcutsend",
+      "kind": "skill",
+      "binding": "sendcutsend",
+      "evidence": [
+        {
+          "path": "skills/sendcutsend/SKILL.md",
+          "quote": "name: sendcutsend"
+        }
+      ]
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements.",
+    "Executing CAD generation, slicing or printer actions requires the corresponding owner-installed CAD/tool/device runtime; skill admission does not validate those actions."
+  ],
+  "validation": [
+    "Admit every declared skill and read its exact native body; validate lifecycle cleanup."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "text-to-cad",
+    "name": "Text to CAD",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/earthtojake/text-to-cad.git",
+      "revision": "3e4dfdeef2cbd5804c369592b59620132188a150"
+    },
+    "runtime": {
+      "type": "skills",
+      "entrypoint": ".pandamonium/plugin.json"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "skill_bundle",
+        "format": "codex_plugin",
+        "include": [
+          "bambu-labs",
+          "cad",
+          "cad-viewer",
+          "dfam-check",
+          "dxf",
+          "gcode",
+          "sdf",
+          "sendcutsend"
+        ]
+      }
+    },
+    "permissions": {
+      "default": "read_only",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 5
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [],
+      "write": [],
+      "network": []
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": []
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 1
+    }
+  },
+  "files": [
+    {
+      "path": ".pandamonium/plugin.json",
+      "content": "{\"skills\": \"skills\"}"
+    }
+  ],
+  "source_exclusions": [
+    "tests/python/packages/cadgen/test_daemon_routing.py",
+    "tests/python/packages/cadgen/viewer/test_security.py"
+  ]
+}

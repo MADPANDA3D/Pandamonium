@@ -308,6 +308,8 @@
     "yt_dlp/extractor/tvw.py",
     "yt_dlp/extractor/weverse.py",
     "yt_dlp/extractor/wykop.py",
-    "yt_dlp/extractor/zingmp3.py"
+    "yt_dlp/extractor/zingmp3.py",
+    "test/testdata/certificate/clientwithkey.crt",
+    "test/testdata/certificate/clientwithencryptedkey.crt"
   ]
 }

@@ -3,7 +3,7 @@
 // MAD-965 owns the release bump; this source smoke uses its package floor 1.0.68.
 import { chromium, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -45,6 +45,47 @@ async function instance(publisher) {
   return { page, context, base, child };
 }
 try {
+  if (process.argv.includes('--inventory')) {
+    const inventory = JSON.parse(await readFile('docs/mad-963-inventory.json', 'utf8'));
+    const consumer = await instance(false);
+    await consumer.page.getByRole('tab', { name: 'Marketplace' }).click();
+    await consumer.page.getByRole('button', { name: 'Refresh catalog', exact: true }).click();
+    await expect(consumer.page.getByRole('button', { name: 'Refresh catalog', exact: true })).toBeEnabled({ timeout: 30000 });
+    const catalog = await (await consumer.context.request.get(consumer.base + '/api/extensions/marketplace')).json();
+    await writeFile(join(output, 'mad963-discovery.json'), JSON.stringify(catalog, null, 2));
+    const packages = inventory.entries.flatMap(e => e.packages).filter(p => p.publication.state === 'published');
+    for (const item of packages) {
+      expect(catalog.plugins.some(p => p.id === item.extension_id)).toBeTruthy();
+    }
+    await consumer.page.screenshot({ animations: 'disabled', path: join(output, 'mad963-discovery.png') });
+    const installs = [];
+    for (const id of ['superpowers', 'step-parts']) {
+      await consumer.page.getByRole('tab', { name: 'Marketplace' }).click();
+      await consumer.page.locator(`[data-plugin-id="${id}"]`).click();
+      const detail = consumer.page.locator('#marketplace-detail');
+      await expect(detail).toContainText('Catalog + artifact verified');
+      await detail.getByRole('button', { name: 'Install', exact: true }).click();
+      await detail.getByRole('button', { name: 'Approve once', exact: true }).click();
+      await expect(consumer.page.locator('#marketplace-summary')).toContainText('Install completed', { timeout: 120000 });
+      const registry = await (await consumer.context.request.get(consumer.base + '/api/extensions')).json();
+      const digest = packages.find(p => p.extension_id === id).publication.digest;
+      expect(registry.extensions[id].active_revision).toBe(digest);
+      let skillCount = 0;
+      if (id === 'superpowers') {
+        skillCount = (await (await consumer.context.request.get(consumer.base + '/api/skills')).json()).count;
+        expect(skillCount).toBe(14);
+      }
+      installs.push({ extension_id: id, installed_digest: digest, native_skills: skillCount });
+      await consumer.page.getByRole('tab', { name: 'Installed plugins' }).click();
+      await consumer.page.locator(`[data-installed-id="${id}"]`).click();
+      await consumer.page.screenshot({ animations: 'disabled', path: join(output, `mad963-${id}-installed.png`) });
+      await consumer.page.getByRole('button', { name: 'Remove', exact: true }).click();
+      await consumer.page.getByRole('button', { name: 'Approve remove once' }).click();
+      await expect(consumer.page.locator('#marketplace-installed-list')).toContainText('No plugins installed');
+    }
+    await writeFile(join(output, 'mad963-consumer.json'), JSON.stringify({ discovered: packages.map(p => p.extension_id), installs, remaining_plugins: 0, compatibility_test_version: '1.0.68', publisher_key_available: false }, null, 2) + '\n');
+    console.log('Inventory discovery and fresh skill/API install passed: ' + output);
+  } else {
   const producer = await instance(true);
   await producer.page.getByRole('tab', { name: 'Add a new plugin' }).click();
   await producer.page.locator('#marketplace-source-url').fill('https://github.com/dietrichgebert/ponytail');
@@ -98,6 +139,7 @@ try {
   await expect(consumer.page.locator('#marketplace-installed-list')).toContainText('No plugins installed');
   await writeFile(join(output, 'mad962-publication.json'), JSON.stringify({ receipt, source: artifact.source_url, revision: artifact.source_revision, prepared_digest: artifact.package.sha256, installed_digest: record.active_revision, native_skills: skills.count, publisher_account_installs: 0, remaining_plugins: 0, compatibility_test_version: '1.0.68', checks: ['real authenticated developer action', 'real GitHub release and signed catalog CAS', 'fresh app with bundled public keys and no publisher key', 'exact tested archive installation', 'native Skills admission', 'desktop/mobile', 'removal and disposable cleanup'] }, null, 2) + '\n');
   console.log('Publication and fresh-install proof passed: ' + output);
+  }
 } finally {
   await browser.close();
   for (const child of children) {

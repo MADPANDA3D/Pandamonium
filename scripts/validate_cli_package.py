@@ -37,7 +37,12 @@ def main():
     parser.add_argument("--recipe", type=Path)
     parser.add_argument("--url")
     parser.add_argument("--ref")
+    parser.add_argument(
+        "--output", type=Path, help="Retain package and receipt after cleanup"
+    )
     args = parser.parse_args()
+    if args.output:
+        args.output.mkdir(parents=True, exist_ok=False)
     proposal = json.loads(args.recipe.read_text()) if args.recipe else None
     source = (
         proposal["manifest"]["source"]
@@ -61,7 +66,7 @@ def main():
             GeneratedCliAdapter,
             _stop_service,
         )
-        from src.extension_installer import ExtensionLifecycleManager
+        from src.extension_installer import ExtensionLifecycleManager, GitSourceClient
         from src.extension_registry import ExtensionRegistry
         from src.extension_scan import ExtensionStaticScanner
         from src.extension_skill_adapter import SkillBundleAdapter
@@ -73,6 +78,7 @@ def main():
 
         owner = "disposable-cli-validation"
         scanner = ExtensionStaticScanner(
+            git_client=GitSourceClient(timeout_seconds=120),
             model=(lambda messages, check: reviewed_reply(proposal, messages))
             if proposal
             else None
@@ -122,7 +128,7 @@ def main():
                 json.dumps({"action": "inspect", "extension_id": extension_id}), owner
             )
         )
-        if proposal:
+        if proposal and proposal.get("execution"):
             checks = proposal["execution"]["checks"]
             mounted = asyncio.run(
                 do_manage_extensions(
@@ -169,23 +175,25 @@ def main():
             if operation == "disable":
                 assert not registry.snapshot()["extensions"][extension_id]["enabled"]
         assert not registry.snapshot()["extensions"]
-        print(
-            json.dumps(
-                {
-                    "source": source,
-                    "package": package,
-                    "installed": installed,
-                    "discovery": discovery,
-                    "operations": results,
-                    "lifecycle": ["install", "disable", "enable", "uninstall"],
-                    "model": "reviewed proposal fixture"
-                    if proposal
-                    else "native descriptor",
-                    "temporary_data_removed_on_exit": directory,
-                },
-                indent=2,
+        receipt = {
+            "source": source,
+            "package": package,
+            "installed": installed,
+            "discovery": discovery,
+            "operations": results,
+            "lifecycle": ["install", "disable", "enable", "uninstall"],
+            "model": "reviewed proposal fixture" if proposal else "native descriptor",
+            "temporary_data_directory": directory,
+        }
+        if args.output:
+            (args.output / "package.tar.gz").write_bytes(
+                (scanner.data_dir / package["id"] / "package.tar.gz").read_bytes()
             )
-        )
+    assert not Path(directory).exists()
+    receipt["temporary_data_removed"] = True
+    if args.output:
+        (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    print(json.dumps(receipt, indent=2))
 
 
 if __name__ == "__main__":

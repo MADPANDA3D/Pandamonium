@@ -1,0 +1,243 @@
+{
+  "purpose": "Use all 14 Superpowers software-development skills as native instructions, with their scripts and references.",
+  "evidence": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "quote": "{\n  \"name\": \"superpowers\",\n  \"version\": \"6.3.0\",\n  \"description\": \"An agentic skills framework & software development methodology that works: planning, TDD, debugging, and collaboration workflows.\",\n  \"author\": {\n    \"name\": \"Jesse Vincent\",\n    \"email\": \"jesse@fsck.com\",\n    \"url\": \"https://github.com/obra\"\n  },\n  \"homepage\": \"https://github.com/obra/superpowers\",\n  \"repository\": \"https://github.com/obra/superpowers\",\n  \"license\": \"MIT\",\n  \"keywords\": [\n    \"brainstorming\",\n    \"subagent-driven-development\",\n    \"skills\",\n    \"planning\",\n    \"tdd\",\n    \"debugging\",\n    \"code-review\",\n    \"workflow\"\n  ],\n  \"skills\": \"./skills/\",\n  \"hooks\": {},\n  \"interface\": {\n    \"displayName\": \"Superpowers\",\n    \"shortDescription\": \"Planning, TDD, debugging, and delivery workflows for coding agents\",\n    \"longDescription\": \"Use Superpowers to guide agent work through brainstorming, implementation planning, test-driven development, systematic debugging, parallel execution, code review, and finish-the-"
+    }
+  ],
+  "repo_class": "skill_bundle",
+  "interfaces": [
+    {
+      "name": "brainstorming",
+      "kind": "skill",
+      "binding": "brainstorming",
+      "evidence": [
+        {
+          "path": "skills/brainstorming/SKILL.md",
+          "quote": "name: brainstorming"
+        }
+      ]
+    },
+    {
+      "name": "dispatching-parallel-agents",
+      "kind": "skill",
+      "binding": "dispatching-parallel-agents",
+      "evidence": [
+        {
+          "path": "skills/dispatching-parallel-agents/SKILL.md",
+          "quote": "name: dispatching-parallel-agents"
+        }
+      ]
+    },
+    {
+      "name": "executing-plans",
+      "kind": "skill",
+      "binding": "executing-plans",
+      "evidence": [
+        {
+          "path": "skills/executing-plans/SKILL.md",
+          "quote": "name: executing-plans"
+        }
+      ]
+    },
+    {
+      "name": "finishing-a-development-branch",
+      "kind": "skill",
+      "binding": "finishing-a-development-branch",
+      "evidence": [
+        {
+          "path": "skills/finishing-a-development-branch/SKILL.md",
+          "quote": "name: finishing-a-development-branch"
+        }
+      ]
+    },
+    {
+      "name": "receiving-code-review",
+      "kind": "skill",
+      "binding": "receiving-code-review",
+      "evidence": [
+        {
+          "path": "skills/receiving-code-review/SKILL.md",
+          "quote": "name: receiving-code-review"
+        }
+      ]
+    },
+    {
+      "name": "requesting-code-review",
+      "kind": "skill",
+      "binding": "requesting-code-review",
+      "evidence": [
+        {
+          "path": "skills/requesting-code-review/SKILL.md",
+          "quote": "name: requesting-code-review"
+        }
+      ]
+    },
+    {
+      "name": "subagent-driven-development",
+      "kind": "skill",
+      "binding": "subagent-driven-development",
+      "evidence": [
+        {
+          "path": "skills/subagent-driven-development/SKILL.md",
+          "quote": "name: subagent-driven-development"
+        }
+      ]
+    },
+    {
+      "name": "systematic-debugging",
+      "kind": "skill",
+      "binding": "systematic-debugging",
+      "evidence": [
+        {
+          "path": "skills/systematic-debugging/SKILL.md",
+          "quote": "name: systematic-debugging"
+        }
+      ]
+    },
+    {
+      "name": "test-driven-development",
+      "kind": "skill",
+      "binding": "test-driven-development",
+      "evidence": [
+        {
+          "path": "skills/test-driven-development/SKILL.md",
+          "quote": "name: test-driven-development"
+        }
+      ]
+    },
+    {
+      "name": "using-git-worktrees",
+      "kind": "skill",
+      "binding": "using-git-worktrees",
+      "evidence": [
+        {
+          "path": "skills/using-git-worktrees/SKILL.md",
+          "quote": "name: using-git-worktrees"
+        }
+      ]
+    },
+    {
+      "name": "using-superpowers",
+      "kind": "skill",
+      "binding": "using-superpowers",
+      "evidence": [
+        {
+          "path": "skills/using-superpowers/SKILL.md",
+          "quote": "name: using-superpowers"
+        }
+      ]
+    },
+    {
+      "name": "verification-before-completion",
+      "kind": "skill",
+      "binding": "verification-before-completion",
+      "evidence": [
+        {
+          "path": "skills/verification-before-completion/SKILL.md",
+          "quote": "name: verification-before-completion"
+        }
+      ]
+    },
+    {
+      "name": "writing-plans",
+      "kind": "skill",
+      "binding": "writing-plans",
+      "evidence": [
+        {
+          "path": "skills/writing-plans/SKILL.md",
+          "quote": "name: writing-plans"
+        }
+      ]
+    },
+    {
+      "name": "writing-skills",
+      "kind": "skill",
+      "binding": "writing-skills",
+      "evidence": [
+        {
+          "path": "skills/writing-skills/SKILL.md",
+          "quote": "name: writing-skills"
+        }
+      ]
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements."
+  ],
+  "validation": [
+    "Admit every declared skill and read its exact native body; validate lifecycle cleanup."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "superpowers",
+    "name": "Superpowers",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/obra/superpowers.git",
+      "revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+    },
+    "runtime": {
+      "type": "skills",
+      "entrypoint": ".codex-plugin/plugin.json"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "skill_bundle",
+        "format": "codex_plugin",
+        "include": [
+          "brainstorming",
+          "dispatching-parallel-agents",
+          "executing-plans",
+          "finishing-a-development-branch",
+          "receiving-code-review",
+          "requesting-code-review",
+          "subagent-driven-development",
+          "systematic-debugging",
+          "test-driven-development",
+          "using-git-worktrees",
+          "using-superpowers",
+          "verification-before-completion",
+          "writing-plans",
+          "writing-skills"
+        ]
+      }
+    },
+    "permissions": {
+      "default": "read_only",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 5
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [],
+      "write": [],
+      "network": []
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": []
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 1
+    }
+  },
+  "files": [],
+  "source_exclusions": [
+    "tests/brainstorm-server/auth.test.js",
+    "tests/brainstorm-server/branding.test.js",
+    "tests/brainstorm-server/lifecycle.test.js",
+    "tests/brainstorm-server/server.test.js"
+  ]
+}
