@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-15T23:08:11.391340+00:00",
-  "expires_at": "2026-12-14T23:08:11.391340+00:00",
+  "generated_at": "2026-09-16T00:07:02.838869+00:00",
+  "expires_at": "2026-12-15T00:07:02.838869+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -118,11 +118,127 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "superpowers",
+        "name": "Superpowers",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/obra/superpowers.git",
+          "revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+        },
+        "runtime": {
+          "type": "skills",
+          "entrypoint": ".codex-plugin/plugin.json"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "skill_bundle",
+            "format": "codex_plugin",
+            "include": [
+              "brainstorming",
+              "dispatching-parallel-agents",
+              "executing-plans",
+              "finishing-a-development-branch",
+              "receiving-code-review",
+              "requesting-code-review",
+              "subagent-driven-development",
+              "systematic-debugging",
+              "test-driven-development",
+              "using-git-worktrees",
+              "using-superpowers",
+              "verification-before-completion",
+              "writing-plans",
+              "writing-skills"
+            ]
+          }
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 5
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [],
+          "write": [],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 1
+        },
+        "metadata": {
+          "summary": "Use all 14 Superpowers software-development skills as native instructions, with their scripts and references.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Use all 14 Superpowers software-development skills as native instructions, with their scripts and references.",
+      "categories": [
+        "skills"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-superpowers-1.0.0-ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44/pandamonium-plugin-superpowers-ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44.tar.gz",
+        "sha256": "ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44",
+        "size_bytes": 537796,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "O7xE7tVISY6Dkv7ifkuuvW5f2dO5AwT4to5CQWRN7tkrNDYsLhK3eSkZAI4fmvgeacYAWKm6iS4NppTw8nMUDw=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:06:47.462244+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "N+5Lx/nziT18I38Qwqe1V/HZ/cZ4rnqewkD2s59kP79YbY0MjwWxnM/xO2F4GbUh/ZLLj44wvWo21U3XV7WgCg=="
+    "value": "Yx/Q7a0IDYH2NRI72hRfdqjj9wws2FcF4+e2KaLZzu30uPjZ/MZ/jLvhLsMH8BkD3/JqerK/weOwFiVvQTYeBg=="
   }
 }
