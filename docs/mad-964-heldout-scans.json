@@ -1,0 +1,57 @@
+{
+  "issue": "MAD-964",
+  "baseline": "47e306cec3aa34cd3410812409e975c98a16beaa",
+  "status": "incomplete_model_endpoint_required",
+  "source_account_changes": 0,
+  "disposable_browser_data_removed": true,
+  "records": [
+    {
+      "source_url": "https://github.com/pystardust/ani-cli",
+      "source_revision": "2a956db02bf83760bf8f28b720d58fe8014b0e9b",
+      "static_class": "unknown",
+      "draft_produced": false,
+      "static_bounds": {
+        "files_scanned": 27,
+        "bytes_scanned": 567636,
+        "duration_ms": 3090
+      },
+      "browser_status": "failed",
+      "browser_stage": "understand",
+      "browser_error": "extension_scan_model_unavailable",
+      "installed": false,
+      "published": false
+    },
+    {
+      "source_url": "https://github.com/lucialv/gifukai-api",
+      "source_revision": "0914d5975ca1cf40d4a0d50cc94df4dd9803b62c",
+      "static_class": "go_cli",
+      "draft_produced": false,
+      "static_bounds": {
+        "files_scanned": 62,
+        "bytes_scanned": 191418,
+        "duration_ms": 2245
+      },
+      "browser_status": "failed",
+      "browser_stage": "understand",
+      "browser_error": "extension_scan_model_unavailable",
+      "installed": false,
+      "published": false
+    },
+    {
+      "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+      "source_revision": "b230ca2ce0d047acbcd3a37a5aad45028d66fde7",
+      "static_class": "rust_lib",
+      "draft_produced": false,
+      "static_bounds": {
+        "files_scanned": 7908,
+        "bytes_scanned": 219444128,
+        "duration_ms": 48576
+      },
+      "browser_status": "failed",
+      "browser_stage": "understand",
+      "browser_error": "extension_scan_model_unavailable",
+      "installed": false,
+      "published": false
+    }
+  ]
+}

@@ -646,3 +646,19 @@ def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixt
             "/api/extensions/marketplace",
         }
     )
+
+
+def test_git_timeout_reaps_transport_children(tmp_path):
+    import os
+    import sys
+    import time
+
+    from src.extension_installer import _default_git_runner
+
+    marker = tmp_path / "escaped-child"
+    child = "import time; from pathlib import Path; time.sleep(1.5); Path('escaped-child').touch()"
+    script = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',sys.argv[1]]); time.sleep(30)"
+    with pytest.raises(subprocess.TimeoutExpired):
+        _default_git_runner([sys.executable, "-c", script, child], tmp_path, 1, os.environ)
+    time.sleep(0.7)
+    assert not marker.exists(), "Git child continued writing after timeout cleanup"
