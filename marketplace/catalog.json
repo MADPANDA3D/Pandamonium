@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:10:05.754591+00:00",
-  "expires_at": "2026-12-15T00:10:05.754591+00:00",
+  "generated_at": "2026-09-16T00:10:29.298540+00:00",
+  "expires_at": "2026-12-15T00:10:29.298540+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -678,11 +678,146 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "barehands",
+        "name": "Barehands",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/jaredrhod/barehands.git",
+          "revision": "eb23bed2d772f9d5a24de26fb92f46c3c76d69cf"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "barehands__board_state",
+                "description": "Read the board heartbeat; an empty state means no camera tracker is connected.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "barehands__configuration",
+                "description": "Read the running board name and declared note/media orbs.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://cdn.jsdelivr.net"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Read the live state and configuration of a private Barehands webcam board. Camera gestures and visible 3D interaction require Chrome and a webcam on the chosen node.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Open the private board in Chrome and grant webcam access for visible hand-tracked interaction. Backend readback does not prove camera or 3D rendering."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Read the live state and configuration of a private Barehands webcam board. Camera gestures and visible 3D interaction require Chrome and a webcam on the chosen node.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "AGPL-3.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-barehands-1.0.0-2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4/pandamonium-plugin-barehands-2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4.tar.gz",
+        "sha256": "2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4",
+        "size_bytes": 2676539,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "EtIarYE3IR4CmxnqhuKjSRvtTF9mrkgU+Lps2QSbZZhBrkE8peegipUsfhDPA9ae+gO8n4HDFInVQSY5t1T4Ag=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:10:09.416387+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "FyVnAmkalz8PgKgHBA0DjgfOOBIUU92yVhSicjYjBQn/tVMYS/qqDNFjdrtGlAHN3xxvmOqHyWZxC7azwkIuBw=="
+    "value": "8f5jti3O6G0cy5KoYbxbOjmQKTDf5jJ0PHU1Qb4RBdSuifiLkhd3t0cT6tudYfHCLYu8eO6s7zTb3BRuPHnXDw=="
   }
 }
