@@ -81,6 +81,7 @@ def test_speech_text_skips_display_markup_urls_and_opaque_ids():
     display = "**Plugins**\n- MAD MCP Portal (ID 9d618e74470e)\n- [Docs](https://example.test/setup)"
 
     assert speech_text(display) == "Plugins MAD MCP Portal Docs"
+    assert speech_text("First boom [[sound:vine-boom-123]] then boom [[sound:vine-boom-123]].") == "First boom then boom ."
 
 
 def test_result_speech_contract_uses_word_thresholds_and_structured_handoffs():
@@ -283,3 +284,46 @@ def test_tts_routes_send_only_clean_spoken_text_to_the_provider():
 
     assert response.status_code == 200
     assert tts.text == "Portal"
+
+
+def test_cue_arriving_after_pcm_uses_the_observed_clock_without_resynthesis(monkeypatch, tmp_path):
+    import struct
+
+    text = "First boom."
+    metadata = json.dumps({"version": 1, "sample_rate": 24000, "text": text,
+                           "words": [[0, 5, 12000], [6, 10, 23040]]}).encode()
+    audio = _wav_payload() + b"cbtm" + struct.pack("<I", len(metadata)) + metadata + b"\0" * (len(metadata) % 2)
+    audio = audio[:4] + struct.pack("<I", len(audio) - 8) + audio[8:]
+
+    class TTS:
+        available = True
+        calls = 0
+
+        def synthesize(self, block, use_cache=True, voice=None):
+            assert block == text
+            self.calls += 1
+            return audio
+
+    monkeypatch.setattr(voice_routes, "VOICE_STATE_FILE", tmp_path / "voice.json")
+    tts = TTS()
+    app = FastAPI()
+    app.include_router(voice_routes.setup_voice_routes(tts_service=tts))
+    client = TestClient(app)
+    session = client.post("/api/voice/sessions", json={"mode": "jarvis_call"}).json()
+    turn = voice_routes._register_speech_turn(session["id"])
+    turn.text = text
+
+    async def blocks():
+        yield text
+        # The generator resumes after this block's PCM has already been emitted.
+        turn.sound_cues = [{"cue_id": "late", "sound_id": "boom-123", "title": "Boom", "char_end": 10}]
+
+    turn.iter_blocks = blocks
+    response = client.get(f"/api/voice/sessions/{session['id']}/turns/{turn.turn_id}/audio")
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert tts.calls == 1
+    assert next(e for e in events if e['type'] == 'block')['sound_cues'] == []
+    late = next(e for e in events if e['type'] == 'sound_cues')
+    assert late['sound_cues'] == [{"cue_id": "late", "sound_id": "boom-123", "title": "Boom",
+                                  "block_index": 0, "end_sample": 23040}]
+    assert [e['type'] for e in events].index('audio') < events.index(late)

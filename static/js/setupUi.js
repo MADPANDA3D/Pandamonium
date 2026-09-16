@@ -64,6 +64,8 @@ const SETUP_ERROR_MESSAGES = {
     'The plugin action did not finish. Try again; if it keeps failing, check the server logs.',
   extension_manifest_invalid:
     'That plugin package did not pass its manifest check. Use a reviewed package, or ask the publisher to fix it.',
+  extension_soundboard_contract_invalid:
+    'This soundboard package does not match the supported tool contract. Update the app and install a compatible package from its publisher.',
   extension_already_installed_use_upgrade:
     'This plugin is already installed. Use Update from the Installed plugins tab.',
   extension_not_installed_use_install:

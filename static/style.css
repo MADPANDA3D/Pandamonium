@@ -44478,3 +44478,14 @@ textarea.bug-report-input {
   .bug-report-diagnostics-pre,
   .bug-report-review-body { max-height: 34dvh; }
 }
+
+/* Installed Soundboard: independent manual effects controls. */
+[data-settings-tab="soundboard"].hidden { display:none !important; }
+.sound-cue { display:inline-flex; gap:.4em; align-items:center; max-width:100%; border:1px solid var(--border); border-radius:8px; padding:.3em .6em; font:inherit; color:var(--text); background:var(--bg-secondary); cursor:pointer; vertical-align:baseline; }
+.sound-cue.playing { border-color:var(--accent); }
+.sound-cue:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.soundboard-row { display:flex; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.soundboard-row .sound-cue { flex:1; min-width:140px; text-align:left; }
+.soundboard-row a { font-size:12px; color:var(--text); text-underline-offset:3px; }
+.soundboard-search { display:flex; gap:8px; }
+.soundboard-search input { min-width:0; flex:1; }

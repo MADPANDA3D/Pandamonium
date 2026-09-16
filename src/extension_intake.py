@@ -221,6 +221,7 @@ def validate_proposal(
         evidence(item)
     names = set()
     tools = []
+    native_sound_tools = set()
     for interface in proposal.interfaces:
         if interface.name in names:
             raise IntakeError("Interface names must be unique.")
@@ -228,6 +229,16 @@ def validate_proposal(
         for item in interface.evidence:
             evidence(item)
         knowledge = interface.binding.startswith("knowledge.")
+        soundboard = interface.binding.startswith("soundboard.")
+        if soundboard:
+            from src.soundboard import schemas
+
+            params, output = schemas(interface.binding)
+            if (interface.kind != "tool" or not interface.tool_schema
+                    or interface.tool_schema.get("function", {}).get("parameters") != params
+                    or interface.output_schema != output):
+                raise IntakeError("Soundboard tools require the exact native schema.")
+            native_sound_tools.add(interface.name)
         if knowledge:
             from src.extension_knowledge import schemas
 
@@ -247,7 +258,7 @@ def validate_proposal(
                 raise IntakeError(
                     "Knowledge tools use the exact platform schema and evidence from selected source files."
                 )
-        if not knowledge and not any(
+        if not (knowledge or soundboard) and not any(
             interface.binding in item.quote for item in interface.evidence
         ):
             raise IntakeError(
@@ -264,15 +275,15 @@ def validate_proposal(
                     "Tool names and meaningful descriptions must match their interfaces."
                 )
             _check_schema(function["parameters"])
-            if knowledge and interface.arguments:
+            if (knowledge or soundboard) and interface.arguments:
                 raise IntakeError(
                     "Platform knowledge arguments use the supplied schema."
                 )
-            if not knowledge and set(function["parameters"]["properties"]) != set(
+            if not (knowledge or soundboard) and set(function["parameters"]["properties"]) != set(
                 interface.arguments
             ):
                 raise IntakeError("Every tool argument needs its own source evidence.")
-            for name, item in ({} if knowledge else interface.arguments).items():
+            for name, item in ({} if knowledge or soundboard else interface.arguments).items():
                 evidence(item)
                 # Lexical support is necessary, not proof that generated code works.
                 argument = re.escape(name).replace("_", "[-_]")
@@ -382,13 +393,13 @@ def validate_proposal(
         if manifest["runtime"]["type"] != "skills" and (
             manifest["permissions"]["default"] != "external_side_effect"
             or any(
-                mode
+                not (name in native_sound_tools and mode == "read_only") and mode
                 not in {
                     "external_side_effect",
                     "destructive",
                     "controlled_administrative",
                 }
-                for mode in manifest["permissions"]["capabilities"].values()
+                for name, mode in manifest["permissions"]["capabilities"].items()
             )
         ):
             raise IntakeError(

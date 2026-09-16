@@ -1,0 +1,26 @@
+{
+  "sha256": "0551e968c20ba8b9dbdaa425d5b056ee8f27dd6d0901f29337427bb1167e6958",
+  "audio_bytes": 21230,
+  "audio_type": "audio/mpeg",
+  "foreign_owner_denied": true,
+  "disable_enable_preserved": true,
+  "cue_metadata_reload_preserved": true,
+  "model_calls": 0,
+  "native_uninstall_log": "UNINSTALLED; OWNER FAVORITES RETAINED",
+  "loopback": {
+    "recording_seconds": 12.013291666666667,
+    "sound_seconds": 1.2549583333333334,
+    "offset_seconds": 6.165333333333334,
+    "correlation": 0.9999999993566584
+  },
+  "loopback_scope": "Actual manual Settings preview only; not voice-word timing.",
+  "jarvis": {
+    "provider": "self-hosted FreeToken GPT-OSS-120B heretic-v2",
+    "context": 32768,
+    "session_id": "390621ed-a306-4f4e-81fa-3e6125c06e26",
+    "rounds": 5,
+    "result": "Discovered plugin, mounted favorites, retrieved saved Vine Boom, placed marker after second bold boom. One invalid load_tools action was rejected before corrected mount.",
+    "fallbacks": [],
+    "paid_calls": 0
+  }
+}

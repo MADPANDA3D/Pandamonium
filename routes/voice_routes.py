@@ -423,6 +423,9 @@ class _SpeechTurn:
         self.voice: str | None = None
         self.text = ""
         self.raw_text = ""
+        self.owner: str | None = None
+        self.sound_cues: list[dict] = []
+        self._cue_markers = 0
         self.pending_text = ""
         self.finished = False
         self.cancelled = False
@@ -435,16 +438,33 @@ class _SpeechTurn:
         if self.finished or not delta:
             return False
         self.raw_text += delta
+        markers = len(re.findall(r"\[\[sound:[A-Za-z0-9_-]{1,160}\]\]", self.raw_text))
+        if markers > self._cue_markers:
+            from src.soundboard import spoken_cues
+
+            self.sound_cues = spoken_cues(
+                self.raw_text, " ".join(speech_text(self.raw_text).split()), owner=self.owner,
+                session_id=self.session_id, turn_id=self.turn_id,
+            )
+            self._cue_markers = markers
         self.pending_text += delta
         matches = list(re.finditer(r"[.!?][\"')\]]*(?=\s|$)", self.pending_text))
         if not matches:
             return False
         cut = matches[-1].end()
-        ready = speech_text(self.pending_text[:cut])
+        raw = self.pending_text[:cut]
+        ready = speech_text(raw)
         self.pending_text = self.pending_text[cut:].lstrip()
-        return self._queue_text(ready)
+        return self._queue_text(ready, raw=raw)
 
-    def _queue_text(self, text: str) -> bool:
+    def _queue_text(self, text: str, *, raw: str = "") -> bool:
+        from src.soundboard import spoken_cues
+
+        if "[[sound:" in raw and not self._cue_markers:
+            self.sound_cues.extend(spoken_cues(
+                raw, " ".join(text.split()), owner=self.owner, session_id=self.session_id,
+                turn_id=self.turn_id, base_offset=len(self.text) + bool(self.text),
+            ))
         queued = False
         for block in speech_blocks(text):
             self.blocks.put_nowait(block)
@@ -452,11 +472,11 @@ class _SpeechTurn:
             queued = True
         return queued
 
-    async def complete(self, text: str | None = None) -> None:
+    async def complete(self, text: str | None = None, *, cue_text: str = "") -> None:
         if text is not None and not self.raw_text:
             self.raw_text = text
-            self.pending_text = text
-        self._queue_text(speech_text(self.pending_text))
+            self.pending_text = cue_text if cue_text and speech_text(cue_text) == text else text
+        self._queue_text(speech_text(self.pending_text), raw=self.pending_text)
         self.pending_text = ""
         self.finished = True
         self.done.set()
@@ -613,6 +633,11 @@ def _engaged_extension_ids(session: dict[str, Any]) -> set[str]:
         for item in session.get("engaged_extensions") or []
         if EXTENSION_ID_PATTERN.fullmatch(str(item))
     }
+    # Installed native Soundboard is always available in this owner's voice session.
+    from src.soundboard import EXTENSION_ID, active_state
+
+    if active_state(session.get("owner")) is not None:
+        engaged.add(EXTENSION_ID)
     # Backward compatibility for sessions created before generic extension state.
     if session.get("oracle_protocol_active"):
         engaged.add("oracle")
@@ -4188,6 +4213,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
         user_turn = _append_turn(session, "user", text, "thinking")
         _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
         speech_turn = _register_speech_turn(session_id)
+        speech_turn.owner = owner
         speech_turn.voice = _tts_voice_for_final({
             "diagnostics": {"character_name": _voice_character_name(turn_session)},
         })
@@ -4249,7 +4275,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                     if event.get("type") == "assistant_delta" and stream_speech:
                         if speech_turn.feed(str(event.get("text") or "")) and not audio_announced:
                             audio_announced = True
-                            yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
+                            yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id, 'sound_cues': speech_turn.sound_cues})}\n\n"
                     yield f"data: {json.dumps(event)}\n\n"
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
@@ -4266,11 +4292,11 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                 else:
                     speech_contract = _speech_contract_for_final(text, final)
                     final.update(speech_contract)
-                    await speech_turn.complete(speech_contract["spoken_text"])
+                    await speech_turn.complete(speech_contract["spoken_text"], cue_text=str(final["assistant_text"]))
                 spoken_text = speech_turn.text
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 if not audio_announced:
-                    yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
+                    yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id, 'sound_cues': speech_turn.sound_cues})}\n\n"
                 current_state = _load_state()
                 current = _session(current_state, session_id)
                 task_ids = final.get("task_ids") or []
@@ -4375,6 +4401,9 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
             audio_ms = 0
             block_count = 0
             spoken_text = ""
+            block_offset = 0
+            word_ends: dict[int, tuple[int, int]] = {}
+            reported_cues: set[str] = set()
             try:
                 sample_rate: int | None = None
                 async for block in speech_turn.iter_blocks():
@@ -4400,6 +4429,20 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                         elif block_rate != sample_rate:
                             raise RuntimeError("TTS sample rate changed during a voice turn")
 
+                        from src.soundboard import word_timings
+
+                        for word in word_timings(audio, block, sample_rate=sample_rate, samples=len(pcm) // 2):
+                            word_ends[block_offset + word["char_end"]] = (block_count, word["end_sample"])
+                        selected = [cue for cue in speech_turn.sound_cues
+                                    if block_offset < cue["char_end"] <= block_offset + len(block)]
+                        reported_cues.update(cue["cue_id"] for cue in selected)
+                        sound_cues = [{"cue_id": cue["cue_id"], "sound_id": cue["sound_id"],
+                                       "title": cue["title"], "end_sample": word_ends[cue["char_end"]][1]}
+                                      for cue in selected if cue["char_end"] in word_ends]
+                        skipped_cues = len(selected) - len(sound_cues)
+                        if skipped_cues:
+                            logger.warning("Skipped %s sound cues: provider word timing unavailable", skipped_cues)
+                        block_offset += len(block) + 1
                         block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
                         yield json.dumps({
                             "type": "block",
@@ -4407,6 +4450,8 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                             "text_chars": len(block),
                             "generation_ms": block_generation_ms,
                             "audio_ms": block_audio_ms,
+                            "sound_cues": sound_cues,
+                            "sound_cues_skipped": skipped_cues,
                         }, separators=(",", ":")) + "\n"
                         for frame in pcm_frames(pcm):
                             yield json.dumps({
@@ -4421,6 +4466,16 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                             raise RuntimeError("Voice playback was interrupted")
                         _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
 
+                # Markers may arrive after a sentence was queued. Reuse its observed
+                # word clock instead of delaying, splitting or synthesizing speech again.
+                late = [cue for cue in speech_turn.sound_cues if cue["cue_id"] not in reported_cues]
+                if late:
+                    resolved = [{"cue_id": cue["cue_id"], "sound_id": cue["sound_id"], "title": cue["title"],
+                                 "block_index": word_ends[cue["char_end"]][0],
+                                 "end_sample": word_ends[cue["char_end"]][1]}
+                                for cue in late if cue["char_end"] in word_ends]
+                    yield json.dumps({"type": "sound_cues", "sound_cues": resolved,
+                                      "sound_cues_skipped": len(late) - len(resolved)}) + "\n"
                 spoken_text = speech_turn.text
 
                 yield json.dumps({

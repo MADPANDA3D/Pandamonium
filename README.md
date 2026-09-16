@@ -12,6 +12,7 @@
   <a href="#pandamonium-upgrades">Upgrades</a> ·
   <a href="docs/setup.md">Setup Guide</a> ·
   <a href="docs/voice-orb/README.md">Voice Orb</a> ·
+  <a href="docs/mad-968-soundboard.md">Soundboard preview</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="ROADMAP.md">Roadmap</a>
 </p>

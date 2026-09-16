@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'pandamonium-v423';
+const CACHE_NAME = 'pandamonium-v425';
 const UPDATE_RECONCILE_QUERY = 'pandamonium-update-reconcile';
 const UPDATE_WORKER_PENDING = 'pending-worker-update';
 const UPDATE_RECONCILE_ATTEMPTS = 8;
@@ -30,6 +30,7 @@ const PRECACHE = [
   '/static/js/clientState.js',
   '/static/js/ui.js',
   '/static/js/markdown.js',
+  '/static/js/soundboard.js',
   '/static/js/dragSort.js',
   '/static/js/sessions.js',
   '/static/js/modelPicker.js',

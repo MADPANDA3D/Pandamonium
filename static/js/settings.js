@@ -13,6 +13,7 @@ import { bindMenuDismiss } from './escMenuStack.js';
 import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 import sshConnectionsModule from './sshConnections.js';
 import unslothRuntimeModule from './unslothRuntime.js';
+import { openSoundboard, refreshSoundboard } from './soundboard.js';
 import { startVoicePreview } from './voicePreview.js';
 import { initModelHelp } from './modelHelp.js';
 
@@ -124,6 +125,7 @@ function initTabs() {
       if (tab === 'ai') refreshAiModelEndpoints();
       if (tab === 'ssh') sshConnectionsModule.open();
       if (tab === 'training') unslothRuntimeModule.open();
+      if (tab === 'soundboard') openSoundboard();
     });
   });
 }
@@ -6577,6 +6579,7 @@ export function open(tab) {
     try { applyRightDock(modalEl); } catch (_) {}
   }
   syncAdminVisibility();
+  refreshSoundboard();
   const content = modalEl.querySelector('.settings-modal-content');
   if (tab) {
     modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === tab));
@@ -6589,6 +6592,7 @@ export function open(tab) {
   if (activeTab === 'ai') refreshAiModelEndpoints();
   if (activeTab === 'ssh') sshConnectionsModule.open();
   if (activeTab === 'training') unslothRuntimeModule.open();
+  if (activeTab === 'soundboard') openSoundboard();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }
