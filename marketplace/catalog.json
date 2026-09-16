@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:13:42.957862+00:00",
-  "expires_at": "2026-12-15T00:13:42.957862+00:00",
+  "generated_at": "2026-09-16T00:14:12.988787+00:00",
+  "expires_at": "2026-12-15T00:14:12.988787+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -1544,11 +1544,122 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "text-to-cad",
+        "name": "Text to CAD",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/earthtojake/text-to-cad.git",
+          "revision": "3e4dfdeef2cbd5804c369592b59620132188a150"
+        },
+        "runtime": {
+          "type": "skills",
+          "entrypoint": ".pandamonium/plugin.json"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "skill_bundle",
+            "format": "codex_plugin",
+            "include": [
+              "bambu-labs",
+              "cad",
+              "cad-viewer",
+              "dfam-check",
+              "dxf",
+              "gcode",
+              "sdf",
+              "sendcutsend"
+            ]
+          }
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 5
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [],
+          "write": [],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 1
+        },
+        "metadata": {
+          "summary": "Use eight text-to-cad workflows for CAD, fabrication and local review as native instructions.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements.",
+            "Executing CAD generation, slicing or printer actions requires the corresponding owner-installed CAD/tool/device runtime; skill admission does not validate those actions."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Use eight text-to-cad workflows for CAD, fabrication and local review as native instructions.",
+      "categories": [
+        "skills"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-text-to-cad-1.0.0-28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a/pandamonium-plugin-text-to-cad-28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a.tar.gz",
+        "sha256": "28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a",
+        "size_bytes": 6144052,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "WnCF4gMpDYz0GZ8xX3lXo9zDZvUiAYcLMB/mvf4qJhvONj8zyRoYZRKemMLPJ4DscrxR3vLqxbzpjDyx9yXvDg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:13:50.536203+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "+vfjgtQ0zy6hHS7XDjsuF3gYlOOzCWnK113ipwh0xb2E3d6ZnRmglIqvW0L7ZHhzmis8MJs9vO6OwAV+nGK7BQ=="
+    "value": "lQBp37o3tBsUuhJ19MDnHAqZONHeaad61fRSIXpLuodkVI1zSaWLZ1NXce2kEBelB7hfvK2z28TXMdnAfzQrDA=="
   }
 }
