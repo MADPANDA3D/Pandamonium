@@ -3,6 +3,8 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 import src.agent_loop as al
 from src.agent_tools import ToolBlock
 from src.tool_execution import execute_tool_block
@@ -95,6 +97,54 @@ def _schema_names(tools):
         tool.get("function", {}).get("name") or tool.get("name")
         for tool in (tools or [])
     }
+
+
+@pytest.mark.parametrize("question,enabled,skill_owner,expected", [
+    ("Do you have access to sounds and a soundboard ?", True, "leo", True),
+    ("Use one of my saved sound effects after the word boom.", True, "leo", True),
+    ("Do you have access to sounds and a soundboard ?", False, "leo", False),
+    ("Do you have access to sounds and a soundboard ?", True, "other", False),
+    ("Hello", True, "leo", False),
+])
+def test_published_skill_prevents_low_signal_bypass(
+    monkeypatch, tmp_path, question, enabled, skill_owner, expected,
+):
+    import routes.prefs_routes as prefs
+    from services.memory.skills import SkillsManager
+    from src import constants
+
+    _patch_loop_basics(monkeypatch)
+    monkeypatch.setattr(constants, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(al, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(prefs, "_load_for_user", lambda owner: {"skills_enabled": enabled})
+    SkillsManager(tmp_path).add_skill(
+        name="soundboard", description="Use saved sound effects",
+        tags=["soundboard", "sound", "sounds", "boom"],
+        procedure=["Inspect and mount the installed plugin with manage_extensions."],
+        source="user", status="published", owner=skill_owner,
+    )
+    prompts = []
+    sent_tools = []
+
+    def build_prompt(messages, *args, **kwargs):
+        prompts.append(kwargs)
+        return messages, []
+
+    async def stream(_candidates, messages, **kwargs):
+        sent_tools.append(_schema_names(kwargs.get("tools")))
+        yield _delta_chunk("ok")
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "_build_system_prompt", build_prompt)
+    monkeypatch.setattr(al, "stream_llm_with_fallback", stream)
+    _collect(al.stream_agent_loop(
+        "http://localhost/v1", "gpt-4-test",
+        [{"role": "user", "content": question}], owner="leo", max_rounds=1,
+    ))
+    assert bool(prompts and not prompts[0]["suppress_skills"]) is expected
+    if expected:
+        assert "manage_skills" in prompts[0]["relevant_tools"]
+        assert "manage_extensions" in sent_tools[0]
 
 
 def test_agent_loop_web_intent_preserves_disabled_web_tools(monkeypatch):

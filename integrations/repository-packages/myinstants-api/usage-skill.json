@@ -1,0 +1,19 @@
+{
+  "name": "pandamonium-soundboard",
+  "description": "Use the installed Myinstants soundboard tools and saved sounds in Pandamonium text and voice responses.",
+  "category": "integrations",
+  "tags": ["soundboard", "myinstants", "sounds", "sound", "favorites", "boom"],
+  "when_to_use": "The user asks about access to a soundboard, finding or using sound effects, saved sounds, or placing a sound in a response.",
+  "procedure": [
+    "Check the installed plugin before answering about access: call manage_extensions with {\"action\":\"inspect\",\"extension_id\":\"myinstants-api\"}. Tools absent from the current prompt may simply be unloaded. If the plugin is absent or disabled, report that actual result; do not install or enable it without the user's request.",
+    "If enabled, load its native tools with manage_extensions {\"action\":\"mount\",\"names\":[\"myinstants_api__favorites\",\"myinstants_api__search\",\"myinstants_api__detail\"]}. They become callable on the next round of this request. Mount again on a new request when needed.",
+    "Call myinstants_api__favorites with {} to verify access or list saved sounds. Use its query argument to find a saved sound by name. For new sounds, call myinstants_api__search with a query; resolve an ID with myinstants_api__detail. Report actual failures instead of claiming the plugin is missing or proposing a replacement script.",
+    "When the user asks to use a sound, select a returned sound and insert its exact cue token immediately after the intended word occurrence and before punctuation. Text chat renders a manual play button; do not claim it autoplayed. In voice, the existing player handles the separate sound effect using Chatterbox timing. Do not call TTS again, add pauses or invent a cue ID.",
+    "Settings > Soundboard is where the user previews, saves/removes favorites and changes effects volume or mute. Lookup alone must not change favorites or start playback."
+  ],
+  "pitfalls": ["An enabled plugin is not proof of successful execution; verify with an actual native tool call.", "Never use a shell, another audio API or a second model as a fallback for a failed soundboard call."],
+  "verification": ["The inspected plugin is enabled, mounting succeeds, and a native favorites/search call returns actual sound records.", "Any response cue exactly matches a returned sound's cue token."],
+  "source": "user",
+  "status": "published",
+  "version": "1.0.0"
+}
