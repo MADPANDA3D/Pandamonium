@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:10:29.298540+00:00",
-  "expires_at": "2026-12-15T00:10:29.298540+00:00",
+  "generated_at": "2026-09-16T00:11:03.619632+00:00",
+  "expires_at": "2026-12-15T00:11:03.619632+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -813,11 +813,140 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "step-parts",
+        "name": "step.parts",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/earthtojake/step.parts.git",
+          "revision": "c6113328a5695b976a010a203a90fe86191769bf"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "step_parts__search",
+                "description": "Search the public STEP catalog and return part metadata and provenance; model downloads are separate.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "q": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "q"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://api.step.parts"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Search the STEP parts catalog for mechanical components with original metadata and attribution. Downloaded geometry retains each source license.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Catalog API access is required. This package does not claim to bundle LFS model binaries or relicense third-party geometry."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Search the STEP parts catalog for mechanical components with original metadata and attribution. Downloaded geometry retains each source license.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-step-parts-1.0.0-57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792/pandamonium-plugin-step-parts-57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792.tar.gz",
+        "sha256": "57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792",
+        "size_bytes": 5572468,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "NfgQj6mgvtzEpaahgk3til212yBt+v0unL5Pn2N9tgi7mwa4+J1EOTsjJ205R9vX4esLSX9lSleN7wjKgWlgCg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:10:39.835719+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "8f5jti3O6G0cy5KoYbxbOjmQKTDf5jJ0PHU1Qb4RBdSuifiLkhd3t0cT6tudYfHCLYu8eO6s7zTb3BRuPHnXDw=="
+    "value": "H2CJWnfFp5/uMXFhKdFlZDZRb/FWc2emiFaGCETgeWXCsuhVv6lez4G4NmuAmM6+IFuJJSvMUjUBK+nrKEIFCg=="
   }
 }
