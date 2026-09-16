@@ -158,6 +158,44 @@ def test_literal_path_search_finds_definitions_beyond_initial_index(tmp_path):
     assert artifact["integration"]["readiness"] == "needs_validation"
 
 
+def test_schema_repair_reports_field_location_without_rejected_value(tmp_path):
+    root = source_tree(tmp_path)
+    calls = []
+
+    def model(messages, check):
+        context = json.loads(messages[1]["content"])
+        calls.append(context)
+        if len(calls) == 1:
+            return json.dumps({"read_paths": ["odd/place/command.py"]})
+        data = proposal()
+        if len(calls) == 2:
+            data["interfaces"][0]["kind"] = "syntheticfixturecredential"
+        else:
+            feedback = context["validation_feedback"]
+            assert '"location": ["proposal", "interfaces", 0, "kind"]' in feedback
+            assert "literal_error" in feedback
+            assert "syntheticfixturecredential" not in feedback
+        return json.dumps({"proposal": data})
+
+    artifact = ExtensionStaticScanner(git_client=_CopyGitClient(root),
+        staging_root=tmp_path / "staging", data_dir=tmp_path / "scans", model=model).run(SOURCE_URL, "HEAD", operator_id="operator")
+    assert len(calls) == 3
+    assert artifact["integration"]["readiness"] == "needs_validation"
+
+
+def test_binding_feedback_identifies_all_unquoted_interfaces(tmp_path):
+    root = source_tree(tmp_path)
+    data = proposal()
+    second = json.loads(json.dumps(data["interfaces"][0]))
+    second["name"] = second["tool_schema"]["function"]["name"] = "other_count"
+    data["interfaces"].append(second)
+    for interface in data["interfaces"]:
+        interface["binding"] = "synthesized interface label"
+    with pytest.raises(ValueError, match=r"Affected interface indexes: \[0, 1\]"):
+        validate_proposal(Proposal.model_validate(data),
+            {"README.md": DOC, "odd/place/command.py": CODE}, root, SOURCE_URL, REVISION)
+
+
 @pytest.mark.parametrize("assignment", [
     "api_key = 'syntheticfixturecredential'",
     "token = syntheticfixturecredential # production token",
@@ -612,6 +650,10 @@ def test_secret_audit_uses_python_physical_lines_with_unicode(tmp_path):
     ('--count  Enable counting', 'boolean', True),
     ('--count <count>', 'boolean', False),
     ('Use --count to count items', 'string', False),
+    ('--count: r.URL.Query().Get("count")', 'string', True),
+    ('--count: chi.URLParam(r, "count")', 'string', True),
+    ('--count: r.URL.Query().Get("count")', 'integer', False),
+    ('--count: other.Get("count")', 'string', False),
 ])
 def test_cli_argument_syntax_requires_real_value_or_flag_evidence(tmp_path, quote, kind, accepted):
     root = source_tree(tmp_path)

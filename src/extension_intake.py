@@ -222,7 +222,8 @@ def validate_proposal(
         evidence(item)
     names = set()
     tools = []
-    for interface in proposal.interfaces:
+    unquoted_bindings = []
+    for interface_index, interface in enumerate(proposal.interfaces):
         if interface.name in names:
             raise IntakeError("Interface names must be unique.")
         names.add(interface.name)
@@ -251,9 +252,7 @@ def validate_proposal(
         if not knowledge and not any(
             interface.binding in item.quote for item in interface.evidence
         ):
-            raise IntakeError(
-                "The exact interface binding must occur in its quoted source evidence."
-            )
+            unquoted_bindings.append(interface_index)
         if interface.kind == "tool":
             schema = normalize_tool_schema(interface.tool_schema)
             function = schema["function"]
@@ -296,9 +295,13 @@ def validate_proposal(
                         item.quote, re.IGNORECASE | re.MULTILINE,
                     ))
                 )
+                http_string = kind == "string" and re.search(
+                    rf'\b(?:\w+\.URL\.Query\(\)\.Get\(\s*"{argument}"\s*\)|chi\.URLParam\([^,\n]+,\s*"{argument}"\s*\))',
+                    item.quote,
+                )
                 if not re.search(
                     rf"(?<!\w){argument}(?!\w)", item.quote, re.IGNORECASE
-                ) or not (cli_syntax or re.search(
+                ) or not (cli_syntax or http_string or re.search(
                     rf"\b(?:{kinds[kind]})\b", item.quote, re.IGNORECASE
                 )):
                     raise IntakeError(
@@ -332,6 +335,11 @@ def validate_proposal(
             raise IntakeError(
                 "Use actual distributed skill definitions, not incidental development instructions."
             )
+    if unquoted_bindings:
+        raise IntakeError(
+            f"The exact interface binding must occur in its quoted source evidence. Affected interface indexes: {unquoted_bindings}. "
+            "Use an exact upstream function name or path fragment, not a synthesized HTTP method/base URL/path label."
+        )
     for setup in proposal.setup:
         evidence(setup.evidence)
     if any(
@@ -493,11 +501,16 @@ Excerpt boundary markers separate source windows; adjacent windows are not conti
 Each tool_schema is {"type":"function","function":{"name":"extension__tool","description":"...",
 "parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false}}}.
 Supply output_schema separately. A parameters schema alone is not a tool_schema.
+An interface binding is an exact upstream symbol or path fragment found in its evidence, e.g.
+ListItemsHandler or /items. Do not synthesize a binding by joining HTTP method, base URL and path.
 For definitions outside a file's initial excerpt, request find_text={"path": "literal symbol text"};
 this returns a bounded excerpt around the first exact match, without regex or executing source.
 For paths missing from a truncated file index, request find_paths=["literal filename or path fragment"].
 This searches the complete pinned path list without executing source; read the returned matching_paths.
 Each argument quote must contain its source name and explicit source type (e.g. count/int).
+Go r.URL.Query().Get("name") and chi.URLParam(r, "name") provide string wire inputs;
+quote the exact getter, never append an inferred type annotation to source evidence.
+On an evidence failure, recheck ALL quotes against supplied excerpts, including whitespace.
 For CLI execution recipes, documented <name> or [name] argv placeholders establish string inputs;
 standalone --name switches in option-list lines establish boolean presence/absence inputs. Preserve
 upstream names (hyphens normalized to underscores), map booleans to flag presence, and pass strings
@@ -713,9 +726,12 @@ def generate_integration(
         except (ValueError, TypeError, SyntaxError) as exc:
             repairs += 1
             rejected = raw if isinstance(raw, str) and len(raw) <= MAX_RESPONSE_CHARS else ""
-            # ValidationError text includes submitted values; never feed/log those as trusted repair instructions.
+            # Report schema locations/types without echoing submitted values or error context.
             feedback = (
-                "Response did not match the supplied JSON schema."
+                "JSON schema errors (locations and types only): " + json.dumps([
+                    {"location": error["loc"], "error": error["type"]}
+                    for error in exc.errors(include_input=False, include_context=False, include_url=False)[:8]
+                ])[:450]
                 if isinstance(exc, ValidationError)
                 else str(exc)[:500]
             )
