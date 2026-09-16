@@ -18,6 +18,11 @@ MAX_RESPONSE_CHARS = 200_000
 MAX_MODEL_CALLS = 4
 MAX_REPAIRS = 2
 GENERATED_DIR = ".pandamonium"
+SCHEMA_KEYS = {
+    "type", "properties", "required", "additionalProperties", "items", "enum",
+    "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems",
+    "description", "title", "default",
+}
 
 
 class IntakeError(ValueError):
@@ -133,25 +138,10 @@ def _check_schema(schema: object, depth: int = 0) -> None:
     """Require typed JSON parameters; reject remote refs and unbounded recursion."""
     if depth > 8 or not isinstance(schema, dict) or "$ref" in schema:
         raise IntakeError("Use an inline JSON schema of at most eight levels.")
-    if set(schema) - {
-        "type",
-        "properties",
-        "required",
-        "additionalProperties",
-        "items",
-        "enum",
-        "minimum",
-        "maximum",
-        "minLength",
-        "maxLength",
-        "minItems",
-        "maxItems",
-        "description",
-        "title",
-        "default",
-    }:
+    if set(schema) - SCHEMA_KEYS:
         raise IntakeError(
-            "Use bounded inline types, properties, enums and size/range constraints only."
+            "Use bounded inline types, properties, enums and size/range constraints only. "
+            f"Unsupported schema keywords: {sorted(set(schema) - SCHEMA_KEYS)}."
         )
     kind = schema.get("type")
     if kind not in {
@@ -493,6 +483,12 @@ two or three example user requests grounded in the actual interfaces. These are 
 not claims of completed validation. Never include credentials or machine-local configuration.
 Distinguish primary purpose from development tooling. Prefer existing native manifests, MCP/OpenAPI and skills;
 never turn Markdown skills into fake tools. Do not invent interfaces or argument types.
+Native runtime.type=mcp requires a preconfigured disabled MCP connection with a concrete reference
+and a server identity matching the package source revision; ENDPOINT_ID is not a native descriptor
+reference placeholder. Distributable connected-service packages use runtime.type=service, an inline
+descriptor, and a package-local Python client with execution checks. It may call evidenced REST or
+MCP operations on ENDPOINT_ID, using the existing configuration file described below. Prefer this
+client path when upstream lacks a compatible native manifest; do not invent native MCP schemas.
 Return ONLY JSON matching the supplied response schema. Request read_paths first when evidence is
 missing, or provide a proposal. Quote exact source excerpts for purpose, each binding and argument.
 Use already supplied excerpts without rereading them. Respect remaining_model_calls; the final
@@ -557,6 +553,7 @@ source_exclusions may name optional source files not needed by the supported ope
 are recorded in the package and preview; remaining source still passes the same secret checks.
 Never exclude required dependencies or license notices. Clearly declare reduced provider support.
 """
+SYSTEM_PROMPT += "\nAllowed JSON Schema keywords: " + ", ".join(sorted(SCHEMA_KEYS)) + ". Every object requires properties and additionalProperties=false. Enforce other constraints in the adapter; do not emit unsupported schema keywords."
 
 
 def generate_integration(
