@@ -97,9 +97,9 @@ def _extract_thinking_blocks(text: str) -> dict:
         """
     )
     result = subprocess.run(
-        check=False,
         ["node", "--input-type=module", "-e", script, json.dumps(text)],
         cwd=_REPO,
+        check=False,
         capture_output=True,
         timeout=15,
         text=True,

@@ -98,9 +98,9 @@ def _run_markdown_case(markdown: str, render_expr: str = "mod.mdToHtml(input)", 
         "__WITH_KATEX__", "true" if with_katex else "false"
     )
     result = subprocess.run(
-        check=False,
         ["node", "--input-type=module", "-e", script, json.dumps(markdown)],
         cwd=_REPO,
+        check=False,
         capture_output=True,
         timeout=15,
         text=True,
