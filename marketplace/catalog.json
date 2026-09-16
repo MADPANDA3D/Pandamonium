@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:07:20.065902+00:00",
-  "expires_at": "2026-12-15T00:07:20.065902+00:00",
+  "generated_at": "2026-09-16T00:09:50.628355+00:00",
+  "expires_at": "2026-12-15T00:09:50.628355+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -358,11 +358,178 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "pandaflix",
+        "name": "PandaFlix",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/MADPANDA3D/pandaflix.git",
+          "revision": "f6484787ba5a23d4453d5bbd8eb34f05054ecfbb"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__episode_range",
+                "description": "Expand a bounded episode selection with PandaFlix's own parser",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "s": {
+                      "type": "string",
+                      "maxLength": 7
+                    }
+                  },
+                  "required": [
+                    "s"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__youtube_playback_plan",
+                "description": "Resolve a YouTube URL into a PandaFlix playback plan without opening an interactive player",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "urlStr": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "urlStr"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__watch_history",
+                "description": "Read watch history from this plugin's private account runtime",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://go.dev",
+            "https://dl.google.com",
+            "https://proxy.golang.org",
+            "https://sum.golang.org"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Plan media playback, expand episode selections and read private watch history through PandaFlix's actual Go interfaces.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux x86_64 with bubblewrap, prlimit, a C compiler, pkg-config and libmpv development files",
+            "Private checksum-verified Go 1.26.0 toolchain; Go dependencies remain in runtime cache",
+            "Actual playback remains interactive and requires a configured player/display on the target node"
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Plan media playback, expand episode selections and read private watch history through PandaFlix's actual Go interfaces.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "GPL-3.0 AND BSD-3-Clause",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-pandaflix-1.0.0-664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405/pandamonium-plugin-pandaflix-664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405.tar.gz",
+        "sha256": "664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405",
+        "size_bytes": 59643614,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "kGKDsBQgwzNKA8y/iXUOeZZ84YlTSxC/R3OytGZ0Pzj64xVTQ9ZnmrXO3BQ3AKU8sZ4bfqFq0S6gPBgH91g3Bg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:08:52.814503+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "KYlueO+u4FnFjXgNEJeIpEUKTJx96rOPrYLwxWTBBobtQwZg5TPGE+ZCz11vHEA8Fn36L34w9+4tTAeRWM/SAA=="
+    "value": "S7iDmFkgel6BtGYEJ37F/h7CUJCfCO9Tc4n0SRsmHhRWQFeNkPFvxFuuaP49W+p42E7IlAKbZ9FIXQHriHJ0BQ=="
   }
 }
