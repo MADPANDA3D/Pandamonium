@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:12:59.062794+00:00",
-  "expires_at": "2026-12-15T00:12:59.062794+00:00",
+  "generated_at": "2026-09-16T00:13:42.957862+00:00",
+  "expires_at": "2026-12-15T00:13:42.957862+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -1413,11 +1413,142 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "graphify",
+        "name": "Graphify",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/Graphify-Labs/graphify.git",
+          "revision": "c7ec1082083e3e876443f643ecf86ebcfae177c2"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "graphify__markdown_graph",
+                "description": "Extract real structural nodes and edges from Markdown under /package or /runtime/artifacts.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://pypi.org",
+            "https://files.pythonhosted.org"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Build a source-backed Markdown knowledge graph with Graphify and retain graph.json. Semantic model inference is a separate configured capability.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Input files belong in the private artifact directory; host workspaces and credentials are not mounted.",
+            "This package validates the Markdown extractor. Broader code parsing and model-inferred edges are not advertised."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Build a source-backed Markdown knowledge graph with Graphify and retain graph.json. Semantic model inference is a separate configured capability.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT AND Apache-2.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-graphify-1.0.0-29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8/pandamonium-plugin-graphify-29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8.tar.gz",
+        "sha256": "29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8",
+        "size_bytes": 4410191,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "2NlvM2GAtr+s9dqql9VPV/6S/WwxshIyjD8c9v1hl+bN4BvLarcuCYTbpIgRm1ZHTS0PLismM8seCGX6nxVdDg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:13:27.401340+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "0rtgXPXNT8iVK7nXUfxc+dY1SCfU/VaY2t7GHfbWn+MOxlGZHe/3LQCKJwHSpaIiEx/lT+xeLB+TZkR/JXvFDA=="
+    "value": "+vfjgtQ0zy6hHS7XDjsuF3gYlOOzCWnK113ipwh0xb2E3d6ZnRmglIqvW0L7ZHhzmis8MJs9vO6OwAV+nGK7BQ=="
   }
 }
