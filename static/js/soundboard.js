@@ -52,6 +52,7 @@ let voiceGeneration = 0;
 const voiceSources = new Map();
 const voiceRequests = new Set();
 const voiceCueIds = new Set();
+const voiceBuffers = new Map();
 
 export function stopVoiceSounds() {
   voiceGeneration += 1;
@@ -60,6 +61,7 @@ export function stopVoiceSounds() {
   for (const source of voiceSources.keys()) { try { source.stop(); } catch {} }
   voiceSources.clear();
   voiceCueIds.clear();
+  voiceBuffers.clear();
 }
 
 export async function finishVoiceSounds() {
@@ -68,6 +70,41 @@ export async function finishVoiceSounds() {
   voiceGeneration += 1;
   await Promise.all([...voiceSources.values()].map(value => value.ended));
   voiceCueIds.clear();
+  voiceBuffers.clear();
+}
+
+function voiceBuffer(context, soundId, token) {
+  if (voiceBuffers.has(soundId)) return voiceBuffers.get(soundId);
+  const controller = new AbortController();
+  voiceRequests.add(controller);
+  const ready = (async () => {
+    try {
+      const current = await api();
+      if (token !== voiceGeneration || !current.installed || !current.enabled || current.muted) return null;
+      state = { ...state, ...current };
+      const response = await fetch(`/api/soundboard/sounds/${encodeURIComponent(soundId)}/audio`, {
+        credentials: 'same-origin', signal: controller.signal,
+      });
+      if (!response.ok) throw new Error('Sound effect unavailable');
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('Sound effect is too large');
+      const buffer = await context.decodeAudioData(bytes);
+      if (buffer.duration > 15) throw new Error('Choose a sound effect under 15 seconds');
+      return buffer;
+    } catch (error) {
+      if (token === voiceGeneration && error.name !== 'AbortError') uiModule.showToast?.(error.message, 'error');
+      return null;
+    } finally { voiceRequests.delete(controller); }
+  })();
+  voiceBuffers.set(soundId, ready);
+  return ready;
+}
+
+export function prefetchVoiceCues(context, cues) {
+  if (!Array.isArray(cues)) return;
+  for (const cue of cues.slice(0, 100)) {
+    if (/^[A-Za-z0-9_-]{1,160}$/.test(cue?.sound_id || '')) voiceBuffer(context, cue.sound_id, voiceGeneration);
+  }
 }
 
 export function prepareVoiceCues(context, cues) {
@@ -77,27 +114,7 @@ export function prepareVoiceCues(context, cues) {
     && typeof cue.cue_id === 'string' && cue.cue_id.length <= 256
     && Number.isSafeInteger(cue.end_sample) && cue.end_sample > 0
     && !voiceCueIds.has(cue.cue_id) && !!voiceCueIds.add(cue.cue_id)).map(cue => {
-    const controller = new AbortController();
-    voiceRequests.add(controller);
-    const ready = (async () => {
-      try {
-        const current = await api();
-        if (token !== voiceGeneration || !current.installed || !current.enabled || current.muted) return null;
-        state = { ...state, ...current };
-        const response = await fetch(`/api/soundboard/sounds/${encodeURIComponent(cue.sound_id)}/audio`, {
-          credentials: 'same-origin', signal: controller.signal,
-        });
-        if (!response.ok) throw new Error('Sound effect unavailable');
-        const bytes = await response.arrayBuffer();
-        if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('Sound effect is too large');
-        const buffer = await context.decodeAudioData(bytes);
-        if (buffer.duration > 15) throw new Error('Choose a sound effect under 15 seconds');
-        return buffer;
-      } catch (error) {
-        if (token === voiceGeneration && error.name !== 'AbortError') uiModule.showToast?.(error.message, 'error');
-        return null;
-      } finally { voiceRequests.delete(controller); }
-    })();
+    const ready = voiceBuffer(context, cue.sound_id, token);
     return { ...cue, ready, token };
   });
 }

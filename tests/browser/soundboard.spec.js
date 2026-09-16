@@ -98,6 +98,7 @@ test('voice effects use the speech clock, deduplicate, skip late media and cance
       },
     };
     const cue = { cue_id: 'turn:second-boom', sound_id: 'vine-boom-123', end_sample: 48000, title: 'Boom' };
+    sounds.prefetchVoiceCues(context, [cue]);
     const prepared = sounds.prepareVoiceCues(context, [cue, cue]);
     await Promise.all(prepared.map(item => item.ready));
     sounds.scheduleVoiceCue(context, prepared[0], 3);

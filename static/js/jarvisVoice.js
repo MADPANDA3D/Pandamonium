@@ -5,7 +5,7 @@ import markdownModule from './markdown.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import { renderAuthorityApprovalCard, restorePendingAuthorityDecision } from './chatRenderer.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
-import { prepareVoiceCues, scheduleVoiceCue, stopVoiceSounds, finishVoiceSounds } from './soundboard.js';
+import { prefetchVoiceCues, prepareVoiceCues, scheduleVoiceCue, stopVoiceSounds, finishVoiceSounds } from './soundboard.js';
 
 let sessionId = null;
 let mediaRecorder = null;
@@ -2320,6 +2320,7 @@ async function streamTurn(text, timings, turnStarted, callGeneration) {
             if (!isCurrentVoiceCall(callGeneration)) return null;
             activeAudioTurnId = event.turn_id;
             setStatus('buffering');
+            ensurePlaybackContext().then(context => prefetchVoiceCues(context, event.sound_cues)).catch(() => {});
             return playVoiceTurnAudio(event.turn_id, timings, turnSessionId);
           });
           activeTurnAudioPromise = promise;
@@ -2886,6 +2887,7 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
         return;
       }
       if (event.type === 'block') {
+        if (event.sound_cues_skipped) showToast('Sound effect skipped: word timing unavailable.', 5200);
         blockSamples = 0;
         soundCues = prepareVoiceCues(context, event.sound_cues);
         timings.tts_blocks = Math.max(timings.tts_blocks, Number(event.index) + 1);

@@ -22,7 +22,7 @@
         "type": "function",
         "function": {
           "name": "myinstants_api__search",
-          "description": "Search Myinstants for new sounds. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "description": "Search Myinstants for new sounds. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -103,7 +103,7 @@
         "type": "function",
         "function": {
           "name": "myinstants_api__detail",
-          "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -184,7 +184,7 @@
         "type": "function",
         "function": {
           "name": "myinstants_api__recent",
-          "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
           "parameters": {
             "type": "object",
             "properties": {},
@@ -257,7 +257,7 @@
         "type": "function",
         "function": {
           "name": "myinstants_api__favorites",
-          "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -352,7 +352,7 @@
           "type": "function",
           "function": {
             "name": "myinstants_api__search",
-            "description": "Search Myinstants for new sounds. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "description": "Search Myinstants for new sounds. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
             "parameters": {
               "type": "object",
               "properties": {
@@ -373,7 +373,7 @@
           "type": "function",
           "function": {
             "name": "myinstants_api__detail",
-            "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
             "parameters": {
               "type": "object",
               "properties": {
@@ -394,7 +394,7 @@
           "type": "function",
           "function": {
             "name": "myinstants_api__recent",
-            "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
             "parameters": {
               "type": "object",
               "properties": {},
@@ -407,7 +407,7 @@
           "type": "function",
           "function": {
             "name": "myinstants_api__favorites",
-            "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
             "parameters": {
               "type": "object",
               "properties": {

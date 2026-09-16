@@ -425,6 +425,7 @@ class _SpeechTurn:
         self.raw_text = ""
         self.owner: str | None = None
         self.sound_cues: list[dict] = []
+        self._cue_markers = 0
         self.pending_text = ""
         self.finished = False
         self.cancelled = False
@@ -437,6 +438,15 @@ class _SpeechTurn:
         if self.finished or not delta:
             return False
         self.raw_text += delta
+        markers = len(re.findall(r"\[\[sound:[A-Za-z0-9_-]{1,160}\]\]", self.raw_text))
+        if markers > self._cue_markers:
+            from src.soundboard import spoken_cues
+
+            self.sound_cues = spoken_cues(
+                self.raw_text, " ".join(speech_text(self.raw_text).split()), owner=self.owner,
+                session_id=self.session_id, turn_id=self.turn_id,
+            )
+            self._cue_markers = markers
         self.pending_text += delta
         matches = list(re.finditer(r"[.!?][\"')\]]*(?=\s|$)", self.pending_text))
         if not matches:
@@ -450,7 +460,7 @@ class _SpeechTurn:
     def _queue_text(self, text: str, *, raw: str = "") -> bool:
         from src.soundboard import spoken_cues
 
-        if "[[sound:" in raw:
+        if "[[sound:" in raw and not self._cue_markers:
             self.sound_cues.extend(spoken_cues(
                 raw, " ".join(text.split()), owner=self.owner, session_id=self.session_id,
                 turn_id=self.turn_id, base_offset=len(self.text) + bool(self.text),
@@ -4265,7 +4275,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                     if event.get("type") == "assistant_delta" and stream_speech:
                         if speech_turn.feed(str(event.get("text") or "")) and not audio_announced:
                             audio_announced = True
-                            yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
+                            yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id, 'sound_cues': speech_turn.sound_cues})}\n\n"
                     yield f"data: {json.dumps(event)}\n\n"
                 if not final:
                     raise RuntimeError("Jarvis voice model returned no final event")
@@ -4286,7 +4296,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                 spoken_text = speech_turn.text
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 if not audio_announced:
-                    yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id})}\n\n"
+                    yield f"data: {json.dumps({'type': 'audio_ready', 'turn_id': speech_turn.turn_id, 'sound_cues': speech_turn.sound_cues})}\n\n"
                 current_state = _load_state()
                 current = _session(current_state, session_id)
                 task_ids = final.get("task_ids") or []
@@ -4422,6 +4432,10 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                         sound_cues = timed_cues(audio, block, speech_turn.sound_cues,
                                                block_offset=block_offset, sample_rate=sample_rate,
                                                samples=len(pcm) // 2)
+                        skipped_cues = sum(block_offset < cue["char_end"] <= block_offset + len(block)
+                                           for cue in speech_turn.sound_cues) - len(sound_cues)
+                        if skipped_cues:
+                            logger.warning("Skipped %s sound cues: provider word timing unavailable", skipped_cues)
                         block_offset += len(block) + 1
                         block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
                         yield json.dumps({
@@ -4431,6 +4445,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                             "generation_ms": block_generation_ms,
                             "audio_ms": block_audio_ms,
                             "sound_cues": sound_cues,
+                            "sound_cues_skipped": skipped_cues,
                         }, separators=(",", ":")) + "\n"
                         for frame in pcm_frames(pcm):
                             yield json.dumps({

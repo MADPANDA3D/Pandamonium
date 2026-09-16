@@ -201,3 +201,16 @@ def test_voice_mounts_only_the_current_owners_enabled_soundboard(monkeypatch):
     assert _engaged_extension_ids({'owner': 'installed-owner'}) == {'myinstants-api'}
     assert _engaged_extension_ids({'owner': 'other-owner'}) == set()
     assert _engaged_extension_ids({'owner': 'other-owner', 'oracle_protocol_active': True}) == {'oracle'}
+
+
+def test_streamed_marker_after_sentence_keeps_its_preceding_word(monkeypatch):
+    from routes.voice_routes import _SpeechTurn
+
+    monkeypatch.setattr(sb, "active_state", lambda owner: {"sounds": {"boom-123": {"title": "Boom"}}})
+    turn = _SpeechTurn("session", "turn")
+    turn.owner = "owner"
+    assert turn.feed("First boom, then boom.")
+    assert not turn.feed(" [[sound:boom-123]]")
+    assert turn.sound_cues[0]["char_end"] == len("First boom, then boom")
+    turn.feed(" More words.")
+    assert len(turn.sound_cues) == 1
