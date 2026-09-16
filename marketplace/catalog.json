@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:11:50.431416+00:00",
-  "expires_at": "2026-12-15T00:11:50.431416+00:00",
+  "generated_at": "2026-09-16T00:12:04.762617+00:00",
+  "expires_at": "2026-12-15T00:12:04.762617+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -1101,11 +1101,171 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "public-apis",
+        "name": "Public APIs",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/public-apis/public-apis.git",
+          "revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "public_apis__search",
+                "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "public_apis__status",
+                "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "public_apis__refresh",
+                "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Choose one search result, read its linked API documentation, then configure that API package with its endpoint and credential.",
+            "This index never follows collection links or installs their projects."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-public-apis-1.0.0-90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567/pandamonium-plugin-public-apis-90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567.tar.gz",
+        "sha256": "90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567",
+        "size_bytes": 158231,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "qgZvWXTe2uJi6BE10XTOZzj9axJYs9Vs0UAGvUBsSP5kIhy1vlbU2MJPVOMMk0AXPartelj3Q5b6ZipD8uiWDQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:11:53.305998+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "tXIEKLsRkMX9FDJ2spx/hvfVtizC/x4m0QnrU2P2+jxgIuMKXOovnZPnmTNuLloQZFeI0QKWCmmzoA+8zWcJCw=="
+    "value": "w8QtpOSXlK16J4yPDIiB0tLBRjMLw6CLTc4s8EuBQd7SrInc3iW4njf9xEu2EBBO137o2n/vXUC2aRZIeCQPAQ=="
   }
 }
