@@ -53,6 +53,7 @@ const voiceSources = new Map();
 const voiceRequests = new Set();
 const voiceCueIds = new Set();
 const voiceBuffers = new Map();
+const scheduledVoiceCues = new Set();
 
 export function stopVoiceSounds() {
   voiceGeneration += 1;
@@ -65,7 +66,8 @@ export function stopVoiceSounds() {
 }
 
 export async function finishVoiceSounds() {
-  // Finish audible effect tails before the existing call loop resumes listening.
+  // Scheduled cues get their existing 150 ms deadline before unused fetches stop.
+  await Promise.all([...scheduledVoiceCues]);
   for (const controller of voiceRequests) controller.abort();
   voiceGeneration += 1;
   await Promise.all([...voiceSources.values()].map(value => value.ended));
@@ -120,7 +122,14 @@ export function prepareVoiceCues(context, cues) {
 }
 
 export function scheduleVoiceCue(context, cue, beginsAt) {
-  cue.ready.then(buffer => {
+  let timer;
+  const deadline = new Promise(resolve => {
+    timer = setTimeout(() => {
+      if (cue.token === voiceGeneration) uiModule.showToast?.(`Skipped late sound: ${cue.title || 'Sound effect'}`, 'error');
+      resolve(null);
+    }, Math.max(0, (beginsAt + 0.15 - context.currentTime) * 1000));
+  });
+  const pending = Promise.race([cue.ready, deadline]).then(buffer => {
     if (!buffer || cue.token !== voiceGeneration || state.muted || !state.enabled) return;
     if (context.currentTime - beginsAt > 0.15) {
       uiModule.showToast?.(`Skipped late sound: ${cue.title || 'Sound effect'}`, 'error');
@@ -140,7 +149,10 @@ export function scheduleVoiceCue(context, cue, beginsAt) {
     voiceSources.set(source, { gain, ended });
     source.onended = () => { voiceSources.delete(source); source.disconnect(); gain.disconnect(); finished(); };
     source.start(Math.max(context.currentTime, beginsAt));
-  }).catch(() => uiModule.showToast?.('Sound effect could not play.', 'error'));
+  }).catch(() => uiModule.showToast?.('Sound effect could not play.', 'error'))
+    .finally(() => { clearTimeout(timer); scheduledVoiceCues.delete(pending); });
+  scheduledVoiceCues.add(pending);
+  return pending;
 }
 
 async function play(id, button) {

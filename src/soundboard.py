@@ -204,15 +204,22 @@ def favorite(runtime: Path, sound_id: str, enabled: bool) -> dict:
     return state
 
 
-def audio(runtime: Path, sound_id: str) -> tuple[bytes, str]:
+def audio(runtime: Path, sound_id: str, *, config: dict | None = None) -> tuple[bytes, str]:
     record = read_state(runtime)["sounds"].get(sound_id)
     if not record:
         raise ValueError("Sound has not been resolved by this plugin")
     url = media_url(record["mp3"])
     with httpx.Client(timeout=15, follow_redirects=False, trust_env=False,
                       headers={"User-Agent": USER_AGENT}) as client:
+        port = int((config or {}).get("PANDAMONIUM_PORT", 0))
+        if port and not 1 <= port <= 65535:
+            raise ValueError("Soundboard service is unavailable")
+        service_url = f"http://127.0.0.1:{port}/soundboard-media" if port else None
         for _ in range(4):
-            with client.stream("GET", url) as response:
+            with client.stream("GET", service_url or url, params={"url": url} if service_url else None) as response:
+                if service_url and response.status_code == 404:
+                    service_url = None  # Compatibility with the earlier 1.1.0 package.
+                    continue
                 if response.is_redirect:
                     url = media_url(urljoin(url, response.headers["location"]))
                     continue
@@ -252,13 +259,11 @@ def spoken_cues(raw: str, spoken: str, *, owner: str | None, session_id: str,
     return cues
 
 
-def timed_cues(audio: bytes, block: str, cues: list[dict], *, block_offset: int,
-               sample_rate: int, samples: int) -> list[dict]:
+def word_timings(audio: bytes, block: str, *, sample_rate: int, samples: int) -> list[dict]:
     """Read bounded Chatterbox RIFF metadata; malformed/missing timing fails effects only."""
     import struct
 
-    selected = [cue for cue in cues if block_offset < cue["char_end"] <= block_offset + len(block)]
-    if not selected or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+    if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
         return []
     try:
         end = struct.unpack_from("<I", audio, 4)[0] + 8
@@ -297,16 +302,16 @@ def timed_cues(audio: bytes, block: str, cues: list[dict], *, block_offset: int,
                 return []
             ends[(row[0], row[1])] = row[2]
             previous = row[2]
-        result = []
-        for cue in selected:
-            for source, target in zip(original, normalized, strict=True):
-                if source.end() != cue["char_end"] - block_offset:
-                    continue
-                offset = ends.get((target.start(), target.end()))
-                if offset is not None:
-                    result.append({"cue_id": cue["cue_id"], "sound_id": cue["sound_id"],
-                                   "title": cue["title"], "end_sample": offset})
-                break
-        return result
+        return [{"char_end": source.end(), "end_sample": ends[(target.start(), target.end())]}
+                for source, target in zip(original, normalized, strict=True)
+                if (target.start(), target.end()) in ends]
     except (ValueError, TypeError, KeyError, UnicodeError, struct.error):
         return []
+
+
+def timed_cues(audio: bytes, block: str, cues: list[dict], *, block_offset: int,
+               sample_rate: int, samples: int) -> list[dict]:
+    ends = {block_offset + row["char_end"]: row["end_sample"]
+            for row in word_timings(audio, block, sample_rate=sample_rate, samples=samples)}
+    return [{"cue_id": cue["cue_id"], "sound_id": cue["sound_id"], "title": cue["title"],
+             "end_sample": ends[cue["char_end"]]} for cue in cues if cue["char_end"] in ends]

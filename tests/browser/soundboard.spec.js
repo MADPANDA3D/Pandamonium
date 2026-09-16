@@ -101,19 +101,20 @@ test('voice effects use the speech clock, deduplicate, skip late media and cance
     sounds.prefetchVoiceCues(context, [cue]);
     const prepared = sounds.prepareVoiceCues(context, [cue, cue]);
     await Promise.all(prepared.map(item => item.ready));
-    sounds.scheduleVoiceCue(context, prepared[0], 3);
+    await sounds.scheduleVoiceCue(context, prepared[0], 3);
     await Promise.resolve();
     sounds.stopVoiceSounds();
     const delayed = sounds.prepareVoiceCues(context, [{ ...cue, cue_id: 'late' }]);
     await delayed[0].ready;
     context.currentTime = 8;
-    sounds.scheduleVoiceCue(context, delayed[0], 3);
+    await sounds.scheduleVoiceCue(context, delayed[0], 3);
     await Promise.resolve();
     sounds.stopVoiceSounds();
     const cancelled = sounds.prepareVoiceCues(context, [{ ...cue, cue_id: 'cancelled' }]);
     sounds.stopVoiceSounds();
-    sounds.scheduleVoiceCue(context, cancelled[0], 9);
+    const cancelledPlayback = sounds.scheduleVoiceCue(context, cancelled[0], 9);
     await cancelled[0].ready;
+    await cancelledPlayback;
     await Promise.resolve();
     return { starts, stopped, deduplicated: prepared.length };
   });
@@ -125,4 +126,29 @@ test('voice effects use the speech clock, deduplicate, skip late media and cance
     return await cues[0].ready;
   });
   expect(muted).toBeNull();
+});
+
+
+test('a final scheduled cue may finish loading within its deadline before teardown', async ({ page }) => {
+  await app(page);
+  await page.route('**/api/soundboard/sounds/*/audio', route => route.fulfill({ contentType: 'audio/wav', body: Buffer.from([0]) }));
+  const starts = await page.evaluate(async () => {
+    const sounds = await import('/static/js/soundboard.js');
+    const starts = [];
+    const context = {
+      currentTime: 1, state: 'running', destination: {},
+      decodeAudioData: () => new Promise(resolve => setTimeout(() => resolve({ duration: 0.01 }), 35)),
+      createGain: () => ({ gain: { value: 1 }, connect() {}, disconnect() {} }),
+      createBufferSource: () => {
+        const source = { connect(gain) { return gain; }, disconnect() {},
+          start(time) { starts.push(time); setTimeout(() => source.onended(), 10); } };
+        return source;
+      },
+    };
+    const [cue] = sounds.prepareVoiceCues(context, [{cue_id: 'final', sound_id: 'vine-boom-123', end_sample: 24000}]);
+    sounds.scheduleVoiceCue(context, cue, 1.1);
+    await sounds.finishVoiceSounds();
+    return starts;
+  });
+  expect(starts).toEqual([1.1]);
 });

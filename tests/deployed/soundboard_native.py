@@ -106,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix="mad968-native-") as directory:
             execute_mounted_extension_tool(specs[2], {}, owner="another-owner")
         )
         assert denied["exit_code"] == 1
-        audio, kind = soundboard.audio(runtime, rows[0]["id"])
+        audio, kind = soundboard.audio(runtime, rows[0]["id"], config=config)
         (output_dir / "preview.mp3").write_bytes(audio)
         print("AUDIO", len(audio), kind, flush=True)
         for op in ["disable", "enable"]:

@@ -89,7 +89,7 @@ def setup_soundboard_routes() -> APIRouter:
 
     @router.get("/sounds/{sound_id}/audio")
     def audio(sound_id: str, owner: str = Depends(require_user)):
-        content, content_type = call(lambda record, runtime, config: soundboard.audio(runtime, sound_id), owner)
+        content, content_type = call(lambda record, runtime, config: soundboard.audio(runtime, sound_id, config=config), owner)
         return Response(content, media_type=content_type, headers={
             "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 

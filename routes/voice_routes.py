@@ -4402,6 +4402,8 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
             block_count = 0
             spoken_text = ""
             block_offset = 0
+            word_ends: dict[int, tuple[int, int]] = {}
+            reported_cues: set[str] = set()
             try:
                 sample_rate: int | None = None
                 async for block in speech_turn.iter_blocks():
@@ -4427,13 +4429,17 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                         elif block_rate != sample_rate:
                             raise RuntimeError("TTS sample rate changed during a voice turn")
 
-                        from src.soundboard import timed_cues
+                        from src.soundboard import word_timings
 
-                        sound_cues = timed_cues(audio, block, speech_turn.sound_cues,
-                                               block_offset=block_offset, sample_rate=sample_rate,
-                                               samples=len(pcm) // 2)
-                        skipped_cues = sum(block_offset < cue["char_end"] <= block_offset + len(block)
-                                           for cue in speech_turn.sound_cues) - len(sound_cues)
+                        for word in word_timings(audio, block, sample_rate=sample_rate, samples=len(pcm) // 2):
+                            word_ends[block_offset + word["char_end"]] = (block_count, word["end_sample"])
+                        selected = [cue for cue in speech_turn.sound_cues
+                                    if block_offset < cue["char_end"] <= block_offset + len(block)]
+                        reported_cues.update(cue["cue_id"] for cue in selected)
+                        sound_cues = [{"cue_id": cue["cue_id"], "sound_id": cue["sound_id"],
+                                       "title": cue["title"], "end_sample": word_ends[cue["char_end"]][1]}
+                                      for cue in selected if cue["char_end"] in word_ends]
+                        skipped_cues = len(selected) - len(sound_cues)
                         if skipped_cues:
                             logger.warning("Skipped %s sound cues: provider word timing unavailable", skipped_cues)
                         block_offset += len(block) + 1
@@ -4460,6 +4466,16 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                             raise RuntimeError("Voice playback was interrupted")
                         _set_voice_status(session_id, "speaking", active_audio_turn_id=turn_id)
 
+                # Markers may arrive after a sentence was queued. Reuse its observed
+                # word clock instead of delaying, splitting or synthesizing speech again.
+                late = [cue for cue in speech_turn.sound_cues if cue["cue_id"] not in reported_cues]
+                if late:
+                    resolved = [{"cue_id": cue["cue_id"], "sound_id": cue["sound_id"], "title": cue["title"],
+                                 "block_index": word_ends[cue["char_end"]][0],
+                                 "end_sample": word_ends[cue["char_end"]][1]}
+                                for cue in late if cue["char_end"] in word_ends]
+                    yield json.dumps({"type": "sound_cues", "sound_cues": resolved,
+                                      "sound_cues_skipped": len(late) - len(resolved)}) + "\n"
                 spoken_text = speech_turn.text
 
                 yield json.dumps({

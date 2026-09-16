@@ -2871,6 +2871,8 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
     let streamDone = null;
     let playbackStarted = false;
     let blockSamples = 0;
+    let blockIndex = 0;
+    const blockStarts = new Map();
     let soundCues = [];
     let lastSourceEnded = Promise.resolve();
     timings.tts_chunks = 0;
@@ -2886,7 +2888,16 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
         if (!sampleRate) throw new Error('Streaming speech returned an invalid sample rate.');
         return;
       }
+      if (event.type === 'sound_cues') {
+        if (event.sound_cues_skipped) showToast('Sound effect skipped: word timing unavailable.', 5200);
+        for (const cue of prepareVoiceCues(context, event.sound_cues)) {
+          const start = blockStarts.get(cue.block_index);
+          if (start != null) scheduleVoiceCue(context, cue, start + cue.end_sample / sampleRate);
+        }
+        return;
+      }
       if (event.type === 'block') {
+        blockIndex = Number(event.index);
         if (event.sound_cues_skipped) showToast('Sound effect skipped: word timing unavailable.', 5200);
         blockSamples = 0;
         soundCues = prepareVoiceCues(context, event.sound_cues);
@@ -2925,6 +2936,7 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
       if (playbackScheduledUntil && !hasQueuedAudio) timings.scheduler_underruns += 1;
       const beginsAt = hasQueuedAudio ? playbackScheduledUntil : context.currentTime + 0.05;
       source.start(beginsAt);
+      if (!blockStarts.has(blockIndex)) blockStarts.set(blockIndex, beginsAt);
       for (const cue of soundCues) {
         if (cue.end_sample > blockSamples && cue.end_sample <= blockSamples + samples.length) {
           scheduleVoiceCue(context, cue, beginsAt + (cue.end_sample - blockSamples) / sampleRate);
