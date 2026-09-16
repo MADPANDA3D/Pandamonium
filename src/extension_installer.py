@@ -227,7 +227,6 @@ class GitSourceClient:
                 "fetch",
                 "--depth",
                 "1",
-                "--filter=blob:none",
                 "origin",
                 requested_ref,
             ]

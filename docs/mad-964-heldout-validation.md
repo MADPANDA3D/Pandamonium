@@ -1,25 +1,25 @@
 # MAD-964 held-out ingestion and lifecycle recovery
 
-**In progress. No held-out package is validated or published.** The original
-ani-cli, gifukai-api and Stirling PDF URLs were fetched in disposable storage.
-The canonical local app has zero configured model endpoints. An authenticated,
-otherwise real browser app stops all three scans in `understand` with
-`extension_scan_model_unavailable`, and shows the Settings/retry instruction.
-No fixture model or reviewed proposal is counted as unseen generation proof.
+**In progress. No held-out package is validated or published.** All three original
+URLs have now been supplied to real configured-model intake in authenticated,
+disposable browser apps. The initial local app lacked an endpoint; read-only
+inspection of the deployed configuration resolved that gate. Only its selected
+model credential was staged privately for the disposable owner; no deployed
+settings or personal installations changed. Credentials are absent from receipts.
 
-[Exact source pins and scan receipts](mad-964-heldout-scans.json) retain the
-initial result. Static classification is not semantic understanding: ani-cli is
-unknown, gifukai-api is classified as Go, and Stirling PDF's incidental Rust
-files produce `rust_lib`. None produces a static installable manifest. The source
-sizes remain within the existing bounds. Stirling PDF's first Git attempt timed
-out; a second bounded fetch succeeded without raising the 120-second ceiling.
+[Source pins and scan receipts](mad-964-heldout-scans.json) distinguish initial
+static results, missing-model behavior and actual model attempts. The configured
+DeepSeek profile answered a small health probe but failed full intake requests.
+The available Luna model exposed read/repair and CLI-evidence failures; Astra
+reruns are in progress. None of these failures is counted as acceptance.
 
-The model question is pending: use an existing permitted endpoint in a disposable
-owner/app, with credentials kept out of evidence and packages. Do not copy Leo's
-installed ORACLE/Ponytail/Superpowers or relabel these failures as acceptance.
-The three sources have now been read statically but never supplied to an intake
-model. If semantic/interface-class fixes become necessary, reserve another fresh
-source for genuinely unseen acceptance after those fixes.
+Stirling PDF's full shallow fetch completes in 28.3 seconds on the same 60-second
+Git limit. Removing blob filtering avoids a second lazy-object transport during
+checkout. Source size, timeout and security limits remain unchanged.
+
+The additional source `https://github.com/junegunn/fzf` is reserved and has not
+been read or fetched. Use it as genuinely unseen acceptance after the shared
+repairs stabilize, alongside rerunning the three original URLs.
 
 ## Shared recovery repairs
 
@@ -54,6 +54,27 @@ The final focused set passes **42** checks; the earlier broader scanner/registry
 skill/native runtime set passed **86** before the two interrupted-install cases.
 Ruff, isort Black profile, scoped mypy with explicit package bases, and syntax/diff
 checks pass. Full Python/Chromium verification is recorded below when complete.
+
+## Configured-model repairs and verification
+
+- CLI argument validation now recognizes documented string argv placeholders and
+  valueless boolean flags. Exact source evidence, matching argument names, actual
+  operation checks and external-side-effect authorization remain required.
+- A rejected response is retained for bounded repair. Remaining model calls are
+  visible, and the prompt specifies the existing function-tool schema shape.
+- Noncontiguous source windows carry explicit boundaries; concatenated snippets
+  must not look like malformed upstream code.
+
+- Literal filename search exposes deep definitions outside the initial 2000-path
+  index, returning at most 100 matches without reading or executing files.
+
+The expanded intake/transport/CLI focused set passes **67** checks. PR #272's first
+pushed head passes all required CI, including **6492 Python checks (5 skipped)**
+and Chromium. Local Chromium passed **185** checks. All **13** already published
+inventory packages were downloaded with signature/digest verification and passed
+native operations plus install/disable/enable/remove in a disposable owner; those
+are regression results, not the missing held-out acceptance. Updated-head full
+checks and another affected-corpus run remain due after semantic repairs stabilize.
 
 ## Remaining acceptance
 

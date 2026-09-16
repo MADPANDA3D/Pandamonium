@@ -1,7 +1,7 @@
 {
   "issue": "MAD-964",
   "baseline": "47e306cec3aa34cd3410812409e975c98a16beaa",
-  "status": "incomplete_model_endpoint_required",
+  "status": "in_progress_configured_model_generation",
   "source_account_changes": 0,
   "disposable_browser_data_removed": true,
   "records": [
@@ -52,6 +52,93 @@
       "browser_error": "extension_scan_model_unavailable",
       "installed": false,
       "published": false
+    }
+  ],
+  "model_endpoint_required": false,
+  "trials": [
+    {
+      "model": null,
+      "run": "browser-no-model",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/lucialv/gifukai-api",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        }
+      ]
+    },
+    {
+      "model": "~deepseek/deepseek-v4-flash-latest",
+      "run": "browser-live-model",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/lucialv/gifukai-api",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+          "status": "failed",
+          "stage": "fetch",
+          "error": "extension_git_command_failed"
+        }
+      ]
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "run": "browser-luna-ani",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Evidence must quote an exact excerpt that was read from the pinned source."
+        }
+      ]
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "run": "browser-cli-fix",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Read new interface definitions or return a proposal; repeated reads make no progress."
+        },
+        {
+          "source_url": "https://github.com/lucialv/gifukai-api",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Read new interface definitions or return a proposal; repeated reads make no progress."
+        },
+        {
+          "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Response did not match the supplied JSON schema."
+        }
+      ]
     }
   ]
 }

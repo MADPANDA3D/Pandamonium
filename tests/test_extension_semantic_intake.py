@@ -121,13 +121,41 @@ def test_literal_source_search_reads_definition_beyond_first_excerpt(tmp_path):
     def model(messages, check):
         calls.append(messages)
         if len(calls) == 1:
+            return json.dumps({"read_paths": ["odd/place/command.py"]})
+        if len(calls) == 2:
             return json.dumps({"find_text": {"odd/place/command.py": "p.add_argument"}})
+        source = json.loads(messages[1]["content"])["untrusted_source_excerpts"]["odd/place/command.py"]
+        assert "[Noncontiguous source excerpt]" in source
         return json.dumps({"proposal": proposal()})
 
     artifact = ExtensionStaticScanner(git_client=_CopyGitClient(root),
         staging_root=tmp_path / "staging", data_dir=tmp_path / "scans", model=model).run(SOURCE_URL, "HEAD", operator_id="operator")
     assert artifact["integration"]["readiness"] == "needs_validation"
-    assert len(calls) == 2
+    assert len(calls) == 3
+
+
+def test_literal_path_search_finds_definitions_beyond_initial_index(tmp_path):
+    root = source_tree(tmp_path)
+    for number in range(2000):
+        _write(root, f"padding-{number}.txt", "padding\n")
+    calls = []
+
+    def model(messages, check):
+        context = json.loads(messages[1]["content"])
+        calls.append(context)
+        if len(calls) == 1:
+            assert context["file_index_truncated"]
+            assert "odd/place/command.py" not in context["files"]
+            return json.dumps({"find_paths": ["COMMAND.PY"]})
+        if len(calls) == 2:
+            assert context["matching_paths"] == ["odd/place/command.py"]
+            return json.dumps({"read_paths": context["matching_paths"]})
+        return json.dumps({"proposal": proposal()})
+
+    artifact = ExtensionStaticScanner(git_client=_CopyGitClient(root),
+        staging_root=tmp_path / "staging", data_dir=tmp_path / "scans", model=model).run(SOURCE_URL, "HEAD", operator_id="operator")
+    assert len(calls) == 3
+    assert artifact["integration"]["readiness"] == "needs_validation"
 
 
 @pytest.mark.parametrize("assignment", [
@@ -183,6 +211,11 @@ def test_unknown_layout_reads_interfaces_repairs_and_preserves_real_adapter(tmp_
         data = proposal()
         if len(calls) == 2:
             data["interfaces"][0]["evidence"][0]["quote"] = "invented --flag"
+        if len(calls) == 3:
+            assert json.loads(messages[1]["content"])["remaining_model_calls"] == 2
+            assert messages[-2]["role"] == "assistant"
+            assert "invented --flag" in messages[-2]["content"]
+            assert "Evidence in odd/place/command.py" in messages[-1]["content"]
         return json.dumps({"proposal": data})
 
     scanner = ExtensionStaticScanner(
@@ -571,3 +604,32 @@ def test_secret_audit_uses_python_physical_lines_with_unicode(tmp_path):
     findings = _source_secrets(tmp_path / 'code.py', source)
     assert len(findings) == 1
     assert findings[0][2].group() == 'api_key = "syntheticfixturecredential"'
+
+
+@pytest.mark.parametrize('quote,kind,accepted', [
+    ('--count <count>', 'string', True),
+    ('--count <value>', 'string', True),
+    ('--count  Enable counting', 'boolean', True),
+    ('--count <count>', 'boolean', False),
+    ('Use --count to count items', 'string', False),
+])
+def test_cli_argument_syntax_requires_real_value_or_flag_evidence(tmp_path, quote, kind, accepted):
+    root = source_tree(tmp_path)
+    data = proposal()
+    name = 'demo_tools__double_count'
+    interface = data['interfaces'][0]
+    interface['name'] = name
+    interface['tool_schema']['function']['name'] = name
+    interface['tool_schema']['function']['parameters']['properties']['count']['type'] = kind
+    evidence = {'path': 'odd/place/command.py', 'quote': quote}
+    interface['evidence'] = [evidence]
+    interface['arguments'] = {'count': evidence}
+    data['execution'] = {'install': [], 'checks': [{'name': name, 'arguments': {'count': '4' if kind == 'string' else True}}]}
+    _write(root, 'odd/place/command.py', quote + '\n')
+    excerpts = {'README.md': DOC, 'odd/place/command.py': quote}
+    if accepted:
+        result = validate_proposal(Proposal.model_validate(data), excerpts, root, SOURCE_URL, REVISION)
+        assert result['readiness'] == 'needs_validation'
+    else:
+        with pytest.raises(ValueError, match='source type'):
+            validate_proposal(Proposal.model_validate(data), excerpts, root, SOURCE_URL, REVISION)
