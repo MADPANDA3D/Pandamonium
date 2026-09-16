@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T06:16:36.346297+00:00",
-  "expires_at": "2026-12-15T06:16:36.346297+00:00",
+  "generated_at": "2026-09-16T06:49:25.723077+00:00",
+  "expires_at": "2026-12-15T06:49:25.723077+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -2102,11 +2102,203 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "myinstants-api",
+        "name": "Myinstants Soundboard",
+        "version": "1.1.1",
+        "source": {
+          "url": "https://github.com/MADPANDA3D/myinstants-api.git",
+          "revision": "435d40d309ab2790e21567b00c9727509badeedd"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "myinstants_api__search",
+                "description": "Search Myinstants for new sounds. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 100,
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "myinstants_api__detail",
+                "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "myinstants_api__recent",
+                "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "myinstants_api__favorites",
+                "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token immediately after the selected word, before sentence punctuation, with no space; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 100
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {
+            "myinstants_api__search": "read_only",
+            "myinstants_api__detail": "read_only",
+            "myinstants_api__recent": "read_only",
+            "myinstants_api__favorites": "read_only"
+          }
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://arch.mirror.constant.com",
+            "https://www.myinstants.com",
+            "https://github.com",
+            "https://release-assets.githubusercontent.com"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Search a soundboard, retrieve owner favorites, and place a manual sound cue at the appropriate point in a response.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux x86_64 with distro PHP 8 CLI and curl; checksum-pinned PHP 8.5.10 fallback supports recent Arch glibc. Incompatible hosts fail setup.",
+            "Upstream TLS verification is restored in the private runtime copy before serving.",
+            "A checksum-pinned static curl 8.21.0 runs inside the package sandbox for consistent verified TLS on Debian and Arch; downloads and provider responses are bounded."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Search a soundboard, retrieve owner favorites, and place a manual sound cue at the appropriate point in a response.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-myinstants-api-1.1.1-b6102d0e58b826442e90ce300ad2d1b6bec9258c53a8d52db6d1b9f69c64cd81/pandamonium-plugin-myinstants-api-b6102d0e58b826442e90ce300ad2d1b6bec9258c53a8d52db6d1b9f69c64cd81.tar.gz",
+        "sha256": "b6102d0e58b826442e90ce300ad2d1b6bec9258c53a8d52db6d1b9f69c64cd81",
+        "size_bytes": 28002,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "90a+zijhGcPplZqARMGU9pVyh62fyWPTFrgD/LGZmVllv4miTYWp+1rg9qeYisn8OxGCyOyoyks6aRY0Gk6TAg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T06:49:15.996157+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "1gnWC8dtUg+fQvBfNU162KfgJ+484SpL3ewETu1xokBSGkPNV9ESKR+AvtWrYbForofl+GOwPk5+rTVsO1UuBA=="
+    "value": "JazJa+7xrBzzhzN4YeLZL/bnBO5/n0LwzQxpnZvzj9ly2dCz0cEMcHSMphtmwCZC3LRAxmkeODrEP9qUEvd6AQ=="
   }
 }
