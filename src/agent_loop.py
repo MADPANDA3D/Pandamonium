@@ -3693,6 +3693,21 @@ async def stream_agent_loop(
         _needs_admin = False
     _low_signal_turn = bool(_intent.get("low_signal"))
     _casual_low_signal_turn = _is_casual_low_signal(_last_user)
+    # Published skills can describe capabilities outside the built-in domains.
+    # Keep their procedures and discovery tools available on matching requests.
+    if _low_signal_turn and not _casual_low_signal_turn and not guide_only:
+        try:
+            from routes.prefs_routes import _load_for_user as _load_prefs
+            from services.memory.skills import SkillsManager
+            from src.constants import DATA_DIR
+            if (_load_prefs(owner) or {}).get("skills_enabled", True):
+                _sm = SkillsManager(DATA_DIR)
+                if _sm.get_relevant_skills(
+                    _last_user, skills=_sm.load(owner=owner), threshold=0.25, max_items=1,
+                ):
+                    _low_signal_turn = False
+        except (ImportError, OSError, TypeError, ValueError) as exc:
+            logger.debug("Skill intent selection unavailable: %s", exc)
     _existing_conversation = _user_turn_count(messages) > 1
     _active_document_relevant = _turn_targets_active_document(_intent, _last_user, active_document)
     _active_email_draft_relevant = _active_document_relevant and _is_email_document_obj(active_document)
