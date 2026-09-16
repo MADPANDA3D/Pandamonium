@@ -5,6 +5,7 @@ import markdownModule from './markdown.js';
 import { collectClientState, handleUIControl } from './chatStream.js';
 import { renderAuthorityApprovalCard, restorePendingAuthorityDecision } from './chatRenderer.js';
 import voiceOrbMedia from './voiceOrbMedia.js';
+import { prepareVoiceCues, scheduleVoiceCue, stopVoiceSounds, finishVoiceSounds } from './soundboard.js';
 
 let sessionId = null;
 let mediaRecorder = null;
@@ -2581,6 +2582,7 @@ function resolvePlaybackWait() {
 }
 
 function stopPlaybackAudio() {
+  stopVoiceSounds();
   playbackAbortController?.abort();
   playbackAbortController = null;
   resolvePlaybackWait();
@@ -2867,6 +2869,8 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
     let sampleRate = 0;
     let streamDone = null;
     let playbackStarted = false;
+    let blockSamples = 0;
+    let soundCues = [];
     let lastSourceEnded = Promise.resolve();
     timings.tts_chunks = 0;
     timings.tts_blocks = 0;
@@ -2882,6 +2886,8 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
         return;
       }
       if (event.type === 'block') {
+        blockSamples = 0;
+        soundCues = prepareVoiceCues(context, event.sound_cues);
         timings.tts_blocks = Math.max(timings.tts_blocks, Number(event.index) + 1);
         return;
       }
@@ -2917,6 +2923,12 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
       if (playbackScheduledUntil && !hasQueuedAudio) timings.scheduler_underruns += 1;
       const beginsAt = hasQueuedAudio ? playbackScheduledUntil : context.currentTime + 0.05;
       source.start(beginsAt);
+      for (const cue of soundCues) {
+        if (cue.end_sample > blockSamples && cue.end_sample <= blockSamples + samples.length) {
+          scheduleVoiceCue(context, cue, beginsAt + (cue.end_sample - blockSamples) / sampleRate);
+        }
+      }
+      blockSamples += samples.length;
       playbackScheduledUntil = beginsAt + audioBuffer.duration;
       timings.tts_chunks += 1;
 
@@ -2943,6 +2955,7 @@ async function playPcmAudioStream(url, options, timings, token, turnId = null, v
     if (!streamDone || !playbackStarted) throw new Error('Streaming speech ended before audio was ready.');
 
     await lastSourceEnded;
+    await finishVoiceSounds();
     if (token !== playbackToken) return null;
     timings.tts_generation_ms = Number(streamDone.generation_ms) || performance.now() - started;
     timings.playback_duration_ms = Number(streamDone.audio_ms) || 0;

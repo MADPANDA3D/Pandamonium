@@ -516,6 +516,10 @@ const sandbox = {
 sandbox.window = sandbox;
 const executableSource = source
   .replace(
+    "import { prepareVoiceCues, scheduleVoiceCue, stopVoiceSounds, finishVoiceSounds } from './soundboard.js';",
+    "const prepareVoiceCues = () => []; const scheduleVoiceCue = () => { throw new Error('Use soundboard browser coverage for cues'); }; const stopVoiceSounds = () => {}; const finishVoiceSounds = async () => {};",
+  )
+  .replace(
     "import markdownModule from './markdown.js';",
     'const markdownModule = { renderMarkdown: value => value };',
   )

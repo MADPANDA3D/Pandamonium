@@ -69,3 +69,17 @@ acceptance comment: `1ef9df42-9a8b-45b1-bb46-f6a15f110e79`.
 The probe is not yet wired into normal Jarvis voice transport/playback. That
 integration, lifecycle checks and scoped deployment remain open under MAD-968.
 Production speech, provider settings and CT103 have not changed.
+
+
+## Voice integration implementation
+
+The voice turn now resolves validated cues against its exact cleaned spoken
+text, preserving repeated-word occurrence and existing speech blocks. Chatterbox's
+optional alignment output travels beside unchanged PCM in a bounded `cbtm` RIFF
+chunk (version, normalized text, sample rate and word character spans/sample
+ends). Missing or invalid metadata skips effects without discarding speech.
+The stream attaches resolved sample offsets to block events. Browser effects
+observe the existing frame start clock through separate gain/source nodes,
+deduplicate cue IDs, reject media over 15 seconds, skip fetches over 150 ms late,
+and cancel on interrupt, call end, disable or mute. Audible effect tails finish
+before the call resumes listening; microphone settings remain unchanged.

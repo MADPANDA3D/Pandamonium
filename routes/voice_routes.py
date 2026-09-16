@@ -423,6 +423,8 @@ class _SpeechTurn:
         self.voice: str | None = None
         self.text = ""
         self.raw_text = ""
+        self.owner: str | None = None
+        self.sound_cues: list[dict] = []
         self.pending_text = ""
         self.finished = False
         self.cancelled = False
@@ -440,11 +442,19 @@ class _SpeechTurn:
         if not matches:
             return False
         cut = matches[-1].end()
-        ready = speech_text(self.pending_text[:cut])
+        raw = self.pending_text[:cut]
+        ready = speech_text(raw)
         self.pending_text = self.pending_text[cut:].lstrip()
-        return self._queue_text(ready)
+        return self._queue_text(ready, raw=raw)
 
-    def _queue_text(self, text: str) -> bool:
+    def _queue_text(self, text: str, *, raw: str = "") -> bool:
+        from src.soundboard import spoken_cues
+
+        if "[[sound:" in raw:
+            self.sound_cues.extend(spoken_cues(
+                raw, " ".join(text.split()), owner=self.owner, session_id=self.session_id,
+                turn_id=self.turn_id, base_offset=len(self.text) + bool(self.text),
+            ))
         queued = False
         for block in speech_blocks(text):
             self.blocks.put_nowait(block)
@@ -452,11 +462,11 @@ class _SpeechTurn:
             queued = True
         return queued
 
-    async def complete(self, text: str | None = None) -> None:
+    async def complete(self, text: str | None = None, *, cue_text: str = "") -> None:
         if text is not None and not self.raw_text:
             self.raw_text = text
-            self.pending_text = text
-        self._queue_text(speech_text(self.pending_text))
+            self.pending_text = cue_text if cue_text and speech_text(cue_text) == text else text
+        self._queue_text(speech_text(self.pending_text), raw=self.pending_text)
         self.pending_text = ""
         self.finished = True
         self.done.set()
@@ -4188,6 +4198,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
         user_turn = _append_turn(session, "user", text, "thinking")
         _append_chat_message(session_manager, session, "user", text, voice_turn_id=user_turn["id"], voice_status="thinking")
         speech_turn = _register_speech_turn(session_id)
+        speech_turn.owner = owner
         speech_turn.voice = _tts_voice_for_final({
             "diagnostics": {"character_name": _voice_character_name(turn_session)},
         })
@@ -4266,7 +4277,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                 else:
                     speech_contract = _speech_contract_for_final(text, final)
                     final.update(speech_contract)
-                    await speech_turn.complete(speech_contract["spoken_text"])
+                    await speech_turn.complete(speech_contract["spoken_text"], cue_text=str(final["assistant_text"]))
                 spoken_text = speech_turn.text
                 final["diagnostics"]["spoken_chars"] = len(spoken_text)
                 if not audio_announced:
@@ -4375,6 +4386,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
             audio_ms = 0
             block_count = 0
             spoken_text = ""
+            block_offset = 0
             try:
                 sample_rate: int | None = None
                 async for block in speech_turn.iter_blocks():
@@ -4400,6 +4412,12 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                         elif block_rate != sample_rate:
                             raise RuntimeError("TTS sample rate changed during a voice turn")
 
+                        from src.soundboard import timed_cues
+
+                        sound_cues = timed_cues(audio, block, speech_turn.sound_cues,
+                                               block_offset=block_offset, sample_rate=sample_rate,
+                                               samples=len(pcm) // 2)
+                        block_offset += len(block) + 1
                         block_audio_ms = int(len(pcm) / (sample_rate * 2) * 1000)
                         yield json.dumps({
                             "type": "block",
@@ -4407,6 +4425,7 @@ def setup_voice_routes(session_manager=None, stt_service=None, tts_service=None)
                             "text_chars": len(block),
                             "generation_ms": block_generation_ms,
                             "audio_ms": block_audio_ms,
+                            "sound_cues": sound_cues,
                         }, separators=(",", ":")) + "\n"
                         for frame in pcm_frames(pcm):
                             yield json.dumps({

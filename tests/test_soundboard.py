@@ -154,3 +154,40 @@ def test_settings_routes_enforce_owner_lifecycle_and_preferences(tmp_path, monke
     sb.state_path(runtime).write_text("corrupt data")
     assert client.get("/api/soundboard").status_code == 503
     assert sb.state_path(runtime).read_text() == "corrupt data"
+
+
+def test_voice_cues_keep_repeated_word_identity_and_validate_riff(monkeypatch):
+    import io
+    import struct
+    import wave
+
+    raw = 'First **boom**, then another **boom**[[sound:vine-boom-123]] and onward.'
+    prefix = raw.split('[[sound:')[0]
+    monkeypatch.setattr(sb, 'message_metadata', lambda *args, **kwargs: {'sound_cues': [{
+        'cue_id': 'raw', 'text_offset_utf16': len(prefix), 'sound_id': 'vine-boom-123', 'title': 'Boom',
+    }]})
+    from src.voice_pcm import speech_text, wav_to_pcm16
+
+    spoken = speech_text(raw)
+    cues = sb.spoken_cues(raw, spoken, owner='owner', session_id='session', turn_id='turn')
+    assert len(cues) == 1
+    assert cues[0]['char_end'] == spoken.index('boom', spoken.index('boom') + 1) + 4
+    assert sb.spoken_cues(raw, 'The result is in chat.', owner='owner', session_id='session', turn_id='turn') == []
+    out = io.BytesIO()
+    with wave.open(out, 'wb') as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(24000)
+        writer.writeframes(b'\0\0' * 72000)
+    body = out.getvalue()
+    target = cues[0]['char_end']
+    payload = json.dumps({'version': 1, 'text': spoken, 'sample_rate': 24000,
+                          'words': [[target - 4, target, 48000]]}).encode()
+    enriched = body + b'cbtm' + struct.pack('<I', len(payload)) + payload + b'\0' * (len(payload) % 2)
+    enriched = enriched[:4] + struct.pack('<I', len(enriched) - 8) + enriched[8:]
+    timed = sb.timed_cues(enriched, spoken, cues, block_offset=0, sample_rate=24000, samples=72000)
+    assert timed == [{'cue_id': cues[0]['cue_id'], 'sound_id': 'vine-boom-123', 'title': 'Boom', 'end_sample': 48000}]
+    assert wav_to_pcm16(enriched) == wav_to_pcm16(body)
+    assert sb.timed_cues(enriched[:-1], spoken, cues, block_offset=0, sample_rate=24000, samples=72000) == []
+    assert sb.timed_cues(enriched, spoken.replace('another', 'different'), cues, block_offset=0, sample_rate=24000, samples=72000) == []
+    assert sb.timed_cues(body, spoken, cues, block_offset=0, sample_rate=24000, samples=72000) == []

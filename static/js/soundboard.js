@@ -47,6 +47,85 @@ export function stopSound() {
   playerButton = null;
 }
 
+// Voice effects share the speech clock, but have separate nodes and cancellation.
+let voiceGeneration = 0;
+const voiceSources = new Map();
+const voiceRequests = new Set();
+const voiceCueIds = new Set();
+
+export function stopVoiceSounds() {
+  voiceGeneration += 1;
+  for (const controller of voiceRequests) controller.abort();
+  voiceRequests.clear();
+  for (const source of voiceSources.keys()) { try { source.stop(); } catch {} }
+  voiceSources.clear();
+  voiceCueIds.clear();
+}
+
+export async function finishVoiceSounds() {
+  // Finish audible effect tails before the existing call loop resumes listening.
+  for (const controller of voiceRequests) controller.abort();
+  voiceGeneration += 1;
+  await Promise.all([...voiceSources.values()].map(value => value.ended));
+  voiceCueIds.clear();
+}
+
+export function prepareVoiceCues(context, cues) {
+  if (!Array.isArray(cues)) return [];
+  const token = voiceGeneration;
+  return cues.slice(0, 100).filter(cue => cue && /^[A-Za-z0-9_-]{1,160}$/.test(cue.sound_id)
+    && typeof cue.cue_id === 'string' && cue.cue_id.length <= 256
+    && Number.isSafeInteger(cue.end_sample) && cue.end_sample > 0
+    && !voiceCueIds.has(cue.cue_id) && !!voiceCueIds.add(cue.cue_id)).map(cue => {
+    const controller = new AbortController();
+    voiceRequests.add(controller);
+    const ready = (async () => {
+      try {
+        const current = await api();
+        if (token !== voiceGeneration || !current.installed || !current.enabled || current.muted) return null;
+        state = { ...state, ...current };
+        const response = await fetch(`/api/soundboard/sounds/${encodeURIComponent(cue.sound_id)}/audio`, {
+          credentials: 'same-origin', signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Sound effect unavailable');
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('Sound effect is too large');
+        const buffer = await context.decodeAudioData(bytes);
+        if (buffer.duration > 15) throw new Error('Choose a sound effect under 15 seconds');
+        return buffer;
+      } catch (error) {
+        if (token === voiceGeneration && error.name !== 'AbortError') uiModule.showToast?.(error.message, 'error');
+        return null;
+      } finally { voiceRequests.delete(controller); }
+    })();
+    return { ...cue, ready, token };
+  });
+}
+
+export function scheduleVoiceCue(context, cue, beginsAt) {
+  cue.ready.then(buffer => {
+    if (!buffer || cue.token !== voiceGeneration || state.muted || !state.enabled) return;
+    if (context.currentTime - beginsAt > 0.15) {
+      uiModule.showToast?.(`Skipped late sound: ${cue.title || 'Sound effect'}`, 'error');
+      return;
+    }
+    if (context.state !== 'running') {
+      uiModule.showToast?.('Enable audio to hear sound effects.', 'error');
+      return;
+    }
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    gain.gain.value = state.volume;
+    source.connect(gain).connect(context.destination);
+    let finished;
+    const ended = new Promise(resolve => { finished = resolve; });
+    voiceSources.set(source, { gain, ended });
+    source.onended = () => { voiceSources.delete(source); source.disconnect(); gain.disconnect(); finished(); };
+    source.start(Math.max(context.currentTime, beginsAt));
+  }).catch(() => uiModule.showToast?.('Sound effect could not play.', 'error'));
+}
+
 async function play(id, button) {
   if (playerButton === button && player && !player.paused) { stopSound(); return; }
   stopSound();
@@ -95,7 +174,7 @@ async function refresh() {
   state = { ...state, ...current };
   const tab = document.querySelector('[data-settings-tab="soundboard"]');
   if (tab) tab.classList.toggle('hidden', !state.installed);
-  if (!state.enabled || state.muted) stopSound();
+  if (!state.enabled || state.muted) { stopSound(); stopVoiceSounds(); }
   if (!state.installed) {
     titles.clear();
     searchGeneration += 1;
@@ -154,18 +233,19 @@ export function initSoundboard() {
   const savePreferences = async () => {
     const muted = el('soundboard-muted').checked;
     const volume = Number(el('soundboard-volume').value);
-    if (muted) stopSound();
+    if (muted) { stopSound(); stopVoiceSounds(); }
+    for (const { gain } of voiceSources.values()) gain.gain.value = volume;
     if (player) player.volume = volume;
     try { await api('/preferences', { muted, volume }); state = { ...state, muted, volume }; }
     catch (error) { el('soundboard-status').textContent = error.message; }
   };
   el('soundboard-muted')?.addEventListener('change', savePreferences);
   el('soundboard-volume')?.addEventListener('change', savePreferences);
-  window.addEventListener('pagehide', stopSound);
-  window.addEventListener('pandamonium:extensions-changed', () => { stopSound(); refreshSoundboard(); });
+  window.addEventListener('pagehide', () => { stopSound(); stopVoiceSounds(); });
+  window.addEventListener('pandamonium:extensions-changed', () => { stopSound(); stopVoiceSounds(); refreshSoundboard(); });
 }
 
 export async function refreshSoundboard() {
   initSoundboard();
-  try { await refresh(); } catch { stopSound(); }
+  try { await refresh(); } catch { stopSound(); stopVoiceSounds(); }
 }

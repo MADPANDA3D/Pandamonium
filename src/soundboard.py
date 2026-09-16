@@ -219,3 +219,83 @@ def audio(runtime: Path, sound_id: str) -> tuple[bytes, str]:
                     raise ValueError("Provider returned empty audio")
                 return bytes(result), content_type
     raise ValueError("Too many audio redirects")
+
+
+def spoken_cues(raw: str, spoken: str, *, owner: str | None, session_id: str,
+                turn_id: str, base_offset: int = 0) -> list[dict]:
+    """Resolve marker positions against the exact cleaned speech, including repeats."""
+    from src.voice_pcm import speech_text
+
+    validated = message_metadata("assistant", raw, {}, owner=owner,
+                                 session_id=session_id, message_id=turn_id)
+    cues = []
+    for cue in validated.get("sound_cues", []):
+        prefix = raw.encode("utf-16-le")[:cue["text_offset_utf16"] * 2].decode("utf-16-le")
+        clean = " ".join(speech_text(prefix).split())
+        words = list(re.finditer(r"\w+(?:['’]\w+)*", clean))
+        raw_words = re.findall(r"\w+(?:['’]\w+)*", prefix)
+        if (not words or not raw_words or raw_words[-1].casefold() != words[-1][0].casefold()
+                or not spoken.startswith(clean)):
+            continue  # The selected word was omitted from the actual spoken payload.
+        char_end = base_offset + words[-1].end()
+        cues.append({**cue, "cue_id": f"{turn_id}:{char_end}:{cue['sound_id']}", "char_end": char_end})
+    return cues
+
+
+def timed_cues(audio: bytes, block: str, cues: list[dict], *, block_offset: int,
+               sample_rate: int, samples: int) -> list[dict]:
+    """Read bounded Chatterbox RIFF metadata; malformed/missing timing fails effects only."""
+    import struct
+
+    selected = [cue for cue in cues if block_offset < cue["char_end"] <= block_offset + len(block)]
+    if not selected or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        return []
+    try:
+        end = struct.unpack_from("<I", audio, 4)[0] + 8
+        if end != len(audio):
+            return []
+        position = 12
+        metadata = None
+        while position + 8 <= end:
+            size = struct.unpack_from("<I", audio, position + 4)[0]
+            following = position + 8 + size
+            if following > end:
+                return []
+            if audio[position:position + 4] == b"cbtm":
+                if size > 65536 or metadata is not None:
+                    return []
+                metadata = json.loads(audio[position + 8:following])
+            position = following + size % 2
+        if (not isinstance(metadata, dict) or metadata.get("version") != 1
+                or metadata.get("sample_rate") != sample_rate
+                or not isinstance(metadata.get("text"), str)
+                or not isinstance(metadata.get("words"), list) or len(metadata["words"]) > 1000):
+            return []
+        pattern = r"\w+(?:['’]\w+)*"
+        original = list(re.finditer(pattern, block))
+        normalized = list(re.finditer(pattern, metadata["text"]))
+        normalize = lambda word: word[0].replace("’", "'").casefold()
+        if list(map(normalize, original)) != list(map(normalize, normalized)):
+            return []  # Never attach a cue to substituted/truncated provider text.
+        ends = {}
+        previous = 0
+        for row in metadata["words"]:
+            if (not isinstance(row, list) or len(row) != 3 or any(type(n) is not int for n in row)
+                    or not 0 <= row[0] < row[1] <= len(metadata["text"])
+                    or not previous <= row[2] <= samples or row[2] == 0):
+                return []
+            ends[(row[0], row[1])] = row[2]
+            previous = row[2]
+        result = []
+        for cue in selected:
+            for source, target in zip(original, normalized, strict=True):
+                if source.end() != cue["char_end"] - block_offset:
+                    continue
+                offset = ends.get((target.start(), target.end()))
+                if offset is not None:
+                    result.append({"cue_id": cue["cue_id"], "sound_id": cue["sound_id"],
+                                   "title": cue["title"], "end_sample": offset})
+                break
+        return result
+    except (ValueError, TypeError, KeyError, UnicodeError, struct.error):
+        return []
