@@ -1,0 +1,277 @@
+{
+  "purpose": "Create and validate procedural 3D sculpt specifications with upstream img2threejs. Image interpretation, Three.js generation and visual quality review remain agent/browser tasks.",
+  "evidence": [
+    {
+      "path": "forge/stage2_spec/new_sculpt_spec.py",
+      "quote": "def make_spec(target_name: str, image: str | None, assessment_payload: dict | None = None) -> dict:"
+    }
+  ],
+  "repo_class": "python_cli",
+  "interfaces": [
+    {
+      "name": "img2threejs__create_spec",
+      "kind": "tool",
+      "binding": "make_spec",
+      "evidence": [
+        {
+          "path": "forge/stage2_spec/new_sculpt_spec.py",
+          "quote": "def make_spec(target_name: str, image: str | None, assessment_payload: dict | None = None) -> dict:"
+        }
+      ],
+      "arguments": {
+        "target_name": {
+          "path": "forge/stage2_spec/new_sculpt_spec.py",
+          "quote": "def make_spec(target_name: str, image: str | None, assessment_payload: dict | None = None) -> dict:"
+        },
+        "image": {
+          "path": "forge/stage2_spec/new_sculpt_spec.py",
+          "quote": "def make_spec(target_name: str, image: str | None, assessment_payload: dict | None = None) -> dict:"
+        }
+      },
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "img2threejs__create_spec",
+          "description": "Create the upstream procedural ObjectSculptSpec scaffold for an image task; the result still needs visual assessment.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "target_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "image": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "target_name"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact",
+          "target_name",
+          "bytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "img2threejs__validate_spec",
+      "kind": "tool",
+      "binding": "validate_spec",
+      "evidence": [
+        {
+          "path": "forge/stage2_spec/validate_sculpt_spec.py",
+          "quote": "def validate_spec(spec: dict[str, Any]) -> tuple[list[str], list[str]]:"
+        },
+        {
+          "path": "forge/stage2_spec/validate_sculpt_spec.py",
+          "quote": "parser.add_argument(\"spec\", type=Path)"
+        }
+      ],
+      "arguments": {
+        "spec": {
+          "path": "forge/stage2_spec/validate_sculpt_spec.py",
+          "quote": "parser.add_argument(\"spec\", type=Path)"
+        }
+      },
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "img2threejs__validate_spec",
+          "description": "Validate the private scaffold against real upstream quality gates and report all errors and warnings.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "spec": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "spec"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "valid",
+          "errors",
+          "warnings"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "The scaffold is deliberately unassessed; a validation result with errors is not a completed image-to-3D model.",
+    "Full upstream native skill admission still exceeds the current 64-file asset limit; the executable package advertises only its two verified operations."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "img2threejs",
+    "name": "img2threejs",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/img2threejs/img2threejs.git",
+      "revision": "6e60b5e22419464b4853e01ddb6c0e6f6659a733"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "img2threejs__create_spec",
+            "description": "Create the upstream procedural ObjectSculptSpec scaffold for an image task; the result still needs visual assessment.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "target_name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "image": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "target_name"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "img2threejs__validate_spec",
+            "description": "Validate the private scaffold against real upstream quality gates and report all errors and warnings.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "spec": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "spec"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": []
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import json,os,sys\nfrom pathlib import Path\nsys.path.insert(0,'/package/forge/stage2_spec')\nfrom new_sculpt_spec import make_spec\nfrom validate_sculpt_spec import validate_spec\nargs=json.load(sys.stdin)\nartifact=Path('/runtime/artifacts/sculpt-spec.json')\nif sys.argv[1]=='img2threejs__create_spec':\n    spec=make_spec(args['target_name'],args.get('image'))\n    artifact.write_text(json.dumps(spec,indent=2))\n    result={'artifact':str(artifact),'target_name':spec['targetName'],'bytes':artifact.stat().st_size}\nelse:\n    source=Path(args['spec']).resolve()\n    if not any(source.is_relative_to(Path(root)) for root in ['/package','/runtime/artifacts']): raise ValueError('Choose a package or private artifact JSON file')\n    if source.stat().st_size>1000000: raise ValueError('Spec exceeds 1 MB')\n    errors,warnings=validate_spec(json.loads(source.read_text()))\n    result={'valid':not errors,'errors':errors,'warnings':warnings}\nprint(json.dumps(result))\n"
+    }
+  ],
+  "execution": {
+    "install": [],
+    "checks": [
+      {
+        "name": "img2threejs__create_spec",
+        "arguments": {
+          "target_name": "Test cube"
+        }
+      },
+      {
+        "name": "img2threejs__validate_spec",
+        "arguments": {
+          "spec": "/package/forge/tests/fixtures/reference_target_conformance_spec.json"
+        }
+      }
+    ]
+  },
+  "source_exclusions": []
+}

@@ -1,0 +1,226 @@
+{
+  "purpose": "Read the live state and configuration of a private Barehands webcam board. Camera gestures and visible 3D interaction require Chrome and a webcam on the chosen node.",
+  "evidence": [
+    {
+      "path": "bin/board-state.sh",
+      "quote": "server's /state (the tracker's last scene heartbeat)"
+    }
+  ],
+  "repo_class": "service",
+  "interfaces": [
+    {
+      "name": "barehands__board_state",
+      "kind": "tool",
+      "binding": "/state",
+      "evidence": [
+        {
+          "path": "bin/board-state.sh",
+          "quote": "server's /state (the tracker's last scene heartbeat)"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "barehands__board_state",
+          "description": "Read the board heartbeat; an empty state means no camera tracker is connected.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "state_json": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connected",
+          "state_json"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "barehands__configuration",
+      "kind": "tool",
+      "binding": "/config",
+      "evidence": [
+        {
+          "path": "server.py",
+          "quote": "if self.path == \"/config\":"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "barehands__configuration",
+          "description": "Read the running board name and declared note/media orbs.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "configuration_json": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configuration_json"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Open the private board in Chrome and grant webcam access for visible hand-tracked interaction. Backend readback does not prove camera or 3D rendering."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "barehands",
+    "name": "Barehands",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/jaredrhod/barehands.git",
+      "revision": "eb23bed2d772f9d5a24de26fb92f46c3c76d69cf"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "barehands__board_state",
+            "description": "Read the board heartbeat; an empty state means no camera tracker is connected.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "barehands__configuration",
+            "description": "Read the running board name and declared note/media orbs.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://cdn.jsdelivr.net"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": [],
+    "metadata": {
+      "summary": "Read the live state and configuration of a private Barehands webcam board. Camera gestures and visible 3D interaction require Chrome and a webcam on the chosen node.",
+      "categories": [
+        "developer-tools"
+      ],
+      "examples": [
+        "Open the private board in Chrome and grant webcam access for visible hand-tracked interaction. Backend readback does not prove camera or 3D rendering."
+      ]
+    }
+  },
+  "files": [
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "import shutil\nshutil.copytree('/package','/runtime/board',dirs_exist_ok=True)\n"
+    },
+    {
+      "path": ".pandamonium/service.py",
+      "content": "import os,json\nfrom pathlib import Path\nconfig=json.load(open('/run/pandamonium/config.json'))\nPath('/runtime/board/barehands.json').write_text(json.dumps({'name':'Pandamonium board','port':int(config['PANDAMONIUM_PORT'])}))\nos.execv('/usr/bin/python3',['python3','/runtime/board/server.py'])\n"
+    },
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import json,sys,urllib.request\nconfig=json.load(open('/run/pandamonium/config.json'))\nroute='/state' if sys.argv[1]=='barehands__board_state' else '/config'\nwith urllib.request.urlopen('http://127.0.0.1:'+config['PANDAMONIUM_PORT']+route,timeout=10) as response: data=json.load(response)\nprint(json.dumps({'connected':bool(data),'state_json':json.dumps(data)} if route=='/state' else {'configuration_json':json.dumps(data)}))\n"
+    }
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "barehands__board_state",
+        "arguments": {}
+      },
+      {
+        "name": "barehands__configuration",
+        "arguments": {}
+      }
+    ],
+    "service": [
+      "python",
+      "/package/.pandamonium/service.py"
+    ]
+  },
+  "source_exclusions": []
+}

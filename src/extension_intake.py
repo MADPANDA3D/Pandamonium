@@ -277,7 +277,7 @@ def validate_proposal(
                 # Lexical support is necessary, not proof that generated code works.
                 argument = re.escape(name).replace("_", "[-_]")
                 kinds = {
-                    "string": r"str|string|text",
+                    "string": r"str|string|text|(?:type\s*=\s*|:\s*)Path",
                     "integer": r"int(?:eger|8|16|32|64)?|uint(?:8|16|32|64)?|[iu](?:8|16|32|64)|isize|usize",
                     "number": r"number|float(?:32|64)?|double|decimal|f32|f64",
                     "boolean": r"bool(?:ean)?|store_true|store_false",

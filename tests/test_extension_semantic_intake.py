@@ -537,3 +537,37 @@ def test_source_symlink_rejected_before_generated_metadata_write(tmp_path):
     with pytest.raises(ExtensionScanError, match="extension_package_member_invalid"):
         scanner.run(SOURCE_URL, "HEAD", operator_id="temporary-owner")
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize('source_type,accepted', [('Path', True), ('int', False)])
+def test_path_argument_requires_a_path_type_not_just_a_path_name(tmp_path, source_type, accepted):
+    root = source_tree(tmp_path)
+    data = proposal()
+    quote = f'def analyze(path: {source_type}) -> dict:'
+    evidence = {'path': 'odd/place/command.py', 'quote': quote}
+    _write(root, 'odd/place/command.py', quote + '\n    return {}\n')
+    interface = data['interfaces'][0]
+    interface['binding'] = 'analyze'
+    interface['evidence'] = [evidence]
+    interface['arguments'] = {'path': evidence}
+    interface['tool_schema']['function']['parameters'] = {
+        'type': 'object', 'properties': {'path': {'type': 'string'}},
+        'required': ['path'], 'additionalProperties': False,
+    }
+    data['manifest']['capabilities']['schemas'] = [interface['tool_schema']]
+    excerpts = {'README.md': DOC, 'odd/place/command.py': quote}
+    if accepted:
+        validate_proposal(Proposal.model_validate(data), excerpts, root, SOURCE_URL, REVISION)
+    else:
+        with pytest.raises(ValueError, match='source type'):
+            validate_proposal(Proposal.model_validate(data), excerpts, root, SOURCE_URL, REVISION)
+
+
+def test_secret_audit_uses_python_physical_lines_with_unicode(tmp_path):
+    from src.extension_scan import _source_secrets
+
+    source = ('banner = "日本\u2028語"\r\nsecret = runtime_configuration_value\r'
+              'api_key = "syntheticfixturecredential"\n')
+    findings = _source_secrets(tmp_path / 'code.py', source)
+    assert len(findings) == 1
+    assert findings[0][2].group() == 'api_key = "syntheticfixturecredential"'

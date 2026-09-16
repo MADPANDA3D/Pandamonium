@@ -1,0 +1,194 @@
+{
+  "purpose": "Build a source-backed Markdown knowledge graph with Graphify and retain graph.json. Semantic model inference is a separate configured capability.",
+  "evidence": [
+    {
+      "path": "graphify/extractors/markdown.py",
+      "quote": "def extract_markdown(path: Path) -> dict:"
+    }
+  ],
+  "repo_class": "python_cli",
+  "interfaces": [
+    {
+      "name": "graphify__markdown_graph",
+      "kind": "tool",
+      "binding": "extract_markdown",
+      "evidence": [
+        {
+          "path": "graphify/extractors/markdown.py",
+          "quote": "def extract_markdown(path: Path) -> dict:"
+        }
+      ],
+      "arguments": {
+        "path": {
+          "path": "graphify/extractors/markdown.py",
+          "quote": "def extract_markdown(path: Path) -> dict:"
+        }
+      },
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "graphify__markdown_graph",
+          "description": "Extract real structural nodes and edges from Markdown under /package or /runtime/artifacts.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "artifact": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "artifact"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Input files belong in the private artifact directory; host workspaces and credentials are not mounted.",
+    "This package validates the Markdown extractor. Broader code parsing and model-inferred edges are not advertised."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "graphify",
+    "name": "Graphify",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/Graphify-Labs/graphify.git",
+      "revision": "c7ec1082083e3e876443f643ecf86ebcfae177c2"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "graphify__markdown_graph",
+            "description": "Extract real structural nodes and edges from Markdown under /package or /runtime/artifacts.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "maxLength": 500
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://pypi.org",
+        "https://files.pythonhosted.org"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "import subprocess,venv,shutil\nshutil.copytree('/package','/runtime/source',dirs_exist_ok=True)\nvenv.EnvBuilder(with_pip=True,symlinks=False).create('/runtime/venv')\nsubprocess.run(['/runtime/venv/bin/python','-m','pip','install','--disable-pip-version-check','--no-cache-dir','/runtime/source'],check=True,stdout=subprocess.DEVNULL,timeout=240)\n"
+    },
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import os,sys\nos.execv('/runtime/venv/bin/python',['/runtime/venv/bin/python','/package/.pandamonium/run.py',*sys.argv[1:]])\n"
+    },
+    {
+      "path": ".pandamonium/run.py",
+      "content": "import json,sys\nfrom pathlib import Path\nfrom graphify.extractors.markdown import extract_markdown\nargs=json.load(sys.stdin);path=Path(args['path']).resolve()\nif path.suffix.lower() not in {'.md','.markdown'} or not any(path.is_relative_to(Path(root)) for root in ['/package','/runtime/artifacts']):raise ValueError('Choose a Markdown file in /package or /runtime/artifacts')\nif not path.is_file() or path.stat().st_size>1000000:raise ValueError('Markdown source must be a file of at most 1 MB')\nresult=extract_markdown(path);artifact=Path('/runtime/artifacts/graph.json');artifact.write_text(json.dumps(result))\nprint(json.dumps({'nodes':len(result['nodes']),'edges':len(result['edges']),'artifact':str(artifact)}))\n"
+    }
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "graphify__markdown_graph",
+        "arguments": {
+          "path": "/package/README.md"
+        }
+      }
+    ]
+  },
+  "source_exclusions": [
+    "graphify/skill-aider.md",
+    "graphify/skill-devin.md",
+    "tests/test_mcp_ingest.py",
+    "tools/skillgen/expected/graphify__skill-aider.md",
+    "tools/skillgen/expected/graphify__skill-devin.md",
+    "tools/skillgen/fragments/core/aider.md",
+    "tools/skillgen/fragments/core/devin.md"
+  ]
+}

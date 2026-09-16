@@ -1,0 +1,32 @@
+{
+  "discovered": [
+    "ponytail",
+    "superpowers",
+    "myinstants-api",
+    "yt-dlp",
+    "pandaflix",
+    "img2threejs",
+    "barehands",
+    "step-parts",
+    "text-to-cad",
+    "text-to-cad-robotics",
+    "black-hat-bash",
+    "graphify",
+    "public-apis"
+  ],
+  "installs": [
+    {
+      "extension_id": "superpowers",
+      "installed_digest": "ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44",
+      "native_skills": 14
+    },
+    {
+      "extension_id": "step-parts",
+      "installed_digest": "57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792",
+      "native_skills": 0
+    }
+  ],
+  "remaining_plugins": 0,
+  "compatibility_test_version": "1.0.68",
+  "publisher_key_available": false
+}

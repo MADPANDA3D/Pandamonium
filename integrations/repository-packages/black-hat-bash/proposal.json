@@ -1,0 +1,420 @@
+{
+  "purpose": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "# Black Hat Bash"
+    }
+  ],
+  "repo_class": "unknown",
+  "interfaces": [
+    {
+      "name": "black_hat_bash__search",
+      "kind": "tool",
+      "binding": "knowledge.search",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "# Black Hat Bash"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "black_hat_bash__search",
+          "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "source_url": {
+                  "type": "string"
+                },
+                "source_revision": {
+                  "type": "string"
+                },
+                "content_sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "line",
+                "text",
+                "source_url",
+                "source_revision",
+                "content_sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "vectorized": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "results",
+          "vectorized"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "black_hat_bash__status",
+      "kind": "tool",
+      "binding": "knowledge.status",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "# Black Hat Bash"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "black_hat_bash__status",
+          "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "vectorized": {
+            "type": "boolean"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunks",
+          "nodes",
+          "edges",
+          "vectorized",
+          "source_url",
+          "source_revision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "black_hat_bash__refresh",
+      "kind": "tool",
+      "binding": "knowledge.refresh",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "# Black Hat Bash"
+        }
+      ],
+      "arguments": {},
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "black_hat_bash__refresh",
+          "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "chunks": {
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "integer"
+          },
+          "vectorized": {
+            "type": "boolean"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunks",
+          "nodes",
+          "edges",
+          "vectorized",
+          "source_url",
+          "source_revision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Collection links and shell examples are source data only; no blanket execution or linked-tool installation."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "black-hat-bash",
+    "name": "Black-Hat-Bash",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/dolevf/Black-Hat-Bash.git",
+      "revision": "92d9287305255aab1e433cd54755acf21f5bd3f9"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "black_hat_bash__search",
+            "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "black_hat_bash__status",
+            "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "black_hat_bash__refresh",
+            "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": []
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "raise RuntimeError('Use the native knowledge tools')\n"
+    }
+  ],
+  "execution": {
+    "install": [],
+    "checks": [
+      {
+        "name": "black_hat_bash__search",
+        "arguments": {
+          "query": "bash",
+          "limit": 3
+        }
+      },
+      {
+        "name": "black_hat_bash__status",
+        "arguments": {}
+      },
+      {
+        "name": "black_hat_bash__refresh",
+        "arguments": {}
+      }
+    ],
+    "knowledge": {
+      "files": [
+        "README.md",
+        "ch01/README.md",
+        "ch01/exercise_solution.sh",
+        "ch01/exit_codes.sh",
+        "ch01/input_prompting.sh",
+        "ch01/local_scope_variable.sh",
+        "ch01/ping_with_arguments.sh",
+        "ch02/README.md",
+        "ch02/case_ip_address_check.sh",
+        "ch02/check_root_function.sh",
+        "ch02/exercise_solution.sh",
+        "ch02/if_elif.sh",
+        "ch02/integer_comparison.sh",
+        "ch02/string_comparison.sh",
+        "ch02/test_if_file_exists.sh",
+        "ch02/until_loop.sh",
+        "ch02/while_loop.sh",
+        "ch03/README.md",
+        "ch04/README.md",
+        "ch04/curl_banner_grab.sh",
+        "ch04/host_monitor_notification.sh",
+        "ch04/multi_host_ping.sh",
+        "ch04/netcat_banner_grab.sh",
+        "ch04/nmap_to_portfiles.sh",
+        "ch04/os_detection.sh",
+        "ch04/port_watchdog.sh",
+        "ch05/README.md",
+        "ch05/curl_fetch_robots_txt.sh",
+        "ch05/directory_indexing_scanner.sh",
+        "ch05/exercise_solution.sh",
+        "ch05/nuclei-notifier.sh",
+        "ch06/README.md",
+        "ch06/os-command-injection.sh",
+        "ch07/README.md",
+        "ch07/donation-monitor.sh",
+        "ch07/port-hopper.sh",
+        "ch07/reverse_shell_monitor.sh",
+        "ch07/ssh-bruteforce.sh",
+        "ch08/README.md",
+        "ch08/home_dir_access_check.sh",
+        "ch08/os_detect.sh",
+        "ch08/recursive_file_search.sh",
+        "ch09/README.md",
+        "ch09/gnupg_passphrase_bf.sh",
+        "ch09/gtfobins_search.sh",
+        "ch09/local_account_bf.sh",
+        "ch10/README.md",
+        "ch10/fake_sudo.sh",
+        "ch10/profile_hook.sh",
+        "ch11/README.md",
+        "ch11/port_scan_etc_services.sh",
+        "ch12/README.md",
+        "ch12/binary_name_rotation.sh",
+        "ch12/exercise_solution.sh",
+        "lab/README.md",
+        "lab/init.sh",
+        "lab/provision.sh",
+        "lab/run.sh"
+      ],
+      "vectorize": false
+    }
+  },
+  "source_exclusions": [
+    "lab/machines/p-web-02/files/site/wp-includes/js/codemirror/esprima.js",
+    "lab/machines/p-web-02/files/site/wp-admin/js/updates.js",
+    "lab/machines/p-web-02/files/site/wp-admin/js/application-passwords.js"
+  ]
+}

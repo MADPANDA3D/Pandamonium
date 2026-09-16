@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-15T23:08:11.391340+00:00",
-  "expires_at": "2026-12-14T23:08:11.391340+00:00",
+  "generated_at": "2026-09-16T00:14:38.212089+00:00",
+  "expires_at": "2026-12-15T00:14:38.212089+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -118,11 +118,1654 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "superpowers",
+        "name": "Superpowers",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/obra/superpowers.git",
+          "revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+        },
+        "runtime": {
+          "type": "skills",
+          "entrypoint": ".codex-plugin/plugin.json"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "skill_bundle",
+            "format": "codex_plugin",
+            "include": [
+              "brainstorming",
+              "dispatching-parallel-agents",
+              "executing-plans",
+              "finishing-a-development-branch",
+              "receiving-code-review",
+              "requesting-code-review",
+              "subagent-driven-development",
+              "systematic-debugging",
+              "test-driven-development",
+              "using-git-worktrees",
+              "using-superpowers",
+              "verification-before-completion",
+              "writing-plans",
+              "writing-skills"
+            ]
+          }
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 5
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [],
+          "write": [],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 1
+        },
+        "metadata": {
+          "summary": "Use all 14 Superpowers software-development skills as native instructions, with their scripts and references.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Use all 14 Superpowers software-development skills as native instructions, with their scripts and references.",
+      "categories": [
+        "skills"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-superpowers-1.0.0-ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44/pandamonium-plugin-superpowers-ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44.tar.gz",
+        "sha256": "ecb76cae4cdcbc09d51327052fb01993b8b7a03dbd0c57ac4d17ea6b832bfc44",
+        "size_bytes": 537796,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "O7xE7tVISY6Dkv7ifkuuvW5f2dO5AwT4to5CQWRN7tkrNDYsLhK3eSkZAI4fmvgeacYAWKm6iS4NppTw8nMUDw=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:06:47.462244+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "myinstants-api",
+        "name": "myinstants-api",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/MADPANDA3D/myinstants-api.git",
+          "revision": "435d40d309ab2790e21567b00c9727509badeedd"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "myinstants_api__recent",
+                "description": "GET /recent \u2014 List recent sound effects and return their source and audio URLs.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://arch.mirror.constant.com",
+            "https://www.myinstants.com"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "List recent sound effects and return their source and audio URLs.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux x86_64 with glibc compatible with pinned PHP 8.5.10; package setup fails on incompatible hosts.",
+            "Upstream TLS verification is restored in the private runtime copy before serving."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "List recent sound effects and return their source and audio URLs.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-myinstants-api-1.0.0-6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9/pandamonium-plugin-myinstants-api-6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9.tar.gz",
+        "sha256": "6c1d52c667a985eeed71627b3dbe37e98bc4cbf66cc345e4e3e341044d0ce2d9",
+        "size_bytes": 25852,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "SVbEq1T6aa4YMwcMjevFZoDMEJwPka1A7ciop0um1G3rIs1kIu/G6DGhMTH71rFgnn4i2pxo9Hcxmo5mSvfyCg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:07:09.612114+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "pandaflix",
+        "name": "PandaFlix",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/MADPANDA3D/pandaflix.git",
+          "revision": "f6484787ba5a23d4453d5bbd8eb34f05054ecfbb"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__episode_range",
+                "description": "Expand a bounded episode selection with PandaFlix's own parser",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "s": {
+                      "type": "string",
+                      "maxLength": 7
+                    }
+                  },
+                  "required": [
+                    "s"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__youtube_playback_plan",
+                "description": "Resolve a YouTube URL into a PandaFlix playback plan without opening an interactive player",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "urlStr": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "urlStr"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__watch_history",
+                "description": "Read watch history from this plugin's private account runtime",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://go.dev",
+            "https://dl.google.com",
+            "https://proxy.golang.org",
+            "https://sum.golang.org"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Plan media playback, expand episode selections and read private watch history through PandaFlix's actual Go interfaces.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux x86_64 with bubblewrap, prlimit, a C compiler, pkg-config and libmpv development files",
+            "Private checksum-verified Go 1.26.0 toolchain; Go dependencies remain in runtime cache",
+            "Actual playback remains interactive and requires a configured player/display on the target node"
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Plan media playback, expand episode selections and read private watch history through PandaFlix's actual Go interfaces.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "GPL-3.0 AND BSD-3-Clause",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-pandaflix-1.0.0-664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405/pandamonium-plugin-pandaflix-664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405.tar.gz",
+        "sha256": "664834d2b9cacdf4e64321247de212ae9544906529de4dd542fc3a78b7e17405",
+        "size_bytes": 59643614,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "kGKDsBQgwzNKA8y/iXUOeZZ84YlTSxC/R3OytGZ0Pzj64xVTQ9ZnmrXO3BQ3AKU8sZ4bfqFq0S6gPBgH91g3Bg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:08:52.814503+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "img2threejs",
+        "name": "img2threejs",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/img2threejs/img2threejs.git",
+          "revision": "6e60b5e22419464b4853e01ddb6c0e6f6659a733"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "img2threejs__create_spec",
+                "description": "Create the upstream procedural ObjectSculptSpec scaffold for an image task; the result still needs visual assessment.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "target_name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "image": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "target_name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "img2threejs__validate_spec",
+                "description": "Validate the private scaffold against real upstream quality gates and report all errors and warnings.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "spec"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Create and validate procedural 3D sculpt specifications with upstream img2threejs. Image interpretation, Three.js generation and visual quality review remain agent/browser tasks.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "The scaffold is deliberately unassessed; a validation result with errors is not a completed image-to-3D model.",
+            "Full upstream native skill admission still exceeds the current 64-file asset limit; the executable package advertises only its two verified operations."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Create and validate procedural 3D sculpt specifications with upstream img2threejs. Image interpretation, Three.js generation and visual quality review remain agent/browser tasks.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "Apache-2.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-img2threejs-1.0.0-278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8/pandamonium-plugin-img2threejs-278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8.tar.gz",
+        "sha256": "278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8",
+        "size_bytes": 1371256,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "NqB+3H7tDmo2fIqpmuze77awiHgorHtbOzfANKHmCSzQrp5bjZw46YnzQeeAN/J8Co1JCZfo0BWUG/WSoZpLAg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:09:53.906550+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "barehands",
+        "name": "Barehands",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/jaredrhod/barehands.git",
+          "revision": "eb23bed2d772f9d5a24de26fb92f46c3c76d69cf"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "barehands__board_state",
+                "description": "Read the board heartbeat; an empty state means no camera tracker is connected.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "barehands__configuration",
+                "description": "Read the running board name and declared note/media orbs.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://cdn.jsdelivr.net"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Read the live state and configuration of a private Barehands webcam board. Camera gestures and visible 3D interaction require Chrome and a webcam on the chosen node.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Open the private board in Chrome and grant webcam access for visible hand-tracked interaction. Backend readback does not prove camera or 3D rendering."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Read the live state and configuration of a private Barehands webcam board. Camera gestures and visible 3D interaction require Chrome and a webcam on the chosen node.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "AGPL-3.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-barehands-1.0.0-2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4/pandamonium-plugin-barehands-2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4.tar.gz",
+        "sha256": "2b10a9849ceeca75e20cb2f6f534db23aa2e7cb466a1393e359a6e0a214e2fc4",
+        "size_bytes": 2676539,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "EtIarYE3IR4CmxnqhuKjSRvtTF9mrkgU+Lps2QSbZZhBrkE8peegipUsfhDPA9ae+gO8n4HDFInVQSY5t1T4Ag=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:10:09.416387+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "step-parts",
+        "name": "step.parts",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/earthtojake/step.parts.git",
+          "revision": "c6113328a5695b976a010a203a90fe86191769bf"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "step_parts__search",
+                "description": "Search the public STEP catalog and return part metadata and provenance; model downloads are separate.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "q": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "q"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://api.step.parts"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Search the STEP parts catalog for mechanical components with original metadata and attribution. Downloaded geometry retains each source license.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Catalog API access is required. This package does not claim to bundle LFS model binaries or relicense third-party geometry."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Search the STEP parts catalog for mechanical components with original metadata and attribution. Downloaded geometry retains each source license.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-step-parts-1.0.0-57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792/pandamonium-plugin-step-parts-57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792.tar.gz",
+        "sha256": "57f75d29fb3c1783234a4f6c11a26d1dca9491eceb8d501bbed682e726f14792",
+        "size_bytes": 5572468,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "NfgQj6mgvtzEpaahgk3til212yBt+v0unL5Pn2N9tgi7mwa4+J1EOTsjJ205R9vX4esLSX9lSleN7wjKgWlgCg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:10:39.835719+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "black-hat-bash",
+        "name": "Black-Hat-Bash",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/dolevf/Black-Hat-Bash.git",
+          "revision": "92d9287305255aab1e433cd54755acf21f5bd3f9"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "black_hat_bash__search",
+                "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "black_hat_bash__status",
+                "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "black_hat_bash__refresh",
+                "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Collection links and shell examples are source data only; no blanket execution or linked-tool installation."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT AND ISC",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-black-hat-bash-1.0.0-0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65/pandamonium-plugin-black-hat-bash-0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65.tar.gz",
+        "sha256": "0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65",
+        "size_bytes": 19445151,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "Jzg1YDZmCuvNWOam0TBS2VGgpKw1fw1DKyRtLH3PgTkF0Bp1jo2p3krg07mNpFdlflKhC4qjPTLR1TtghbzaCA=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:11:16.395392+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "public-apis",
+        "name": "Public APIs",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/public-apis/public-apis.git",
+          "revision": "536d5c4e5ff25e16c0f27e6bda4c9308ffc5fd33"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "public_apis__search",
+                "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "public_apis__status",
+                "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "public_apis__refresh",
+                "description": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Choose one search result, read its linked API documentation, then configure that API package with its endpoint and credential.",
+            "This index never follows collection links or installs their projects."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Find public APIs and inspect their documentation, authentication requirements and HTTPS support before connecting one API.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-public-apis-1.0.0-90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567/pandamonium-plugin-public-apis-90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567.tar.gz",
+        "sha256": "90c845448a2f4124bd9d131a2d5cad77059ae4d4bc75455443a7f7ec857dc567",
+        "size_bytes": 158231,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "qgZvWXTe2uJi6BE10XTOZzj9axJYs9Vs0UAGvUBsSP5kIhy1vlbU2MJPVOMMk0AXPartelj3Q5b6ZipD8uiWDQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:11:53.305998+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "yt-dlp",
+        "name": "yt-dlp",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/yt-dlp/yt-dlp.git",
+          "revision": "bbc809a1161d3bfca51fa36f59dda35556ee85a0"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "yt_dlp__inspect_media",
+                "description": "Inspect a single media URL without downloading",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "yt_dlp__download_media",
+                "description": "Download a single media item up to 16 MiB into private plugin artifacts",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://*"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Inspect media URLs and download bounded media artifacts using the pinned yt-dlp CLI library.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux with bubblewrap and prlimit",
+            "Python 3.10+; yt-dlp runs directly from the pinned source",
+            "Optional ffmpeg/browser/credentials for media sites requiring them; the declared tools need no owner credentials",
+            "Direct-media URLs only; optional provider modules containing embedded credentials are excluded from this package."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Inspect media URLs and download bounded media artifacts using the pinned yt-dlp CLI library.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "Unlicense",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-yt-dlp-1.0.0-0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13/pandamonium-plugin-yt-dlp-0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13.tar.gz",
+        "sha256": "0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13",
+        "size_bytes": 3023523,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "aJibV5wrHVsvjqVVBfZAorSkr5nzyfgadPZOr2mwahBoRTGvdGRW1+ampdY7Qpon6h/411ncCB+xNkD+qwAsCQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:12:40.424419+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "graphify",
+        "name": "Graphify",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/Graphify-Labs/graphify.git",
+          "revision": "c7ec1082083e3e876443f643ecf86ebcfae177c2"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "graphify__markdown_graph",
+                "description": "Extract real structural nodes and edges from Markdown under /package or /runtime/artifacts.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://pypi.org",
+            "https://files.pythonhosted.org"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Build a source-backed Markdown knowledge graph with Graphify and retain graph.json. Semantic model inference is a separate configured capability.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Input files belong in the private artifact directory; host workspaces and credentials are not mounted.",
+            "This package validates the Markdown extractor. Broader code parsing and model-inferred edges are not advertised."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Build a source-backed Markdown knowledge graph with Graphify and retain graph.json. Semantic model inference is a separate configured capability.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT AND Apache-2.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-graphify-1.0.0-29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8/pandamonium-plugin-graphify-29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8.tar.gz",
+        "sha256": "29a1ce7cfcfe63be1eaa8a8994109f5747523872af7b16e6e35f5e9dea2aa3a8",
+        "size_bytes": 4410191,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "2NlvM2GAtr+s9dqql9VPV/6S/WwxshIyjD8c9v1hl+bN4BvLarcuCYTbpIgRm1ZHTS0PLismM8seCGX6nxVdDg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:13:27.401340+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "text-to-cad",
+        "name": "Text to CAD",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/earthtojake/text-to-cad.git",
+          "revision": "3e4dfdeef2cbd5804c369592b59620132188a150"
+        },
+        "runtime": {
+          "type": "skills",
+          "entrypoint": ".pandamonium/plugin.json"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "skill_bundle",
+            "format": "codex_plugin",
+            "include": [
+              "bambu-labs",
+              "cad",
+              "cad-viewer",
+              "dfam-check",
+              "dxf",
+              "gcode",
+              "sdf",
+              "sendcutsend"
+            ]
+          }
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 5
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [],
+          "write": [],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 1
+        },
+        "metadata": {
+          "summary": "Use eight text-to-cad workflows for CAD, fabrication and local review as native instructions.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements.",
+            "Executing CAD generation, slicing or printer actions requires the corresponding owner-installed CAD/tool/device runtime; skill admission does not validate those actions."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Use eight text-to-cad workflows for CAD, fabrication and local review as native instructions.",
+      "categories": [
+        "skills"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-text-to-cad-1.0.0-28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a/pandamonium-plugin-text-to-cad-28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a.tar.gz",
+        "sha256": "28269204434b02eef63309afa50a14b1ea42495f5ece2dd73fed1344ac9e244a",
+        "size_bytes": 6144052,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "WnCF4gMpDYz0GZ8xX3lXo9zDZvUiAYcLMB/mvf4qJhvONj8zyRoYZRKemMLPJ4DscrxR3vLqxbzpjDyx9yXvDg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:13:50.536203+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "text-to-cad-robotics",
+        "name": "Text to CAD \u2014 robotics and parts",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/earthtojake/text-to-cad.git",
+          "revision": "3e4dfdeef2cbd5804c369592b59620132188a150"
+        },
+        "runtime": {
+          "type": "skills",
+          "entrypoint": ".pandamonium/plugin.json"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "skill_bundle",
+            "format": "codex_plugin",
+            "include": [
+              "srdf",
+              "step-parts",
+              "urdf"
+            ]
+          }
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 5
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [],
+          "write": [],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 1
+        },
+        "metadata": {
+          "summary": "Use the SRDF, URDF and step.parts workflows from text-to-cad as native skills.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Skills are instructions; underlying development commands retain ordinary operator approval and host requirements.",
+            "Executing CAD generation, slicing or printer actions requires the corresponding owner-installed CAD/tool/device runtime; skill admission does not validate those actions."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Use the SRDF, URDF and step.parts workflows from text-to-cad as native skills.",
+      "categories": [
+        "skills"
+      ],
+      "license": "MIT",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-text-to-cad-robotics-1.0.0-fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf/pandamonium-plugin-text-to-cad-robotics-fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf.tar.gz",
+        "sha256": "fc7491f17d612b7896bc704f60d31d6eaa8f78b04dc394b666426934545e6ccf",
+        "size_bytes": 6143869,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "a/r+4nZg+FJf9RXGx/xPDtOLwdHNQChx+3RcY4xQCUw/ATRRU5JulsxowDO8GYWmhrewDo88AwROwEQAKwrPBQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:14:20.505500+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "N+5Lx/nziT18I38Qwqe1V/HZ/cZ4rnqewkD2s59kP79YbY0MjwWxnM/xO2F4GbUh/ZLLj44wvWo21U3XV7WgCg=="
+    "value": "gn5SI2mQEvQUTgpy6JxcMh5J1MEbe9idMqFYsAqEF8abmTUE2IxpbyXw+IZOvrm/PAzrrPVR0oTcX9XvMKitBg=="
   }
 }

@@ -1,0 +1,167 @@
+{
+  "purpose": "Search the STEP parts catalog for mechanical components with original metadata and attribution. Downloaded geometry retains each source license.",
+  "evidence": [
+    {
+      "path": "src/lib/openapi.ts",
+      "quote": "\"/v1/parts\": {"
+    }
+  ],
+  "repo_class": "python_cli",
+  "interfaces": [
+    {
+      "name": "step_parts__search",
+      "kind": "tool",
+      "binding": "/v1/parts",
+      "evidence": [
+        {
+          "path": "src/lib/openapi.ts",
+          "quote": "\"/v1/parts\": {"
+        }
+      ],
+      "arguments": {
+        "q": {
+          "path": "src/lib/openapi.ts",
+          "quote": "name: \"q\",\n    in: \"query\",\n    schema: { type: \"string\" }"
+        }
+      },
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "step_parts__search",
+          "description": "Search the public STEP catalog and return part metadata and provenance; model downloads are separate.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "items_json": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "total",
+          "items_json"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Catalog API access is required. This package does not claim to bundle LFS model binaries or relicense third-party geometry."
+  ],
+  "validation": [
+    "Validate every declared operation in the bounded disposable runtime."
+  ],
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "step-parts",
+    "name": "step.parts",
+    "version": "1.0.0",
+    "source": {
+      "url": "https://github.com/earthtojake/step.parts.git",
+      "revision": "c6113328a5695b976a010a203a90fe86191769bf"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "step_parts__search",
+            "description": "Search the public STEP catalog and return part metadata and provenance; model downloads are separate.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "q": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "q"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {}
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 30
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://api.step.parts"
+      ]
+    },
+    "removal": {
+      "remove_paths": [],
+      "preserve_paths": [
+        "runtime"
+      ]
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    },
+    "configuration": []
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import json,sys,urllib.parse,urllib.request\nargs=json.load(sys.stdin)\nurl='https://api.step.parts/v1/parts?'+urllib.parse.urlencode({'q':args['q'],'pageSize':3})\nwith urllib.request.urlopen(url,timeout=20) as response: data=json.load(response)\nprint(json.dumps({'total':data['total'],'items_json':json.dumps(data['items'])}))\n"
+    }
+  ],
+  "execution": {
+    "install": [],
+    "checks": [
+      {
+        "name": "step_parts__search",
+        "arguments": {
+          "q": "M3"
+        }
+      }
+    ]
+  },
+  "source_exclusions": []
+}
