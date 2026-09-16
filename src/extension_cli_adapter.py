@@ -768,7 +768,7 @@ class GeneratedCliAdapter:
         with _LOCK:
             pass  # Each bounded invocation exits; preserve private runtime/user data.
 
-    def _validated_context(self, record: dict, owner: str, revision: str | None = None) -> tuple:
+    def _validated_context(self, record: dict, owner: str, revision: str | None = None, *, recover: bool = False) -> tuple:
         """Read the same current package/configuration/health evidence used by calls."""
         manifest = record["manifest"]
         state = json.loads((self.root / "lifecycle.json").read_text())
@@ -807,19 +807,49 @@ class GeneratedCliAdapter:
             raise ExtensionLifecycleError(
                 "extension_needs_setup:Configuration changed; enable to revalidate."
             )
+        if receipt["digest"] != digest:
+            raise ExtensionLifecycleError("extension_cli_validation_required")
         contract = _read_contract(path, manifest)
         if contract["execution"]["service"]:
             state_path = self._service_state(runtime)
-            if not state_path.exists():
-                raise ExtensionLifecycleError(
-                    "extension_service_offline:Disable and enable to restart."
-                )
-            service = json.loads(state_path.read_text())
+            service = json.loads(state_path.read_text()) if state_path.exists() else None
+            if not service or resources._systemctl(
+                "show", service["unit"], "--property=ActiveState", "--value"
+            ) in {"inactive", "failed"}:
+                if not recover:
+                    raise ExtensionLifecycleError("extension_service_offline:Service is stopped.")
+                # Enabled, unchanged installations retain authority to recover after
+                # their owning app exits. Active scopes still fail closed on limits.
+                service = self._start_service(path, runtime, manifest, contract, config)
+                try:
+                    atomic_write_json(str(state_path), service)
+                except BaseException:
+                    _stop_service(service["unit"])
+                    raise
             resources.verify_scope(service["unit"])
             config = {**config, "PANDAMONIUM_PORT": str(service["port"])}
-        if receipt["digest"] != digest:
-            raise ExtensionLifecycleError("extension_cli_validation_required")
         return path, runtime, manifest, contract, config
+
+    def restore_enabled(self, registry=None) -> dict[str, str]:
+        """App startup restores only unchanged, previously enabled owner packages."""
+        from src.extension_registry import ExtensionRegistry
+
+        result = {}
+        with _LOCK:
+            lifecycle = self.root / "lifecycle.json"
+            if not lifecycle.exists():
+                return result
+            installed = json.loads(lifecycle.read_text())["extensions"]
+            for key, record in (registry or ExtensionRegistry()).snapshot()["extensions"].items():
+                owner = installed.get(key, {}).get("owner_scope")
+                if not owner or not record.get("enabled") or not is_cli(record["manifest"]):
+                    continue
+                try:
+                    self._validated_context(record, owner, recover=True)
+                    result[key] = "ready"
+                except (ExtensionLifecycleError, OSError, ValueError, KeyError, TypeError):
+                    result[key] = "needs_setup"
+        return result
 
     def readiness(self, record: dict, owner: str) -> dict[str, str]:
         # Do not block the UI behind an install or a running tool.
@@ -838,7 +868,7 @@ class GeneratedCliAdapter:
         cancel: threading.Event, revision: str | None = None,
     ) -> dict:
         with _LOCK:
-            path, runtime, manifest, contract, config = self._validated_context(record, owner, revision)
+            path, runtime, manifest, contract, config = self._validated_context(record, owner, revision, recover=True)
             if name not in {c["name"] for c in record["effective_capabilities"]}:
                 raise ExtensionLifecycleError("extension_cli_validation_required")
             return _invoke(path, runtime, manifest, contract, name, arguments, cancel, config=config)

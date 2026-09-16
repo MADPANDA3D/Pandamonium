@@ -41,7 +41,7 @@ def _context(owner: str, *, active: bool = True) -> tuple:
     runtime = adapter._runtime(record["manifest"], installed["active_revision"], identity)
     config = {}
     if active:
-        _, runtime, _, contract, config = adapter._validated_context(record, identity)
+        _, runtime, _, contract, config = adapter._validated_context(record, identity, recover=True)
         if not any(i["binding"] == "soundboard.search" for i in contract["interfaces"].values()):
             raise HTTPException(409, "Update the Myinstants plugin to enable Soundboard")
     return record, runtime, config

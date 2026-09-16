@@ -115,7 +115,7 @@ def test_settings_routes_enforce_owner_lifecycle_and_preferences(tmp_path, monke
         def _runtime(self, *_args):
             return runtime
 
-        def _validated_context(self, *_args):
+        def _validated_context(self, *_args, **_kwargs):
             if not record["enabled"]:
                 raise ExtensionLifecycleError("extension_disabled")
             return None, runtime, None, {"interfaces": {"search": {"binding": "soundboard.search"}}}, {}
