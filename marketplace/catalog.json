@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:12:04.762617+00:00",
-  "expires_at": "2026-12-15T00:12:04.762617+00:00",
+  "generated_at": "2026-09-16T00:12:59.062794+00:00",
+  "expires_at": "2026-12-15T00:12:59.062794+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -1261,11 +1261,163 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "yt-dlp",
+        "name": "yt-dlp",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/yt-dlp/yt-dlp.git",
+          "revision": "bbc809a1161d3bfca51fa36f59dda35556ee85a0"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "yt_dlp__inspect_media",
+                "description": "Inspect a single media URL without downloading",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "yt_dlp__download_media",
+                "description": "Download a single media item up to 16 MiB into private plugin artifacts",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://*"
+          ]
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Inspect media URLs and download bounded media artifacts using the pinned yt-dlp CLI library.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Linux with bubblewrap and prlimit",
+            "Python 3.10+; yt-dlp runs directly from the pinned source",
+            "Optional ffmpeg/browser/credentials for media sites requiring them; the declared tools need no owner credentials",
+            "Direct-media URLs only; optional provider modules containing embedded credentials are excluded from this package."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Inspect media URLs and download bounded media artifacts using the pinned yt-dlp CLI library.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "Unlicense",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-yt-dlp-1.0.0-0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13/pandamonium-plugin-yt-dlp-0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13.tar.gz",
+        "sha256": "0facb77d950a43ec96c2d883468b792c097fcc071482ed8a39a41d354f193c13",
+        "size_bytes": 3023523,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "aJibV5wrHVsvjqVVBfZAorSkr5nzyfgadPZOr2mwahBoRTGvdGRW1+ampdY7Qpon6h/411ncCB+xNkD+qwAsCQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:12:40.424419+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "w8QtpOSXlK16J4yPDIiB0tLBRjMLw6CLTc4s8EuBQd7SrInc3iW4njf9xEu2EBBO137o2n/vXUC2aRZIeCQPAQ=="
+    "value": "0rtgXPXNT8iVK7nXUfxc+dY1SCfU/VaY2t7GHfbWn+MOxlGZHe/3LQCKJwHSpaIiEx/lT+xeLB+TZkR/JXvFDA=="
   }
 }
