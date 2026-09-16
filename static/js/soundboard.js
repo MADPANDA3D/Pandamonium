@@ -225,9 +225,14 @@ async function refresh() {
 async function search(query = '') {
   const token = ++searchGeneration;
   const status = el('soundboard-search-status');
+  if (!query.trim()) {
+    el('soundboard-results').replaceChildren();
+    status.textContent = 'Type a sound name and press Search.';
+    return;
+  }
   status.textContent = 'Finding sounds…';
   try {
-    const result = await api(`/sounds${query ? `?query=${encodeURIComponent(query)}` : ''}`);
+    const result = await api(`/sounds?query=${encodeURIComponent(query)}`);
     if (token !== searchGeneration) return;
     renderRows(el('soundboard-results'), result.sounds);
     status.textContent = result.sounds.length ? '' : 'No matching sounds. Try a different search.';
@@ -235,7 +240,7 @@ async function search(query = '') {
 }
 
 export async function openSoundboard() {
-  try { await refresh(); if (state.enabled) await search(); }
+  try { await refresh(); if (state.enabled) await search(el('soundboard-query').value.trim()); }
   catch (error) { if (el('soundboard-status')) el('soundboard-status').textContent = error.message; }
 }
 

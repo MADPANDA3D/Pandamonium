@@ -43,3 +43,7 @@ Sanitized early receipts: [proof.json](evidence/mad-968/proof.json). Raw private
 The requested 1.0.68 train includes the already-merged MAD-957–MAD-963 infrastructure plus this scoped feature. Paused MAD-964/PR272 is excluded; this task installs only Myinstants. Public package, signed application release and installed deployment are separate facts; current installed readback and user feedback are tracked in MAD-968.
 
 CT103 requires the native runtime's persistent bounded filesystem, bubblewrap, systemd user manager/cgroup controllers and distro PHP CLI/curl. The scoped setup adds a dedicated 2 GiB volume under app data and a service environment drop-in, retaining security/resource checks. The protected updater backs up app data/config and preserves signed v1.0.67 plus its rollback snapshot. The PC retains its original Chatterbox image, service unit and source for reversal. Never hand-edit an immutable live release, replace model defaults, delete owner data or continue to another plugin automatically.
+
+## Installed Settings feedback
+
+Opening Settings shows “Type a sound name and press Search.” instead of requesting the upstream recent feed. Blank submissions stay local; entering a query uses the existing search and preserves real errors. This removes a misleading unavailable message when recent browsing fails but search works. Favorites and voice behavior are unchanged.
