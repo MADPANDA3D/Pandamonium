@@ -32,8 +32,23 @@ async function app(page) {
 
 test('installed Settings supports manual preview, saved favorites, mute and uninstall visibility', async ({ page }) => {
   const state = await app(page);
+  const searches = [];
+  await page.route('**/api/soundboard/sounds*', route => {
+    const query = new URL(route.request().url()).searchParams.get('query');
+    searches.push(query);
+    return query ? route.fulfill({ json: { sounds: [sound] } })
+      : route.fulfill({ status: 503, json: { detail: 'Soundboard unavailable' } });
+  });
   await page.evaluate(async () => (await import('/static/js/settings.js')).open('soundboard'));
+  await expect(page.locator('#soundboard-search-status')).toHaveText('Type a sound name and press Search.');
+  await page.locator('#soundboard-query').fill('   ');
+  await page.locator('#soundboard-search-button').click();
+  await expect(page.locator('#soundboard-results')).toBeEmpty();
+  expect(searches).toEqual([]);
+  await page.locator('#soundboard-query').fill('vine boom');
+  await page.locator('#soundboard-search-button').click();
   await expect(page.locator('#soundboard-results')).toContainText('Vine boom');
+  expect(searches).toEqual(['vine boom']);
   expect(await page.evaluate(() => window.soundPlays)).toBe(0);
   await page.locator('#soundboard-results .sound-cue').click();
   await expect.poll(() => page.evaluate(() => window.soundPlays)).toBe(1);
