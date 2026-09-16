@@ -78,6 +78,7 @@ try {
       installs.push({ extension_id: id, installed_digest: digest, native_skills: skillCount });
       await consumer.page.getByRole('tab', { name: 'Installed plugins' }).click();
       await consumer.page.locator(`[data-installed-id="${id}"]`).click();
+      await expect(consumer.page.getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
       await consumer.page.screenshot({ animations: 'disabled', path: join(output, `mad963-${id}-installed.png`) });
       await consumer.page.getByRole('button', { name: 'Remove', exact: true }).click();
       await consumer.page.getByRole('button', { name: 'Approve remove once' }).click();
