@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:09:50.628355+00:00",
-  "expires_at": "2026-12-15T00:09:50.628355+00:00",
+  "generated_at": "2026-09-16T00:10:05.754591+00:00",
+  "expires_at": "2026-12-15T00:10:05.754591+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -525,11 +525,164 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "img2threejs",
+        "name": "img2threejs",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/img2threejs/img2threejs.git",
+          "revision": "6e60b5e22419464b4853e01ddb6c0e6f6659a733"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "img2threejs__create_spec",
+                "description": "Create the upstream procedural ObjectSculptSpec scaffold for an image task; the result still needs visual assessment.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "target_name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "image": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "target_name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "img2threejs__validate_spec",
+                "description": "Validate the private scaffold against real upstream quality gates and report all errors and warnings.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "spec": {
+                      "type": "string",
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "spec"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Create and validate procedural 3D sculpt specifications with upstream img2threejs. Image interpretation, Three.js generation and visual quality review remain agent/browser tasks.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "The scaffold is deliberately unassessed; a validation result with errors is not a completed image-to-3D model.",
+            "Full upstream native skill admission still exceeds the current 64-file asset limit; the executable package advertises only its two verified operations."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Create and validate procedural 3D sculpt specifications with upstream img2threejs. Image interpretation, Three.js generation and visual quality review remain agent/browser tasks.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "Apache-2.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-img2threejs-1.0.0-278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8/pandamonium-plugin-img2threejs-278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8.tar.gz",
+        "sha256": "278d9ecd9f8e867068828bd232e5e131ec14d320ad10d0bce6b2ccf79fad52d8",
+        "size_bytes": 1371256,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "NqB+3H7tDmo2fIqpmuze77awiHgorHtbOzfANKHmCSzQrp5bjZw46YnzQeeAN/J8Co1JCZfo0BWUG/WSoZpLAg=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:09:53.906550+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "S7iDmFkgel6BtGYEJ37F/h7CUJCfCO9Tc4n0SRsmHhRWQFeNkPFvxFuuaP49W+p42E7IlAKbZ9FIXQHriHJ0BQ=="
+    "value": "FyVnAmkalz8PgKgHBA0DjgfOOBIUU92yVhSicjYjBQn/tVMYS/qqDNFjdrtGlAHN3xxvmOqHyWZxC7azwkIuBw=="
   }
 }
