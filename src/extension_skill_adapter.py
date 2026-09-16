@@ -8,8 +8,9 @@ import re
 import shutil
 import tempfile
 import threading
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from services.memory.skill_format import Skill, parse_frontmatter, slugify
 from services.memory.skill_importer import (
@@ -21,7 +22,6 @@ from services.memory.skill_importer import (
 from services.memory.skills import SkillsManager
 from src.extension_installer import ExtensionLifecycleError
 from src.extension_registry import MANIFEST_VERSION, SKILL_ID_PATTERN
-
 
 _FRONTMATTER_FIELDS = frozenset({
     "name", "description", "version", "tags", "platforms",
@@ -38,6 +38,16 @@ _LIST_FIELDS = frozenset({
 _FRONTMATTER_KEY = re.compile(r"^([a-z_][a-z0-9_-]*):", re.IGNORECASE)
 _FRONTMATTER_LIST_ITEM = re.compile(r"^\s+-\s+.+$")
 _BLOCK_SCALAR_MARKS = frozenset({">", "|", ">-", "|-", ">+", "|+"})
+
+
+def is_skill_text_asset(path: Path) -> bool:
+    """Admit standard script/graph text without admitting arbitrary binaries."""
+    if _is_text_file(path.name) or path.suffix.lower() in {".cjs", ".mjs", ".dot"}:
+        return True
+    if not path.suffix:
+        with path.open("rb") as source:
+            return source.read(2) == b"#!"
+    return False
 
 
 class SkillBundleAdapter:
@@ -172,7 +182,7 @@ class SkillBundleAdapter:
             if skill_root == checkout and relative_checkout.as_posix() == "jarvis-extension.json":
                 continue
             relative = path.relative_to(skill_root).as_posix()
-            if not _is_text_file(path.name):
+            if not is_skill_text_asset(path):
                 raise ExtensionLifecycleError("extension_skill_asset_not_text")
             text = cls._read_text(path)
             total += len(text.encode("utf-8"))

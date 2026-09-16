@@ -31,7 +31,6 @@ from core.atomic_io import atomic_write_json
 from services.memory.skill_importer import MAX_FILE_BYTES as SKILL_FILE_BYTES
 from services.memory.skill_importer import MAX_FILES as SKILL_BUNDLE_FILES
 from services.memory.skill_importer import MAX_TOTAL_BYTES as SKILL_BUNDLE_BYTES
-from services.memory.skill_importer import _is_text_file
 from src.constants import DATA_DIR
 from src.extension_capability_inventory import (
     MAX_SCAN_BYTES,
@@ -51,7 +50,7 @@ from src.extension_package import (
     package_tree_digest,
 )
 from src.extension_registry import ExtensionContractError, validate_extension_manifest
-from src.extension_skill_adapter import SkillBundleAdapter
+from src.extension_skill_adapter import SkillBundleAdapter, is_skill_text_asset
 
 SCAN_DIR = Path(DATA_DIR) / "extension_scans"
 MAX_RETAINED_SCANS = 32
@@ -93,7 +92,8 @@ def _source_secrets(path: Path, text: str) -> list[tuple[str, str, re.Match[str]
         except (SyntaxError, ValueError, RecursionError):
             pass  # Unparseable source keeps the conservative lexical scan.
         else:
-            lines = text.splitlines(keepends=True)
+            # AST locations count physical CR/LF lines, not Unicode text separators.
+            lines = re.findall(r"[^\r\n]*(?:\r\n?|\n|$)", text)
             offsets = [0]
             for line in lines:
                 offsets.append(offsets[-1] + len(line))
@@ -240,10 +240,41 @@ class ExtensionStaticScanner:
     def _walk(self, root: Path, *, deadline: float, check: Callable[[], None] = lambda: None) -> list[Path]:
         files: list[Path] = []
         total_bytes = 0
+        copied_files = copied_bytes = 0
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(name for name in dirnames if name != ".git")
-            if any((Path(dirpath) / name).is_symlink() for name in dirnames):
-                raise ExtensionScanError("extension_package_member_invalid")
+            for name in dirnames:
+                link = Path(dirpath) / name
+                if not link.is_symlink():
+                    continue
+                try:
+                    target = link.resolve(strict=True)
+                    relative = target.relative_to(root.resolve())
+                    if ".git" in relative.parts or target in link.parents:
+                        raise ValueError("unsafe directory link")
+                    copy_files = copy_bytes = 0
+                    for member in target.rglob("*"):
+                        check()
+                        if member.is_symlink() or ".git" in member.relative_to(target).parts:
+                            raise ValueError("nested links require a regular source tree")
+                        if member.is_file():
+                            copy_files += 1
+                            copy_bytes += member.stat().st_size
+                        if (len(files) + copy_files > self.max_files
+                                or total_bytes + copy_bytes > self.max_bytes
+                                or copied_files + copy_files > self.max_files
+                                or copied_bytes + copy_bytes > self.max_bytes
+                                or self.clock() > deadline):
+                            raise ExtensionScanError("extension_scan_bounds_exceeded")
+                except ExtensionScanError:
+                    raise
+                except (OSError, ValueError, RuntimeError) as exc:
+                    raise ExtensionScanError("extension_package_member_invalid") from exc
+                check()
+                copied_files += copy_files
+                copied_bytes += copy_bytes
+                link.unlink()
+                shutil.copytree(target, link)
             for filename in sorted(filenames):
                 check()
                 path = Path(dirpath) / filename
@@ -252,7 +283,26 @@ class ExtensionStaticScanner:
                 except OSError:
                     continue
                 if path.is_symlink():
-                    raise ExtensionScanError("extension_package_member_invalid")
+                    # Normalize only bounded in-tree regular files; archives still reject links.
+                    try:
+                        target = path.resolve(strict=True)
+                        relative = target.relative_to(root.resolve())
+                        if ".git" in relative.parts or not target.is_file():
+                            raise ValueError("unsafe link")
+                        size = target.stat().st_size
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        raise ExtensionScanError("extension_package_member_invalid") from exc
+                    if (total_bytes + size > self.max_bytes
+                            or copied_bytes + size > self.max_bytes
+                            or copied_files + 1 > self.max_files):
+                        raise ExtensionScanError("extension_scan_bounds_exceeded")
+                    copied_files += 1
+                    copied_bytes += size
+                    content = target.read_bytes()
+                    path.unlink()
+                    path.write_bytes(content)
+                    path.chmod(target.stat().st_mode & 0o777)
+                    stat = path.stat()
                 if not path.is_file():
                     continue
                 files.append(path)
@@ -507,7 +557,7 @@ class ExtensionStaticScanner:
                 return None
             if path.is_dir():
                 continue
-            if not _is_text_file(path.name):
+            if not is_skill_text_asset(path):
                 return None
             try:
                 size = path.stat().st_size
@@ -968,7 +1018,12 @@ class ExtensionStaticScanner:
 
             draft = _manifest or self._draft_manifest(source, repo_class, capabilities, licenses, layout=layout)
             integration = None
-            if self.model is not None and draft is None:
+            if self.model is not None and (
+                draft is None or (_manifest is None and (
+                    (layout and layout.get("excluded"))
+                    or any(item["category"] == "secret" for item in findings)
+                ))
+            ):
                 source_remaining = [MAX_TOTAL_READ_BYTES]
 
                 def read_source(path: Path) -> str:

@@ -489,3 +489,63 @@ def test_source_plan_route_passes_stored_scan_draft(tmp_path, monkeypatch):
         )
     assert exc.value.status_code == 404
     assert exc.value.detail == "extension_scan_not_found"
+
+
+def test_scan_materializes_only_bounded_internal_file_links(tmp_path):
+    source = tmp_path / "links"
+    source.mkdir()
+    (source / "README.md").write_text("documented source")
+    link = source / "AGENTS.md"
+    link.symlink_to("README.md")
+    scanner = ExtensionStaticScanner()
+    scanner._walk(source, deadline=time.monotonic() + 5)
+    assert not link.is_symlink() and link.read_text() == "documented source"
+    link.unlink()
+    outside = tmp_path / "private"
+    outside.write_text("must not enter package")
+    link.symlink_to(outside)
+    with pytest.raises(ExtensionScanError, match="extension_package_member_invalid"):
+        scanner._walk(source, deadline=time.monotonic() + 5)
+    assert link.is_symlink()
+    link.unlink()
+    link.symlink_to("README.md")
+    with pytest.raises(ExtensionScanError, match="extension_scan_bounds_exceeded"):
+        ExtensionStaticScanner(max_bytes=1)._walk(source, deadline=time.monotonic() + 5)
+    assert link.is_symlink()
+    link.unlink()
+    link.symlink_to("AGENTS.md")
+    with pytest.raises(ExtensionScanError, match="extension_package_member_invalid"):
+        scanner._walk(source, deadline=time.monotonic() + 5)
+
+
+def test_scan_directory_aliases_and_skill_script_assets(tmp_path):
+    source = tmp_path / "tree"
+    assets = source / "original"
+    assets.mkdir(parents=True)
+    (assets / "server.cjs").write_text("module.exports = {};\n")
+    (assets / "run").write_text("#!/bin/sh\nexit 0\n")
+    alias = source / "alias"
+    alias.symlink_to("original", target_is_directory=True)
+    with pytest.raises(ExtensionScanError, match="extension_scan_bounds_exceeded"):
+        ExtensionStaticScanner(max_bytes=1)._walk(source, deadline=time.monotonic() + 5)
+    assert alias.is_symlink()
+    ExtensionStaticScanner()._walk(source, deadline=time.monotonic() + 5)
+    assert not alias.is_symlink() and (alias / "run").read_text().startswith("#!")
+    assert ExtensionStaticScanner._skill_bundle_assets(alias) == (2, 38)
+    (alias / "image.png").write_bytes(b"\x89PNG")
+    assert ExtensionStaticScanner._skill_bundle_assets(alias) is None
+    (source / "cycle").symlink_to(source, target_is_directory=True)
+    with pytest.raises(ExtensionScanError, match="extension_package_member_invalid"):
+        ExtensionStaticScanner()._walk(source, deadline=time.monotonic() + 5)
+
+
+def test_directory_alias_expansion_is_bounded_before_visiting_children(tmp_path):
+    original = tmp_path / "original"
+    original.mkdir()
+    (original / "body.md").write_text("123456")
+    for name in ("a", "b", "c"):
+        (tmp_path / name).symlink_to("original", target_is_directory=True)
+    with pytest.raises(ExtensionScanError, match="extension_scan_bounds_exceeded"):
+        ExtensionStaticScanner(max_bytes=10)._walk(tmp_path, deadline=time.monotonic() + 5)
+    assert not (tmp_path / "a").is_symlink()
+    assert (tmp_path / "b").is_symlink() and (tmp_path / "c").is_symlink()

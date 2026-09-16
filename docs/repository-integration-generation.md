@@ -63,7 +63,10 @@ the immutable package tree. No dependencies or lifecycle commands run at intake.
 - Progress is atomically persisted. Reopening/reloading the tab restores the scan
   ID; owner checks protect readback, cancellation and installation. A server
   restart converts an orphaned running scan into an explicit interrupted failure.
-- Secret findings, private files, symlinks, invalid evidence, malformed schemas,
+- Confined source symlinks are materialized as ordinary files/directories within
+  the scan's byte/file/time bounds. External targets, cycles, nested directory
+  links and `.git` targets fail closed. Distribution archives still reject links.
+- Secret findings, private files, unsafe links, invalid evidence, malformed schemas,
   generated syntax errors and archive tampering fail closed. Start a new scan after
   repairing source or configuration; there is no silent fallback to invented tools.
   Secret findings retain a path/type and a redaction marker, never the matched value.
@@ -72,5 +75,7 @@ the immutable package tree. No dependencies or lifecycle commands run at intake.
   the retained source is audited again under the same secret gate. Exclusions are
   preserved in integration metadata and the execution approval preview.
 
-See the [approved M17 plan](repository-plugin-ingestion-plan.md) for the remaining
-runtime, marketplace, inventory and release batons.
+See the [complete 30-entry inventory](mad-963-plugin-inventory.md) for exact
+capability coverage, published packages and outstanding setup/license work, and
+the [approved M17 plan](repository-plugin-ingestion-plan.md) for holdout and release
+acceptance.
