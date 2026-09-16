@@ -257,7 +257,8 @@ assert.match(index, /src="\/static\/js\/sessions\.js"/);
 assert.match(index, /jarvisVoice\.js\?v=20260905T210749Z/);
 assert.match(index, /app\.js\?v=20260906T203500Z/);
 assert.match(appSource, /from '\.\/js\/sessions\.js'/);
-assert.match(serviceWorker, /CACHE_NAME = 'pandamonium-v393'/);
+assert.ok(Number(serviceWorker.match(/CACHE_NAME = 'pandamonium-v(\d+)'/)?.[1]) >= 393,
+  'the worker must include the voice rollout or a later cache generation');
 assert.match(index, /id="hamburger-btn"[^>]*aria-label="Toggle sidebar"[^>]*aria-controls="sidebar"/);
 assert.match(serviceWorker, /\/static\/js\/voiceOrbMedia\.js/);
 assert.match(serviceWorker, /\/static\/voice-orb-media\.json/);
@@ -541,7 +542,7 @@ let foregroundResultRender = null;
 sandbox.chatModule = {
   addMessage(role, text, model, metadata) {
     foregroundResultRender = { role, text, model, metadata };
-    return { dataset: { ...metadata }, parentElement: chat };
+    return { dataset: { ...metadata }, parentElement: chat, classList: makeClassList() };
   },
 };
 placement.renderWorkerResult(

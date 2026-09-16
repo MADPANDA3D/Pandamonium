@@ -1821,6 +1821,7 @@
           </button>
           <div class="settings-sidebar-divider"></div>
           <!-- Section 3: UX (Appearance → Shortcuts) -->
+          <button class="settings-nav-item hidden" data-settings-tab="soundboard"><span aria-hidden="true">♫</span> Soundboard</button>
           <button class="settings-nav-item" data-settings-tab="appearance">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/></svg>
             <span>Appearance</span>
@@ -3083,6 +3084,17 @@
         </div>
 
         <!-- ═══ TRAINING RUNTIME TAB (MAD-796) ═══ -->
+        <div data-settings-panel="soundboard" class="hidden">
+          <h3>Soundboard</h3>
+          <p id="soundboard-status" class="settings-hint" role="status"></p>
+          <div class="settings-row"><label for="soundboard-volume">Effects volume</label><input id="soundboard-volume" type="range" min="0" max="1" step="0.05" value="0.6"></div>
+          <div class="settings-row"><label for="soundboard-muted">Mute effects</label><input id="soundboard-muted" type="checkbox"></div>
+          <h4>Your favorites</h4><div id="soundboard-favorites"></div>
+          <h4>Find a sound</h4>
+          <form id="soundboard-search" class="soundboard-search"><label class="sr-only" for="soundboard-query">Search sounds</label><input id="soundboard-query" class="settings-select" type="search" maxlength="100" placeholder="Try vine boom or a funny sound"><button id="soundboard-search-button" class="admin-btn-sm" type="submit">Search</button></form>
+          <p id="soundboard-search-status" class="settings-hint" role="status"></p><div id="soundboard-results"></div>
+        </div>
+
         <div data-settings-panel="training" class="hidden">
           <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:8px;">

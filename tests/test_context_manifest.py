@@ -339,6 +339,33 @@ async def test_current_domain_tool_is_prioritized_before_schema_cap(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_plugin_discovery_survives_real_32k_catalog_budget(monkeypatch):
+    from src import context_budget
+
+    captured = {}
+
+    async def fake_stream(*args, **kwargs):
+        captured["tools"] = kwargs["tools"]
+        yield 'data: {"delta":"Checked."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "blocked_tools_for_owner", lambda owner: set())
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    # Reproduce the live 26,828 input budget without endpoint discovery or inference.
+    monkeypatch.setattr(agent_loop, "get_setting", lambda key, default=None: 28876 if key == "agent_input_token_budget" else default)
+    monkeypatch.setattr(context_budget, "model_input_token_budget", lambda model: 0)
+    async for _ in agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1/chat/completions", "jarvis",
+        [{"role": "user", "content": "Use your installed Myinstants soundboard and find my saved Vine Boom favorite."}],
+        context_length=32768, max_tokens=5940, max_rounds=1,
+        relevant_tools={schema["function"]["name"] for schema in agent_loop.FUNCTION_TOOL_SCHEMAS},
+    ):
+        pass
+    assert "manage_extensions" in {tool["function"]["name"] for tool in captured["tools"]}
+
+
+@pytest.mark.asyncio
 async def test_selected_portal_chain_reaches_actual_model_payload_under_cap(monkeypatch):
     captured = {}
     manager = McpManager()

@@ -4750,8 +4750,9 @@ async def stream_agent_loop(
         )
         # MAD-907: the discovery gateway ranks after explicitly requested MCP
         # tools but ahead of incidental retrieval, so it survives the cap.
-        if "manage_settings" in _schema_priority and "manage_settings" not in _priority_order:
-            _priority_order.append("manage_settings")
+        for gateway in ("manage_settings", "manage_extensions"):
+            if gateway in _schema_priority and gateway not in _priority_order:
+                _priority_order.append(gateway)
         # Retrieved/domain tools keep their catalog (source) order ahead of
         # non-priority schemas. Sorting these alphabetically made greedy
         # budget capping drop small earlier tools and reorder the payload

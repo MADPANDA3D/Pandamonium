@@ -1,5 +1,5 @@
 {
-  "purpose": "List recent sound effects and return their source and audio URLs.",
+  "purpose": "Search a soundboard, retrieve owner favorites, and place a manual sound cue at the appropriate point in a response.",
   "evidence": [
     {
       "path": "README.md",
@@ -9,20 +9,182 @@
   "repo_class": "service",
   "interfaces": [
     {
-      "name": "myinstants_api__recent",
+      "name": "myinstants_api__search",
       "kind": "tool",
-      "binding": "GET /recent",
+      "binding": "soundboard.search",
       "evidence": [
         {
           "path": "README.md",
-          "quote": "| `GET /recent`    | Recently uploaded sounds |            |"
+          "quote": "<h1 align=\"center\">MyInstants REST API</h1>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "myinstants_api__search",
+          "description": "Search Myinstants for new sounds. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "sounds": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "mp3": {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "cue": {
+                  "type": "string",
+                  "maxLength": 180
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "url",
+                "mp3",
+                "cue"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sounds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "myinstants_api__detail",
+      "kind": "tool",
+      "binding": "soundboard.detail",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "<h1 align=\"center\">MyInstants REST API</h1>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "myinstants_api__detail",
+          "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "sounds": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "mp3": {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "cue": {
+                  "type": "string",
+                  "maxLength": 180
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "url",
+                "mp3",
+                "cue"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sounds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "myinstants_api__recent",
+      "kind": "tool",
+      "binding": "soundboard.recent",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "<h1 align=\"center\">MyInstants REST API</h1>"
         }
       ],
       "tool_schema": {
         "type": "function",
         "function": {
           "name": "myinstants_api__recent",
-          "description": "GET /recent \u2014 List recent sound effects and return their source and audio URLs.",
+          "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
           "parameters": {
             "type": "object",
             "properties": {},
@@ -37,28 +199,117 @@
         "properties": {
           "sounds": {
             "type": "array",
-            "maxItems": 10,
+            "maxItems": 100,
             "items": {
               "type": "object",
               "properties": {
                 "id": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
                 },
                 "title": {
-                  "type": "string"
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
                 },
                 "url": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 512
                 },
                 "mp3": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "cue": {
+                  "type": "string",
+                  "maxLength": 180
                 }
               },
               "required": [
                 "id",
                 "title",
                 "url",
-                "mp3"
+                "mp3",
+                "cue"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "sounds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "myinstants_api__favorites",
+      "kind": "tool",
+      "binding": "soundboard.favorites",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "<h1 align=\"center\">MyInstants REST API</h1>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "myinstants_api__favorites",
+          "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "sounds": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "mp3": {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "cue": {
+                  "type": "string",
+                  "maxLength": 180
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "url",
+                "mp3",
+                "cue"
               ],
               "additionalProperties": false
             }
@@ -82,8 +333,8 @@
   "manifest": {
     "protocol_version": "jos-extension.v1",
     "extension_id": "myinstants-api",
-    "name": "myinstants-api",
-    "version": "1.0.0",
+    "name": "Myinstants Soundboard",
+    "version": "1.1.0",
     "source": {
       "url": "https://github.com/MADPANDA3D/myinstants-api.git",
       "revision": "435d40d309ab2790e21567b00c9727509badeedd"
@@ -100,11 +351,71 @@
         {
           "type": "function",
           "function": {
+            "name": "myinstants_api__search",
+            "description": "Search Myinstants for new sounds. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "maxLength": 100,
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "myinstants_api__detail",
+            "description": "Resolve a Myinstants sound by its ID. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
             "name": "myinstants_api__recent",
-            "description": "GET /recent \u2014 List recent sound effects and return their source and audio URLs.",
+            "description": "Browse starter sounds from Myinstants. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
             "parameters": {
               "type": "object",
               "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "myinstants_api__favorites",
+            "description": "Quickly find saved sounds for the current owner, without searching upstream. Returns a cue token. Place that token exactly where the sound belongs in your normal response; text chat shows a manual play button. Prefer favorites for known sounds. Never claim voice synchronization unless the playback system confirms it.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "maxLength": 100
+                }
+              },
               "required": [],
               "additionalProperties": false
             }
@@ -114,7 +425,12 @@
     },
     "permissions": {
       "default": "external_side_effect",
-      "capabilities": {}
+      "capabilities": {
+        "myinstants_api__search": "read_only",
+        "myinstants_api__detail": "read_only",
+        "myinstants_api__recent": "read_only",
+        "myinstants_api__favorites": "read_only"
+      }
     },
     "health": {
       "type": "catalog",
@@ -161,7 +477,7 @@
     },
     {
       "path": ".pandamonium/adapter.py",
-      "content": "import json,urllib.request\nconfig=json.load(open('/run/pandamonium/config.json'))\nwith urllib.request.urlopen('http://127.0.0.1:'+config['PANDAMONIUM_PORT']+'/recent',timeout=20) as response: data=json.load(response)\nsounds=data['data'][:10]\nif not sounds: raise RuntimeError('No sound records returned; upstream availability needs checking')\nprint(json.dumps({'sounds':sounds}))\n"
+      "content": "raise RuntimeError(\"Soundboard operations require the native soundboard handler\")\n"
     }
   ],
   "execution": {
@@ -173,7 +489,23 @@
     ],
     "checks": [
       {
+        "name": "myinstants_api__search",
+        "arguments": {
+          "query": "vine boom"
+        }
+      },
+      {
+        "name": "myinstants_api__detail",
+        "arguments": {
+          "id": "vine-boom-sound-70972"
+        }
+      },
+      {
         "name": "myinstants_api__recent",
+        "arguments": {}
+      },
+      {
+        "name": "myinstants_api__favorites",
         "arguments": {}
       }
     ],

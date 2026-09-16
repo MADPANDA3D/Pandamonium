@@ -81,6 +81,7 @@ def test_speech_text_skips_display_markup_urls_and_opaque_ids():
     display = "**Plugins**\n- MAD MCP Portal (ID 9d618e74470e)\n- [Docs](https://example.test/setup)"
 
     assert speech_text(display) == "Plugins MAD MCP Portal Docs"
+    assert speech_text("First boom [[sound:vine-boom-123]] then boom [[sound:vine-boom-123]].") == "First boom then boom ."
 
 
 def test_result_speech_contract_uses_word_thresholds_and_structured_handoffs():

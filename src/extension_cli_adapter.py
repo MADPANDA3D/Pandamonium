@@ -88,11 +88,7 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
         raise ExtensionLifecycleError("extension_cli_namespaced_schemas_required")
     if any(manifest["lifecycle"].values()):
         raise ExtensionLifecycleError("extension_cli_lifecycle_must_be_empty")
-    modes = {
-        manifest["permissions"]["default"],
-        *manifest["permissions"]["capabilities"].values(),
-    }
-    if modes - {"external_side_effect", "controlled_administrative", "destructive"}:
+    if manifest["permissions"]["default"] not in {"external_side_effect", "controlled_administrative", "destructive"}:
         raise ExtensionLifecycleError("extension_cli_effectful_authority_required")
     if {c.name for c in execution.checks} != set(tools):
         raise ExtensionLifecycleError("extension_cli_operation_checks_required")
@@ -111,6 +107,18 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
         ):
             raise ExtensionLifecycleError("extension_cli_install_argv_invalid")
     for name, tool in tools.items():
+        binding = interfaces[name]["binding"]
+        mode = manifest["permissions"]["capabilities"].get(name, manifest["permissions"]["default"])
+        if binding.startswith("soundboard."):
+            from src.soundboard import EXTENSION_ID, schemas
+
+            parameters, output = schemas(binding)
+            if (manifest["extension_id"] != EXTENSION_ID or not execution.service
+                    or tool["parameters"] != parameters or interfaces[name]["output_schema"] != output
+                    or mode != "read_only"):
+                raise ExtensionLifecycleError("extension_soundboard_contract_invalid")
+        elif mode not in {"external_side_effect", "controlled_administrative", "destructive"}:
+            raise ExtensionLifecycleError("extension_cli_effectful_authority_required")
         if interfaces[name]["binding"].startswith("knowledge."):
             if execution.knowledge is None or interfaces[name]["binding"] not in {
                 "knowledge.search",
@@ -423,6 +431,12 @@ def _invoke(
         raise ExtensionLifecycleError("extension_cli_capability_unavailable")
     Draft202012Validator(contract["tools"][name]["parameters"]).validate(arguments)
     binding = contract["interfaces"][name]["binding"]
+    if binding.startswith("soundboard."):
+        from src.soundboard import execute as execute_soundboard
+
+        result = execute_soundboard(binding, arguments, runtime, config or {}, validation=validation)
+        Draft202012Validator(contract["interfaces"][name]["output_schema"]).validate(result)
+        return result
     if binding.startswith("knowledge."):
         from src.extension_knowledge import execute
 

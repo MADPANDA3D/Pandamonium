@@ -22,6 +22,8 @@ def speech_text(text: str, *, preserve_code: bool = False) -> str:
     from src.authority_protocol import redact_secret_text
 
     text = redact_secret_text(text)
+    # Sound cues are display metadata, never words for TTS. Playback is separate.
+    text = re.sub(r"\[\[sound:[A-Za-z0-9_-]{1,160}\]\]", "", text)
     text = re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", text, flags=re.IGNORECASE)
     if preserve_code:
         text = re.sub(r"(?:```|~~~)[^\n]*\n?([\s\S]*?)(?:```|~~~)", r"\1", text)

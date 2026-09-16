@@ -5,6 +5,7 @@
  */
 
 import uiModule from './ui.js';
+import { cueHtml, initSoundboard } from './soundboard.js';
 import { splitTableRow } from './markdown/tableRow.js';
 import { replaceEmojiShortcodes, hasEmojiShortcode } from './emojiShortcodes.js';
 
@@ -549,6 +550,14 @@ export function mdToHtml(src, opts) {
   const inlineCodeBlocks = [];
   const mermaidBlocks = [];
   let s = (src ?? '');
+  const soundCues = [];
+  s = s.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`]*`|\[\[sound:([A-Za-z0-9_-]{1,160})\]\]/g, (match, id, offset) => {
+    if (!id) return match;
+    const placeholder = `___SOUND_CUE_${soundCues.length}___`;
+    soundCues.push(cueHtml(id, offset));
+    return placeholder;
+  }).replace(/\[\[sound:[^\]\n]*\]?$/, '');
+  if (soundCues.length && typeof document !== 'undefined') initSoundboard();
 
   // Extract fenced code blocks before any markdown/HTML preservation passes.
   // Otherwise placeholders from the allowed-HTML sanitizer (e.g.
@@ -832,6 +841,10 @@ export function mdToHtml(src, opts) {
   // Restore mermaid diagram blocks
   mermaidBlocks.forEach((block, index) => {
     s = s.replace(`___MERMAID_BLOCK_${index}___`, block);
+  });
+
+  soundCues.forEach((cue, index) => {
+    s = s.replace(`___SOUND_CUE_${index}___`, () => cue);
   });
 
   // CRITICAL: Restore code blocks at the end

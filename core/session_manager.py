@@ -17,6 +17,7 @@ from typing import Dict, Optional
 from .database import Session as DbSession, ChatMessage as DbChatMessage, Document as DbDocument, SessionLocal, utcnow_naive
 from .models import Session, ChatMessage
 from src.attachment_refs import persistable_message_content
+from src.soundboard import message_metadata as soundboard_message_metadata
 from src.upload_handler import reserve_message_upload_references
 
 # Re-export singleton accessors from models for convenience
@@ -257,6 +258,10 @@ class SessionManager:
             # model call. Persist only readable text plus attachment references
             # so chat_messages/FTS do not duplicate upload bytes.
             _content = persistable_message_content(message.content, message.metadata)
+            message.metadata = soundboard_message_metadata(
+                message.role, _content, message.metadata, owner=getattr(db_session, "owner", None),
+                session_id=session_id, message_id=msg_id,
+            )
             db_message = DbChatMessage(
                 id=msg_id,
                 session_id=session_id,
@@ -402,6 +407,10 @@ class SessionManager:
             now = datetime.now(timezone.utc)
             for i, message in enumerate(messages):
                 msg_id = str(uuid.uuid4())
+                message.metadata = soundboard_message_metadata(
+                    message.role, message.content, message.metadata, owner=getattr(db_session, "owner", None),
+                    session_id=session_id, message_id=msg_id,
+                )
                 db_message = DbChatMessage(
                     id=msg_id,
                     session_id=session_id,
