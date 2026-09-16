@@ -1,0 +1,229 @@
+{
+  "issue": "MAD-964",
+  "baseline": "47e306cec3aa34cd3410812409e975c98a16beaa",
+  "status": "in_progress_configured_model_generation",
+  "source_account_changes": 0,
+  "disposable_browser_data_removed": true,
+  "records": [
+    {
+      "source_url": "https://github.com/pystardust/ani-cli",
+      "source_revision": "2a956db02bf83760bf8f28b720d58fe8014b0e9b",
+      "static_class": "unknown",
+      "draft_produced": false,
+      "static_bounds": {
+        "files_scanned": 27,
+        "bytes_scanned": 567636,
+        "duration_ms": 3090
+      },
+      "browser_status": "failed",
+      "browser_stage": "understand",
+      "browser_error": "extension_scan_model_unavailable",
+      "installed": false,
+      "published": true,
+      "disposable_install_passed": true,
+      "publication_digest": "f515d399737761245716afd46e4ec99e220d344155e533e818b88963e1203f83"
+    },
+    {
+      "source_url": "https://github.com/lucialv/gifukai-api",
+      "source_revision": "0914d5975ca1cf40d4a0d50cc94df4dd9803b62c",
+      "static_class": "go_cli",
+      "draft_produced": false,
+      "static_bounds": {
+        "files_scanned": 62,
+        "bytes_scanned": 191418,
+        "duration_ms": 2245
+      },
+      "browser_status": "failed",
+      "browser_stage": "understand",
+      "browser_error": "extension_scan_model_unavailable",
+      "installed": false,
+      "published": false
+    },
+    {
+      "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+      "source_revision": "b230ca2ce0d047acbcd3a37a5aad45028d66fde7",
+      "static_class": "rust_lib",
+      "draft_produced": false,
+      "static_bounds": {
+        "files_scanned": 7908,
+        "bytes_scanned": 219444128,
+        "duration_ms": 48576
+      },
+      "browser_status": "failed",
+      "browser_stage": "understand",
+      "browser_error": "extension_scan_model_unavailable",
+      "installed": false,
+      "published": false
+    }
+  ],
+  "model_endpoint_required": false,
+  "trials": [
+    {
+      "model": null,
+      "run": "browser-no-model",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/lucialv/gifukai-api",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        }
+      ]
+    },
+    {
+      "model": "~deepseek/deepseek-v4-flash-latest",
+      "run": "browser-live-model",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/lucialv/gifukai-api",
+          "status": "failed",
+          "stage": "understand",
+          "error": "extension_scan_model_unavailable"
+        },
+        {
+          "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+          "status": "failed",
+          "stage": "fetch",
+          "error": "extension_git_command_failed"
+        }
+      ]
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "run": "browser-luna-ani",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Evidence must quote an exact excerpt that was read from the pinned source."
+        }
+      ]
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "run": "browser-cli-fix",
+      "results": [
+        {
+          "source_url": "https://github.com/pystardust/ani-cli",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Read new interface definitions or return a proposal; repeated reads make no progress."
+        },
+        {
+          "source_url": "https://github.com/lucialv/gifukai-api",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Read new interface definitions or return a proposal; repeated reads make no progress."
+        },
+        {
+          "source_url": "https://github.com/Stirling-Tools/stirling-pdf",
+          "status": "failed",
+          "stage": "understand",
+          "error": "Integration could not be prepared within the read/repair budget. Response did not match the supplied JSON schema."
+        }
+      ]
+    }
+  ],
+  "ani_cli_acceptance": {
+    "runtime": {
+      "source_url": "https://github.com/pystardust/ani-cli",
+      "source_revision": "2a956db02bf83760bf8f28b720d58fe8014b0e9b",
+      "package": {
+        "id": "0f1a8cdd-4ed7-4237-a9f5-931445d36bde",
+        "sha256": "4cfbf3ce2d27a93b69f5a95fb4d687ecabb1df5e6dccf818dbd9fc70075bf4fb",
+        "size_bytes": 481449,
+        "tree_digest": "da35cffd4b4956877a351d1ed1121def0b0fdeec8c03f3bb697264fe90109539"
+      },
+      "operations": [
+        {
+          "tool": "ani_cli__nextep_countdown",
+          "arguments": {
+            "query": "One Piece"
+          },
+          "result": {
+            "result": {
+              "text": "Checking dependencies...\nEng: One Piece\nJpn: N/A\nStatus: Ongoing\nNext Sub: Episode 1179 in 4d 14h 17m\nNext Dub: Episode 1156 in 34d 14h 17m\n\nEng: THE ONE PIECE\nJpn: N/A\nStatus: Upcoming\nNext Sub: N/A\nNext Dub: N/A\n\nEng: Nissan Serena x One Piece 3D: Mugiwara Chase - Sennyuu!! Sauzando Sanii-gou\nJpn: N/A\nStatus: Finished\n\nEng: One Piece: Emergency Planning\nJpn: ONE PIECE: Kinkyuu Kikaku One Piece Kanzen Kouryakuhou\nStatus: Finished\n\nEng: ONE PIECE FILM: Z\nJpn: N/A\nStatus: Finished\n\nEng: ONE PIECE: The Movie\nJpn: ONE PIECE (Movie)\nStatus: Finished\n\nEng: One Piece: The Curse of the Sacred Sword\nJpn: ONE PIECE: Norowareta Seiken\nStatus: Finished\n\nEng: ONE PIECE: Episode of Nami - Koukaishi no Namida to Nakama no Kizuna\nJpn: N/A\nStatus: Finished\n\nEng: ONE PIECE FILM: GOLD\nJpn: N/A\nStatus: Finished\n\nEng: ONE PIECE FILM RED\nJpn: ONE PIECE FILM: RED\nStatus: Finished\n\nEng: One Piece: Episode of Merry - The Tale of One More Friend\nJpn: ONE PIECE: Episode of Merry - Mou Hitori no Nakama no Monogatari\nStatus: Finished\n\nEng: Koisuru ONE PIECE\nJpn: N/A\nStatus: Finished\n\nEng: One Piece: Clockwork Island Adventure\nJpn: ONE PIECE: Nejimaki-jima no Bouken\nStatus: Finished\n\nEng: One Piece: Stampede\nJpn: ONE PIECE STAMPEDE\nStatus: Finished\n\nEng: One Piece: Heroines\nJpn: N/A\nStatus: Finished\n\nEng: One Piece: Episode of Skypiea\nJpn: ONE PIECE: Episode of Sorajima\nStatus: Finished\n\nEng: ONE PIECE: Heart of Gold\nJpn: N/A\nStatus: Finished\n\nEng: ONE PIECE FAN LETTER\nJpn: N/A\nStatus: Finished"
+            },
+            "exit_code": 0
+          }
+        }
+      ],
+      "lifecycle": [
+        {
+          "operation": "install",
+          "status": "completed"
+        },
+        {
+          "operation": "disable",
+          "status": "completed"
+        },
+        {
+          "operation": "enable",
+          "status": "completed"
+        },
+        {
+          "operation": "uninstall",
+          "status": "completed"
+        }
+      ],
+      "temporary_data_removed": true
+    },
+    "browser": {
+      "source": "Restored exact real configured-model scan and unchanged archive in a fresh disposable app",
+      "scan_id": "0f1a8cdd-4ed7-4237-a9f5-931445d36bde",
+      "package": {
+        "id": "0f1a8cdd-4ed7-4237-a9f5-931445d36bde",
+        "sha256": "4cfbf3ce2d27a93b69f5a95fb4d687ecabb1df5e6dccf818dbd9fc70075bf4fb",
+        "size_bytes": 481449,
+        "tree_digest": "da35cffd4b4956877a351d1ed1121def0b0fdeec8c03f3bb697264fe90109539"
+      },
+      "operations": [
+        "install",
+        "disable",
+        "enable",
+        "uninstall"
+      ],
+      "remaining_plugins": 0
+    },
+    "publication": {
+      "id": "3a3023e368aa693f2cae8058000ae07294e067799be438d4e4018e1b89a2a33e",
+      "state": "published",
+      "message": "Published",
+      "stage": "Publishing catalog and verifying readback",
+      "input_digest": "4cfbf3ce2d27a93b69f5a95fb4d687ecabb1df5e6dccf818dbd9fc70075bf4fb",
+      "digest": "f515d399737761245716afd46e4ec99e220d344155e533e818b88963e1203f83",
+      "extension_id": "ani-cli",
+      "version": "1.0.0",
+      "artifact_url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-ani-cli-1.0.0-f515d399737761245716afd46e4ec99e220d344155e533e818b88963e1203f83/pandamonium-plugin-ani-cli-f515d399737761245716afd46e4ec99e220d344155e533e818b88963e1203f83.tar.gz",
+      "catalog_generated_at": "2026-09-16T01:45:43.681758+00:00",
+      "validation": {
+        "kind": "isolated_operations",
+        "checks": 1
+      }
+    },
+    "publisher_orphan_cleanup_verified": true
+  },
+  "additional_unseen": {
+    "fzf": "Attempted after first semantic fixes; model timeout, not acceptance.",
+    "bat": "https://github.com/sharkdp/bat is reserved and has not been read or fetched."
+  }
+}

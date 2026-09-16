@@ -1,7 +1,7 @@
 """Exact-artifact installation, including generated files and same-source upgrades."""
 
-import hashlib
 import gzip
+import hashlib
 import io
 import json
 import tarfile
@@ -9,12 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from src import extension_package
 from src.authority_protocol import AuthorityStore
 from src.extension_installer import ExtensionLifecycleManager, InlineWebAdapter
 from src.extension_package import PackageError, extract_package
-from src import extension_package
 from src.extension_registry import ExtensionRegistry
-
 
 REVISION = "1" * 40
 SOURCE = "https://github.com/example/atlas-lab.git"
@@ -136,3 +135,66 @@ def test_archive_member_count_and_duplicate_paths_are_bounded(tmp_path, monkeypa
     monkeypatch.setattr(extension_package, "MAX_PACKAGE_FILES", 1)
     with pytest.raises(PackageError, match="extension_package_size_invalid"):
         extract_package(content, tmp_path / "too-many")
+
+
+def test_stale_install_preview_cannot_replace_an_installed_package(tmp_path):
+    instance = manager(tmp_path)
+    first = preview(instance)
+    instance.authority.resolve(first["authority_decision"]["decision_id"], operator_id="operator", choice="approve", scope="once")
+    stale = preview(instance, "2.0.0")
+    instance.authority.resolve(stale["authority_decision"]["decision_id"], operator_id="operator", choice="approve", scope="once")
+    instance.execute_plan(first["plan_id"], operator_id="operator")
+    original = instance.snapshot()["extensions"]["atlas"]["active_revision"]
+    with pytest.raises(Exception, match="extension_already_installed_use_upgrade"):
+        instance.execute_plan(stale["plan_id"], operator_id="operator")
+    assert instance.snapshot()["extensions"]["atlas"]["active_revision"] == original
+    assert instance.registry.snapshot()["extensions"]["atlas"]["manifest"]["version"] == "1.0.0"
+
+
+def test_duplicate_execute_is_serialized_and_restart_retry_keeps_package(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    instance = manager(tmp_path)
+    plan = preview(instance)
+    instance.authority.resolve(plan["authority_decision"]["decision_id"], operator_id="operator", choice="approve", scope="once")
+    entered, release = Event(), Event()
+    operation = instance._execute_operation
+    calls = []
+
+    def paused(current):
+        calls.append(current["plan_id"])
+        entered.set()
+        assert release.wait(3)
+        return operation(current)
+
+    instance._execute_operation = paused
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(instance.execute_plan, plan["plan_id"], operator_id="operator")
+        assert entered.wait(3)
+        second = pool.submit(instance.execute_plan, plan["plan_id"], operator_id="operator")
+        release.set()
+        assert first.result() == second.result()
+    assert calls == [plan["plan_id"]]
+    assert manager(tmp_path).execute_plan(plan["plan_id"], operator_id="operator")["status"] == "completed"
+
+
+@pytest.mark.parametrize("after_activation", [False, True])
+def test_interrupted_approved_install_retries_after_restart(tmp_path, after_activation):
+    instance = manager(tmp_path)
+    plan = preview(instance)
+    instance.authority.resolve(plan["authority_decision"]["decision_id"], operator_id="operator", choice="approve", scope="once")
+    operation = instance._execute_operation
+
+    def interrupted(current):
+        if after_activation:
+            operation(current)
+        raise KeyboardInterrupt
+
+    instance._execute_operation = interrupted
+    with pytest.raises(KeyboardInterrupt):
+        instance.execute_plan(plan["plan_id"], operator_id="operator")
+    assert instance.snapshot()["plans"][plan["plan_id"]]["status"] == "executing"
+    fresh = manager(tmp_path)
+    assert fresh.execute_plan(plan["plan_id"], operator_id="operator")["status"] == "completed"
+    assert fresh.registry.snapshot()["extensions"]["atlas"]["manifest"]["version"] == "1.0.0"

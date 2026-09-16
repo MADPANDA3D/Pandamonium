@@ -3,7 +3,9 @@
 import asyncio
 import copy
 import json
+import tempfile
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,21 @@ from src.extension_package import build_prepared_package, package_tree_digest
 from src.extension_registry import ExtensionRegistry
 from tests.test_extension_installer import _approve_and_execute
 from tests.test_extension_semantic_intake import proposal, source_tree
+
+
+def test_sandbox_preserves_external_ca_bundle_symlink_target(tmp_path, monkeypatch):
+    bundle = tmp_path / "distribution-trust" / "ca.pem"
+    bundle.parent.mkdir()
+    bundle.write_bytes(b"public trust bundle")
+    link = tmp_path / "ca.pem"
+    link.symlink_to(bundle)
+    monkeypatch.setattr(cli.ssl, "get_default_verify_paths", lambda: SimpleNamespace(cafile=str(link)))
+    with tempfile.TemporaryDirectory(dir=cli.resources.storage_root()) as directory:
+        result = cli._run(tmp_path / "distribution-trust", Path(directory),
+            {"data_boundaries": {"network": []}},
+            ["python", "-c", f"from pathlib import Path; assert Path('/etc/ssl/cert.pem').read_bytes() == Path({str(bundle)!r}).read_bytes(); print('trusted bundle reachable')"],
+            validation=True)
+    assert result == b"trusted bundle reachable\n"
 
 
 def package(tmp_path):

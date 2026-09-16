@@ -206,9 +206,6 @@ def _sandbox(
     for name in ("/etc/resolv.conf", "/etc/ssl/certs", "/etc/hosts"):
         if Path(name).exists():
             command += ["--ro-bind", name, name]
-    cafile = ssl.get_default_verify_paths().cafile
-    if cafile:
-        command += ["--ro-bind", str(Path(cafile).resolve()), "/etc/ssl/cert.pem"]
     command += [
         "--proc",
         "/proc",
@@ -225,6 +222,11 @@ def _sandbox(
         str(runtime),
         "/runtime",
     ]
+    cafile = ssl.get_default_verify_paths().cafile
+    if cafile:
+        bundle = str(Path(cafile).resolve())
+        # Preserve distro symlinks whose trusted bundle lives outside /etc/ssl/certs.
+        command += ["--ro-bind", bundle, bundle, "--ro-bind", bundle, "/etc/ssl/cert.pem"]
     for folder in ("home", "artifacts"):
         if validation:
             command += ["--size", "268435456", "--tmpfs", "/runtime/" + folder]

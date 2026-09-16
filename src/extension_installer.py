@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -21,6 +22,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse, urlunparse
 
 from core.atomic_io import atomic_write_json
+from core.platform_compat import detached_popen_kwargs, kill_process_tree
 from src.action_protocol import (
     build_action_result,
     compose_capability_catalog,
@@ -122,16 +124,31 @@ GitRunner = Callable[
 def _default_git_runner(
     argv: list[str], cwd: Path | None, timeout: int, environment: Mapping[str, str]
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    with subprocess.Popen(
         argv,
         cwd=str(cwd) if cwd else None,
         env=dict(environment),
         stdin=subprocess.DEVNULL,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
-        check=False,
-    )
+        **detached_popen_kwargs(),
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException:
+            # Git transport helpers inherit the group; killing only Git leaks them.
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                kill_process_tree(process.pid)
+                process.kill()
+            process.communicate()
+            raise
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 class GitSourceClient:
@@ -210,7 +227,6 @@ class GitSourceClient:
                 "fetch",
                 "--depth",
                 "1",
-                "--filter=blob:none",
                 "origin",
                 requested_ref,
             ]
@@ -880,6 +896,11 @@ class ExtensionLifecycleManager:
         return result
 
     def execute_plan(self, plan_id: str, *, operator_id: str) -> dict[str, Any]:
+        # ponytail: serialize lifecycle on this manager; per-extension locks if needed.
+        with self._lock:
+            return self._execute_plan(plan_id, operator_id=operator_id)
+
+    def _execute_plan(self, plan_id: str, *, operator_id: str) -> dict[str, Any]:
         with self._lock:
             state = self._read_state()
             plan = state["plans"].get(plan_id)
@@ -891,6 +912,10 @@ class ExtensionLifecycleManager:
                 raise ExtensionLifecycleError("extension_configuration_changed_preview_again")
             if plan.get("status") == "completed":
                 return self._public_plan(plan)
+            installed = state["extensions"].get(plan["extension_id"])
+            if (plan["operation"] == "install" and installed
+                    and installed.get("last_plan_id") != plan_id):
+                raise ExtensionLifecycleError("extension_already_installed_use_upgrade")
             if "configuration_fingerprint" in plan:
                 from src.extension_configuration import fingerprint, values
 
@@ -1121,6 +1146,7 @@ class ExtensionLifecycleManager:
                     "content_digest": plan["content_digest"],
                 }
             state["extensions"][extension_id] = {
+                "last_plan_id": plan["plan_id"],
                 "source_url": plan["source_url"],
                 "active_revision": package_revision,
                 "package_revisions": revisions,

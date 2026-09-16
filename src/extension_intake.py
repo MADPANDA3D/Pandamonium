@@ -15,9 +15,14 @@ from src.extension_registry import normalize_tool_schema, validate_extension_man
 
 MAX_CONTEXT_CHARS = 160_000
 MAX_RESPONSE_CHARS = 200_000
-MAX_MODEL_CALLS = 4
-MAX_REPAIRS = 2
+MAX_MODEL_CALLS = 8
+MAX_REPAIRS = 4
 GENERATED_DIR = ".pandamonium"
+SCHEMA_KEYS = {
+    "type", "properties", "required", "additionalProperties", "items", "enum",
+    "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems",
+    "description", "title", "default",
+}
 
 
 class IntakeError(ValueError):
@@ -35,8 +40,8 @@ class Evidence(Record):
 
 class Interface(Record):
     name: str = Field(min_length=1, max_length=96)
-    kind: Literal["tool", "skill", "endpoint"]
-    binding: str = Field(min_length=1, max_length=500)
+    kind: Literal["tool", "skill", "endpoint"] = Field(description="Use tool for every callable operation, including HTTP APIs. endpoint is a descriptor-only record without tool_schema, arguments or output_schema.")
+    binding: str = Field(min_length=1, max_length=500, description="An exact upstream symbol or path fragment appearing verbatim in this interface's evidence.")
     evidence: list[Evidence] = Field(min_length=1, max_length=8)
     tool_schema: dict | None = None
     arguments: dict[str, Evidence] = Field(default_factory=dict)
@@ -112,6 +117,7 @@ class Proposal(Record):
 class Reply(Record):
     read_paths: list[str] = Field(default_factory=list, max_length=16)
     find_text: dict[str, str] = Field(default_factory=dict, max_length=16)
+    find_paths: list[str] = Field(default_factory=list, max_length=8)
     proposal: Proposal | None = None
 
 
@@ -132,25 +138,10 @@ def _check_schema(schema: object, depth: int = 0) -> None:
     """Require typed JSON parameters; reject remote refs and unbounded recursion."""
     if depth > 8 or not isinstance(schema, dict) or "$ref" in schema:
         raise IntakeError("Use an inline JSON schema of at most eight levels.")
-    if set(schema) - {
-        "type",
-        "properties",
-        "required",
-        "additionalProperties",
-        "items",
-        "enum",
-        "minimum",
-        "maximum",
-        "minLength",
-        "maxLength",
-        "minItems",
-        "maxItems",
-        "description",
-        "title",
-        "default",
-    }:
+    if set(schema) - SCHEMA_KEYS:
         raise IntakeError(
-            "Use bounded inline types, properties, enums and size/range constraints only."
+            "Use bounded inline types, properties, enums and size/range constraints only. "
+            f"Unsupported schema keywords: {sorted(set(schema) - SCHEMA_KEYS)}."
         )
     kind = schema.get("type")
     if kind not in {
@@ -214,14 +205,15 @@ def validate_proposal(
             raise IntakeError("Keep the source that defines the proposed interfaces.")
         if item.path not in excerpts or item.quote not in excerpts[item.path]:
             raise IntakeError(
-                "Evidence must quote an exact excerpt that was read from the pinned source."
+                f"Evidence in {item.path} must quote an exact excerpt that was read from the pinned source."
             )
 
     for item in proposal.evidence:
         evidence(item)
     names = set()
     tools = []
-    for interface in proposal.interfaces:
+    unquoted_bindings = []
+    for interface_index, interface in enumerate(proposal.interfaces):
         if interface.name in names:
             raise IntakeError("Interface names must be unique.")
         names.add(interface.name)
@@ -250,9 +242,7 @@ def validate_proposal(
         if not knowledge and not any(
             interface.binding in item.quote for item in interface.evidence
         ):
-            raise IntakeError(
-                "The exact interface binding must occur in its quoted source evidence."
-            )
+            unquoted_bindings.append(interface_index)
         if interface.kind == "tool":
             schema = normalize_tool_schema(interface.tool_schema)
             function = schema["function"]
@@ -286,11 +276,24 @@ def validate_proposal(
                     "null": r"null|none|nil",
                 }
                 kind = function["parameters"]["properties"][name]["type"]
+                # CLI argv values are strings; valueless option switches are booleans.
+                cli_syntax = proposal.execution is not None and (
+                    (kind == "string" and re.search(
+                        rf"(?:<{argument}>|\[{argument}\]|--{argument}[ =]+<[A-Za-z][\w-]*>)", item.quote, re.IGNORECASE
+                    )) or (kind == "boolean" and re.search(
+                        rf"(?:^|\n)\s*(?:-\w,\s*)?--{argument}(?=\t| {{2,}}|\r?$|,)",
+                        item.quote, re.IGNORECASE | re.MULTILINE,
+                    ))
+                )
+                http_string = kind == "string" and re.search(
+                    rf'\b(?:\w+\.URL\.Query\(\)\.Get\(\s*"{argument}"\s*\)|chi\.URLParam\([^,\n]+,\s*"{argument}"\s*\))',
+                    item.quote,
+                )
                 if not re.search(
                     rf"(?<!\w){argument}(?!\w)", item.quote, re.IGNORECASE
-                ) or not re.search(
+                ) or not (cli_syntax or http_string or re.search(
                     rf"\b(?:{kinds[kind]})\b", item.quote, re.IGNORECASE
-                ):
+                )):
                     raise IntakeError(
                         "Each argument quote must contain its name (hyphen/underscore aliases allowed) "
                         "and a source type matching its JSON type. Read the actual declaration."
@@ -322,6 +325,11 @@ def validate_proposal(
             raise IntakeError(
                 "Use actual distributed skill definitions, not incidental development instructions."
             )
+    if unquoted_bindings:
+        raise IntakeError(
+            f"The exact interface binding must occur in its quoted source evidence. Affected interface indexes: {unquoted_bindings}. "
+            "Use an exact upstream function name or path fragment, not a synthesized HTTP method/base URL/path label."
+        )
     for setup in proposal.setup:
         evidence(setup.evidence)
     if any(
@@ -475,13 +483,37 @@ two or three example user requests grounded in the actual interfaces. These are 
 not claims of completed validation. Never include credentials or machine-local configuration.
 Distinguish primary purpose from development tooling. Prefer existing native manifests, MCP/OpenAPI and skills;
 never turn Markdown skills into fake tools. Do not invent interfaces or argument types.
+Native runtime.type=mcp requires a preconfigured disabled MCP connection with a concrete reference
+and a server identity matching the package source revision; ENDPOINT_ID is not a native descriptor
+reference placeholder. Distributable connected-service packages use runtime.type=service, an inline
+descriptor, and a package-local Python client with execution checks. It may call evidenced REST or
+MCP operations on ENDPOINT_ID, using the existing configuration file described below. Prefer this
+client path when upstream lacks a compatible native manifest; do not invent native MCP schemas.
 Return ONLY JSON matching the supplied response schema. Request read_paths first when evidence is
 missing, or provide a proposal. Quote exact source excerpts for purpose, each binding and argument.
+Use already supplied excerpts without rereading them. Respect remaining_model_calls; the final
+call must return a proposal. When repairing, correct the rejected response using validation feedback.
+Excerpt boundary markers separate source windows; adjacent windows are not contiguous source code.
+Each tool_schema is {"type":"function","function":{"name":"extension__tool","description":"...",
+"parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false}}}.
+Supply output_schema separately. A parameters schema alone is not a tool_schema.
+An interface binding is an exact upstream symbol or path fragment found in its evidence, e.g.
+ListItemsHandler or /items. Do not synthesize a binding by joining HTTP method, base URL and path.
 For definitions outside a file's initial excerpt, request find_text={"path": "literal symbol text"};
 this returns a bounded excerpt around the first exact match, without regex or executing source.
-Each argument quote must contain that argument's name and its explicit source type (e.g. count/int);
-keep source argument names, with hyphens normalized to underscores. If no typed declaration or
-documentation is available, return manifest=null and an actionable validation requirement.
+For paths missing from a truncated file index, request find_paths=["literal filename or path fragment"].
+This searches the complete pinned path list without executing source; read the returned matching_paths.
+Each argument quote must contain its source name and explicit source type (e.g. count/int).
+Go r.URL.Query().Get("name") and chi.URLParam(r, "name") provide string wire inputs;
+quote the exact getter, never append an inferred type annotation to source evidence.
+On an evidence failure, recheck ALL quotes against supplied excerpts, including whitespace.
+For CLI execution recipes, documented <name> or [name] argv placeholders establish string inputs;
+standalone --name switches in option-list lines establish boolean presence/absence inputs. Preserve
+upstream names (hyphens normalized to underscores), map booleans to flag presence, and pass strings
+as single argv elements. This is source syntax evidence, not operation proof: every generated tool
+still needs a real non-destructive runtime check. Do not reject shell CLIs merely for lacking a JSON
+API; use a package-local Python adapter and a noninteractive upstream operation. If no supported
+argument syntax or typed declaration exists, return manifest=null with actionable requirements.
 Generated files must live under .pandamonium/. Use stdlib Python for adapters: argv[1] is the tool
 name, stdin is a JSON arguments object, stdout is a JSON result matching output_schema, failures
 exit nonzero. Validate input; use subprocess argv without a shell; bound time/output; never install
@@ -521,6 +553,7 @@ source_exclusions may name optional source files not needed by the supported ope
 are recorded in the package and preview; remaining source still passes the same secret checks.
 Never exclude required dependencies or license notices. Clearly declare reduced provider support.
 """
+SYSTEM_PROMPT += "\nAllowed JSON Schema keywords: " + ", ".join(sorted(SCHEMA_KEYS)) + ". Every object requires properties and additionalProperties=false. Enforce other constraints in the adapter; do not emit unsupported schema keywords."
 
 
 def generate_integration(
@@ -534,8 +567,9 @@ def generate_integration(
     progress: Callable[[str], None],
 ) -> dict:
     paths = {path.relative_to(root).as_posix(): path for path in files}
-    # ponytail: bounded filename index; huge monorepos need a narrower source package.
+    # ponytail: bounded initial index; literal path searches expose deeper files on demand.
     index = sorted(paths, key=lambda p: (len(PurePosixPath(p).parts), p))[:2000]
+    matching_paths: list[str] = []
     excerpts: dict[str, str] = {}
 
     def read(names: list[str], queries: dict[str, str] | None = None) -> None:
@@ -564,11 +598,13 @@ def generate_integration(
                     raise IntakeError(
                         "Requested file is binary, private, empty or above the read limit."
                     )
-                if sum(map(len, excerpts.values())) + len(content) > MAX_CONTEXT_CHARS:
+                prefix = excerpts.get(name, "")
+                addition = ("\n\n[Noncontiguous source excerpt]\n\n" if prefix else "") + content
+                if sum(map(len, excerpts.values())) + len(addition) > MAX_CONTEXT_CHARS:
                     raise IntakeError(
                         "Source context budget reached; use a narrower source package."
                     )
-                excerpts[name] = excerpts.get(name, "") + content
+                excerpts[name] = prefix + addition
 
     seeds = [p for p in index if Path(p).name.lower().startswith("readme")][:2]
     seeds += [
@@ -594,6 +630,7 @@ def generate_integration(
         except IntakeError:
             continue
     feedback = ""
+    rejected = ""
     repairs = 0
     for attempt in range(MAX_MODEL_CALLS):
         check()
@@ -628,8 +665,10 @@ def generate_integration(
                         "revision": revision,
                         "files": index,
                         "file_index_truncated": len(paths) > len(index),
+                        "matching_paths": matching_paths,
                         "untrusted_source_excerpts": excerpts,
                         "validation_feedback": feedback,
+                        "remaining_model_calls": MAX_MODEL_CALLS - attempt,
                         "manifest_contract": json.loads(
                             (
                                 Path(__file__).parent.parent
@@ -640,12 +679,28 @@ def generate_integration(
                 ),
             },
         ]
+        if rejected:
+            messages.extend([
+                {"role": "assistant", "content": rejected},
+                {"role": "user", "content": "Repair this rejected response. Validation feedback: " + feedback},
+            ])
         raw = model(messages)
         check()
         try:
             if not isinstance(raw, str) or len(raw) > MAX_RESPONSE_CHARS:
                 raise IntakeError("Model response exceeded its size limit.")
             reply = Reply.model_validate_json(raw)
+            if reply.find_paths:
+                if reply.proposal or reply.read_paths or reply.find_text:
+                    raise IntakeError("Return either a path search, file reads, or a proposal.")
+                if any(not query.strip() or len(query) > 200 for query in reply.find_paths):
+                    raise IntakeError("Path searches need literal fragments of 1 to 200 characters.")
+                matching_paths = sorted(path for path in paths if any(
+                    query.casefold() in path.casefold() for query in reply.find_paths
+                ))[:100]
+                feedback = "Read matching_paths or use a more specific path fragment; at most 100 matches are returned."
+                rejected = ""
+                continue
             if (reply.read_paths or reply.find_text) and reply.proposal is None:
                 if not reply.find_text and all(
                     name in excerpts for name in reply.read_paths
@@ -658,6 +713,7 @@ def generate_integration(
                     reply.find_text,
                 )
                 feedback = ""
+                rejected = ""
                 continue
             if reply.proposal is None or reply.read_paths or reply.find_text:
                 raise IntakeError("Return either read_paths or a proposal.")
@@ -666,9 +722,13 @@ def generate_integration(
             )
         except (ValueError, TypeError, SyntaxError) as exc:
             repairs += 1
-            # ValidationError text includes submitted values; never feed/log those as trusted repair instructions.
+            rejected = raw if isinstance(raw, str) and len(raw) <= MAX_RESPONSE_CHARS else ""
+            # Report schema locations/types without echoing submitted values or error context.
             feedback = (
-                "Response did not match the supplied JSON schema."
+                "JSON schema errors (locations and types only): " + json.dumps([
+                    {"location": error["loc"], "error": error["type"]}
+                    for error in exc.errors(include_input=False, include_context=False, include_url=False)[:8]
+                ])[:450]
                 if isinstance(exc, ValidationError)
                 else str(exc)[:500]
             )
