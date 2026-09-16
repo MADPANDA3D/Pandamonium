@@ -1168,8 +1168,8 @@ def configured_scan_model(owner: str, loop: asyncio.AbstractEventLoop) -> Callab
         # while the user polls this scan's progress or keeps the browser visible.
         return await asyncio.wait_for(llm_call_async_with_fallback(
             candidates, messages=messages, max_tokens=12000, temperature=0.1,
-            timeout=90, max_retries=1, workload="foreground",
-        ), timeout=90)
+            timeout=180, max_retries=1, workload="foreground",
+        ), timeout=180)
 
     def invoke(messages: list[dict], check: Callable[[], None]) -> str:
         future = asyncio.run_coroutine_threadsafe(request(messages), loop)

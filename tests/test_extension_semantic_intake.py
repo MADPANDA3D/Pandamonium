@@ -14,7 +14,7 @@ import pytest
 from services.memory.skills import SkillsManager
 from src.authority_protocol import AuthorityStore
 from src.extension_installer import ExtensionLifecycleError, ExtensionLifecycleManager
-from src.extension_intake import Proposal, validate_proposal
+from src.extension_intake import MAX_MODEL_CALLS, MAX_REPAIRS, Proposal, validate_proposal
 from src.extension_package import extract_package
 from src.extension_registry import ExtensionRegistry
 from src.extension_scan import ExtensionScanError, ExtensionStaticScanner
@@ -250,7 +250,7 @@ def test_unknown_layout_reads_interfaces_repairs_and_preserves_real_adapter(tmp_
         if len(calls) == 2:
             data["interfaces"][0]["evidence"][0]["quote"] = "invented --flag"
         if len(calls) == 3:
-            assert json.loads(messages[1]["content"])["remaining_model_calls"] == 2
+            assert json.loads(messages[1]["content"])["remaining_model_calls"] == MAX_MODEL_CALLS - 2
             assert messages[-2]["role"] == "assistant"
             assert "invented --flag" in messages[-2]["content"]
             assert "Evidence in odd/place/command.py" in messages[-1]["content"]
@@ -408,7 +408,7 @@ def test_generation_attempts_are_bounded_and_cleanup(tmp_path):
     )
     with pytest.raises(ExtensionScanError, match="read/repair budget"):
         scanner.run(SOURCE_URL, "HEAD", operator_id="temporary-owner")
-    assert len(calls) == 3
+    assert len(calls) == min(MAX_MODEL_CALLS, MAX_REPAIRS + 1)
     assert not list((tmp_path / "staging/staging").iterdir())
     assert not list((tmp_path / "scans").glob("*/package.tar.gz"))
 

@@ -15,8 +15,8 @@ from src.extension_registry import normalize_tool_schema, validate_extension_man
 
 MAX_CONTEXT_CHARS = 160_000
 MAX_RESPONSE_CHARS = 200_000
-MAX_MODEL_CALLS = 4
-MAX_REPAIRS = 2
+MAX_MODEL_CALLS = 8
+MAX_REPAIRS = 4
 GENERATED_DIR = ".pandamonium"
 SCHEMA_KEYS = {
     "type", "properties", "required", "additionalProperties", "items", "enum",
@@ -40,8 +40,8 @@ class Evidence(Record):
 
 class Interface(Record):
     name: str = Field(min_length=1, max_length=96)
-    kind: Literal["tool", "skill", "endpoint"]
-    binding: str = Field(min_length=1, max_length=500)
+    kind: Literal["tool", "skill", "endpoint"] = Field(description="Use tool for every callable operation, including HTTP APIs. endpoint is a descriptor-only record without tool_schema, arguments or output_schema.")
+    binding: str = Field(min_length=1, max_length=500, description="An exact upstream symbol or path fragment appearing verbatim in this interface's evidence.")
     evidence: list[Evidence] = Field(min_length=1, max_length=8)
     tool_schema: dict | None = None
     arguments: dict[str, Evidence] = Field(default_factory=dict)
