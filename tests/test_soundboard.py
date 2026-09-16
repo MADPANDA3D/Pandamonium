@@ -191,3 +191,13 @@ def test_voice_cues_keep_repeated_word_identity_and_validate_riff(monkeypatch):
     assert sb.timed_cues(enriched[:-1], spoken, cues, block_offset=0, sample_rate=24000, samples=72000) == []
     assert sb.timed_cues(enriched, spoken.replace('another', 'different'), cues, block_offset=0, sample_rate=24000, samples=72000) == []
     assert sb.timed_cues(body, spoken, cues, block_offset=0, sample_rate=24000, samples=72000) == []
+
+
+
+def test_voice_mounts_only_the_current_owners_enabled_soundboard(monkeypatch):
+    from routes.voice_routes import _engaged_extension_ids
+
+    monkeypatch.setattr(sb, 'active_state', lambda owner: {} if owner == 'installed-owner' else None)
+    assert _engaged_extension_ids({'owner': 'installed-owner'}) == {'myinstants-api'}
+    assert _engaged_extension_ids({'owner': 'other-owner'}) == set()
+    assert _engaged_extension_ids({'owner': 'other-owner', 'oracle_protocol_active': True}) == {'oracle'}

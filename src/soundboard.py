@@ -95,13 +95,8 @@ def save_state(runtime: Path, data: dict) -> None:
     atomic_write_json(str(state_path(runtime)), data)
 
 
-def message_metadata(role: str, content, metadata: dict | None, *, owner: str | None,
-                     session_id: str, message_id: str) -> dict:
-    """Stamp resolved cues at persistence, never trusting caller-supplied cue records."""
-    result = dict(metadata or {})
-    result.pop("sound_cues", None)
-    if role != "assistant" or not isinstance(content, str) or "[[sound:" not in content:
-        return result
+def active_state(owner: str | None) -> dict | None:
+    """Read only this owner's enabled native soundboard; shared by text and voice."""
     from src.authority_protocol import operator_identity
     from src.extension_cli_adapter import _LOCK, GeneratedCliAdapter
     from src.extension_installer import ExtensionLifecycleError
@@ -112,11 +107,26 @@ def message_metadata(role: str, content, metadata: dict | None, *, owner: str | 
             record = ExtensionRegistry().snapshot()["extensions"].get(EXTENSION_ID)
             identity = operator_identity(owner)
             if not record or not identity:
-                return result
-            _, runtime, _, _, _ = GeneratedCliAdapter()._validated_context(record, identity)
-            sounds = read_state(runtime)["sounds"]
+                return None
+            _, runtime, _, contract, _ = GeneratedCliAdapter()._validated_context(record, identity)
+            if not all(item["binding"] in READ_BINDINGS for item in contract["interfaces"].values()):
+                return None
+            return read_state(runtime)
     except (ExtensionLifecycleError, ValueError, TypeError, KeyError, OSError):
-        return result  # An unavailable effect must never discard the chat response.
+        return None  # Unavailable effects never discard speech or chat.
+
+
+def message_metadata(role: str, content, metadata: dict | None, *, owner: str | None,
+                     session_id: str, message_id: str) -> dict:
+    """Stamp resolved cues at persistence, never trusting caller-supplied cue records."""
+    result = dict(metadata or {})
+    result.pop("sound_cues", None)
+    if role != "assistant" or not isinstance(content, str) or "[[sound:" not in content:
+        return result
+    state = active_state(owner)
+    if state is None:
+        return result
+    sounds = state["sounds"]
     cues = []
     for match in re.finditer(r"```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`]*`|\[\[sound:([A-Za-z0-9_-]{1,160})\]\]", content):
         sound_id = match.group(1)

@@ -623,6 +623,11 @@ def _engaged_extension_ids(session: dict[str, Any]) -> set[str]:
         for item in session.get("engaged_extensions") or []
         if EXTENSION_ID_PATTERN.fullmatch(str(item))
     }
+    # Installed native Soundboard is always available in this owner's voice session.
+    from src.soundboard import EXTENSION_ID, active_state
+
+    if active_state(session.get("owner")) is not None:
+        engaged.add(EXTENSION_ID)
     # Backward compatibility for sessions created before generic extension state.
     if session.get("oracle_protocol_active"):
         engaged.add("oracle")
