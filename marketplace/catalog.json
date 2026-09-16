@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T00:11:03.619632+00:00",
-  "expires_at": "2026-12-15T00:11:03.619632+00:00",
+  "generated_at": "2026-09-16T00:11:50.431416+00:00",
+  "expires_at": "2026-12-15T00:11:50.431416+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -942,11 +942,170 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "black-hat-bash",
+        "name": "Black-Hat-Bash",
+        "version": "1.0.0",
+        "source": {
+          "url": "https://github.com/dolevf/Black-Hat-Bash.git",
+          "revision": "92d9287305255aab1e433cd54755acf21f5bd3f9"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "black_hat_bash__search",
+                "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "black_hat_bash__status",
+                "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "black_hat_bash__refresh",
+                "description": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {}
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": []
+        },
+        "removal": {
+          "remove_paths": [],
+          "preserve_paths": [
+            "runtime"
+          ]
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        },
+        "metadata": {
+          "summary": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+          "icon": "\u25c8",
+          "categories": [],
+          "examples": [],
+          "requirements": [
+            "Collection links and shell examples are source data only; no blanket execution or linked-tool installation."
+          ],
+          "skill_descriptions": {}
+        }
+      },
+      "summary": "Search the Black Hat Bash source examples as reference text. No example is executed.",
+      "categories": [
+        "integrations"
+      ],
+      "license": "MIT AND ISC",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-black-hat-bash-1.0.0-0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65/pandamonium-plugin-black-hat-bash-0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65.tar.gz",
+        "sha256": "0d667e3c8a4a546ad75575e48312dcdffd59826fc9f36b7c96701220cbb27a65",
+        "size_bytes": 19445151,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "Jzg1YDZmCuvNWOam0TBS2VGgpKw1fw1DKyRtLH3PgTkF0Bp1jo2p3krg07mNpFdlflKhC4qjPTLR1TtghbzaCA=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-16T00:11:16.395392+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "H2CJWnfFp5/uMXFhKdFlZDZRb/FWc2emiFaGCETgeWXCsuhVv6lez4G4NmuAmM6+IFuJJSvMUjUBK+nrKEIFCg=="
+    "value": "tXIEKLsRkMX9FDJ2spx/hvfVtizC/x4m0QnrU2P2+jxgIuMKXOovnZPnmTNuLloQZFeI0QKWCmmzoA+8zWcJCw=="
   }
 }
