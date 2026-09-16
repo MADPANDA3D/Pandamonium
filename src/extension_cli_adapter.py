@@ -807,18 +807,22 @@ class GeneratedCliAdapter:
             raise ExtensionLifecycleError(
                 "extension_needs_setup:Configuration changed; enable to revalidate."
             )
+        if receipt["digest"] != digest:
+            raise ExtensionLifecycleError("extension_cli_validation_required")
         contract = _read_contract(path, manifest)
         if contract["execution"]["service"]:
             state_path = self._service_state(runtime)
-            if not state_path.exists():
-                raise ExtensionLifecycleError(
-                    "extension_service_offline:Disable and enable to restart."
-                )
-            service = json.loads(state_path.read_text())
+            service = json.loads(state_path.read_text()) if state_path.exists() else None
+            if not service or resources._systemctl(
+                "show", service["unit"], "--property=ActiveState", "--value"
+            ) in {"inactive", "failed"}:
+                # Enabled, unchanged installations retain authority to recover after
+                # their owning app exits. Active scopes still fail closed on limits.
+                self.activate_for_owner(path, manifest, None, revision, owner_scope=owner)
+                self.commit_activation(manifest)
+                service = json.loads(state_path.read_text())
             resources.verify_scope(service["unit"])
             config = {**config, "PANDAMONIUM_PORT": str(service["port"])}
-        if receipt["digest"] != digest:
-            raise ExtensionLifecycleError("extension_cli_validation_required")
         return path, runtime, manifest, contract, config
 
     def readiness(self, record: dict, owner: str) -> dict[str, str]:

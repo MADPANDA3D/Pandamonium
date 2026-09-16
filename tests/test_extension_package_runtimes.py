@@ -88,6 +88,16 @@ with urllib.request.urlopen(request,timeout=3) as response: print(response.read(
     unit = json.loads(state.read_text())["unit"]
     resources.verify_scope(unit)
     assert adapter.readiness(record, "operator")["state"] == "ready"
+    # App/installer exit kills its sandbox. A fresh process must recover the
+    # already-enabled, digest-validated service without another install.
+    resources.stop(unit)
+    assert GeneratedCliAdapter(root).execute(
+        record, name, {"count": 4}, "operator", threading.Event()
+    ) == {"result": 8}
+    recovered = json.loads(state.read_text())["unit"]
+    assert recovered != unit
+    unit = recovered
+    resources.verify_scope(unit)
     # A failed new revision leaves the original running; a successful replacement
     # stops it, and rollback restores that exact package at the same source commit.
     original = manager._read_state()["extensions"]["demo-tools"]["active_revision"]
@@ -136,6 +146,11 @@ with urllib.request.urlopen(request,timeout=3) as response: print(response.read(
             manager.preview_lifecycle(operation, "demo-tools", operator_id="operator"),
         )
         if operation != "enable":
+            assert not list((root / "runtime-state").glob("*.json"))
+            with pytest.raises(Exception, match="disabled"):
+                GeneratedCliAdapter(root).execute(
+                    record, name, {"count": 4}, "operator", threading.Event()
+                )
             assert not list((root / "runtime-state").glob("*.json"))
     assert registry.snapshot()["extensions"] == {}
     engine.dispose()
