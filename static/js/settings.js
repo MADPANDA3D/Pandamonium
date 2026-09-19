@@ -14,6 +14,7 @@ import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 import sshConnectionsModule from './sshConnections.js';
 import unslothRuntimeModule from './unslothRuntime.js';
 import { openSoundboard, refreshSoundboard } from './soundboard.js';
+import { openEntertainment, refreshEntertainment } from './entertainment.js';
 import { startVoicePreview } from './voicePreview.js';
 import { initModelHelp } from './modelHelp.js';
 
@@ -126,6 +127,7 @@ function initTabs() {
       if (tab === 'ssh') sshConnectionsModule.open();
       if (tab === 'training') unslothRuntimeModule.open();
       if (tab === 'soundboard') openSoundboard();
+      if (tab === 'entertainment') { close(); openEntertainment(); }
     });
   });
 }
@@ -6569,6 +6571,12 @@ function syncAdminVisibility() {
 export function open(tab) {
   if (!initialized) initAll();
   syncAppearanceCheckboxes();
+  const content = modalEl.querySelector('.settings-modal-content');
+  if (content?._closeTimer) {
+    clearTimeout(content._closeTimer);
+    delete content._closeTimer;
+  }
+  content?.classList.remove('modal-closing');
   if (modalEl.classList.contains('hidden')) {
     resetWindowPlacement();
   }
@@ -6580,7 +6588,7 @@ export function open(tab) {
   }
   syncAdminVisibility();
   refreshSoundboard();
-  const content = modalEl.querySelector('.settings-modal-content');
+  refreshEntertainment();
   if (tab) {
     modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === tab));
     modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
@@ -6608,10 +6616,19 @@ export function close() {
   if (content && !content.classList.contains('modal-closing')) {
     content.classList.add('modal-closing');
     content.addEventListener('animationend', () => {
+      if (!content.classList.contains('modal-closing')) return;
+      clearTimeout(content._closeTimer);
+      delete content._closeTimer;
       modalEl.classList.add('hidden');
       content.classList.remove('modal-closing');
     }, { once: true });
-    setTimeout(() => { if (!modalEl.classList.contains('hidden')) { modalEl.classList.add('hidden'); content.classList.remove('modal-closing'); } }, 250);
+    content._closeTimer = setTimeout(() => {
+      delete content._closeTimer;
+      if (!modalEl.classList.contains('hidden')) {
+        modalEl.classList.add('hidden');
+        content.classList.remove('modal-closing');
+      }
+    }, 250);
   } else {
     modalEl.classList.add('hidden');
   }

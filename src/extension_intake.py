@@ -222,6 +222,7 @@ def validate_proposal(
     names = set()
     tools = []
     native_sound_tools = set()
+    native_media_tools = set()
     for interface in proposal.interfaces:
         if interface.name in names:
             raise IntakeError("Interface names must be unique.")
@@ -230,6 +231,8 @@ def validate_proposal(
             evidence(item)
         knowledge = interface.binding.startswith("knowledge.")
         soundboard = interface.binding.startswith("soundboard.")
+        from src.entertainment import operation as entertainment_operation, schemas as entertainment_schemas
+        media = entertainment_operation(proposal.manifest or {}, interface.binding)
         if soundboard:
             from src.soundboard import schemas
 
@@ -239,6 +242,14 @@ def validate_proposal(
                     or interface.output_schema != output):
                 raise IntakeError("Soundboard tools require the exact native schema.")
             native_sound_tools.add(interface.name)
+        if media:
+            params, output = entertainment_schemas(interface.binding)
+            if (interface.kind != "tool" or interface.name != media[0]
+                    or not interface.tool_schema
+                    or interface.tool_schema.get("function", {}).get("parameters") != params
+                    or interface.output_schema != output):
+                raise IntakeError("Entertainment tools require the exact native UI schema.")
+            native_media_tools.add(interface.name)
         if knowledge:
             from src.extension_knowledge import schemas
 
@@ -258,7 +269,7 @@ def validate_proposal(
                 raise IntakeError(
                     "Knowledge tools use the exact platform schema and evidence from selected source files."
                 )
-        if not (knowledge or soundboard) and not any(
+        if not (knowledge or soundboard or media) and not any(
             interface.binding in item.quote for item in interface.evidence
         ):
             raise IntakeError(
@@ -275,15 +286,15 @@ def validate_proposal(
                     "Tool names and meaningful descriptions must match their interfaces."
                 )
             _check_schema(function["parameters"])
-            if (knowledge or soundboard) and interface.arguments:
+            if (knowledge or soundboard or media) and interface.arguments:
                 raise IntakeError(
                     "Platform knowledge arguments use the supplied schema."
                 )
-            if not (knowledge or soundboard) and set(function["parameters"]["properties"]) != set(
+            if not (knowledge or soundboard or media) and set(function["parameters"]["properties"]) != set(
                 interface.arguments
             ):
                 raise IntakeError("Every tool argument needs its own source evidence.")
-            for name, item in ({} if knowledge or soundboard else interface.arguments).items():
+            for name, item in ({} if knowledge or soundboard or media else interface.arguments).items():
                 evidence(item)
                 # Lexical support is necessary, not proof that generated code works.
                 argument = re.escape(name).replace("_", "[-_]")
@@ -390,10 +401,12 @@ def validate_proposal(
                 "Declare setup and validation recipes; intake cannot authorize lifecycle commands."
             )
         descriptor = manifest["capabilities"]["descriptor"]["type"]
+        media_manifest = bool(native_media_tools) and len(native_media_tools) == len(tools)
         if manifest["runtime"]["type"] != "skills" and (
-            manifest["permissions"]["default"] != "external_side_effect"
+            manifest["permissions"]["default"] not in ({"read_only"} if media_manifest else {"external_side_effect"})
             or any(
-                not (name in native_sound_tools and mode == "read_only") and mode
+                not (name in native_sound_tools and mode == "read_only")
+                and not (name in native_media_tools and mode in {"read_only", "bounded_write"}) and mode
                 not in {
                     "external_side_effect",
                     "destructive",

@@ -809,6 +809,9 @@ app.include_router(setup_extension_routes(skills_manager=skills_manager))
 from routes.soundboard_routes import setup_soundboard_routes
 app.include_router(setup_soundboard_routes())
 
+from routes.entertainment_routes import setup_entertainment_routes
+app.include_router(setup_entertainment_routes())
+
 # Documents (artifacts/canvas)
 from routes.document_routes import setup_document_routes
 document_router = setup_document_routes(session_manager, upload_handler)
