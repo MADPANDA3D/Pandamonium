@@ -92,6 +92,47 @@ def test_playlist_rewrites_segments_and_embedded_subtitle_uris(monkeypatch):
     }
 
 
+def test_realistic_playlist_retry_reuses_tokens_without_revalidating_segments(monkeypatch):
+    validated = []
+    monkeypatch.setattr(
+        routes,
+        "validate_public_http_url",
+        lambda url, **_: validated.append(url) or url,
+    )
+    routes._TOKENS.clear()
+    try:
+        playback = asyncio.run(routes._prepare_playback("owner", {
+            "title": "Episode", "url": "https://cdn.example/episode.m3u8",
+            "headers": {"Referer": "https://origin.example/"}, "subtitles": [],
+        }))
+        root_token = playback["url"].rsplit("/", 1)[-1]
+        playlist = "#EXTM3U\n" + "".join(
+            f"#EXTINF:4.0,\nsegment-{index}.ts\n" for index in range(309)
+        )
+
+        first = asyncio.run(routes._playlist(
+            "owner", "https://cdn.example/episode.m3u8", playlist,
+            {"Referer": "https://origin.example/"},
+        ))
+        second = asyncio.run(routes._playlist(
+            "owner", "https://cdn.example/episode.m3u8", playlist,
+            {"Referer": "https://origin.example/"},
+        ))
+
+        assert first == second
+        assert root_token in routes._TOKENS
+        assert len(routes._TOKENS) == 310
+        assert validated == ["https://cdn.example/episode.m3u8"]
+    finally:
+        routes._TOKENS.clear()
+
+
+def test_proxy_open_rejects_private_targets_before_transport():
+    target = routes._ProxyTarget("owner", "http://127.0.0.1/media.ts", {}, float("inf"))
+    with pytest.raises(ValueError, match="public HTTP"):
+        asyncio.run(routes._open(target, None))
+
+
 def test_generated_player_argument_parsers_keep_real_headers_and_subtitles(tmp_path):
     cases = (
         ("ani-cli", ["--referrer=https://hianime.at/", "--sub-file=https://cdn.example/sub.vtt", "--force-media-title=Show Episode 1", "https://cdn.example/master.m3u8"]),
