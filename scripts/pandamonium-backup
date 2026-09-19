@@ -48,6 +48,7 @@ from src.backup_archive import (
     BackupArchiveError,
     backup_inventory_summary,
     build_backup_inventory,
+    encode_backup_manifest,
     read_backup_manifest,
     validate_backup_members,
     verify_backup_inventory,
@@ -152,6 +153,13 @@ def _backup_manifest(args, inventory: dict) -> dict:
 def _read_manifest(tar, members) -> dict:
     try:
         return read_backup_manifest(tar, members)
+    except BackupArchiveError as exc:
+        fail(str(exc))
+
+
+def _encode_manifest(manifest: dict) -> bytes:
+    try:
+        return encode_backup_manifest(manifest)
     except BackupArchiveError as exc:
         fail(str(exc))
 
@@ -377,7 +385,7 @@ def cmd_snapshot(args):
 
                 inventory = build_backup_inventory(inventory_entries)
                 manifest = _backup_manifest(args, inventory)
-                manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+                manifest_bytes = _encode_manifest(manifest)
                 manifest_info = tarfile.TarInfo(_MANIFEST_NAME)
                 manifest_info.size = len(manifest_bytes)
                 manifest_info.mode = 0o600

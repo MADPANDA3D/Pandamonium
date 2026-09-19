@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src import backup_archive
 from tests.helpers.cli_loader import load_script
 
 
@@ -225,6 +226,51 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(
     assert proof["inventory"]["verified"] is True
     assert proof["proof_recorded"] is True
     assert Path(str(archive) + ".verified.json").exists()
+
+
+def test_backup_manifest_larger_than_legacy_limit_round_trips(tmp_path):
+    manifest = {
+        "schema": "legacy",
+        "padding": "x" * (16 * 1024 * 1024),
+    }
+    encoded = backup_archive.encode_backup_manifest(manifest)
+    assert len(encoded) > 16 * 1024 * 1024
+
+    archive = tmp_path / "large-manifest.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        member = tarfile.TarInfo(backup_archive.BACKUP_MANIFEST_NAME)
+        member.size = len(encoded)
+        tar.addfile(member, io.BytesIO(encoded))
+
+    with tarfile.open(archive, "r:gz") as tar:
+        members = backup_archive.validate_backup_members(tar.getmembers())
+        assert backup_archive.read_backup_manifest(tar, members) == manifest
+
+
+def test_backup_manifest_writer_and_reader_share_a_bounded_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(backup_archive, "BACKUP_MANIFEST_MAX_BYTES", 1024)
+    manifest = {"schema": "legacy", "padding": "x" * 1024}
+
+    with pytest.raises(
+        backup_archive.BackupArchiveError,
+        match="backup manifest exceeds 1024-byte limit",
+    ):
+        backup_archive.encode_backup_manifest(manifest)
+
+    archive = tmp_path / "oversized-manifest.tar.gz"
+    payload = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+    with tarfile.open(archive, "w:gz") as tar:
+        member = tarfile.TarInfo(backup_archive.BACKUP_MANIFEST_NAME)
+        member.size = len(payload)
+        tar.addfile(member, io.BytesIO(payload))
+
+    with tarfile.open(archive, "r:gz") as tar:
+        members = backup_archive.validate_backup_members(tar.getmembers())
+        with pytest.raises(
+            backup_archive.BackupArchiveError,
+            match="backup manifest exceeds 1024-byte limit",
+        ):
+            backup_archive.read_backup_manifest(tar, members)
 
 
 def test_external_data_root_round_trips_without_restoring_into_source(

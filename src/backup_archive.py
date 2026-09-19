@@ -17,7 +17,7 @@ BACKUP_MANIFEST_NAMES = frozenset(
 BACKUP_SCHEMA_V1 = "jos-p7.backup.v1"
 BACKUP_SCHEMA_V2 = "jos-p7.backup.v2"
 BACKUP_INVENTORY_SCHEMA = "pandamonium.backup-inventory.v1"
-_MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+BACKUP_MANIFEST_MAX_BYTES = 64 * 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _INVENTORY_SOURCES = frozenset({"file", "materialized_internal_file_symlink"})
 
@@ -55,6 +55,16 @@ def backup_inventory_summary(inventory: Mapping[str, Any] | None) -> dict[str, A
         "total_bytes": value.get("total_bytes"),
         "digest": value.get("digest"),
     }
+
+
+def encode_backup_manifest(manifest: Mapping[str, Any]) -> bytes:
+    """Serialize a manifest that the bounded reader is guaranteed to accept."""
+    encoded = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > BACKUP_MANIFEST_MAX_BYTES:
+        raise BackupArchiveError(
+            f"backup manifest exceeds {BACKUP_MANIFEST_MAX_BYTES}-byte limit"
+        )
+    return encoded
 
 
 def validate_backup_members(
@@ -98,11 +108,15 @@ def read_backup_manifest(
     if len(matches) != 1:
         raise BackupArchiveError("backup archive contains multiple manifests")
     member = matches[0]
-    if not member.isfile() or member.size > _MAX_MANIFEST_BYTES:
-        raise BackupArchiveError("backup manifest is unreadable or oversized")
+    if not member.isfile():
+        raise BackupArchiveError("backup manifest is not a regular file")
+    if member.size > BACKUP_MANIFEST_MAX_BYTES:
+        raise BackupArchiveError(
+            f"backup manifest exceeds {BACKUP_MANIFEST_MAX_BYTES}-byte limit"
+        )
     source = tar.extractfile(member)
     if source is None:
-        raise BackupArchiveError("backup manifest is unreadable or oversized")
+        raise BackupArchiveError("backup manifest is unreadable")
     try:
         with source:
             value = json.loads(source.read().decode("utf-8"))
