@@ -14,7 +14,7 @@ import { getBrandName, loadBrand, readLogoFile, saveBrand } from './brand.js';
 import sshConnectionsModule from './sshConnections.js';
 import unslothRuntimeModule from './unslothRuntime.js';
 import { openSoundboard, refreshSoundboard } from './soundboard.js';
-import { openEntertainment, refreshEntertainment } from './entertainment.js';
+import { refreshEntertainment } from './entertainment.js';
 import { startVoicePreview } from './voicePreview.js';
 import { initModelHelp } from './modelHelp.js';
 
@@ -127,7 +127,6 @@ function initTabs() {
       if (tab === 'ssh') sshConnectionsModule.open();
       if (tab === 'training') unslothRuntimeModule.open();
       if (tab === 'soundboard') openSoundboard();
-      if (tab === 'entertainment') { close(); openEntertainment(); }
     });
   });
 }
