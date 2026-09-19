@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-19T05:45:37.009081+00:00",
-  "expires_at": "2026-12-18T05:45:37.009081+00:00",
+  "generated_at": "2026-09-19T18:24:36.052946+00:00",
+  "expires_at": "2026-12-18T18:24:36.052946+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -2613,11 +2613,301 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "ani-cli",
+        "name": "AniCLI",
+        "version": "5.1.2",
+        "metadata": {
+          "summary": "Install the complete pinned ani-cli application and expose its search, sub/dub, episodes, quality, playback and history flows in Pandamonium's native Entertainment UI.",
+          "icon": "\u25b6",
+          "categories": [
+            "entertainment",
+            "media"
+          ],
+          "examples": [
+            "Search and play a title in Pandamonium."
+          ],
+          "requirements": [
+            "Linux container with the standard POSIX utilities and curl; all state remains inside the private plugin runtime.",
+            "Retain the upstream GPL-3.0-or-later license and source notices."
+          ],
+          "skill_descriptions": {}
+        },
+        "source": {
+          "url": "https://github.com/pystardust/ani-cli.git",
+          "revision": "2a956db02bf83760bf8f28b720d58fe8014b0e9b"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__status",
+                "description": "Check the installed upstream Anime CLI version.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__search",
+                "description": "Search Anime through the real upstream CLI.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    },
+                    "dub": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "dub"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__episodes",
+                "description": "List episodes for the selected Anime title.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    },
+                    "selection_index": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "dub": {
+                      "type": "boolean"
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5000
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "selection_index",
+                    "dub",
+                    "offset"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__resolve",
+                "description": "Resolve the selected Anime title for native browser playback.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    },
+                    "selection_index": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "dub": {
+                      "type": "boolean"
+                    },
+                    "episode": {
+                      "type": "string",
+                      "maxLength": 16
+                    },
+                    "quality": {
+                      "type": "string",
+                      "enum": [
+                        "best",
+                        "1080p",
+                        "720p",
+                        "480p",
+                        "360p"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "selection_index",
+                    "dub",
+                    "episode",
+                    "quality"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__history",
+                "description": "Read ani-cli watch history from this account's private runtime.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__continue",
+                "description": "Continue an ani-cli history entry and resolve it for native browser playback.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "history_index": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "dub": {
+                      "type": "boolean"
+                    },
+                    "quality": {
+                      "type": "string",
+                      "enum": [
+                        "best",
+                        "1080p",
+                        "720p",
+                        "480p",
+                        "360p"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "history_index",
+                    "dub",
+                    "quality"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {
+            "ani_cli__resolve": "bounded_write",
+            "ani_cli__continue": "bounded_write"
+          }
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://hianime.at"
+          ]
+        },
+        "removal": {
+          "remove_paths": [
+            "runtime"
+          ],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        }
+      },
+      "summary": "Install the complete pinned ani-cli application and expose its search, sub/dub, episodes, quality, playback and history flows in Pandamonium's native Entertainment UI.",
+      "categories": [
+        "entertainment",
+        "media"
+      ],
+      "license": "GPL-3.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-ani-cli-5.1.2-7851c2650f1930a9916e78804fa061eec7185f1d33b298b6549fa07f3c073bf0/pandamonium-plugin-ani-cli-7851c2650f1930a9916e78804fa061eec7185f1d33b298b6549fa07f3c073bf0.tar.gz",
+        "sha256": "7851c2650f1930a9916e78804fa061eec7185f1d33b298b6549fa07f3c073bf0",
+        "size_bytes": 481669,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "g+BPLv0TmHkhBFZevWeyit1fzgNalLSI/a9Eu7IAXQq4L32L36pBOyz46Ic3ds/4kLOZm+uf53UxYodS0q01AA=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-19T18:24:24.106978+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "D2N137adhqEImOyiV1g5Zrrkyo3guZ6O/hYOeOghoAhfTP2KmFz74OYs3D1jtKhwd8LDbhLRGXvWKQjAM4UHCQ=="
+    "value": "/EgRdgoQimoZXC/O9xraR48G0xT8iEPNEM+b+G1vNLx5ZpUV2bJHOUHZ+NwkBb/cz6Jk9kDY5mozy88bIwNZDg=="
   }
 }
