@@ -6,7 +6,7 @@ import asyncio
 import secrets
 import time
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -55,11 +55,18 @@ def _headers(value: object) -> dict[str, str]:
 
 
 async def _token(owner: str, url: str, headers: dict[str, str]) -> str:
-    validate_public_http_url(url, max_length=8192)
+    url = (url or "").strip()
+    parsed = urlparse(url)
+    if len(url) > 8192 or parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Invalid media URL")
     now = time.monotonic()
     async with _TOKEN_LOCK:
         for key in [key for key, value in _TOKENS.items() if value.expires <= now]:
             _TOKENS.pop(key, None)
+        # ponytail: bounded 512-entry scan; add a reverse index only if the cap grows.
+        for key, value in _TOKENS.items():
+            if value.owner == owner and value.url == url and value.headers == headers:
+                return key
         while len(_TOKENS) >= 512:
             _TOKENS.pop(next(iter(_TOKENS)))
         key = secrets.token_urlsafe(24)
