@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-16T06:49:25.723077+00:00",
-  "expires_at": "2026-12-15T06:49:25.723077+00:00",
+  "generated_at": "2026-09-19T05:43:28.701675+00:00",
+  "expires_at": "2026-12-18T05:43:28.701675+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -2294,11 +2294,163 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "ani-cli",
+        "name": "ani-cli Release Countdown",
+        "version": "1.0.1",
+        "metadata": {
+          "summary": "ani-cli is a shell CLI for browsing and watching anime, not development tooling. Propose a reduced, headless Pandamonium integration for its native next-episode countdown operation, reporting release information through AnimeSchedule without launching a player or downloading media. This generated integration is source-backed but UNVERIFIED.",
+          "icon": "\ud83d\udcfa",
+          "categories": [
+            "anime",
+            "entertainment",
+            "release-tracking"
+          ],
+          "examples": [
+            "Check the next-episode countdown for One Piece.",
+            "Look up the release status and available sub/dub countdowns for Blue Lock."
+          ],
+          "requirements": [
+            "Needs setup and real runtime validation before use. No commands have been executed.",
+            "The repository is a POSIX shell CLI; repo_class is unknown because the response schema has no shell_cli class. Python is only the generated adapter language.",
+            "The package-local adapter invokes ['/bin/sh', '/package/ani-cli', '--nextep-countdown', query] without a shell command string. The query remains one argv element.",
+            "Provide /bin/sh, curl, sed, grep, cut, uname, mkdir, tr, head, tput and rm in the isolated Linux environment. The countdown-only adapter uses /bin/true as its inert menu command because this path never opens an interactive selector.",
+            "If dependencies are absent, supply approved executables and required libraries inside the isolated runner, optionally under /runtime/bin, then rerun setup. Do not use host package-manager or upstream self-update commands.",
+            "Authorize HTTPS access to https://animeschedule.net for title queries and returned anime routes. Queries leave the runner; provider availability and response parsing remain unverified.",
+            "Reduced support: AnimeSchedule countdowns only. No hianime browsing, stream resolution, playback, downloads, history management, self-update, or alternative media providers are exposed.",
+            "No display, audio, GPU, browser, credentials, persistent service, or interactive input is required for this operation. The adapter selects /bin/true as the inert menu executable for this noninteractive path.",
+            "The adapter selects upstream's documented debug player mode to avoid media-player dependencies and confines upstream history initialization to disposable state under /runtime.",
+            "Retain LICENSE and upstream license notices. No source exclusions are proposed."
+          ],
+          "skill_descriptions": {}
+        },
+        "source": {
+          "url": "https://github.com/pystardust/ani-cli.git",
+          "revision": "2a956db02bf83760bf8f28b720d58fe8014b0e9b"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "ani_cli__nextep_countdown",
+                "description": "Request ani-cli's live release status and available next-episode countdowns. Returns upstream text with terminal controls removed. Does not play or download media. Generated binding is UNVERIFIED.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200,
+                      "description": "Anime title passed as one argv element using upstream's documented [query] string placeholder. Must start with a letter or digit; accepts letters, digits, spaces, and . : ' ! ? ( ) -."
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "external_side_effect",
+          "capabilities": {
+            "ani_cli__nextep_countdown": "external_side_effect"
+          }
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 10
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            "ani-cli",
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://animeschedule.net"
+          ]
+        },
+        "removal": {
+          "remove_paths": [
+            "runtime"
+          ],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        }
+      },
+      "summary": "ani-cli is a shell CLI for browsing and watching anime, not development tooling. Propose a reduced, headless Pandamonium integration for its native next-episode countdown operation, reporting release information through AnimeSchedule without launching a player or downloading media. This generated integration is source-backed but UNVERIFIED.",
+      "categories": [
+        "anime",
+        "entertainment",
+        "release-tracking"
+      ],
+      "license": "GPL-3.0",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-ani-cli-1.0.1-fbcb8f01d1fc85764694821ae04a60dbbe78eedd6df97f06ad1e0c604582cc67/pandamonium-plugin-ani-cli-fbcb8f01d1fc85764694821ae04a60dbbe78eedd6df97f06ad1e0c604582cc67.tar.gz",
+        "sha256": "fbcb8f01d1fc85764694821ae04a60dbbe78eedd6df97f06ad1e0c604582cc67",
+        "size_bytes": 481490,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "iav2eryeuhgn7Qt+OuyQs7RfMZAn1ph3O9UynmlLjOHoqAzz0SPhgMLVvfAJd6Oz6hhy4lX6SIKdxUeGTo60DQ=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-09-19T05:43:18.388819+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "JazJa+7xrBzzhzN4YeLZL/bnBO5/n0LwzQxpnZvzj9ly2dCz0cEMcHSMphtmwCZC3LRAxmkeODrEP9qUEvd6AQ=="
+    "value": "0ZMcnaw6Rh4EpJ7HSdVWF+SuJ4gxj7VgVJ2GhI1ZqinW2GVZf2wNLSWbTgUT8awwPIVeUaogkJU5g58lX11sBA=="
   }
 }
