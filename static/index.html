@@ -1002,6 +1002,16 @@
         </div>
       </div>
 
+      <div class="section hidden" id="entertainment-section">
+        <div class="section-header-flex">
+          <span class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>Entertainment</span>
+        </div>
+        <div class="list-item" id="tool-entertainment-btn" role="button" tabindex="0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+          <span class="grow">Open Entertainment</span>
+        </div>
+      </div>
+
       <div class="section" id="plugins-section" data-section-reorder="true">
         <div class="section-header-flex">
           <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
@@ -3094,6 +3104,31 @@
           <h4>Find a sound</h4>
           <form id="soundboard-search" class="soundboard-search"><label class="sr-only" for="soundboard-query">Search sounds</label><input id="soundboard-query" class="settings-select" type="search" maxlength="100" placeholder="Try vine boom or a funny sound"><button id="soundboard-search-button" class="admin-btn-sm" type="submit">Search</button></form>
           <p id="soundboard-search-status" class="settings-hint" role="status"></p><div id="soundboard-results"></div>
+        </div>
+
+        <!-- ═══ ENTERTAINMENT TAB (MAD-972) ═══ -->
+        <div data-settings-panel="entertainment" class="hidden">
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:8px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>Entertainment
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:12px">Defaults applied whenever the Entertainment player opens. Open the player from the sidebar. Providers come from the installed AniCLI and PandaFlix plugins.</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label" for="entertainment-default-provider">Default provider</label>
+                <select id="entertainment-default-provider" class="settings-select"><option value="">Ask each time</option></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="entertainment-default-language">Anime language</label>
+                <select id="entertainment-default-language" class="settings-select"><option value="sub">Sub</option><option value="dub">Dub</option></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label" for="entertainment-default-quality">Playback quality</label>
+                <select id="entertainment-default-quality" class="settings-select"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select>
+              </div>
+            </div>
+            <div id="entertainment-settings-status" class="settings-hint" role="status" style="padding-top:8px;"></div>
+          </div>
         </div>
 
         <div data-settings-panel="training" class="hidden">

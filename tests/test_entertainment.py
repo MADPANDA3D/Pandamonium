@@ -152,9 +152,14 @@ def test_generated_player_argument_parsers_keep_real_headers_and_subtitles(tmp_p
 def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     source = (ROOT / "static/js/entertainment.js").read_text()
     settings = (ROOT / "static/js/settings.js").read_text()
+    index = (ROOT / "static/index.html").read_text()
     assert "providers.length === 1" in source
     assert "providers.length > 1" in source
-    assert "providers.length === 0" in source
+    assert "providers.length > 0" in source
     assert "requestFullscreen" in source and "window.Hls" in source
     assert "voice" not in source.lower()
-    assert "refreshEntertainment" in settings and "openEntertainment" in settings
+    # The launcher lives in the sidebar; Settings owns the defaults panel.
+    assert "refreshEntertainment" in settings and "openEntertainment" in source
+    assert 'id="tool-entertainment-btn"' in index
+    assert 'data-settings-tab="entertainment"' in index
+    assert 'data-settings-panel="entertainment"' in index

@@ -9,6 +9,13 @@ let selection = null;
 let hls = null;
 let initialized = false;
 
+const PREFS_KEY = 'entertainment';
+const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best' };
+const LANGUAGES = ['sub', 'dub'];
+const QUALITIES = ['best', '1080p', '720p', '480p', '360p'];
+let prefs = { ...DEFAULT_PREFS };
+let prefsLoaded = false;
+
 async function api(path = '', body) {
   const response = await fetch(`/api/entertainment${path}`, {
     credentials: 'same-origin',
@@ -17,6 +24,66 @@ async function api(path = '', body) {
   const data = await response.json();
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Entertainment unavailable');
   return data;
+}
+
+async function loadPrefs() {
+  try {
+    const response = await fetch(`/api/prefs/${PREFS_KEY}`, { credentials: 'same-origin' });
+    const data = await response.json();
+    const value = data && typeof data.value === 'object' && data.value ? data.value : {};
+    prefs = { ...DEFAULT_PREFS, ...value };
+  } catch (_) {
+    prefs = { ...DEFAULT_PREFS };
+  }
+  prefsLoaded = true;
+  return prefs;
+}
+
+async function savePrefs() {
+  const statusEl = el('entertainment-settings-status');
+  try {
+    const response = await fetch(`/api/prefs/${PREFS_KEY}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: prefs }),
+    });
+    if (!response.ok) throw new Error('Could not save Entertainment defaults');
+    if (statusEl) statusEl.textContent = 'Saved.';
+  } catch (error) {
+    if (statusEl) statusEl.textContent = error.message;
+  }
+}
+
+function applyPrefs() {
+  const mode = el('entertainment-mode');
+  if (mode) mode.value = LANGUAGES.includes(prefs.language) ? prefs.language : 'sub';
+  const quality = el('entertainment-quality');
+  if (quality) quality.value = QUALITIES.includes(prefs.quality) ? prefs.quality : 'best';
+}
+
+function renderSettingsPanel() {
+  const providerSelect = el('entertainment-default-provider');
+  if (providerSelect) {
+    providerSelect.innerHTML = '<option value="">Ask each time</option>' + providers
+      .filter(provider => provider.enabled)
+      .map(provider => `<option value="${esc(provider.id)}">${esc(provider.label)}</option>`)
+      .join('');
+    providerSelect.value = providers.some(provider => provider.id === prefs.provider && provider.enabled) ? prefs.provider : '';
+  }
+  const language = el('entertainment-default-language');
+  if (language) language.value = LANGUAGES.includes(prefs.language) ? prefs.language : 'sub';
+  const quality = el('entertainment-default-quality');
+  if (quality) quality.value = QUALITIES.includes(prefs.quality) ? prefs.quality : 'best';
+}
+
+function readSettingsPanel() {
+  prefs = {
+    provider: el('entertainment-default-provider')?.value || '',
+    language: el('entertainment-default-language')?.value || 'sub',
+    quality: el('entertainment-default-quality')?.value || 'best',
+  };
+  savePrefs();
 }
 
 function stopPlayer() {
@@ -152,6 +219,13 @@ function init() {
     try { status('Loading history…'); const result = await api('/ani-cli/history', {}); buttons(result.items, 'history', item => `${item.title} · Episode ${item.episode}`); status('Continue watching.'); }
     catch (error) { status(error.message); }
   });
+  el('tool-entertainment-btn')?.addEventListener('click', () => openEntertainment());
+  el('tool-entertainment-btn')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEntertainment(); }
+  });
+  el('entertainment-default-provider')?.addEventListener('change', readSettingsPanel);
+  el('entertainment-default-language')?.addEventListener('change', readSettingsPanel);
+  el('entertainment-default-quality')?.addEventListener('change', readSettingsPanel);
   document.addEventListener('click', event => {
     const provider = event.target.closest?.('[data-provider]');
     if (provider) { showProvider(provider.dataset.provider); return; }
@@ -177,18 +251,24 @@ function init() {
 
 export async function refreshEntertainment() {
   init();
+  if (!prefsLoaded) await loadPrefs();
   try { providers = (await api()).providers; } catch (_) { providers = []; }
-  document.querySelector('[data-settings-tab="entertainment"]')?.classList.toggle('hidden', providers.length === 0);
-  if (!providers.length) closeEntertainment();
+  const installed = providers.length > 0;
+  document.querySelector('[data-settings-tab="entertainment"]')?.classList.toggle('hidden', !installed);
+  el('entertainment-section')?.classList.toggle('hidden', !installed);
+  renderSettingsPanel();
+  if (!installed) closeEntertainment();
 }
 
 export async function openEntertainment() {
   await refreshEntertainment();
   if (!providers.length) return;
+  applyPrefs();
   const tabs = el('entertainment-tabs');
   tabs.innerHTML = providers.length > 1 ? providers.map(provider => `<button type="button" data-provider="${provider.id}">${esc(provider.label)}</button>`).join('') : '';
   el('entertainment-modal').classList.remove('hidden');
-  showLanding();
+  const preferred = providers.find(provider => provider.id === prefs.provider && provider.enabled);
+  if (preferred) showProvider(preferred.id); else showLanding();
 }
 
 export function closeEntertainment() {
