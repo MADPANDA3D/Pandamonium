@@ -211,7 +211,13 @@ def _sandbox(
         command += ["--ro-bind", str(base), str(base)]
     if not python.is_relative_to(base) and not python.is_relative_to(Path("/usr")):
         raise ExtensionLifecycleError("extension_cli_python_runtime_unsupported")
-    for name in ("/etc/resolv.conf", "/etc/ssl/certs", "/etc/hosts"):
+    for name in (
+        "/etc/resolv.conf",
+        "/etc/ssl/certs",
+        "/etc/ca-certificates",
+        "/etc/pki",
+        "/etc/hosts",
+    ):
         if Path(name).exists():
             command += ["--ro-bind", name, name]
     cafile = ssl.get_default_verify_paths().cafile

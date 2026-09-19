@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -178,6 +179,31 @@ class GitSourceClient:
                 rows.append((revision, name))
         if IMMUTABLE_REVISION_PATTERN.fullmatch(ref):
             matches = {revision for revision, _name in rows if revision == ref}
+            if not matches:
+                with tempfile.TemporaryDirectory(prefix="extension-ref-") as directory:
+                    try:
+                        self._run(["init", directory])
+                        self._run(
+                            ["-C", directory, "remote", "add", "origin", source]
+                        )
+                        self._run(
+                            [
+                                "-C",
+                                directory,
+                                "fetch",
+                                "--depth",
+                                "1",
+                                "--filter=blob:none",
+                                "origin",
+                                ref,
+                            ]
+                        )
+                        observed = self._run(
+                            ["-C", directory, "rev-parse", "FETCH_HEAD"]
+                        ).strip()
+                    except ExtensionLifecycleError:
+                        observed = ""
+                matches = {observed} if observed == ref else set()
         elif ref == "HEAD" or ref.startswith("refs/"):
             matches = {revision for revision, name in rows if name == ref}
         else:
