@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,17 @@ from src.extension_package import build_prepared_package, package_tree_digest
 from src.extension_registry import ExtensionRegistry
 from tests.test_extension_installer import _approve_and_execute
 from tests.test_extension_semantic_intake import proposal, source_tree
+
+
+def test_sandbox_mounts_available_ca_bundle_directories(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
+    command = cli._sandbox(tmp_path, tmp_path, network=True)
+
+    for directory in ("/etc/ca-certificates", "/etc/pki"):
+        if Path(directory).exists():
+            assert ["--ro-bind", directory, directory] == command[
+                command.index(directory) - 1 : command.index(directory) + 2
+            ]
 
 
 def package(tmp_path):
