@@ -120,6 +120,10 @@ def mount_extension_capabilities(
         if not record.get("enabled"):
             unavailable.append({"name": name, "error": "extension_disabled"})
             continue
+        from src.entertainment import is_provider
+        if is_provider(record["manifest"]):
+            unavailable.append({"name": name, "error": "extension_media_ui_only"})
+            continue
         descriptor = record["manifest"]["capabilities"]["descriptor"]["type"]
         if descriptor not in MOUNTABLE_DESCRIPTORS and not is_cli(record["manifest"]):
             unavailable.append({

@@ -1822,6 +1822,7 @@
           <div class="settings-sidebar-divider"></div>
           <!-- Section 3: UX (Appearance → Shortcuts) -->
           <button class="settings-nav-item hidden" data-settings-tab="soundboard"><span aria-hidden="true">♫</span> Soundboard</button>
+          <button class="settings-nav-item hidden" data-settings-tab="entertainment"><span aria-hidden="true">▶</span> Entertainment</button>
           <button class="settings-nav-item" data-settings-tab="appearance">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/></svg>
             <span>Appearance</span>
@@ -3117,6 +3118,38 @@
     </div>
   </div>
 
+  <div id="entertainment-modal" class="entertainment-shell hidden" role="dialog" aria-modal="true" aria-labelledby="entertainment-title">
+    <header class="entertainment-header">
+      <button id="entertainment-home" class="entertainment-brand" type="button" aria-label="Entertainment home"><span>▶</span><strong id="entertainment-title">ENTERTAINMENT</strong></button>
+      <nav id="entertainment-tabs" aria-label="Entertainment providers"></nav>
+      <button id="entertainment-close" class="entertainment-close" type="button" aria-label="Close Entertainment">✕</button>
+    </header>
+    <main class="entertainment-main">
+      <section id="entertainment-landing" class="entertainment-landing" aria-label="Choose a provider"></section>
+      <section id="entertainment-browser" class="entertainment-browser hidden">
+        <div class="entertainment-hero">
+          <p id="entertainment-eyebrow">PRIVATE RUNTIME · UPSTREAM CLI</p>
+          <h1 id="entertainment-heading">Entertainment</h1>
+          <p id="entertainment-copy"></p>
+        </div>
+        <form id="entertainment-search" class="entertainment-search">
+          <label class="sr-only" for="entertainment-query">Search titles</label>
+          <input id="entertainment-query" type="search" maxlength="200" autocomplete="off" placeholder="Search titles">
+          <select id="entertainment-mode" aria-label="Anime language"><option value="sub">Sub</option><option value="dub">Dub</option></select>
+          <select id="entertainment-quality" aria-label="Playback quality"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select>
+          <button type="submit">Search</button>
+          <button id="entertainment-history" type="button">Continue</button>
+        </form>
+        <p id="entertainment-status" class="entertainment-status" role="status" aria-live="polite"></p>
+        <div id="entertainment-results" class="entertainment-results"></div>
+      </section>
+      <section id="entertainment-player" class="entertainment-player hidden">
+        <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+        <video id="entertainment-video" controls autoplay playsinline></video>
+      </section>
+    </main>
+  </div>
+
   <!-- Search overlay (Ctrl+K command palette) -->
   <div class="search-overlay hidden" id="search-overlay">
     <div class="search-popup">
@@ -3134,6 +3167,7 @@
 
 
 <!-- Load modules in this order -->
+<script src="/static/lib/hls.min.js"></script>
 <script type="module" src="/static/js/storage.js"></script>
 <script type="module" src="/static/js/ui.js"></script>
 <script type="module" src="/static/js/markdown.js"></script>

@@ -1,108 +1,525 @@
 {
-  "purpose": "ani-cli is a shell CLI for browsing and watching anime, not development tooling. Propose a reduced, headless Pandamonium integration for its native next-episode countdown operation, reporting release information through AnimeSchedule without launching a player or downloading media. This generated integration is source-backed but UNVERIFIED.",
+  "purpose": "Install the complete pinned ani-cli application and expose its search, sub/dub, episodes, quality, playback and history flows in Pandamonium's native Entertainment UI.",
   "categories": [
-    "anime",
     "entertainment",
-    "release-tracking"
+    "media"
   ],
-  "icon": "📺",
+  "icon": "\u25b6",
   "examples": [
-    "Check the next-episode countdown for One Piece.",
-    "Look up the release status and available sub/dub countdowns for Blue Lock."
+    "Search and play a title in Pandamonium."
   ],
   "evidence": [
     {
       "path": "README.md",
       "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
-    },
-    {
-      "path": "ani-cli.1",
-      "quote": "A shell script to browse and search anime from the command-line."
-    },
-    {
-      "path": "ani-cli",
-      "quote": "        # for checking new releases by specifying anime name\n        [ \"$source\" = \"nextep\" ] && time_until_next_ep \"$query\""
-    },
-    {
-      "path": "ani-cli",
-      "quote": "    animeschedule=\"https://animeschedule.net\"\n    _query=\"$(printf \"%s\" \"$*\" | tr ' ' '+')\"\n    $curl_exe -s -G \"$animeschedule/api/v3/anime\" --data \"q=${_query}\" | sed 's|},{\"id\"|\\n|g' | while read -r _entry; do"
-    },
-    {
-      "path": "ani-cli.1",
-      "quote": "Sets the player ani-cli uses. Can be debug (print links), download (equivalent to -d), android_mpv (apk and am start), android_vlc (apk and am start), catt (for streaming to tv), or any player that can play urls. For defaults see working without arguments."
-    },
-    {
-      "path": "ani-cli",
-      "quote": "dep_ch \"$menu_program\" # TODO: use dep_ch_failover to iterate through options\n\ncase \"$player_function\" in\n    debug) ;;"
     }
   ],
   "repo_class": "unknown",
   "interfaces": [
     {
-      "name": "ani_cli__nextep_countdown",
+      "name": "ani_cli__status",
       "kind": "tool",
-      "binding": "--nextep-countdown",
+      "binding": "entertainment.ani.status",
       "evidence": [
         {
-          "path": "ani-cli",
-          "quote": "      -N, --nextep-countdown\n        Display a countdown to the next episode"
-        },
-        {
-          "path": "ani-cli",
-          "quote": "        -N | --nextep-countdown) source=nextep ;;"
-        },
-        {
-          "path": "ani-cli",
-          "quote": "        [ \"$source\" = \"nextep\" ] && time_until_next_ep \"$query\""
-        },
-        {
-          "path": "ani-cli",
-          "quote": "    %s [options] [query]"
-        },
-        {
-          "path": "ani-cli",
-          "quote": "        printf \"Eng: %s\\n\" \"$_eng_title\"\n        printf \"Jpn: %s\\n\" \"$_jpn_title\"\n        printf \"Status: \\033[1;%sm%s\\033[0m\\n\" \"$_color\" \"$_status\""
+          "path": "README.md",
+          "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
         }
       ],
       "tool_schema": {
         "type": "function",
         "function": {
-          "name": "ani_cli__nextep_countdown",
-          "description": "Request ani-cli's live release status and available next-episode countdowns. Returns upstream text with terminal controls removed. Does not play or download media. Generated binding is UNVERIFIED.",
+          "name": "ani_cli__status",
+          "description": "Check the installed upstream Anime CLI version.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ani_cli__search",
+      "kind": "tool",
+      "binding": "entertainment.ani.search",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "ani_cli__search",
+          "description": "Search Anime through the real upstream CLI.",
           "parameters": {
             "type": "object",
             "properties": {
               "query": {
                 "type": "string",
-                "minLength": 1,
                 "maxLength": 200,
-                "description": "Anime title passed as one argv element using upstream's documented [query] string placeholder. Must start with a letter or digit; accepts letters, digits, spaces, and . : ' ! ? ( ) -."
+                "minLength": 1
+              },
+              "dub": {
+                "type": "boolean"
               }
             },
             "required": [
-              "query"
+              "query",
+              "dub"
             ],
             "additionalProperties": false
           }
         }
       },
-      "arguments": {
-        "query": {
-          "path": "ani-cli",
-          "quote": "    %s [options] [query]"
-        }
-      },
+      "arguments": {},
       "output_schema": {
         "type": "object",
         "properties": {
-          "text": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 131072
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "id",
+                "title"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
-          "text"
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ani_cli__episodes",
+      "kind": "tool",
+      "binding": "entertainment.ani.episodes",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "ani_cli__episodes",
+          "description": "List episodes for the selected Anime title.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              "selection_index": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "dub": {
+                "type": "boolean"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5000
+              }
+            },
+            "required": [
+              "query",
+              "selection_index",
+              "dub",
+              "offset"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "number": {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              },
+              "required": [
+                "number",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "next_offset": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 5000
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "next_offset"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ani_cli__resolve",
+      "kind": "tool",
+      "binding": "entertainment.ani.resolve",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "ani_cli__resolve",
+          "description": "Resolve the selected Anime title for native browser playback.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              "selection_index": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "dub": {
+                "type": "boolean"
+              },
+              "episode": {
+                "type": "string",
+                "maxLength": 16
+              },
+              "quality": {
+                "type": "string",
+                "enum": [
+                  "best",
+                  "1080p",
+                  "720p",
+                  "480p",
+                  "360p"
+                ]
+              }
+            },
+            "required": [
+              "query",
+              "selection_index",
+              "dub",
+              "episode",
+              "quality"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "headers": {
+            "type": "object",
+            "properties": {
+              "Referer": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "User-Agent": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "Origin": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "Cookie": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "subtitles": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "language": {
+                  "type": "string",
+                  "maxLength": 16
+                }
+              },
+              "required": [
+                "url",
+                "label",
+                "language"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "headers",
+          "subtitles"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ani_cli__history",
+      "kind": "tool",
+      "binding": "entertainment.ani.history",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "ani_cli__history",
+          "description": "Read ani-cli watch history from this account's private runtime.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "episode": {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "index",
+                "episode",
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ani_cli__continue",
+      "kind": "tool",
+      "binding": "entertainment.ani.continue",
+      "evidence": [
+        {
+          "path": "README.md",
+          "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "ani_cli__continue",
+          "description": "Continue an ani-cli history entry and resolve it for native browser playback.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "history_index": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "dub": {
+                "type": "boolean"
+              },
+              "quality": {
+                "type": "string",
+                "enum": [
+                  "best",
+                  "1080p",
+                  "720p",
+                  "480p",
+                  "360p"
+                ]
+              }
+            },
+            "required": [
+              "history_index",
+              "dub",
+              "quality"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {},
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "headers": {
+            "type": "object",
+            "properties": {
+              "Referer": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "User-Agent": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "Origin": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "Cookie": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "subtitles": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "language": {
+                  "type": "string",
+                  "maxLength": 16
+                }
+              },
+              "required": [
+                "url",
+                "label",
+                "language"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "headers",
+          "subtitles"
         ],
         "additionalProperties": false
       }
@@ -110,76 +527,31 @@
   ],
   "setup": [],
   "requirements": [
-    "Needs setup and real runtime validation before use. No commands have been executed.",
-    "The repository is a POSIX shell CLI; repo_class is unknown because the response schema has no shell_cli class. Python is only the generated adapter language.",
-    "The package-local adapter invokes ['/bin/sh', '/package/ani-cli', '--nextep-countdown', query] without a shell command string. The query remains one argv element.",
-    "Provide /bin/sh, curl, sed, grep, cut, uname, mkdir, tr, head, tput and rm in the isolated Linux environment. The countdown-only adapter uses /bin/true as its inert menu command because this path never opens an interactive selector.",
-    "If dependencies are absent, supply approved executables and required libraries inside the isolated runner, optionally under /runtime/bin, then rerun setup. Do not use host package-manager or upstream self-update commands.",
-    "Authorize HTTPS access to https://animeschedule.net for title queries and returned anime routes. Queries leave the runner; provider availability and response parsing remain unverified.",
-    "Reduced support: AnimeSchedule countdowns only. No hianime browsing, stream resolution, playback, downloads, history management, self-update, or alternative media providers are exposed.",
-    "No display, audio, GPU, browser, credentials, persistent service, or interactive input is required for this operation. The adapter selects /bin/true as the inert menu executable for this noninteractive path.",
-    "The adapter selects upstream's documented debug player mode to avoid media-player dependencies and confines upstream history initialization to disposable state under /runtime.",
-    "Retain LICENSE and upstream license notices. No source exclusions are proposed."
+    "Linux container with the standard POSIX utilities and curl; all state remains inside the private plugin runtime.",
+    "Retain the upstream GPL-3.0-or-later license and source notices."
   ],
   "validation": [
-    "After operator authorization, run execution.install to check dependencies and prepare private state. Dependency detection is not an operation test.",
-    "Run ani_cli__nextep_countdown with {\"query\":\"One Piece\"} against the real upstream command and live provider. Require exit zero, schema-valid JSON, recognizable Eng/Jpn/Status fields, and plausible provider content. Live response text has no deterministic expected JSON.",
-    "Repeat with {\"query\":\"Blue Lock\"}; inspect available sub/dub fields without treating missing countdowns for finished titles as a failure.",
-    "Confirm the operation never opens a menu or player, starts no persistent process, and writes only under /runtime. Inspect actual network destinations and confirm they remain on the declared AnimeSchedule origin.",
-    "Test rejection of empty queries, leading option syntax, unknown JSON keys, duplicate keys, invalid tool names and oversized input. Verify provider failures, malformed output, output-limit breaches and timeouts exit nonzero without fabricated results.",
-    "Exercise restart and removal through the shared lifecycle. Confirm no processes remain and private runtime state is removed. Keep the integration UNVERIFIED until external checks pass."
+    "Install in disposable state and require the actual pinned ani-cli --version check to pass.",
+    "Exercise search, sub/dub episode discovery and playback resolution against the live upstream provider before live acceptance."
   ],
-  "execution": {
-    "install": [
-      [
-        "python",
-        "/package/.pandamonium/setup.py"
-      ]
-    ],
-    "checks": [
-      {
-        "name": "ani_cli__nextep_countdown",
-        "arguments": {
-          "query": "One Piece"
-        },
-        "expected": null
-      }
-    ],
-    "service": [],
-    "prerequisites": [],
-    "knowledge": null,
-    "voice_model": null
-  },
-  "source_exclusions": [],
-  "readiness": "needs_validation",
   "manifest": {
     "protocol_version": "jos-extension.v1",
     "extension_id": "ani-cli",
-    "name": "ani-cli Release Countdown",
-    "version": "0.1.0",
+    "name": "AniCLI",
+    "version": "5.1.2",
     "metadata": {
-      "summary": "ani-cli is a shell CLI for browsing and watching anime, not development tooling. Propose a reduced, headless Pandamonium integration for its native next-episode countdown operation, reporting release information through AnimeSchedule without launching a player or downloading media. This generated integration is source-backed but UNVERIFIED.",
-      "icon": "📺",
+      "summary": "Install the complete pinned ani-cli application and expose its search, sub/dub, episodes, quality, playback and history flows in Pandamonium's native Entertainment UI.",
+      "icon": "\u25b6",
       "categories": [
-        "anime",
         "entertainment",
-        "release-tracking"
+        "media"
       ],
       "examples": [
-        "Check the next-episode countdown for One Piece.",
-        "Look up the release status and available sub/dub countdowns for Blue Lock."
+        "Search and play a title in Pandamonium."
       ],
       "requirements": [
-        "Needs setup and real runtime validation before use. No commands have been executed.",
-        "The repository is a POSIX shell CLI; repo_class is unknown because the response schema has no shell_cli class. Python is only the generated adapter language.",
-        "The package-local adapter invokes ['/bin/sh', '/package/ani-cli', '--nextep-countdown', query] without a shell command string. The query remains one argv element.",
-        "Provide /bin/sh, curl, sed, grep, cut, uname, mkdir, tr, head, tput and rm in the isolated Linux environment. The countdown-only adapter uses /bin/true as its inert menu command because this path never opens an interactive selector.",
-        "If dependencies are absent, supply approved executables and required libraries inside the isolated runner, optionally under /runtime/bin, then rerun setup. Do not use host package-manager or upstream self-update commands.",
-        "Authorize HTTPS access to https://animeschedule.net for title queries and returned anime routes. Queries leave the runner; provider availability and response parsing remain unverified.",
-        "Reduced support: AnimeSchedule countdowns only. No hianime browsing, stream resolution, playback, downloads, history management, self-update, or alternative media providers are exposed.",
-        "No display, audio, GPU, browser, credentials, persistent service, or interactive input is required for this operation. The adapter selects /bin/true as the inert menu executable for this noninteractive path.",
-        "The adapter selects upstream's documented debug player mode to avoid media-player dependencies and confines upstream history initialization to disposable state under /runtime.",
-        "Retain LICENSE and upstream license notices. No source exclusions are proposed."
+        "Linux container with the standard POSIX utilities and curl; all state remains inside the private plugin runtime.",
+        "Retain the upstream GPL-3.0-or-later license and source notices."
       ],
       "skill_descriptions": {}
     },
@@ -199,20 +571,169 @@
         {
           "type": "function",
           "function": {
-            "name": "ani_cli__nextep_countdown",
-            "description": "Request ani-cli's live release status and available next-episode countdowns. Returns upstream text with terminal controls removed. Does not play or download media. Generated binding is UNVERIFIED.",
+            "name": "ani_cli__status",
+            "description": "Check the installed upstream Anime CLI version.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "ani_cli__search",
+            "description": "Search Anime through the real upstream CLI.",
             "parameters": {
               "type": "object",
               "properties": {
                 "query": {
                   "type": "string",
-                  "minLength": 1,
                   "maxLength": 200,
-                  "description": "Anime title passed as one argv element using upstream's documented [query] string placeholder. Must start with a letter or digit; accepts letters, digits, spaces, and . : ' ! ? ( ) -."
+                  "minLength": 1
+                },
+                "dub": {
+                  "type": "boolean"
                 }
               },
               "required": [
-                "query"
+                "query",
+                "dub"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "ani_cli__episodes",
+            "description": "List episodes for the selected Anime title.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "minLength": 1
+                },
+                "selection_index": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "dub": {
+                  "type": "boolean"
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5000
+                }
+              },
+              "required": [
+                "query",
+                "selection_index",
+                "dub",
+                "offset"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "ani_cli__resolve",
+            "description": "Resolve the selected Anime title for native browser playback.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "minLength": 1
+                },
+                "selection_index": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "dub": {
+                  "type": "boolean"
+                },
+                "episode": {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "best",
+                    "1080p",
+                    "720p",
+                    "480p",
+                    "360p"
+                  ]
+                }
+              },
+              "required": [
+                "query",
+                "selection_index",
+                "dub",
+                "episode",
+                "quality"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "ani_cli__history",
+            "description": "Read ani-cli watch history from this account's private runtime.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "ani_cli__continue",
+            "description": "Continue an ani-cli history entry and resolve it for native browser playback.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "history_index": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "dub": {
+                  "type": "boolean"
+                },
+                "quality": {
+                  "type": "string",
+                  "enum": [
+                    "best",
+                    "1080p",
+                    "720p",
+                    "480p",
+                    "360p"
+                  ]
+                }
+              },
+              "required": [
+                "history_index",
+                "dub",
+                "quality"
               ],
               "additionalProperties": false
             }
@@ -221,14 +742,15 @@
       ]
     },
     "permissions": {
-      "default": "external_side_effect",
+      "default": "read_only",
       "capabilities": {
-        "ani_cli__nextep_countdown": "external_side_effect"
+        "ani_cli__resolve": "bounded_write",
+        "ani_cli__continue": "bounded_write"
       }
     },
     "health": {
       "type": "catalog",
-      "timeout_seconds": 10
+      "timeout_seconds": 30
     },
     "lifecycle": {
       "install": [],
@@ -238,14 +760,13 @@
     },
     "data_boundaries": {
       "read": [
-        "ani-cli",
         ".pandamonium"
       ],
       "write": [
         "runtime"
       ],
       "network": [
-        "https://animeschedule.net"
+        "https://hianime.at"
       ]
     },
     "removal": {
@@ -262,11 +783,39 @@
   "files": [
     {
       "path": ".pandamonium/adapter.py",
-      "content": "import json\nimport os\nimport pathlib\nimport re\nimport selectors\nimport signal\nimport subprocess\nimport sys\nimport tempfile\nimport time\n\nTOOL = 'ani_cli__nextep_countdown'\nPATH = '/runtime/bin:/usr/bin:/bin'\nLIMIT = 131072\nTIMEOUT = 45\n\n\ndef unique_object(pairs):\n    result = {}\n    for key, value in pairs:\n        if key in result:\n            raise ValueError('Duplicate JSON key')\n        result[key] = value\n    return result\n\n\ndef run_bounded(argv, env):\n    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,\n                               stderr=subprocess.PIPE, cwd='/package', env=env,\n                               shell=False, start_new_session=True)\n    selector = selectors.DefaultSelector()\n    buffers = {'stdout': bytearray(), 'stderr': bytearray()}\n    total = 0\n    deadline = time.monotonic() + TIMEOUT\n    try:\n        selector.register(process.stdout, selectors.EVENT_READ, 'stdout')\n        selector.register(process.stderr, selectors.EVENT_READ, 'stderr')\n        while selector.get_map():\n            remaining = deadline - time.monotonic()\n            if remaining <= 0:\n                raise RuntimeError('Upstream operation timed out')\n            for key, _ in selector.select(min(remaining, 0.2)):\n                chunk = os.read(key.fileobj.fileno(), 8192)\n                if not chunk:\n                    selector.unregister(key.fileobj)\n                    continue\n                total += len(chunk)\n                if total > LIMIT:\n                    raise RuntimeError('Upstream output exceeded limit')\n                buffers[key.data].extend(chunk)\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            raise RuntimeError('Upstream operation timed out')\n        code = process.wait(timeout=remaining)\n        if code != 0:\n            raise RuntimeError('Upstream operation failed with exit code ' + str(code))\n        return bytes(buffers['stdout']).decode('utf-8', errors='replace')\n    finally:\n        try:\n            os.killpg(process.pid, signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n        process.wait()\n        selector.close()\n        process.stdout.close()\n        process.stderr.close()\n\n\ndef main():\n    if len(sys.argv) != 2 or sys.argv[1] != TOOL:\n        raise ValueError('Unknown tool name')\n    raw = sys.stdin.buffer.read(4097)\n    if len(raw) > 4096:\n        raise ValueError('Input exceeds limit')\n    args = json.loads(raw, object_pairs_hook=unique_object)\n    if not isinstance(args, dict) or set(args) != {'query'}:\n        raise ValueError('Expected exactly the query argument')\n    query = args['query']\n    if not isinstance(query, str) or not 1 <= len(query) <= 200:\n        raise ValueError('query must be a string of 1 to 200 characters')\n    if query != query.strip() or not query[0].isalnum():\n        raise ValueError('query must start with a letter or digit and have no outer whitespace')\n    if any(not (char.isalnum() or char in \" .:'!?()-\") for char in query):\n        raise ValueError('query contains unsupported characters')\n    root = pathlib.Path('/runtime/ani-cli')\n    root.mkdir(parents=True, exist_ok=True)\n    with tempfile.TemporaryDirectory(prefix='check-', dir=root) as state:\n        home = pathlib.Path(state, 'home')\n        cache = pathlib.Path(state, 'cache')\n        home.mkdir()\n        cache.mkdir()\n        env = {\n            'PATH': PATH,\n            'HOME': str(home),\n            'XDG_CACHE_HOME': str(cache),\n            'XDG_STATE_HOME': str(pathlib.Path(state, 'state')),\n            'TMPDIR': state,\n            'LANG': 'C.UTF-8',\n            'LC_ALL': 'C.UTF-8',\n            'TERM': 'dumb',\n            'ANI_CLI_PLAYER': 'debug',\n            'ANI_CLI_MENU': '/bin/true',\n            'ANI_CLI_LOG': '0',\n            'ANI_CLI_HIST_DIR': str(pathlib.Path(state, 'history')),\n            'ANI_CLI_DEFAULT_SOURCE': 'search',\n        }\n        output = run_bounded(['/bin/sh', '/package/ani-cli', '--nextep-countdown', query], env)\n    output = re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]', '', output)\n    output = ''.join(char for char in output if char in '\\n\\t' or (ord(char) >= 32 and not 127 <= ord(char) <= 159))\n    output = output.strip()\n    if not all(re.search(r'^' + field + r': .+', output, flags=re.MULTILINE) for field in ('Eng', 'Jpn', 'Status')):\n        raise RuntimeError('No recognizable release information returned; inspect provider availability and upstream parsing')\n    if len(output) > LIMIT:\n        raise RuntimeError('Result exceeds schema limit')\n    print(json.dumps({'text': output}, ensure_ascii=True))\n\n\nif __name__ == '__main__':\n    try:\n        main()\n    except Exception as exc:\n        print('ani-cli adapter: ' + str(exc), file=sys.stderr)\n        sys.exit(1)\n"
+      "content": "\"\"\"Structured web operations over the pinned, unmodified ani-cli script.\"\"\"\n\nimport json\nimport os\nimport pathlib\nimport pty\nimport re\nimport selectors\nimport signal\nimport subprocess\nimport sys\nimport tempfile\nimport time\n\nLIMIT = 64 * 1024\nTOOLS = {\n    \"ani_cli__status\", \"ani_cli__search\", \"ani_cli__episodes\",\n    \"ani_cli__resolve\", \"ani_cli__history\", \"ani_cli__continue\",\n}\n\n\ndef _json():\n    def unique(pairs):\n        result = {}\n        for key, value in pairs:\n            if key in result:\n                raise ValueError(\"Duplicate JSON key\")\n            result[key] = value\n        return result\n    raw = sys.stdin.buffer.read(LIMIT + 1)\n    if len(raw) > LIMIT:\n        raise ValueError(\"Input exceeds limit\")\n    value = json.loads(raw or b\"{}\", object_pairs_hook=unique)\n    if not isinstance(value, dict):\n        raise ValueError(\"Expected an object\")\n    return value\n\n\ndef _text(value, name, maximum=300):\n    if not isinstance(value, str) or value != value.strip() or not 1 <= len(value) <= maximum or \"\\0\" in value:\n        raise ValueError(f\"Invalid {name}\")\n    return value\n\n\ndef _run(argv, env, timeout=25):\n    master, slave = pty.openpty()\n    process = subprocess.Popen(argv, stdin=slave, stdout=subprocess.PIPE,\n                               stderr=subprocess.PIPE, cwd=\"/package\", env=env,\n                               shell=False, start_new_session=True)\n    os.close(slave)\n    streams = {process.stdout: bytearray(), process.stderr: bytearray()}\n    deadline = time.monotonic() + timeout\n    try:\n        with selectors.DefaultSelector() as selector:\n            for stream in streams:\n                selector.register(stream, selectors.EVENT_READ)\n            while selector.get_map():\n                if time.monotonic() >= deadline:\n                    raise RuntimeError(\"Upstream operation timed out\")\n                for key, _ in selector.select(0.2):\n                    chunk = os.read(key.fd, 8192)\n                    if not chunk:\n                        selector.unregister(key.fileobj)\n                    else:\n                        streams[key.fileobj].extend(chunk)\n                        if sum(map(len, streams.values())) > LIMIT:\n                            raise RuntimeError(\"Upstream output exceeded limit\")\n        return process.wait(timeout=1), streams[process.stdout].decode(errors=\"replace\"), streams[process.stderr].decode(errors=\"replace\")\n    finally:\n        os.close(master)\n        try:\n            os.killpg(process.pid, signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n        process.wait()\n        process.stdout.close(); process.stderr.close()\n\n\ndef _environment(work, plan=None, capture_at=None, hold=\"0\"):\n    selector = pathlib.Path(work, \"selector.json\")\n    selector.write_text(json.dumps({\"index\": 0, \"plan\": plan or [], \"capture_at\": capture_at}))\n    return {\n        \"PATH\": \"/runtime/bin:/usr/bin:/bin\", \"HOME\": \"/runtime/home\",\n        \"XDG_CACHE_HOME\": \"/runtime/cache\", \"XDG_STATE_HOME\": \"/runtime/home/.local/state\",\n        \"TMPDIR\": work, \"LANG\": \"C.UTF-8\", \"LC_ALL\": \"C.UTF-8\", \"TERM\": \"dumb\",\n        \"ANI_CLI_PLAYER\": \"/runtime/bin/pandamonium-mpv\",\n        \"ANI_CLI_MENU\": \"/runtime/bin/pandamonium-select\", \"ANI_CLI_LOG\": \"0\",\n        \"ANI_CLI_HIST_DIR\": \"/runtime/home/.local/state/ani-cli\", \"ANI_CLI_NO_DETACH\": \"1\",\n        \"PANDAMONIUM_SELECTOR_STATE\": str(selector),\n        \"PANDAMONIUM_SELECTOR_CAPTURE\": str(pathlib.Path(work, \"capture.json\")),\n        \"PANDAMONIUM_PLAYBACK_CAPTURE\": str(pathlib.Path(work, \"playback.json\")),\n        \"PANDAMONIUM_PLAYER_HOLD\": hold,\n    }\n\n\ndef _capture(work, detail=\"\"):\n    path = pathlib.Path(work, \"capture.json\")\n    if not path.exists():\n        raise RuntimeError(\"Upstream did not expose the requested selection: \" + detail[-1000:])\n    return json.loads(path.read_text())[\"items\"][:5000]\n\n\ndef _playback(work):\n    path = pathlib.Path(work, \"playback.json\")\n    if not path.exists():\n        raise RuntimeError(\"Upstream did not resolve playback\")\n    argv = json.loads(path.read_text())\n    urls = [value for value in argv if value.startswith((\"http://\", \"https://\"))]\n    if not urls:\n        raise RuntimeError(\"Upstream returned no playback URL\")\n    def option(prefix):\n        return next((value[len(prefix):] for value in argv if value.startswith(prefix)), \"\")\n    referer = option(\"--referrer=\")\n    title = option(\"--force-media-title=\").removeprefix(\"Playing \") or \"Anime\"\n    return {\n        \"title\": title[:300], \"url\": urls[-1], \"headers\": {\"Referer\": referer} if referer else {},\n        \"subtitles\": [{\"url\": value[len(\"--sub-file=\"):], \"label\": \"English\", \"language\": \"en\"}\n                      for value in argv if value.startswith(\"--sub-file=\")],\n    }\n\n\ndef _base_args(args, *, episode=False):\n    allowed = {\"query\", \"selection_index\", \"dub\"} | ({\"episode\", \"quality\"} if episode else {\"offset\"})\n    if set(args) != allowed:\n        raise ValueError(\"Unexpected arguments\")\n    query = _text(args[\"query\"], \"query\", 200)\n    index, dub = args[\"selection_index\"], args[\"dub\"]\n    if not isinstance(index, int) or isinstance(index, bool) or not 1 <= index <= 50 or not isinstance(dub, bool):\n        raise ValueError(\"Invalid selection\")\n    argv = [\"/bin/sh\", \"/package/ani-cli\", \"-S\", str(index)]\n    if dub:\n        argv.append(\"--dub\")\n    if episode:\n        argv += [\"-e\", _text(args[\"episode\"], \"episode\", 16), \"-q\", _text(args[\"quality\"], \"quality\", 8)]\n    argv.append(query)\n    return argv\n\n\ndef main():\n    if len(sys.argv) != 2 or sys.argv[1] not in TOOLS:\n        raise ValueError(\"Unknown tool name\")\n    tool, args = sys.argv[1], _json()\n    if tool == \"ani_cli__status\":\n        if args:\n            raise ValueError(\"Unexpected arguments\")\n        code, output, _ = _run([\"/bin/sh\", \"/package/ani-cli\", \"--version\"], _environment(\"/runtime/cache\"), 10)\n        if code:\n            raise RuntimeError(\"ani-cli version check failed\")\n        result = {\"version\": output.strip()[:40]}\n    elif tool == \"ani_cli__history\":\n        if args:\n            raise ValueError(\"Unexpected arguments\")\n        rows = []\n        root = pathlib.Path(\"/runtime/home/.local/state/ani-cli\")\n        for path in [root / \"ani-hsts\"] if root.exists() else []:\n            if not path.is_file() or path.stat().st_size > LIMIT:\n                continue\n            for line in path.read_text(errors=\"replace\").splitlines():\n                parts = line.split(\"\\t\", 2)\n                if len(parts) == 3:\n                    rows.append({\"index\": len(rows) + 1, \"episode\": parts[0][:16], \"title\": parts[2][:300]})\n        result = {\"items\": rows[:100]}\n    else:\n        pathlib.Path(\"/runtime/cache\").mkdir(parents=True, exist_ok=True)\n        with tempfile.TemporaryDirectory(prefix=\"ani-web-\", dir=\"/runtime/cache\") as work:\n            if tool == \"ani_cli__search\":\n                if set(args) != {\"query\", \"dub\"} or not isinstance(args[\"dub\"], bool):\n                    raise ValueError(\"Unexpected arguments\")\n                query = _text(args[\"query\"], \"query\", 200)\n                argv = [\"/bin/sh\", \"/package/ani-cli\", *([\"--dub\"] if args[\"dub\"] else []), query]\n                _, _, detail = _run(argv, _environment(work, capture_at=0))\n                items = []\n                for line in _capture(work, detail):\n                    match = re.match(r\"^(\\d+)\\s+(.+)$\", line)\n                    if match:\n                        items.append({\"id\": int(match.group(1)), \"title\": match.group(2)[:300]})\n                result = {\"items\": items[:50]}\n            elif tool == \"ani_cli__episodes\":\n                offset = args[\"offset\"]\n                if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 5000:\n                    raise ValueError(\"Invalid episode offset\")\n                _, _, detail = _run(_base_args(args), _environment(work, capture_at=0))\n                values = _capture(work, detail)\n                page = values[offset:offset + 100]\n                result = {\"items\": [{\"number\": value[:16], \"label\": f\"Episode {value[:16]}\"} for value in page],\n                          \"total\": len(values), \"next_offset\": offset + 100 if offset + 100 < len(values) else -1}\n            elif tool == \"ani_cli__resolve\":\n                _run(_base_args(args, episode=True), _environment(work, plan=[\"quit\"]))\n                result = _playback(work)\n            else:\n                if set(args) != {\"history_index\", \"dub\", \"quality\"}:\n                    raise ValueError(\"Unexpected arguments\")\n                index, dub = args[\"history_index\"], args[\"dub\"]\n                if not isinstance(index, int) or isinstance(index, bool) or not 1 <= index <= 100 or not isinstance(dub, bool):\n                    raise ValueError(\"Invalid history selection\")\n                argv = [\"/bin/sh\", \"/package/ani-cli\", \"--continue\", \"-S\", str(index), \"-q\", _text(args[\"quality\"], \"quality\", 8)]\n                if dub:\n                    argv.append(\"--dub\")\n                _run(argv, _environment(work, plan=[\"quit\"]))\n                result = _playback(work)\n    print(json.dumps(result, ensure_ascii=True))\n\n\nif __name__ == \"__main__\":\n    try:\n        main()\n    except Exception as exc:\n        print(\"ani-cli adapter: \" + str(exc), file=sys.stderr)\n        sys.exit(1)\n"
     },
     {
       "path": ".pandamonium/setup.py",
-      "content": "import pathlib\nimport shutil\nimport sys\n\nPATH = '/runtime/bin:/usr/bin:/bin'\nDEPENDENCIES = ('curl', 'sed', 'grep', 'cut', 'uname', 'mkdir', 'tr', 'head', 'tput', 'rm')\n\n\ndef main():\n    missing = [name for name in DEPENDENCIES if shutil.which(name, path=PATH) is None]\n    for executable in ('/bin/sh', '/bin/true'):\n        if not pathlib.Path(executable).is_file():\n            missing.append(executable)\n    if missing:\n        raise RuntimeError('Needs setup: provide approved isolated-runner dependencies, then rerun setup: ' + ', '.join(missing))\n    if not pathlib.Path('/package/ani-cli').is_file():\n        raise RuntimeError('Pinned source /package/ani-cli is missing')\n    for name in ('home', 'cache', 'ani-cli'):\n        pathlib.Path('/runtime', name).mkdir(parents=True, exist_ok=True)\n    print('Dependencies located; real operation validation is still required.')\n\n\nif __name__ == '__main__':\n    try:\n        main()\n    except Exception as exc:\n        print(str(exc), file=sys.stderr)\n        sys.exit(1)\n"
+      "content": "\"\"\"Prepare ani-cli's dependencies inside its private Pandamonium runtime.\"\"\"\n\nimport pathlib\nimport shutil\n\nDEPENDENCIES = (\"curl\", \"sed\", \"grep\", \"cut\", \"uname\", \"mkdir\", \"tr\", \"head\", \"tail\", \"tput\", \"rm\", \"cat\", \"wc\", \"nl\", \"sort\", \"base64\", \"od\", \"cp\", \"mv\", \"sleep\")\n\n\ndef main():\n    missing = [name for name in DEPENDENCIES if shutil.which(name, path=\"/usr/bin:/bin\") is None]\n    if missing or not pathlib.Path(\"/package/ani-cli\").is_file():\n        raise RuntimeError(\"Missing pinned ani-cli or container dependencies: \" + \", \".join(missing))\n    target = pathlib.Path(\"/runtime/bin\")\n    target.mkdir(parents=True, exist_ok=True)\n    for source, name in ((\"selector.py\", \"pandamonium-select\"), (\"player.py\", \"pandamonium-mpv\")):\n        destination = target / name\n        shutil.copy2(pathlib.Path(\"/package/.pandamonium\", source), destination)\n        destination.chmod(0o700)\n    for name in (\"home\", \"cache\"):\n        pathlib.Path(\"/runtime\", name).mkdir(parents=True, exist_ok=True)\n    print(\"ani-cli 5.1.2 private runtime ready\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    },
+    {
+      "path": ".pandamonium/selector.py",
+      "content": "#!/usr/bin/env python3\nimport json\nimport os\nimport pathlib\nimport sys\n\nstate_path = pathlib.Path(os.environ[\"PANDAMONIUM_SELECTOR_STATE\"])\nstate = json.loads(state_path.read_text())\nitems = [line.rstrip(\"\\n\") for line in sys.stdin if line.rstrip(\"\\n\")]\nindex = state[\"index\"]\nif state.get(\"capture_at\") == index:\n    pathlib.Path(os.environ[\"PANDAMONIUM_SELECTOR_CAPTURE\"]).write_text(json.dumps({\"prompt\": \" \".join(sys.argv[1:]), \"items\": items}))\n    raise SystemExit(1)\ndesired = state.get(\"plan\", [])[index] if index < len(state.get(\"plan\", [])) else None\nstate[\"index\"] = index + 1\nstate_path.write_text(json.dumps(state))\nif \"playing episode\" in \" \".join(sys.argv[1:]).lower():\n    desired = \"quit\"\nchoice = next((item for item in items if item == str(desired) or item.split(\" \", 1)[0] == str(desired)), items[0] if items else \"\")\nif choice:\n    print(choice)\nelse:\n    raise SystemExit(1)\n"
+    },
+    {
+      "path": ".pandamonium/player.py",
+      "content": "#!/usr/bin/env python3\nimport json\nimport os\nimport pathlib\nimport sys\nimport time\n\npathlib.Path(os.environ[\"PANDAMONIUM_PLAYBACK_CAPTURE\"]).write_text(json.dumps(sys.argv[1:]))\ntime.sleep(float(os.environ.get(\"PANDAMONIUM_PLAYER_HOLD\", \"0\")))\n"
     }
-  ]
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "ani_cli__status",
+        "arguments": {},
+        "expected": null
+      }
+    ],
+    "service": [],
+    "prerequisites": [],
+    "knowledge": null,
+    "voice_model": null
+  },
+  "source_exclusions": []
 }

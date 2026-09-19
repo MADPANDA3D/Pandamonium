@@ -80,6 +80,8 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
         i["name"]: i for i in integration["interfaces"] if i["kind"] == "tool"
     }
     prefix = manifest["extension_id"].replace("-", "_") + "__"
+    from src.entertainment import PROVIDERS, is_provider, schemas as entertainment_schemas
+    media_ui = is_provider(manifest)
     if (
         not tools
         or set(tools) != set(interfaces)
@@ -88,9 +90,26 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
         raise ExtensionLifecycleError("extension_cli_namespaced_schemas_required")
     if any(manifest["lifecycle"].values()):
         raise ExtensionLifecycleError("extension_cli_lifecycle_must_be_empty")
-    if manifest["permissions"]["default"] not in {"external_side_effect", "controlled_administrative", "destructive"}:
+    if media_ui:
+        provider_tools = {
+            name: binding
+            for name, binding in PROVIDERS[manifest["extension_id"]]["tools"].values()
+        }
+        expected_modes = {
+            name: "bounded_write"
+            for operation, (name, _binding) in PROVIDERS[manifest["extension_id"]]["tools"].items()
+            if operation in {"resolve", "continue"}
+        }
+        if (
+            set(tools) != set(provider_tools)
+            or manifest["permissions"]["default"] != "read_only"
+            or manifest["permissions"]["capabilities"] != expected_modes
+        ):
+            raise ExtensionLifecycleError("extension_entertainment_contract_invalid")
+    if not media_ui and manifest["permissions"]["default"] not in {"external_side_effect", "controlled_administrative", "destructive"}:
         raise ExtensionLifecycleError("extension_cli_effectful_authority_required")
-    if {c.name for c in execution.checks} != set(tools):
+    expected_checks = {prefix + "status"} if media_ui else set(tools)
+    if {c.name for c in execution.checks} != expected_checks or not expected_checks <= set(tools):
         raise ExtensionLifecycleError("extension_cli_operation_checks_required")
     if execution.service and not manifest["data_boundaries"]["network"]:
         raise ExtensionLifecycleError("extension_service_network_declaration_required")
@@ -117,7 +136,15 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
                     or tool["parameters"] != parameters or interfaces[name]["output_schema"] != output
                     or mode != "read_only"):
                 raise ExtensionLifecycleError("extension_soundboard_contract_invalid")
-        elif mode not in {"external_side_effect", "controlled_administrative", "destructive"}:
+        elif media_ui:
+            parameters, output = entertainment_schemas(provider_tools[name])
+            if (
+                binding != provider_tools[name]
+                or tool["parameters"] != parameters
+                or interfaces[name]["output_schema"] != output
+            ):
+                raise ExtensionLifecycleError("extension_entertainment_contract_invalid")
+        elif not media_ui and mode not in {"external_side_effect", "controlled_administrative", "destructive"}:
             raise ExtensionLifecycleError("extension_cli_effectful_authority_required")
         if interfaces[name]["binding"].startswith("knowledge."):
             if execution.knowledge is None or interfaces[name]["binding"] not in {

@@ -71,6 +71,17 @@ Vendored in `static/lib/` and served directly:
 | [jsPDF](https://github.com/parallax/jsPDF) (bundled in html2pdf) | PDF generation | MIT |
 | [html2canvas](https://github.com/niklasvh/html2canvas) (bundled in html2pdf) | DOM → canvas rasterization | MIT |
 | [node-qrcode](https://github.com/soldair/node-qrcode) (`qrcode.min.js`) | QR-code rendering (2FA setup) | MIT |
+| [hls.js](https://github.com/video-dev/hls.js) 1.7.3 (`hls.min.js`) | HLS playback in the native Entertainment video player | Apache-2.0 ([full text](licenses/hls.js-Apache-2.0.txt)) |
+
+## Marketplace Entertainment packages
+
+These pinned upstream applications are distributed only inside their signed
+Marketplace plugin packages and installed into Pandamonium's private runtime:
+
+| Application | Upstream version | License |
+|---|---|---|
+| [ani-cli](https://github.com/pystardust/ani-cli) | 5.1.2 | GPL-3.0-or-later (license retained in package) |
+| [PandaFlix](https://github.com/MADPANDA3D/pandaflix) | 1.2.1 | GPL-3.0-or-later (license retained in package) |
 
 ## Front-end libraries loaded at runtime (CDN)
 
