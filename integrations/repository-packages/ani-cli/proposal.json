@@ -1,0 +1,272 @@
+{
+  "purpose": "ani-cli is a shell CLI for browsing and watching anime, not development tooling. Propose a reduced, headless Pandamonium integration for its native next-episode countdown operation, reporting release information through AnimeSchedule without launching a player or downloading media. This generated integration is source-backed but UNVERIFIED.",
+  "categories": [
+    "anime",
+    "entertainment",
+    "release-tracking"
+  ],
+  "icon": "📺",
+  "examples": [
+    "Check the next-episode countdown for One Piece.",
+    "Look up the release status and available sub/dub countdowns for Blue Lock."
+  ],
+  "evidence": [
+    {
+      "path": "README.md",
+      "quote": "A cli to browse and watch anime (alone AND with friends). This tool scrapes the site <a href=\"https://hianime.at/\">hianime.</a>"
+    },
+    {
+      "path": "ani-cli.1",
+      "quote": "A shell script to browse and search anime from the command-line."
+    },
+    {
+      "path": "ani-cli",
+      "quote": "        # for checking new releases by specifying anime name\n        [ \"$source\" = \"nextep\" ] && time_until_next_ep \"$query\""
+    },
+    {
+      "path": "ani-cli",
+      "quote": "    animeschedule=\"https://animeschedule.net\"\n    _query=\"$(printf \"%s\" \"$*\" | tr ' ' '+')\"\n    $curl_exe -s -G \"$animeschedule/api/v3/anime\" --data \"q=${_query}\" | sed 's|},{\"id\"|\\n|g' | while read -r _entry; do"
+    },
+    {
+      "path": "ani-cli.1",
+      "quote": "Sets the player ani-cli uses. Can be debug (print links), download (equivalent to -d), android_mpv (apk and am start), android_vlc (apk and am start), catt (for streaming to tv), or any player that can play urls. For defaults see working without arguments."
+    },
+    {
+      "path": "ani-cli",
+      "quote": "dep_ch \"$menu_program\" # TODO: use dep_ch_failover to iterate through options\n\ncase \"$player_function\" in\n    debug) ;;"
+    }
+  ],
+  "repo_class": "unknown",
+  "interfaces": [
+    {
+      "name": "ani_cli__nextep_countdown",
+      "kind": "tool",
+      "binding": "--nextep-countdown",
+      "evidence": [
+        {
+          "path": "ani-cli",
+          "quote": "      -N, --nextep-countdown\n        Display a countdown to the next episode"
+        },
+        {
+          "path": "ani-cli",
+          "quote": "        -N | --nextep-countdown) source=nextep ;;"
+        },
+        {
+          "path": "ani-cli",
+          "quote": "        [ \"$source\" = \"nextep\" ] && time_until_next_ep \"$query\""
+        },
+        {
+          "path": "ani-cli",
+          "quote": "    %s [options] [query]"
+        },
+        {
+          "path": "ani-cli",
+          "quote": "        printf \"Eng: %s\\n\" \"$_eng_title\"\n        printf \"Jpn: %s\\n\" \"$_jpn_title\"\n        printf \"Status: \\033[1;%sm%s\\033[0m\\n\" \"$_color\" \"$_status\""
+        }
+      ],
+      "tool_schema": {
+        "type": "function",
+        "function": {
+          "name": "ani_cli__nextep_countdown",
+          "description": "Request ani-cli's live release status and available next-episode countdowns. Returns upstream text with terminal controls removed. Does not play or download media. Generated binding is UNVERIFIED.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Anime title passed as one argv element using upstream's documented [query] string placeholder. Must start with a letter or digit; accepts letters, digits, spaces, and . : ' ! ? ( ) -."
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "arguments": {
+        "query": {
+          "path": "ani-cli",
+          "quote": "    %s [options] [query]"
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 131072
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "setup": [],
+  "requirements": [
+    "Needs setup and real runtime validation before use. No commands have been executed.",
+    "The repository is a POSIX shell CLI; repo_class is unknown because the response schema has no shell_cli class. Python is only the generated adapter language.",
+    "The package-local adapter invokes ['/bin/sh', '/package/ani-cli', '--nextep-countdown', query] without a shell command string. The query remains one argv element.",
+    "Provide /bin/sh, curl, sed, grep, cut, uname, mkdir, tr, head, tput and rm in the isolated Linux environment. The countdown-only adapter uses /bin/true as its inert menu command because this path never opens an interactive selector.",
+    "If dependencies are absent, supply approved executables and required libraries inside the isolated runner, optionally under /runtime/bin, then rerun setup. Do not use host package-manager or upstream self-update commands.",
+    "Authorize HTTPS access to https://animeschedule.net for title queries and returned anime routes. Queries leave the runner; provider availability and response parsing remain unverified.",
+    "Reduced support: AnimeSchedule countdowns only. No hianime browsing, stream resolution, playback, downloads, history management, self-update, or alternative media providers are exposed.",
+    "No display, audio, GPU, browser, credentials, persistent service, or interactive input is required for this operation. The adapter selects /bin/true as the inert menu executable for this noninteractive path.",
+    "The adapter selects upstream's documented debug player mode to avoid media-player dependencies and confines upstream history initialization to disposable state under /runtime.",
+    "Retain LICENSE and upstream license notices. No source exclusions are proposed."
+  ],
+  "validation": [
+    "After operator authorization, run execution.install to check dependencies and prepare private state. Dependency detection is not an operation test.",
+    "Run ani_cli__nextep_countdown with {\"query\":\"One Piece\"} against the real upstream command and live provider. Require exit zero, schema-valid JSON, recognizable Eng/Jpn/Status fields, and plausible provider content. Live response text has no deterministic expected JSON.",
+    "Repeat with {\"query\":\"Blue Lock\"}; inspect available sub/dub fields without treating missing countdowns for finished titles as a failure.",
+    "Confirm the operation never opens a menu or player, starts no persistent process, and writes only under /runtime. Inspect actual network destinations and confirm they remain on the declared AnimeSchedule origin.",
+    "Test rejection of empty queries, leading option syntax, unknown JSON keys, duplicate keys, invalid tool names and oversized input. Verify provider failures, malformed output, output-limit breaches and timeouts exit nonzero without fabricated results.",
+    "Exercise restart and removal through the shared lifecycle. Confirm no processes remain and private runtime state is removed. Keep the integration UNVERIFIED until external checks pass."
+  ],
+  "execution": {
+    "install": [
+      [
+        "python",
+        "/package/.pandamonium/setup.py"
+      ]
+    ],
+    "checks": [
+      {
+        "name": "ani_cli__nextep_countdown",
+        "arguments": {
+          "query": "One Piece"
+        },
+        "expected": null
+      }
+    ],
+    "service": [],
+    "prerequisites": [],
+    "knowledge": null,
+    "voice_model": null
+  },
+  "source_exclusions": [],
+  "readiness": "needs_validation",
+  "manifest": {
+    "protocol_version": "jos-extension.v1",
+    "extension_id": "ani-cli",
+    "name": "ani-cli Release Countdown",
+    "version": "0.1.0",
+    "metadata": {
+      "summary": "ani-cli is a shell CLI for browsing and watching anime, not development tooling. Propose a reduced, headless Pandamonium integration for its native next-episode countdown operation, reporting release information through AnimeSchedule without launching a player or downloading media. This generated integration is source-backed but UNVERIFIED.",
+      "icon": "📺",
+      "categories": [
+        "anime",
+        "entertainment",
+        "release-tracking"
+      ],
+      "examples": [
+        "Check the next-episode countdown for One Piece.",
+        "Look up the release status and available sub/dub countdowns for Blue Lock."
+      ],
+      "requirements": [
+        "Needs setup and real runtime validation before use. No commands have been executed.",
+        "The repository is a POSIX shell CLI; repo_class is unknown because the response schema has no shell_cli class. Python is only the generated adapter language.",
+        "The package-local adapter invokes ['/bin/sh', '/package/ani-cli', '--nextep-countdown', query] without a shell command string. The query remains one argv element.",
+        "Provide /bin/sh, curl, sed, grep, cut, uname, mkdir, tr, head, tput and rm in the isolated Linux environment. The countdown-only adapter uses /bin/true as its inert menu command because this path never opens an interactive selector.",
+        "If dependencies are absent, supply approved executables and required libraries inside the isolated runner, optionally under /runtime/bin, then rerun setup. Do not use host package-manager or upstream self-update commands.",
+        "Authorize HTTPS access to https://animeschedule.net for title queries and returned anime routes. Queries leave the runner; provider availability and response parsing remain unverified.",
+        "Reduced support: AnimeSchedule countdowns only. No hianime browsing, stream resolution, playback, downloads, history management, self-update, or alternative media providers are exposed.",
+        "No display, audio, GPU, browser, credentials, persistent service, or interactive input is required for this operation. The adapter selects /bin/true as the inert menu executable for this noninteractive path.",
+        "The adapter selects upstream's documented debug player mode to avoid media-player dependencies and confines upstream history initialization to disposable state under /runtime.",
+        "Retain LICENSE and upstream license notices. No source exclusions are proposed."
+      ],
+      "skill_descriptions": {}
+    },
+    "source": {
+      "url": "https://github.com/pystardust/ani-cli.git",
+      "revision": "2a956db02bf83760bf8f28b720d58fe8014b0e9b"
+    },
+    "runtime": {
+      "type": "service",
+      "entrypoint": ".pandamonium/adapter.py"
+    },
+    "capabilities": {
+      "descriptor": {
+        "type": "inline"
+      },
+      "schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "ani_cli__nextep_countdown",
+            "description": "Request ani-cli's live release status and available next-episode countdowns. Returns upstream text with terminal controls removed. Does not play or download media. Generated binding is UNVERIFIED.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "Anime title passed as one argv element using upstream's documented [query] string placeholder. Must start with a letter or digit; accepts letters, digits, spaces, and . : ' ! ? ( ) -."
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "permissions": {
+      "default": "external_side_effect",
+      "capabilities": {
+        "ani_cli__nextep_countdown": "external_side_effect"
+      }
+    },
+    "health": {
+      "type": "catalog",
+      "timeout_seconds": 10
+    },
+    "lifecycle": {
+      "install": [],
+      "start": [],
+      "stop": [],
+      "remove": []
+    },
+    "data_boundaries": {
+      "read": [
+        "ani-cli",
+        ".pandamonium"
+      ],
+      "write": [
+        "runtime"
+      ],
+      "network": [
+        "https://animeschedule.net"
+      ]
+    },
+    "removal": {
+      "remove_paths": [
+        "runtime"
+      ],
+      "preserve_paths": []
+    },
+    "rollback": {
+      "strategy": "pinned_revision",
+      "retain_revisions": 2
+    }
+  },
+  "files": [
+    {
+      "path": ".pandamonium/adapter.py",
+      "content": "import json\nimport os\nimport pathlib\nimport re\nimport selectors\nimport signal\nimport subprocess\nimport sys\nimport tempfile\nimport time\n\nTOOL = 'ani_cli__nextep_countdown'\nPATH = '/runtime/bin:/usr/bin:/bin'\nLIMIT = 131072\nTIMEOUT = 45\n\n\ndef unique_object(pairs):\n    result = {}\n    for key, value in pairs:\n        if key in result:\n            raise ValueError('Duplicate JSON key')\n        result[key] = value\n    return result\n\n\ndef run_bounded(argv, env):\n    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,\n                               stderr=subprocess.PIPE, cwd='/package', env=env,\n                               shell=False, start_new_session=True)\n    selector = selectors.DefaultSelector()\n    buffers = {'stdout': bytearray(), 'stderr': bytearray()}\n    total = 0\n    deadline = time.monotonic() + TIMEOUT\n    try:\n        selector.register(process.stdout, selectors.EVENT_READ, 'stdout')\n        selector.register(process.stderr, selectors.EVENT_READ, 'stderr')\n        while selector.get_map():\n            remaining = deadline - time.monotonic()\n            if remaining <= 0:\n                raise RuntimeError('Upstream operation timed out')\n            for key, _ in selector.select(min(remaining, 0.2)):\n                chunk = os.read(key.fileobj.fileno(), 8192)\n                if not chunk:\n                    selector.unregister(key.fileobj)\n                    continue\n                total += len(chunk)\n                if total > LIMIT:\n                    raise RuntimeError('Upstream output exceeded limit')\n                buffers[key.data].extend(chunk)\n        remaining = deadline - time.monotonic()\n        if remaining <= 0:\n            raise RuntimeError('Upstream operation timed out')\n        code = process.wait(timeout=remaining)\n        if code != 0:\n            raise RuntimeError('Upstream operation failed with exit code ' + str(code))\n        return bytes(buffers['stdout']).decode('utf-8', errors='replace')\n    finally:\n        try:\n            os.killpg(process.pid, signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n        process.wait()\n        selector.close()\n        process.stdout.close()\n        process.stderr.close()\n\n\ndef main():\n    if len(sys.argv) != 2 or sys.argv[1] != TOOL:\n        raise ValueError('Unknown tool name')\n    raw = sys.stdin.buffer.read(4097)\n    if len(raw) > 4096:\n        raise ValueError('Input exceeds limit')\n    args = json.loads(raw, object_pairs_hook=unique_object)\n    if not isinstance(args, dict) or set(args) != {'query'}:\n        raise ValueError('Expected exactly the query argument')\n    query = args['query']\n    if not isinstance(query, str) or not 1 <= len(query) <= 200:\n        raise ValueError('query must be a string of 1 to 200 characters')\n    if query != query.strip() or not query[0].isalnum():\n        raise ValueError('query must start with a letter or digit and have no outer whitespace')\n    if any(not (char.isalnum() or char in \" .:'!?()-\") for char in query):\n        raise ValueError('query contains unsupported characters')\n    root = pathlib.Path('/runtime/ani-cli')\n    root.mkdir(parents=True, exist_ok=True)\n    with tempfile.TemporaryDirectory(prefix='check-', dir=root) as state:\n        home = pathlib.Path(state, 'home')\n        cache = pathlib.Path(state, 'cache')\n        home.mkdir()\n        cache.mkdir()\n        env = {\n            'PATH': PATH,\n            'HOME': str(home),\n            'XDG_CACHE_HOME': str(cache),\n            'XDG_STATE_HOME': str(pathlib.Path(state, 'state')),\n            'TMPDIR': state,\n            'LANG': 'C.UTF-8',\n            'LC_ALL': 'C.UTF-8',\n            'TERM': 'dumb',\n            'ANI_CLI_PLAYER': 'debug',\n            'ANI_CLI_MENU': '/bin/true',\n            'ANI_CLI_LOG': '0',\n            'ANI_CLI_HIST_DIR': str(pathlib.Path(state, 'history')),\n            'ANI_CLI_DEFAULT_SOURCE': 'search',\n        }\n        output = run_bounded(['/bin/sh', '/package/ani-cli', '--nextep-countdown', query], env)\n    output = re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]', '', output)\n    output = ''.join(char for char in output if char in '\\n\\t' or (ord(char) >= 32 and not 127 <= ord(char) <= 159))\n    output = output.strip()\n    if not all(re.search(r'^' + field + r': .+', output, flags=re.MULTILINE) for field in ('Eng', 'Jpn', 'Status')):\n        raise RuntimeError('No recognizable release information returned; inspect provider availability and upstream parsing')\n    if len(output) > LIMIT:\n        raise RuntimeError('Result exceeds schema limit')\n    print(json.dumps({'text': output}, ensure_ascii=True))\n\n\nif __name__ == '__main__':\n    try:\n        main()\n    except Exception as exc:\n        print('ani-cli adapter: ' + str(exc), file=sys.stderr)\n        sys.exit(1)\n"
+    },
+    {
+      "path": ".pandamonium/setup.py",
+      "content": "import pathlib\nimport shutil\nimport sys\n\nPATH = '/runtime/bin:/usr/bin:/bin'\nDEPENDENCIES = ('curl', 'sed', 'grep', 'cut', 'uname', 'mkdir', 'tr', 'head', 'tput', 'rm')\n\n\ndef main():\n    missing = [name for name in DEPENDENCIES if shutil.which(name, path=PATH) is None]\n    for executable in ('/bin/sh', '/bin/true'):\n        if not pathlib.Path(executable).is_file():\n            missing.append(executable)\n    if missing:\n        raise RuntimeError('Needs setup: provide approved isolated-runner dependencies, then rerun setup: ' + ', '.join(missing))\n    if not pathlib.Path('/package/ani-cli').is_file():\n        raise RuntimeError('Pinned source /package/ani-cli is missing')\n    for name in ('home', 'cache', 'ani-cli'):\n        pathlib.Path('/runtime', name).mkdir(parents=True, exist_ok=True)\n    print('Dependencies located; real operation validation is still required.')\n\n\nif __name__ == '__main__':\n    try:\n        main()\n    except Exception as exc:\n        print(str(exc), file=sys.stderr)\n        sys.exit(1)\n"
+    }
+  ]
+}

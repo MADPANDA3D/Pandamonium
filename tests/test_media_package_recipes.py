@@ -44,5 +44,11 @@ def test_pandaflix_recipe_extracts_on_python_311_and_rejects_traversal(tmp_path)
 def test_ani_cli_countdown_does_not_require_an_interactive_menu():
     setup = _load("ani_cli_setup", PACKAGES / "ani-cli" / "setup.py")
     adapter = (PACKAGES / "ani-cli" / "adapter.py").read_text()
+    recipe = json.loads((PACKAGES / "ani-cli" / "proposal.json").read_text())
+    generated = {item["path"]: item["content"] for item in recipe["files"]}
     assert "fzf" not in setup.DEPENDENCIES
     assert "'ANI_CLI_MENU': '/bin/true'" in adapter
+    assert generated[".pandamonium/setup.py"] == (
+        PACKAGES / "ani-cli" / "setup.py"
+    ).read_text()
+    assert generated[".pandamonium/adapter.py"] == adapter
