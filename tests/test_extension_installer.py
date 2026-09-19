@@ -217,7 +217,6 @@ def test_install_preview_pins_revision_and_requires_explicit_approval(
     with pytest.raises(ExtensionLifecycleError, match="extension_plan_owner_mismatch"):
         manager.execute_plan(plan["plan_id"], operator_id="another-operator")
     assert registry.effective_capabilities() == {}
-
     result = _approve_and_execute(manager, authority, plan)
 
     assert result["result"]["status"] == "succeeded"
@@ -230,6 +229,17 @@ def test_install_preview_pins_revision_and_requires_explicit_approval(
     assert install_path.is_dir()
     assert not install_path.is_relative_to(Path(installer.get_app_root()).resolve())
     assert manager.execute_plan(plan["plan_id"], operator_id="operator") == result
+
+
+def test_exact_revision_remains_resolvable_after_branch_advances(git_fixture):
+    repo, v1, _v2 = git_fixture
+    _run(["git", "tag", "-d", "v1"], cwd=repo)
+
+    assert _mapped_git(repo).resolve_revision(SOURCE_URL, v1) == (
+        SOURCE_URL,
+        v1,
+        v1,
+    )
 
 
 def test_signed_marketplace_manifest_is_reconciled_before_approval(
