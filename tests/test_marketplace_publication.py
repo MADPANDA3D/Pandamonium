@@ -169,6 +169,45 @@ def test_bootstrap_pinned_trust_lkg_and_tampering(tmp_path, monkeypatch):
         channel.load_channel(cache, refresh=True)
 
 
+def test_legacy_public_trust_refreshes_while_custom_trust_stays_local(
+    tmp_path, monkeypatch
+):
+    public_key = Ed25519PrivateKey.generate()
+    public_keys = {publisher.KEY_ID: public_key_b64(public_key)}
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    (bundled / "trusted_keys.json").write_text(json.dumps(public_keys))
+    old_public = signed([], public_key)
+    (bundled / "catalog.json").write_text(json.dumps(old_public))
+    fresh_public = signed([], public_key)
+    monkeypatch.setattr(channel, "BUNDLED", bundled)
+    monkeypatch.setattr(channel, "fetch_catalog", lambda: fresh_public)
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "trusted_keys.json").write_text(json.dumps(public_keys))
+    (legacy / "catalog.json").write_text(json.dumps(old_public))
+    assert channel.load_channel(legacy, refresh=True)[0] == fresh_public
+    assert channel.channel_status(legacy)["state"] == "refreshed"
+
+    custom_key = Ed25519PrivateKey.generate()
+    custom_keys = {"operator": public_key_b64(custom_key)}
+    custom_catalog = build_catalog(
+        [],
+        private_key=custom_key,
+        key_id="operator",
+        catalog_id="operator-channel",
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        expires_at=(datetime.now(timezone.utc) + timedelta(days=90)).isoformat(),
+    )
+    custom = tmp_path / "custom"
+    custom.mkdir()
+    (custom / "trusted_keys.json").write_text(json.dumps(custom_keys))
+    (custom / "catalog.json").write_text(json.dumps(custom_catalog))
+    assert channel.load_channel(custom, refresh=True) == (custom_catalog, custom_keys)
+    assert channel.channel_status(custom)["state"] == "operator_managed"
+
+
 def test_jobs_single_flight_owner_isolation_failure_retry_and_restart(
     tmp_path, monkeypatch
 ):

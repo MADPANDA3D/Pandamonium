@@ -51,20 +51,21 @@ def fetch_catalog() -> dict:
 def load_channel(root: Path, *, refresh: bool = False) -> tuple[dict, dict]:
     """Keep explicit local catalogs compatible; default installations bootstrap."""
     with _LOCK:
+        keys = json.loads((BUNDLED / "trusted_keys.json").read_text())
         local_keys = root / "trusted_keys.json"
         if local_keys.exists():
-            # Explicit operator-managed trust stores retain their own channel.
             try:
-                catalog = json.loads((root / "catalog.json").read_text())
-                keys = json.loads(local_keys.read_text())
-                validate_published_catalog(catalog, trusted_keys=keys)
-                _STATUS[str(root)] = {"state": "operator_managed"}
-                return catalog, keys
+                local_trust = json.loads(local_keys.read_text())
+                if local_trust != keys:
+                    # Explicit operator-managed trust stores retain their own channel.
+                    catalog = json.loads((root / "catalog.json").read_text())
+                    validate_published_catalog(catalog, trusted_keys=local_trust)
+                    _STATUS[str(root)] = {"state": "operator_managed"}
+                    return catalog, local_trust
             except (OSError, ValueError, TypeError) as exc:
                 raise MarketplaceCatalogError(
                     "marketplace_configuration_invalid"
                 ) from exc
-        keys = json.loads((BUNDLED / "trusted_keys.json").read_text())
         cache = root / "catalog.json"
         candidates = [cache, BUNDLED / "catalog.json"]
         catalog = None
