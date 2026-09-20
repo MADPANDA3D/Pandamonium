@@ -244,6 +244,7 @@ function showProvider(id) {
   playback = null;
   stopPlayer();
   el('entertainment-modal').classList.remove('is-landing');
+  el('entertainment-collection')?.classList.add('hidden');
   el('entertainment-landing').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-browser').classList.remove('hidden');
@@ -293,6 +294,7 @@ function showLanding() {
   if (providers.length === 1) { showProvider(providers[0].id); return; }
   stopPlayer(); active = null; playback = null;
   el('entertainment-modal').classList.add('is-landing');
+  el('entertainment-collection')?.classList.add('hidden');
   el('entertainment-browser').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-landing').classList.remove('hidden');
@@ -365,8 +367,64 @@ async function activateSlot(key) {
 
 function showPlayer(title) {
   el('entertainment-browser').classList.add('hidden');
+  el('entertainment-collection')?.classList.add('hidden');
   el('entertainment-player').classList.remove('hidden');
   el('entertainment-now-playing').textContent = title;
+}
+
+const COLLECTIONS = {
+  genres: { eyebrow: 'BROWSE', title: 'Genres', copy: 'Browse anime and shows by genre.' },
+  popular: { eyebrow: 'BROWSE', title: 'Popular', copy: 'Popular titles across the connected providers.' },
+  'top-rated': { eyebrow: 'BROWSE', title: 'Top Rated', copy: 'Highest-rated titles across the catalog.' },
+  'recently-added': { eyebrow: 'BROWSE', title: 'Recently Added', copy: 'Newest additions to the catalog.' },
+  watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you saved.' },
+  history: { eyebrow: 'MY LIBRARY', title: 'History', copy: 'Pick up exactly where you left off.' },
+  downloads: { eyebrow: 'MY LIBRARY', title: 'Downloads', copy: 'Downloaded episodes and movies land here.' },
+};
+
+async function renderCollection(key) {
+  const host = el('ent-collection-results');
+  const statusEl = el('ent-collection-status');
+  statusEl.textContent = '';
+  host.innerHTML = '';
+  if (key === 'watchlist') {
+    const favorites = prefs.favorites || [];
+    host.innerHTML = favorites.length
+      ? favorites.map(entry => `<button type="button" class="ent-collection-item" data-ent-open-fav="${esc(entry.key)}">★ ${esc(entry.title)}</button>`).join('')
+      : '<p class="entertainment-empty">Nothing saved yet. Use the star on a result card to add titles.</p>';
+    return;
+  }
+  if (key === 'history') {
+    statusEl.textContent = 'Loading history…';
+    const result = await api('/ani-cli/history');
+    statusEl.textContent = '';
+    const items = result.items || [];
+    host.innerHTML = items.length
+      ? items.map(item => `<button type="button" class="ent-collection-item" data-ent-history="${item.index}">${esc(item.title)} · Episode ${esc(item.episode)}</button>`).join('')
+      : '<p class="entertainment-empty">No watch history yet.</p>';
+    return;
+  }
+  if (key === 'downloads') {
+    host.innerHTML = '<p class="entertainment-empty">No downloads yet. Downloads from a series or movie will appear here.</p>';
+    return;
+  }
+  host.innerHTML = '<p class="entertainment-empty">Catalog browsing needs the metadata source (AniList). This is next.</p>';
+}
+
+function showCollection(key) {
+  const meta = COLLECTIONS[key] || { eyebrow: 'ENTERTAINMENT', title: 'Collection', copy: '' };
+  stopPlayer();
+  el('entertainment-modal').classList.remove('is-landing');
+  el('entertainment-landing').classList.add('hidden');
+  el('entertainment-browser').classList.add('hidden');
+  el('entertainment-player').classList.add('hidden');
+  el('entertainment-collection').classList.remove('hidden');
+  el('ent-collection-eyebrow').textContent = meta.eyebrow;
+  el('ent-collection-title').textContent = meta.title;
+  el('ent-collection-copy').textContent = meta.copy;
+  document.querySelectorAll('[data-ent-dest]').forEach(button => button.classList.toggle('active', button.dataset.entDest === key));
+  document.querySelectorAll('[data-ent-browse]').forEach(button => button.classList.remove('active'));
+  renderCollection(key).catch(error => { el('ent-collection-status').textContent = error.message; });
 }
 
 async function play(result) {
@@ -591,6 +649,7 @@ function init() {
   el('entertainment-home')?.addEventListener('click', showLanding);
   el('entertainment-fanfare-btn')?.addEventListener('click', () => playSound('entertainment-fanfare'));
   el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
+  document.querySelectorAll('[data-ent-dest]').forEach(button => button.addEventListener('click', () => showCollection(button.dataset.entDest)));
   el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
   initSlots();
   el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
@@ -625,8 +684,7 @@ function init() {
       return;
     }
     const favorite = event.target.closest?.('[data-ent-fav]');
-    if (favorite) {
-      const item = el('entertainment-results')._items?.[Number(favorite.dataset.entFav)];
+    if (favorite) {      const item = el('entertainment-results')._items?.[Number(favorite.dataset.entFav)];
       if (item) {
         toggleFavorite(active, item);
         const saved = isFavorite(active, item);
@@ -637,6 +695,14 @@ function init() {
     }
     const openFav = event.target.closest?.('[data-ent-open-fav]');
     if (openFav) { openFavorite(openFav.dataset.entOpenFav).catch(error => status(error.message)); return; }
+    const historyItem = event.target.closest?.('[data-ent-history]');
+    if (historyItem) {
+      const index = Number(historyItem.dataset.entHistory);
+      api('/ani-cli/continue', { history_index: index, dub: el('entertainment-mode')?.value === 'dub', quality: el('entertainment-quality')?.value || 'best' })
+        .then(result => play(result))
+        .catch(error => status(error.message));
+      return;
+    }
     const button = event.target.closest?.('[data-ent-action]');
     const more = event.target.closest?.('[data-ent-more]');
     if (more) {

@@ -44609,6 +44609,12 @@ textarea.bug-report-input {
 .ent-chips{display:flex;flex-wrap:wrap;gap:10px}
 .entertainment-browser[data-kind="ani-cli"]{--ent-hero-art:url('/static/entertainment/hero-anime.webp')}
 .entertainment-browser[data-kind="pandaflix"]{--ent-hero-art:url('/static/entertainment/card-movies.webp')}
+.entertainment-collection.hidden{display:none}
+.ent-hero--plain{min-height:180px}
+.ent-hero--plain::before{display:none}
+.ent-hero--plain::after{background:radial-gradient(circle at 82% 10%,rgba(229,9,20,.22),transparent 46%),linear-gradient(120deg,#120508,#070606)}
+.ent-collection-item{display:block;width:100%;text-align:left;border:1px solid #241416;border-radius:12px;background:#0d0b0b;color:#eae6e6;font-size:14px;padding:14px 18px;cursor:pointer}
+.ent-collection-item:hover{border-color:#e50914;background:#180a0b}
 .ent-chip{display:flex;align-items:center;gap:8px;border:1px solid #2c1417;border-radius:999px;background:#0f0b0b;color:#d7d2d2;font-size:12.5px;padding:7px 13px}
 .ent-chip svg{width:15px;height:15px;color:#e50914}
 .ent-chip b{color:#e50914;font-size:11px}

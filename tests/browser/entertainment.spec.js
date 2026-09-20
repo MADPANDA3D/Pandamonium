@@ -233,3 +233,32 @@ test('Entertainment pill plays the fanfare and the top nav is stripped down', as
   await page.locator('.entertainment-choice[data-provider="pandaflix"]').click();
   await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-fanfare'))).toBe(true);
 });
+
+test('Entertainment sidebar destinations open their pages', async ({ page }) => {
+  await page.addInitScript(() => { HTMLMediaElement.prototype.play = async function () {}; });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/history') return route.fulfill({ json: { items: [{ index: 1, episode: '429', title: 'Naruto: Shippuden' }] } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+
+  await page.locator('.ent-sidebar [data-ent-dest="history"]').click();
+  await expect(page.locator('#ent-collection-title')).toHaveText('History');
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('Naruto: Shippuden');
+
+  await page.locator('.ent-sidebar [data-ent-dest="watchlist"]').click();
+  await expect(page.locator('#ent-collection-title')).toHaveText('Watchlist');
+
+  await page.locator('.ent-sidebar [data-ent-dest="downloads"]').click();
+  await expect(page.locator('#ent-collection-title')).toHaveText('Downloads');
+
+  await page.locator('.ent-sidebar [data-ent-dest="popular"]').click();
+  await expect(page.locator('#ent-collection-title')).toHaveText('Popular');
+});
