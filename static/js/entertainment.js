@@ -155,14 +155,34 @@ function stopPlayer() {
 function status(text = '') { el('entertainment-status').textContent = text; }
 
 function buttons(items, action, label) {
-  const favoritable = action === 'title';
-  el('entertainment-results').innerHTML = items.length ? items.map((item, index) => {
-    const row = `<button type="button" class="entertainment-result" data-ent-action="${action}" data-ent-index="${index}"><span>${esc(label(item))}</span><b>›</b></button>`;
-    if (!favoritable) return row;
+  const host = el('entertainment-results');
+  const cards = action === 'title';
+  host.classList.toggle('is-cards', cards);
+  if (!items.length) {
+    host.innerHTML = '<p class="entertainment-empty">Nothing found. Try a different search.</p>';
+    host._items = items;
+    return;
+  }
+  host.innerHTML = items.map((item, index) => {
+    if (!cards) {
+      return `<button type="button" class="entertainment-result" data-ent-action="${action}" data-ent-index="${index}"><span>${esc(label(item))}</span><b>›</b></button>`;
+    }
     const saved = isFavorite(active, item);
-    return `<div class="entertainment-result-row">${row}<button type="button" class="entertainment-fav" data-ent-fav="${index}" aria-pressed="${saved}" aria-label="${saved ? 'Remove favorite' : 'Save favorite'}: ${esc(item.title)}">${saved ? '★' : '☆'}</button></div>`;
-  }).join('') : '<p class="entertainment-empty">Nothing found. Try a different search.</p>';
-  el('entertainment-results')._items = items;
+    const kind = item.kind === 'series' ? 'TV Series' : (item.kind === 'movie' ? 'Movie' : '');
+    const cta = active === 'ani-cli' ? 'View Episodes' : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
+    return `<article class="ent-card" data-kind="${esc(active)}">
+      <span class="ent-card-art" aria-hidden="true"><span class="ent-card-initials">${esc((item.title || '?').trim().slice(0, 2).toUpperCase())}</span></span>
+      <div class="ent-card-body">
+        <h3>${esc(item.title)}</h3>
+        ${kind ? `<div class="ent-card-badges"><span>${kind}</span></div>` : ''}
+        <div class="ent-card-actions">
+          <button type="button" class="ent-card-play" data-ent-action="${action}" data-ent-index="${index}">▶ ${cta}</button>
+          <button type="button" class="ent-card-fav" data-ent-fav="${index}" aria-pressed="${saved}" aria-label="${saved ? 'Remove favorite' : 'Save favorite'}: ${esc(item.title)}">${saved ? '★' : '☆'}</button>
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+  host._items = items;
 }
 
 function episodeButtons(result, action, path, body) {
@@ -182,6 +202,10 @@ function showProvider(id) {
   el('entertainment-player').classList.add('hidden');
   el('entertainment-browser').classList.remove('hidden');
   const anime = id === 'ani-cli';
+  el('entertainment-browser').dataset.kind = id;
+  el('entertainment-eyebrow').textContent = anime ? 'STREAM ANYTHING · NO LIMITS' : 'PRIVATE RUNTIME · UPSTREAM CLI';
+  el('entertainment-chips').innerHTML = providerChips(id);
+  el('entertainment-results-title').textContent = 'Results';
   el('entertainment-heading').textContent = anime ? 'Anime' : 'Movies & Shows';
   el('entertainment-copy').textContent = anime ? 'Search AniCLI, choose sub or dub, then pick an episode and quality.' : 'Search PandaFlix for a movie or series, then choose a season and episode.';
   el('entertainment-mode').classList.toggle('hidden', !anime);
@@ -193,7 +217,30 @@ function showProvider(id) {
   status('');
   renderSaved();
   el('entertainment-tabs').querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.provider === id));
+  document.querySelectorAll('[data-ent-browse]').forEach(button => button.classList.toggle('active', button.dataset.entBrowse === id));
   el('entertainment-query').focus();
+}
+
+const ENT_ICON = {
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+  infinity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12c0-2 1.5-3.5 3.5-3.5S14 12 14 12s1.5 3.5 3.5 3.5S21 14 21 12s-1.5-3.5-3.5-3.5S14 12 14 12s-1.5 3.5-3.5 3.5S7 14 7 12z"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>',
+  panda: '<svg viewBox="0 0 100 100"><circle cx="24" cy="26" r="15" fill="currentColor"/><circle cx="76" cy="26" r="15" fill="currentColor"/><circle cx="50" cy="54" r="40" fill="none" stroke="currentColor" stroke-width="7"/><ellipse cx="34" cy="50" rx="12" ry="16" fill="currentColor"/><ellipse cx="66" cy="50" rx="12" ry="16" fill="currentColor"/><ellipse cx="50" cy="74" rx="7" ry="5" fill="currentColor"/></svg>',
+  film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5M16 4v5"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+};
+
+function providerBlurb(id) {
+  return id === 'ani-cli'
+    ? 'Dive into a massive library of anime, from timeless classics to the latest releases.'
+    : 'Blockbusters, binge-worthy series, and hidden gems. All in one place.';
+}
+
+function providerChips(id) {
+  const chips = id === 'ani-cli'
+    ? [[ENT_ICON.panda, 'AnimeCLI Powered'], [ENT_ICON.film, 'Dub / Sub'], ['<b>HD</b>', 'Up to 1080p/4K'], [ENT_ICON.bolt, 'Fast & Private']]
+    : [[ENT_ICON.film, 'PandaFlix Powered'], ['<b>HD</b>', 'Movie / TV / Special'], ['<b>HD</b>', 'Up to 4K'], [ENT_ICON.bolt, 'Fast & Private']];
+  return chips.map(([icon, label]) => `<span class="ent-chip">${icon}${label}</span>`).join('');
 }
 
 function showLanding() {
@@ -202,9 +249,28 @@ function showLanding() {
   el('entertainment-browser').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-landing').classList.remove('hidden');
-  el('entertainment-landing').innerHTML = '<div class="entertainment-landing-copy"><p>PRIVATE ENTERTAINMENT</p><h1>What are we watching?</h1></div>' + providers.map(provider =>
-    `<button type="button" class="entertainment-choice" data-provider="${provider.id}" ${provider.enabled ? '' : 'disabled'}><span>${provider.id === 'ani-cli' ? 'ANIME' : 'MOVIES · SHOWS'}</span><strong>${esc(provider.label)}</strong><small>${provider.enabled ? 'Open provider' : 'Enable this plugin first'}</small></button>`
-  ).join('');
+  el('entertainment-landing').innerHTML =
+    `<div class="ent-landing-copy">
+       <p class="ent-eyebrow"><i></i>PRIVATE STREAMING. NO LIMITS.<i></i></p>
+       <h1>What are we<br><em>watching tonight?</em></h1>
+       <p class="ent-landing-sub">Your private gateway to anime, movies, and shows. Stream what you love. On your terms.</p>
+       <div class="ent-feature-chips">
+         <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.lock}</span><div><strong>Private</strong><small>Your media, your space.</small></div></div>
+         <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.infinity}</span><div><strong>Unlimited</strong><small>Anime, movies, and more.</small></div></div>
+         <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.bolt}</span><div><strong>Always On</strong><small>Entertainment, no limits.</small></div></div>
+       </div>
+     </div>
+     <div class="ent-choice-grid">` + providers.map(provider =>
+      `<button type="button" class="entertainment-choice" data-provider="${provider.id}" ${provider.enabled ? '' : 'disabled'}>
+         <span class="ent-choice-art" data-kind="${esc(provider.id)}"></span>
+         <span class="ent-choice-body">
+           <span class="ent-choice-badge" aria-hidden="true">${provider.id === 'ani-cli' ? ENT_ICON.panda : ENT_ICON.film}</span>
+           <strong>${esc(provider.label)}</strong>
+           <small>${providerBlurb(provider.id)}</small>
+           <span class="ent-choice-cta">${provider.enabled ? 'Open provider' : 'Enable this plugin first'} <b>→</b></span>
+         </span>
+       </button>`
+    ).join('') + `</div>`;
 }
 
 async function play(result) {
@@ -232,7 +298,8 @@ async function search() {
   const body = active === 'ani-cli' ? { query, dub: el('entertainment-mode').value === 'dub' } : { query };
   const result = await api(`/${active}/search`, body);
   buttons(result.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
-  status(`${result.items.length} result${result.items.length === 1 ? '' : 's'}`);
+  el('entertainment-results-title').textContent = `${result.items.length} Results for “${query}”`;
+  status('');
 }
 
 async function chooseTitle(item) {
@@ -420,6 +487,15 @@ function init() {
     if (event.key === 'Escape' && !el('entertainment-modal')?.classList.contains('hidden')) closeEntertainment();
   });
   window.addEventListener('pandamonium:extensions-changed', refreshEntertainment);
+  document.querySelectorAll('[data-ent-browse]').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.entBrowse;
+    if (providers.some(provider => provider.id === id)) showProvider(id);
+  }));
+  document.querySelectorAll('[data-ent-nav]').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.entNav;
+    if (id === 'home') { showLanding(); return; }
+    if (providers.some(provider => provider.id === id)) showProvider(id);
+  }));
 }
 
 export async function refreshEntertainment() {
@@ -429,6 +505,8 @@ export async function refreshEntertainment() {
   const installed = providers.length > 0;
   document.querySelector('[data-settings-tab="entertainment"]')?.classList.toggle('hidden', !installed);
   el('entertainment-section')?.classList.toggle('hidden', !installed);
+  const footerVersion = el('entertainment-footer-version');
+  if (footerVersion && window._appVersion) footerVersion.textContent = `v${window._appVersion}`;
   renderSettingsPanel();
   if (!installed) closeEntertainment();
 }

@@ -56,7 +56,7 @@ test('Entertainment settings tab holds defaults and the sidebar opens the player
   await page.locator('.entertainment-choice[data-provider="pandaflix"]').click();
   await page.locator('#entertainment-query').fill('Arrival');
   await page.locator('#entertainment-search button[type="submit"]').click();
-  await page.locator('.entertainment-result').click();
+  await page.locator('.ent-card-play').click();
   await expect(page.locator('#entertainment-player')).toBeVisible();
   await expect(page.locator('#entertainment-now-playing')).toHaveText('Arrival');
   await expect(page.locator('#entertainment-video')).toHaveAttribute('src', 'https://media.example/arrival.mp4');
@@ -128,7 +128,7 @@ test('Entertainment player supports jump, next, autoplay, favorites, and continu
   await page.locator('.entertainment-choice[data-provider="ani-cli"]').click();
   await page.locator('#entertainment-query').fill('Naruto');
   await page.locator('#entertainment-search button[type="submit"]').click();
-  await page.locator('.entertainment-result').first().click();
+  await page.locator('.ent-card-play').first().click();
 
   // Jump straight to an episode instead of paging.
   await expect(page.locator('#entertainment-jump')).toBeVisible();
@@ -149,7 +149,7 @@ test('Entertainment player supports jump, next, autoplay, favorites, and continu
   await expect(page.locator('#entertainment-resume')).toContainText('Naruto Episode 4');
   await page.locator('#entertainment-query').fill('Naruto');
   await page.locator('#entertainment-search button[type="submit"]').click();
-  await page.locator('.entertainment-fav').first().click();
+  await page.locator('.ent-card-fav').first().click();
   await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toHaveCount(1);
   await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toContainText('Naruto');
 });
