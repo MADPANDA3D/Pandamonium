@@ -340,10 +340,11 @@ function loadIntoSlot(key, result) {
     const instance = new window.Hls({
       enableWorker: true,
       lowLatencyMode: false,
-      maxBufferLength: 600,
-      maxMaxBufferLength: 1800,
-      maxBufferSize: 300 * 1000 * 1000,
-      backBufferLength: 60,
+      // Buffer the whole episode: effectively no forward cap for a ~30 min show.
+      maxBufferLength: 3600,
+      maxMaxBufferLength: 7200,
+      maxBufferSize: 4 * 1000 * 1000 * 1000,
+      backBufferLength: 120,
       fragLoadingMaxRetry: 8,
       manifestLoadingMaxRetry: 6,
       levelLoadingMaxRetry: 6,
