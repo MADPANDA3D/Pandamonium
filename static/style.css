@@ -44553,9 +44553,9 @@ textarea.bug-report-input {
 .entertainment-shell.is-landing .ent-nav-home,.entertainment-shell.is-landing .ent-nav-lib{display:none}
 .entertainment-shell.is-landing .ent-sidebar{display:none}
 .entertainment-shell.is-landing .ent-footer{display:none}
-.entertainment-landing{position:relative;min-height:100%;display:flex;align-items:center;overflow:hidden;padding:64px 5vw 96px;background:radial-gradient(circle at 76% 10%,rgba(229,9,20,.2),transparent 42%),radial-gradient(circle at 12% 92%,rgba(120,10,18,.26),transparent 46%),linear-gradient(155deg,#140507,#070606 62%)}
-.ent-watermark{position:absolute;top:-10%;right:-5%;width:min(64vw,940px);opacity:.1;pointer-events:none;mix-blend-mode:screen;user-select:none}
-.ent-foreground{position:absolute;left:0;right:0;bottom:0;width:100%;height:210px;pointer-events:none}
+.entertainment-landing{position:relative;min-height:100%;display:flex;align-items:center;overflow:hidden;padding:64px 5vw 96px;background:linear-gradient(90deg,rgba(6,5,6,.9) 0%,rgba(6,5,6,.6) 40%,rgba(6,5,6,.22) 100%),url('/static/entertainment/landing-bg.webp') center/cover no-repeat}
+.ent-watermark{display:none}
+.ent-foreground{display:none}
 .ent-landing-inner{position:relative;z-index:2;width:100%;max-width:1560px;margin:0 auto;display:grid;grid-template-columns:1.05fr .95fr;gap:64px;align-items:center}
 .ent-landing-copy{max-width:680px}
 .ent-eyebrow{display:flex;align-items:center;gap:14px;color:#e50914;font-weight:800;letter-spacing:.3em;font-size:12px;margin:0 0 22px}
@@ -44575,8 +44575,8 @@ textarea.bug-report-input {
 .entertainment-choice:hover:not(:disabled){transform:translateY(-6px);border-color:#e50914;box-shadow:0 30px 90px -30px rgba(229,9,20,.8)}
 .entertainment-choice:disabled{opacity:.5;cursor:not-allowed;transform:none}
 .ent-choice-art{position:absolute;inset:0;background:linear-gradient(160deg,#2a0709,#0a0708 62%)}
-.ent-choice-art[data-kind="ani-cli"]{background:radial-gradient(circle at 64% 24%,rgba(229,9,20,.6),transparent 46%),linear-gradient(160deg,#2b060b,#080607 66%)}
-.ent-choice-art[data-kind="pandaflix"]{background:radial-gradient(circle at 62% 28%,rgba(229,9,20,.42),transparent 48%),linear-gradient(160deg,#161616,#070607 66%)}
+.ent-choice-art[data-kind="ani-cli"]{background:url('/static/entertainment/card-anime.webp') center/cover no-repeat}
+.ent-choice-art[data-kind="pandaflix"]{background:url('/static/entertainment/card-movies.webp') center/cover no-repeat}
 .ent-choice-art::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,rgba(5,4,4,.98),rgba(5,4,4,.45) 52%,rgba(5,4,4,.12))}
 .ent-choice-body{position:relative;z-index:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-height:560px;padding:28px;gap:12px}
 .entertainment-choice .ent-choice-art,.entertainment-choice .ent-choice-badge,.entertainment-choice .ent-choice-body,.entertainment-choice .ent-choice-cta{color:#fff;font-size:inherit;letter-spacing:normal}

@@ -252,9 +252,7 @@ function showLanding() {
   el('entertainment-player').classList.add('hidden');
   el('entertainment-landing').classList.remove('hidden');
   el('entertainment-landing').innerHTML =
-    `<img class="ent-watermark" src="/static/icons/pandamonium.png" alt="" aria-hidden="true">
-     <svg class="ent-foreground" viewBox="0 0 1440 220" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="entRidge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a0a0d" stop-opacity=".6"/><stop offset=".45" stop-color="#120608" stop-opacity=".85"/><stop offset="1" stop-color="#070606"/></linearGradient></defs><path d="M0 220V150l110 34 120-58 130 62 140-70 150 74 130-56 150 70 130-52 160 76 120-60 110 44 100-30V220Z" fill="url(#entRidge)"/></svg>
-     <div class="ent-landing-inner">
+    `<div class="ent-landing-inner">
        <div class="ent-landing-copy">
          <p class="ent-eyebrow"><i></i>PRIVATE STREAMING. NO LIMITS.<i></i></p>
          <h1>What are we<br><em>watching tonight?</em></h1>
