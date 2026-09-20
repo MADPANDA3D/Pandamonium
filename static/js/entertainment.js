@@ -198,6 +198,7 @@ function showProvider(id) {
   selection = null;
   playback = null;
   stopPlayer();
+  el('entertainment-modal').classList.remove('is-landing');
   el('entertainment-landing').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-browser').classList.remove('hidden');
@@ -246,31 +247,38 @@ function providerChips(id) {
 function showLanding() {
   if (providers.length === 1) { showProvider(providers[0].id); return; }
   stopPlayer(); active = null; playback = null;
+  el('entertainment-modal').classList.add('is-landing');
   el('entertainment-browser').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-landing').classList.remove('hidden');
   el('entertainment-landing').innerHTML =
-    `<div class="ent-landing-copy">
-       <p class="ent-eyebrow"><i></i>PRIVATE STREAMING. NO LIMITS.<i></i></p>
-       <h1>What are we<br><em>watching tonight?</em></h1>
-       <p class="ent-landing-sub">Your private gateway to anime, movies, and shows. Stream what you love. On your terms.</p>
-       <div class="ent-feature-chips">
-         <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.lock}</span><div><strong>Private</strong><small>Your media, your space.</small></div></div>
-         <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.infinity}</span><div><strong>Unlimited</strong><small>Anime, movies, and more.</small></div></div>
-         <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.bolt}</span><div><strong>Always On</strong><small>Entertainment, no limits.</small></div></div>
+    `<img class="ent-watermark" src="/static/icons/pandamonium.png" alt="" aria-hidden="true">
+     <svg class="ent-foreground" viewBox="0 0 1440 220" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="entRidge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a0a0d" stop-opacity=".6"/><stop offset=".45" stop-color="#120608" stop-opacity=".85"/><stop offset="1" stop-color="#070606"/></linearGradient></defs><path d="M0 220V150l110 34 120-58 130 62 140-70 150 74 130-56 150 70 130-52 160 76 120-60 110 44 100-30V220Z" fill="url(#entRidge)"/></svg>
+     <div class="ent-landing-inner">
+       <div class="ent-landing-copy">
+         <p class="ent-eyebrow"><i></i>PRIVATE STREAMING. NO LIMITS.<i></i></p>
+         <h1>What are we<br><em>watching tonight?</em></h1>
+         <p class="ent-landing-sub">Your private gateway to anime, movies, and shows. Stream what you love. On your terms.</p>
+         <div class="ent-feature-chips">
+           <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.lock}</span><div><strong>Private</strong><small>Your media, your space.</small></div></div>
+           <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.infinity}</span><div><strong>Unlimited</strong><small>Anime, movies, and more.</small></div></div>
+           <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.bolt}</span><div><strong>Always On</strong><small>Entertainment, no limits.</small></div></div>
+         </div>
        </div>
+       <div class="ent-choice-grid">` + providers.map(provider =>
+        `<button type="button" class="entertainment-choice" data-provider="${provider.id}" ${provider.enabled ? '' : 'disabled'}>
+           <span class="ent-choice-art" data-kind="${esc(provider.id)}"></span>
+           <span class="ent-choice-body">
+             <span class="ent-choice-badge" aria-hidden="true">${provider.id === 'ani-cli' ? ENT_ICON.panda : ENT_ICON.film}</span>
+             <strong>${esc(provider.label)}</strong>
+             <small>${providerBlurb(provider.id)}</small>
+             <span class="ent-choice-cta">${provider.enabled ? 'Open provider' : 'Enable this plugin first'} <b>→</b></span>
+           </span>
+         </button>`
+      ).join('') + `</div>
      </div>
-     <div class="ent-choice-grid">` + providers.map(provider =>
-      `<button type="button" class="entertainment-choice" data-provider="${provider.id}" ${provider.enabled ? '' : 'disabled'}>
-         <span class="ent-choice-art" data-kind="${esc(provider.id)}"></span>
-         <span class="ent-choice-body">
-           <span class="ent-choice-badge" aria-hidden="true">${provider.id === 'ani-cli' ? ENT_ICON.panda : ENT_ICON.film}</span>
-           <strong>${esc(provider.label)}</strong>
-           <small>${providerBlurb(provider.id)}</small>
-           <span class="ent-choice-cta">${provider.enabled ? 'Open provider' : 'Enable this plugin first'} <b>→</b></span>
-         </span>
-       </button>`
-    ).join('') + `</div>`;
+     <div class="ent-corner ent-corner-left"><i></i><span>GOOD STORIES<br>GO FURTHER.</span></div>
+     <div class="ent-corner ent-corner-right"><span>SAME PASSION.<br>BIGGER WORLDS.</span><i></i></div>`;
 }
 
 async function play(result) {

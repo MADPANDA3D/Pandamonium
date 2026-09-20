@@ -3155,20 +3155,19 @@
   <div id="entertainment-modal" class="entertainment-shell hidden" role="dialog" aria-modal="true" aria-labelledby="entertainment-title">
     <header class="ent-topnav">
       <button id="entertainment-home" class="ent-brand" type="button" aria-label="Entertainment home">
-        <span class="ent-brand-mark" aria-hidden="true"><svg viewBox="0 0 100 100"><circle cx="24" cy="26" r="15" fill="#0a0a0a" stroke="#fff" stroke-width="4"/><circle cx="76" cy="26" r="15" fill="#0a0a0a" stroke="#fff" stroke-width="4"/><circle cx="50" cy="54" r="40" fill="#fff"/><ellipse cx="34" cy="50" rx="13" ry="17" fill="#0a0a0a"/><ellipse cx="66" cy="50" rx="13" ry="17" fill="#0a0a0a"/><path d="M27 48q9-7 17 0-9 7-17 0z" fill="#e50914"/><path d="M56 48q9-7 17 0-9 7-17 0z" fill="#e50914"/><ellipse cx="50" cy="74" rx="8" ry="6" fill="#0a0a0a"/></svg></span>
+        <img class="ent-brand-mark" src="/static/icons/pandamonium.png" alt="">
         <span class="ent-brand-word" id="entertainment-title">PANDA<em>MONIUM</em></span>
       </button>
       <nav class="ent-topnav-links" aria-label="Entertainment sections">
-        <button type="button" data-ent-nav="home">Home</button>
+        <button type="button" class="ent-section-pill" data-ent-nav="home"><span class="ent-pill-play" aria-hidden="true">▶</span>ENTERTAINMENT</button>
+        <button type="button" class="ent-nav-home" data-ent-nav="home">Home</button>
         <span id="entertainment-tabs" class="ent-provider-tabs" aria-label="Entertainment providers"></span>
-        <button type="button" data-ent-nav="mylist" disabled>My List</button>
-        <button type="button" data-ent-nav="downloads" disabled>Downloads</button>
+        <button type="button" class="ent-nav-lib" data-ent-nav="mylist" disabled>My List</button>
+        <button type="button" class="ent-nav-lib" data-ent-nav="downloads" disabled>Downloads</button>
       </nav>
       <div class="ent-topnav-right">
-        <button type="button" class="ent-global-search" disabled aria-label="Global search (coming soon)">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-          <span>Search anime, movies, shows…</span><kbd>⌘K</kbd>
-        </button>
+        <button type="button" class="ent-icon-btn" disabled aria-label="Search (coming soon)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+        <button type="button" class="ent-icon-btn" disabled aria-label="Notifications"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><i class="ent-badge"></i></button>
         <button type="button" class="ent-avatar" disabled aria-label="Account"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></button>
       </div>
       <button id="entertainment-close" class="ent-close" type="button" aria-label="Close Entertainment">✕</button>
