@@ -185,6 +185,7 @@ function teardownSlot(slot) {
 
 function stopPlayer() {
   initSlots();
+  el('entertainment-modal')?.classList.remove('is-watching');
   preloaded = null;
   preloadToken += 1;
   for (const key of ['a', 'b']) teardownSlot(slots[key]);
@@ -257,7 +258,7 @@ function showProvider(id) {
   el('entertainment-copy').textContent = anime ? 'Search AniCLI, choose sub or dub, then pick an episode and quality.' : 'Search PandaFlix for a movie or series, then choose a season and episode.';
   el('entertainment-mode').classList.toggle('hidden', !anime);
   el('entertainment-quality').classList.toggle('hidden', !anime);
-  el('entertainment-history').classList.toggle('hidden', !anime);
+  el('entertainment-history')?.classList.toggle('hidden', !anime);
   el('entertainment-jump').classList.add('hidden');
   el('entertainment-query').placeholder = anime ? 'Search anime' : 'Search movies and shows';
   el('entertainment-results').replaceChildren();
@@ -339,10 +340,14 @@ function loadIntoSlot(key, result) {
     const instance = new window.Hls({
       enableWorker: true,
       lowLatencyMode: false,
-      maxBufferLength: 60,
-      maxMaxBufferLength: 600,
-      maxBufferSize: 120 * 1000 * 1000,
-      backBufferLength: 30,
+      maxBufferLength: 600,
+      maxMaxBufferLength: 1800,
+      maxBufferSize: 300 * 1000 * 1000,
+      backBufferLength: 60,
+      fragLoadingMaxRetry: 8,
+      manifestLoadingMaxRetry: 6,
+      levelLoadingMaxRetry: 6,
+      fragLoadingRetryDelay: 500,
     });
     instance.loadSource(result.url); instance.attachMedia(video);
     slot.hls = instance;
@@ -369,6 +374,7 @@ function showPlayer(title) {
   el('entertainment-browser').classList.add('hidden');
   el('entertainment-collection')?.classList.add('hidden');
   el('entertainment-player').classList.remove('hidden');
+  el('entertainment-modal').classList.add('is-watching');
   el('entertainment-now-playing').textContent = title;
 }
 
@@ -446,6 +452,7 @@ async function play(result) {
 async function search() {
   query = el('entertainment-query').value.trim();
   if (!query) return;
+  if (active === 'ani-cli') playSound('entertainment-anime-search');
   status('Searching upstream…'); el('entertainment-results').replaceChildren();
   const body = active === 'ani-cli' ? { query, dub: el('entertainment-mode').value === 'dub' } : { query };
   const result = await api(`/${active}/search`, body);
