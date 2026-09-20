@@ -6,12 +6,18 @@ let providers = [];
 let active = null;
 let query = '';
 let selection = null;
-let hls = null;
+let slots = null;
+let activeSlotKey = null;
+let preloaded = null;
+let preloadToken = 0;
+let pendingResume = 0;
+let resumeSaveAt = 0;
+let lastAutoRefresh = 0;
 let initialized = false;
 let playback = null;
 
 const PREFS_KEY = 'entertainment';
-const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], resume: null };
+const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
 const LANGUAGES = ['sub', 'dub'];
 const QUALITIES = ['best', '1080p', '720p', '480p', '360p'];
 let prefs = { ...DEFAULT_PREFS };
@@ -31,6 +37,8 @@ function normalizePrefs(value) {
   const merged = { ...DEFAULT_PREFS, ...(value && typeof value === 'object' ? value : {}) };
   merged.autoplay = Boolean(merged.autoplay);
   merged.favorites = Array.isArray(merged.favorites) ? merged.favorites.filter(item => item && item.key && item.item).slice(0, 100) : [];
+  merged.watchlist = Array.isArray(merged.watchlist) ? merged.watchlist.filter(item => item && item.key && item.item).slice(0, 100) : [];
+  merged.history = Array.isArray(merged.history) ? merged.history.filter(entry => entry && entry.title).slice(0, 200) : [];
   merged.resume = merged.resume && typeof merged.resume === 'object' && merged.resume.item ? merged.resume : null;
   return merged;
 }
@@ -120,8 +128,38 @@ function toggleFavorite(provider, item) {
   renderSaved();
 }
 
+function isWatchlisted(provider, item) {
+  const key = favKey(provider, item);
+  return (prefs.watchlist || []).some(entry => entry.key === key);
+}
+
+function toggleWatchlist(provider, item) {
+  if (!item) return;
+  const key = favKey(provider, item);
+  const index = prefs.watchlist.findIndex(entry => entry.key === key);
+  if (index >= 0) prefs.watchlist.splice(index, 1);
+  else prefs.watchlist.unshift({ key, provider, query, item, title: item.title || 'Title' });
+  prefs.watchlist = prefs.watchlist.slice(0, 100);
+  savePrefs();
+}
+
+function historyKey(record) {
+  return `${record.provider}:${record.item?.id ?? record.item?.selection ?? record.title}:${record.episode ?? ''}`;
+}
+
+function recordHistory(record) {
+  if (!record || !record.title) return;
+  const key = historyKey(record);
+  const rest = (prefs.history || []).filter(entry => entry.key !== key);
+  prefs.history = [{ ...record, key, at: Date.now() }, ...rest].slice(0, 200);
+}
+
 function rememberResume(record) {
-  prefs.resume = { ...record, at: Date.now() };
+  const same = prefs.resume
+    && prefs.resume.provider === record.provider
+    && String(prefs.resume.episode) === String(record.episode);
+  prefs.resume = { ...record, key: historyKey(record), position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
+  recordHistory(prefs.resume);
   savePrefs();
 }
 
@@ -146,23 +184,113 @@ function renderSaved() {
   host.classList.toggle('hidden', !resume && favorites.length === 0);
 }
 
-function stopPlayer() {
-  if (hls) { hls.destroy(); hls = null; }
-  const video = el('entertainment-video');
+function initSlots() {
+  if (slots) return;
+  slots = {
+    a: { video: el('entertainment-video'), hls: null },
+    b: { video: el('entertainment-video-next'), hls: null },
+  };
+  for (const key of ['a', 'b']) {
+    slots[key].video?.addEventListener('ended', () => { if (key === activeSlotKey) handleEnded(); });
+    slots[key].video?.addEventListener('timeupdate', event => {
+      if (!activeSlotKey || slots[activeSlotKey].video !== event.target || !playback) return;
+      const now = Date.now();
+      if (now - resumeSaveAt < 5000) return;
+      resumeSaveAt = now;
+      if (!prefs.resume) return;
+      const position = Math.floor(event.target.currentTime || 0);
+      const duration = Math.floor(event.target.duration || 0);
+      prefs.resume.position = position;
+      prefs.resume.duration = duration;
+      prefs.resume.at = now;
+      const entry = (prefs.history || []).find(item => item.key === prefs.resume.key);
+      if (entry) { entry.position = position; entry.duration = duration; entry.at = now; }
+      savePrefs();
+    });
+  }
+}
+
+function idleSlotKey() {
+  return activeSlotKey === 'a' ? 'b' : 'a';
+}
+
+function teardownSlot(slot) {
+  if (!slot) return;
+  if (slot.hls) { slot.hls.destroy(); slot.hls = null; }
+  const video = slot.video;
   if (video) { video.pause(); video.removeAttribute('src'); video.replaceChildren(); video.load(); }
 }
 
-function status(text = '') { el('entertainment-status').textContent = text; }
+function stopPlayer() {
+  initSlots();
+  el('entertainment-modal')?.classList.remove('is-watching');
+  preloaded = null;
+  preloadToken += 1;
+  for (const key of ['a', 'b']) teardownSlot(slots[key]);
+  activeSlotKey = null;
+}
+
+function status(text = '') {
+  const browser = el('entertainment-status');
+  if (browser) browser.textContent = text;
+  const player = el('entertainment-player-status');
+  if (player) player.textContent = text;
+}
+
+function playSound(id) {
+  const audio = el(id);
+  if (!audio) return;
+  try { audio.currentTime = 0; audio.play().catch(() => {}); } catch (_) {}
+}
+
+function cardArt(item) {
+  if (item.cover) {
+    return `<span class="ent-card-art"><img class="ent-card-cover" src="${esc(item.cover)}" alt="" loading="lazy" decoding="async"></span>`;
+  }
+  return `<span class="ent-card-art" aria-hidden="true"><span class="ent-card-initials">${esc((item.title || '?').trim().slice(0, 2).toUpperCase())}</span></span>`;
+}
+
+function cardBadges(item, kind) {
+  const badges = [];
+  if (kind) badges.push(kind);
+  if (item.year) badges.push(String(item.year));
+  for (const genre of (Array.isArray(item.genres) ? item.genres : []).slice(0, 2)) badges.push(genre);
+  return badges.length ? `<div class="ent-card-badges">${badges.map(badge => `<span>${esc(badge)}</span>`).join('')}</div>` : '';
+}
 
 function buttons(items, action, label) {
-  const favoritable = action === 'title';
-  el('entertainment-results').innerHTML = items.length ? items.map((item, index) => {
-    const row = `<button type="button" class="entertainment-result" data-ent-action="${action}" data-ent-index="${index}"><span>${esc(label(item))}</span><b>›</b></button>`;
-    if (!favoritable) return row;
+  const host = el('entertainment-results');
+  const cards = action === 'title';
+  host.classList.toggle('is-cards', cards);
+  if (!items.length) {
+    host.innerHTML = '<p class="entertainment-empty">Nothing found. Try a different search.</p>';
+    host._items = items;
+    return;
+  }
+  host.innerHTML = items.map((item, index) => {
+    if (!cards) {
+      return `<button type="button" class="entertainment-result" data-ent-action="${action}" data-ent-index="${index}"><span>${esc(label(item))}</span><b>›</b></button>`;
+    }
     const saved = isFavorite(active, item);
-    return `<div class="entertainment-result-row">${row}<button type="button" class="entertainment-fav" data-ent-fav="${index}" aria-pressed="${saved}" aria-label="${saved ? 'Remove favorite' : 'Save favorite'}: ${esc(item.title)}">${saved ? '★' : '☆'}</button></div>`;
-  }).join('') : '<p class="entertainment-empty">Nothing found. Try a different search.</p>';
-  el('entertainment-results')._items = items;
+    const watched = isWatchlisted(active, item);
+    const kind = item.kind === 'series' ? 'TV Series' : (item.kind === 'movie' ? 'Movie' : '');
+    const cta = active === 'ani-cli' ? 'View Episodes' : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
+    return `<article class="ent-card" data-kind="${esc(active)}" data-ent-card="${index}">
+      ${cardArt(item)}
+      <div class="ent-card-body">
+        <h3>${esc(item.title)}</h3>
+        ${cardBadges(item, kind)}
+        <div class="ent-card-actions">
+          <button type="button" class="ent-card-play" data-ent-action="${action}" data-ent-index="${index}">▶ ${cta}</button>
+          <div class="ent-card-tools">
+            <button type="button" class="ent-card-fav" data-ent-fav="${index}" aria-pressed="${saved}" aria-label="${saved ? 'Remove favorite' : 'Save favorite'}: ${esc(item.title)}" title="${saved ? 'In favorites' : 'Save favorite'}">${saved ? '★' : '☆'}</button>
+            <button type="button" class="ent-card-watch" data-ent-watch="${index}" aria-pressed="${watched}" aria-label="${watched ? 'Remove from watchlist' : 'Add to watchlist'}: ${esc(item.title)}" title="${watched ? 'In watchlist' : 'Add to watchlist'}">${watched ? '✓' : '＋'}</button>
+          </div>
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+  host._items = items;
 }
 
 function episodeButtons(result, action, path, body) {
@@ -178,67 +306,364 @@ function showProvider(id) {
   selection = null;
   playback = null;
   stopPlayer();
+  el('entertainment-modal').classList.remove('is-landing');
+  el('entertainment-collection')?.classList.add('hidden');
   el('entertainment-landing').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-browser').classList.remove('hidden');
   const anime = id === 'ani-cli';
+  el('entertainment-browser').dataset.kind = id;
+  el('entertainment-eyebrow').textContent = anime ? 'STREAM ANYTHING · NO LIMITS' : 'PRIVATE RUNTIME · UPSTREAM CLI';
+  el('entertainment-chips').innerHTML = providerChips(id);
+  el('entertainment-results-title').textContent = 'Results';
   el('entertainment-heading').textContent = anime ? 'Anime' : 'Movies & Shows';
   el('entertainment-copy').textContent = anime ? 'Search AniCLI, choose sub or dub, then pick an episode and quality.' : 'Search PandaFlix for a movie or series, then choose a season and episode.';
   el('entertainment-mode').classList.toggle('hidden', !anime);
   el('entertainment-quality').classList.toggle('hidden', !anime);
-  el('entertainment-history').classList.toggle('hidden', !anime);
+  el('entertainment-history')?.classList.toggle('hidden', !anime);
   el('entertainment-jump').classList.add('hidden');
   el('entertainment-query').placeholder = anime ? 'Search anime' : 'Search movies and shows';
   el('entertainment-results').replaceChildren();
   status('');
   renderSaved();
-  el('entertainment-tabs').querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.provider === id));
+  el('entertainment-tabs')?.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.provider === id));
+  document.querySelectorAll('[data-ent-browse]').forEach(button => button.classList.toggle('active', button.dataset.entBrowse === id));
   el('entertainment-query').focus();
+}
+
+const ENT_ICON = {
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+  infinity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 12c0-2 1.5-3.5 3.5-3.5S14 12 14 12s1.5 3.5 3.5 3.5S21 14 21 12s-1.5-3.5-3.5-3.5S14 12 14 12s-1.5 3.5-3.5 3.5S7 14 7 12z"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>',
+  panda: '<svg viewBox="0 0 100 100"><circle cx="24" cy="26" r="15" fill="currentColor"/><circle cx="76" cy="26" r="15" fill="currentColor"/><circle cx="50" cy="54" r="40" fill="none" stroke="currentColor" stroke-width="7"/><ellipse cx="34" cy="50" rx="12" ry="16" fill="currentColor"/><ellipse cx="66" cy="50" rx="12" ry="16" fill="currentColor"/><ellipse cx="50" cy="74" rx="7" ry="5" fill="currentColor"/></svg>',
+  film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5M16 4v5"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+};
+
+function providerBlurb(id) {
+  return id === 'ani-cli'
+    ? 'Dive into a massive library of anime, from timeless classics to the latest releases.'
+    : 'Blockbusters, binge-worthy series, and hidden gems. All in one place.';
+}
+
+function providerChips(id) {
+  const chips = id === 'ani-cli'
+    ? [[ENT_ICON.panda, 'AnimeCLI Powered'], [ENT_ICON.film, 'Dub / Sub'], ['<b>HD</b>', 'Up to 1080p/4K'], [ENT_ICON.bolt, 'Fast & Private']]
+    : [[ENT_ICON.film, 'PandaFlix Powered'], ['<b>HD</b>', 'Movie / TV / Special'], ['<b>HD</b>', 'Up to 4K'], [ENT_ICON.bolt, 'Fast & Private']];
+  return chips.map(([icon, label]) => `<span class="ent-chip">${icon}${label}</span>`).join('');
 }
 
 function showLanding() {
   if (providers.length === 1) { showProvider(providers[0].id); return; }
   stopPlayer(); active = null; playback = null;
+  el('entertainment-modal').classList.add('is-landing');
+  el('entertainment-collection')?.classList.add('hidden');
   el('entertainment-browser').classList.add('hidden');
   el('entertainment-player').classList.add('hidden');
   el('entertainment-landing').classList.remove('hidden');
-  el('entertainment-landing').innerHTML = '<div class="entertainment-landing-copy"><p>PRIVATE ENTERTAINMENT</p><h1>What are we watching?</h1></div>' + providers.map(provider =>
-    `<button type="button" class="entertainment-choice" data-provider="${provider.id}" ${provider.enabled ? '' : 'disabled'}><span>${provider.id === 'ani-cli' ? 'ANIME' : 'MOVIES · SHOWS'}</span><strong>${esc(provider.label)}</strong><small>${provider.enabled ? 'Open provider' : 'Enable this plugin first'}</small></button>`
-  ).join('');
+  el('entertainment-landing').innerHTML =
+    `<div class="ent-landing-inner">
+       <div class="ent-landing-copy">
+         <p class="ent-eyebrow"><i></i>PRIVATE STREAMING. NO LIMITS.<i></i></p>
+         <h1>What are we<br><em>watching tonight?</em></h1>
+         <p class="ent-landing-sub">Your private gateway to anime, movies, and shows. Stream what you love. On your terms.</p>
+         <div class="ent-feature-chips">
+           <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.lock}</span><div><strong>Private</strong><small>Your media, your space.</small></div></div>
+           <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.infinity}</span><div><strong>Unlimited</strong><small>Anime, movies, and more.</small></div></div>
+           <div class="ent-feature-chip"><span class="ent-feature-icon">${ENT_ICON.bolt}</span><div><strong>Always On</strong><small>Entertainment, no limits.</small></div></div>
+         </div>
+       </div>
+       <div class="ent-choice-grid">` + providers.map(provider =>
+        `<button type="button" class="entertainment-choice" data-provider="${provider.id}" ${provider.enabled ? '' : 'disabled'}>
+           <span class="ent-choice-art" data-kind="${esc(provider.id)}"></span>
+           <span class="ent-choice-body">
+             <span class="ent-choice-badge" aria-hidden="true">${provider.id === 'ani-cli' ? ENT_ICON.panda : ENT_ICON.film}</span>
+             <strong>${esc(provider.label)}</strong>
+             <small>${providerBlurb(provider.id)}</small>
+             <span class="ent-choice-cta">${provider.enabled ? (provider.id === 'ani-cli' ? 'Open AniCLI' : 'Open Pandaflix') : 'Enable this plugin first'} <b>→</b></span>
+           </span>
+         </button>`
+      ).join('') + `</div>
+     </div>
+     <div class="ent-corner ent-corner-left"><i></i><span>GOOD STORIES<br>GO FURTHER.</span></div>
+     <div class="ent-corner ent-corner-right"><span>SAME PASSION.<br>BIGGER WORLDS.</span><i></i></div>`;
 }
 
-async function play(result) {
-  stopPlayer();
-  el('entertainment-browser').classList.add('hidden');
-  el('entertainment-player').classList.remove('hidden');
-  el('entertainment-now-playing').textContent = result.title;
-  const video = el('entertainment-video');
+function loadIntoSlot(key, result) {
+  const slot = slots[key];
+  teardownSlot(slot);
+  const video = slot.video;
   for (const subtitle of result.subtitles || []) {
     const track = document.createElement('track');
     track.kind = 'subtitles'; track.src = subtitle.url; track.label = subtitle.label; track.srclang = subtitle.language;
     video.appendChild(track);
   }
   if (result.format === 'hls' && window.Hls?.isSupported()) {
-    hls = new window.Hls({ enableWorker: true, maxBufferLength: 30 });
-    hls.loadSource(result.url); hls.attachMedia(video);
-  } else video.src = result.url;
+    const instance = new window.Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      // Buffer the whole episode: effectively no forward cap for a ~30 min show.
+      maxBufferLength: 3600,
+      maxMaxBufferLength: 7200,
+      maxBufferSize: 4 * 1000 * 1000 * 1000,
+      backBufferLength: 120,
+      fragLoadingMaxRetry: 8,
+      manifestLoadingMaxRetry: 6,
+      levelLoadingMaxRetry: 6,
+      fragLoadingRetryDelay: 500,
+    });
+    instance.loadSource(result.url); instance.attachMedia(video);
+    instance.on(window.Hls.Events.ERROR, (_event, data) => {
+      if (!data?.fatal) return;
+      if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { instance.recoverMediaError(); return; }
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+        // A stale/expired proxy token is fatal and retries forever. Re-resolve
+        // once so the stream self-heals instead of freezing on the same URL.
+        const now = Date.now();
+        if (now - lastAutoRefresh < 15000) return;
+        lastAutoRefresh = now;
+        status('Stream stalled — reloading…');
+        refreshPlayback().catch(() => {});
+      }
+    });
+    slot.hls = instance;
+  } else {
+    video.src = result.url;
+  }
+  return slot;
+}
+
+async function activateSlot(key) {
+  activeSlotKey = key;
+  for (const name of ['a', 'b']) {
+    const video = slots[name].video;
+    if (!video) continue;
+    const isActive = name === key;
+    video.classList.toggle('is-active', isActive);
+    // The preloaded slot is created without controls; give the active element
+    // controls so an autoplayed next episode is still pausable/seekable.
+    video.controls = isActive;
+    video.muted = !isActive;
+  }
+  const video = slots[key].video;
   try { await video.play(); } catch (_) { status('Press play to start.'); }
+}
+
+function showPlayer(title) {
+  el('entertainment-browser').classList.add('hidden');
+  el('entertainment-collection')?.classList.add('hidden');
+  el('entertainment-player').classList.remove('hidden');
+  el('entertainment-modal').classList.add('is-watching');
+  el('entertainment-now-playing').textContent = title;
+}
+
+const COLLECTIONS = {
+  genres: { eyebrow: 'BROWSE', title: 'Genres', copy: 'Browse anime and shows by genre.' },
+  popular: { eyebrow: 'BROWSE', title: 'Popular', copy: 'Popular titles across the connected providers.' },
+  'top-rated': { eyebrow: 'BROWSE', title: 'Top Rated', copy: 'Highest-rated titles across the catalog.' },
+  'recently-added': { eyebrow: 'BROWSE', title: 'Recently Added', copy: 'Newest additions to the catalog.' },
+  favorites: { eyebrow: 'MY LIBRARY', title: 'My Favorites', copy: 'Titles you saved.' },
+  watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you plan to watch.' },
+  recent: { eyebrow: 'MY LIBRARY', title: 'Recently Watched', copy: 'Pick up exactly where you left off.' },
+  history: { eyebrow: 'MY LIBRARY', title: 'History', copy: 'Pick up exactly where you left off.' },
+  downloads: { eyebrow: 'MY LIBRARY', title: 'Downloads', copy: 'Downloaded episodes and movies land here.' },
+};
+
+function formatTime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+async function resumeHistoryEntry(index) {
+  const entry = (prefs.history || [])[index];
+  if (!entry) return;
+  if (!providers.some(provider => provider.id === entry.provider && provider.enabled)) { status('That provider is not installed.'); return; }
+  showProvider(entry.provider);
+  query = entry.query || '';
+  selection = entry.item || null;
+  el('entertainment-query').value = query;
+  pendingResume = Number(entry.position) || 0;
+  try {
+    if (entry.provider === 'ani-cli') await playAnimeEpisode(entry.episode);
+    else await resolvePanda(entry.season || 0, entry.episode || 0);
+  } catch (error) { status(error.message); }
+}
+
+function collectionThumb(entry) {
+  if (entry.item?.cover) {
+    return `<img class="ent-collection-thumb" src="${esc(entry.item.cover)}" alt="" loading="lazy" decoding="async">`;
+  }
+  return `<span class="ent-collection-thumb ent-collection-thumb--empty" aria-hidden="true">${esc((entry.title || '?').trim().slice(0, 2).toUpperCase())}</span>`;
+}
+
+function collectionItem(entry, glyph, index) {
+  const provider = entry.provider === 'ani-cli' ? 'Anime' : 'Movies & Shows';
+  return `<button type="button" class="ent-collection-item" data-ent-open-fav="${esc(entry.key)}" data-ent-lib-index="${index}">
+    ${collectionThumb(entry)}
+    <span class="ent-collection-item-body"><strong>${esc(entry.title)}</strong><small>${esc(provider)}</small></span>
+    <b class="ent-collection-glyph" aria-hidden="true">${glyph}</b>
+  </button>`;
+}
+
+async function enrichLibrary(entries) {
+  const host = el('ent-collection-results');
+  const groups = new Map();
+  (entries || []).forEach((entry, index) => {
+    if (!entry?.item || entry.item.cover || !entry.title) return;
+    if (!groups.has(entry.provider)) groups.set(entry.provider, []);
+    groups.get(entry.provider).push({ entry, index });
+  });
+  for (const [provider, rows] of groups) {
+    let covers = {};
+    try {
+      const result = await api('/metadata', { provider, items: rows.map(({ entry }) => ({ title: entry.title, kind: entry.item.kind || '' })) });
+      covers = result.covers || {};
+    } catch (_) { continue; }
+    let changed = false;
+    for (const { entry, index } of rows) {
+      const cover = covers[entry.title];
+      if (!cover) continue;
+      entry.item.cover = cover;
+      changed = true;
+      const thumb = host.querySelector(`[data-ent-lib-index="${index}"] .ent-collection-thumb`);
+      if (thumb) thumb.outerHTML = `<img class="ent-collection-thumb" src="${esc(cover)}" alt="" loading="lazy" decoding="async">`;
+    }
+    if (changed) savePrefs();
+  }
+}
+
+function recentItem(entry, index) {
+  const provider = entry.provider === 'ani-cli' ? 'Anime' : 'Movies & Shows';
+  const episode = entry.episode != null && entry.episode !== '' ? `Episode ${entry.episode}` : (entry.item?.kind === 'movie' ? 'Movie' : '');
+  const bits = [provider, episode].filter(Boolean);
+  const duration = Number(entry.duration) || 0;
+  const position = Number(entry.position) || 0;
+  const percent = duration > 0 ? Math.min(100, Math.round((position / duration) * 100)) : 0;
+  const left = duration > 0 ? `${formatTime(Math.max(0, duration - position))} left` : (position ? formatTime(position) : '');
+  return `<button type="button" class="ent-collection-item ent-recent" data-ent-resume-history="${index}" data-ent-lib-index="${index}">
+    ${collectionThumb(entry)}
+    <span class="ent-collection-item-body">
+      <strong>${esc(entry.title)}</strong>
+      <small>${esc(bits.join(' · '))}${left ? ` · ${esc(left)}` : ''}</small>
+      ${percent ? `<span class="ent-recent-bar" aria-hidden="true"><i style="width:${percent}%"></i></span>` : ''}
+    </span>
+    <b class="ent-collection-glyph" aria-hidden="true">▶</b>
+  </button>`;
+}
+
+async function renderCollection(key) {
+  const host = el('ent-collection-results');
+  const statusEl = el('ent-collection-status');
+  statusEl.textContent = '';
+  host.innerHTML = '';
+  if (key === 'favorites' || key === 'watchlist') {
+    const entries = (key === 'favorites' ? prefs.favorites : prefs.watchlist) || [];
+    host.innerHTML = entries.length
+      ? entries.map((entry, index) => collectionItem(entry, key === 'favorites' ? '★' : '＋', index)).join('')
+      : `<p class="entertainment-empty">${key === 'favorites'
+        ? 'No favorites yet. Use the star on a result card to save titles.'
+        : 'Your watchlist is empty. Use ＋ on a result card to add titles.'}</p>`;
+    enrichLibrary(entries).catch(() => {});
+    return;
+  }
+  if (key === 'recent') {
+    const history = prefs.history || [];
+    host.innerHTML = history.length
+      ? history.map((entry, index) => recentItem(entry, index)).join('')
+      : '<p class="entertainment-empty">Nothing watched yet. Play an episode and it will show up here so you can resume it.</p>';
+    enrichLibrary(history).catch(() => {});
+    return;
+  }
+  if (key === 'history') {
+    const history = prefs.history || [];
+    host.innerHTML = history.length
+      ? history.map((entry, index) => {
+        const episode = entry.episode != null && entry.episode !== '' ? ` · Episode ${esc(entry.episode)}` : '';
+        const position = entry.position ? ` · ${formatTime(entry.position)}` : '';
+        return `<button type="button" class="ent-collection-item" data-ent-resume-history="${index}" data-ent-lib-index="${index}">${collectionThumb(entry)}<span class="ent-collection-item-body"><strong>${esc(entry.title)}${episode}</strong><small>${position.replace(' · ', '') || 'Watched'}</small></span><b class="ent-collection-glyph" aria-hidden="true">▶</b></button>`;
+      }).join('')
+      : '<p class="entertainment-empty">Nothing watched yet.</p>';
+    enrichLibrary(history).catch(() => {});
+    return;
+  }
+  if (key === 'downloads') {
+    host.innerHTML = '<p class="entertainment-empty">No downloads yet. Downloads from a series or movie will appear here.</p>';
+    return;
+  }
+  host.innerHTML = '<p class="entertainment-empty">Catalog browsing needs the metadata source (AniList). This is next.</p>';
+}
+
+function showCollection(key) {
+  const meta = COLLECTIONS[key] || { eyebrow: 'ENTERTAINMENT', title: 'Collection', copy: '' };
+  stopPlayer();
+  el('entertainment-modal').classList.remove('is-landing');
+  el('entertainment-landing').classList.add('hidden');
+  el('entertainment-browser').classList.add('hidden');
+  el('entertainment-player').classList.add('hidden');
+  el('entertainment-collection').classList.remove('hidden');
+  el('ent-collection-eyebrow').textContent = meta.eyebrow;
+  el('ent-collection-title').textContent = meta.title;
+  el('ent-collection-copy').textContent = meta.copy;
+  document.querySelectorAll('[data-ent-dest]').forEach(button => button.classList.toggle('active', button.dataset.entDest === key));
+  document.querySelectorAll('[data-ent-browse]').forEach(button => button.classList.remove('active'));
+  renderCollection(key).catch(error => { el('ent-collection-status').textContent = error.message; });
+}
+
+async function play(result) {
+  initSlots();
+  stopPlayer();
+  showPlayer(result.title);
+  const key = idleSlotKey();
+  loadIntoSlot(key, result);
+  if (pendingResume > 0) {
+    const video = slots[key].video;
+    const seek = () => { try { video.currentTime = pendingResume; } catch (_) {} };
+    if (video.readyState >= 1) seek(); else video.addEventListener('loadedmetadata', seek, { once: true });
+    pendingResume = 0;
+  }
+  await activateSlot(key);
+  schedulePreload();
+}
+
+async function enrichCovers(provider, items) {
+  const host = el('entertainment-results');
+  const pending = (items || []).filter(item => item && item.title && !item.cover).slice(0, 50);
+  if (!pending.length) return;
+  let covers = {};
+  try {
+    const result = await api('/metadata', { provider, items: pending.map(item => ({ title: item.title, kind: item.kind || '' })) });
+    covers = result.covers || {};
+  } catch (_) { return; }
+  for (const item of pending) {
+    const cover = covers[item.title];
+    if (!cover) continue;
+    item.cover = cover;
+    const index = (host?._items || []).indexOf(item);
+    const art = index >= 0 ? host.querySelector(`[data-ent-card="${index}"] .ent-card-art`) : null;
+    if (art) art.innerHTML = `<img class="ent-card-cover" src="${esc(cover)}" alt="" loading="lazy" decoding="async">`;
+  }
 }
 
 async function search() {
   query = el('entertainment-query').value.trim();
   if (!query) return;
+  if (active === 'ani-cli') playSound('entertainment-anime-search');
   status('Searching upstream…'); el('entertainment-results').replaceChildren();
   const body = active === 'ani-cli' ? { query, dub: el('entertainment-mode').value === 'dub' } : { query };
   const result = await api(`/${active}/search`, body);
   buttons(result.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
-  status(`${result.items.length} result${result.items.length === 1 ? '' : 's'}`);
+  el('entertainment-results-title').textContent = `${result.items.length} Results for “${query}”`;
+  status('');
+  enrichCovers(active, result.items).catch(() => {});
 }
 
 async function chooseTitle(item) {
   selection = item;
   status('Loading title…');
   if (active === 'ani-cli') {
+    playSound('entertainment-katon');
     const body = { query, selection_index: item.id, dub: el('entertainment-mode').value === 'dub' };
     const result = await api('/ani-cli/episodes', { ...body, offset: 0 });
     episodeButtons(result, 'anime-episode', '/ani-cli/episodes', body);
@@ -295,30 +720,119 @@ function nextNumber(current, items) {
   return Number.isFinite(numeric) ? String(numeric + 1) : null;
 }
 
-async function nextEpisode() {
-  if (!playback) { status('No episode is playing.'); return; }
+function previousNumber(current, items) {
+  if (Array.isArray(items)) {
+    const index = items.findIndex(value => String(value.number) === String(current));
+    if (index > 0) return items[index - 1].number;
+  }
+  const numeric = Number(current);
+  return Number.isFinite(numeric) && numeric > 1 ? String(numeric - 1) : null;
+}
+
+function episodeTarget(step) {
+  if (!playback) return null;
   const context = playback;
+  const pick = (current, items) => (step > 0 ? nextNumber(current, items) : previousNumber(current, items));
   if (context.provider === 'ani-cli') {
-    const next = nextNumber(context.episode, context.items);
-    if (next == null) { status('No next episode.'); return; }
-    status('Loading next episode…');
-    const result = await api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: next, quality: context.quality });
-    playback = { ...context, episode: next, title: result.title };
-    rememberResume({ provider: 'ani-cli', query: context.query, item: context.item, episode: next, dub: context.dub, quality: context.quality, title: result.title });
-    await play(result);
-    return;
+    const episode = pick(context.episode, context.items);
+    if (episode == null) return null;
+    return {
+      playback: { ...context, episode },
+      resolve: () => api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode, quality: context.quality }),
+      resume: (title) => ({ provider: 'ani-cli', query: context.query, item: context.item, episode, dub: context.dub, quality: context.quality, title }),
+    };
   }
   if (context.provider === 'pandaflix' && context.item?.kind !== 'movie') {
-    const next = nextNumber(context.episode, context.items);
-    if (next == null) { status('No next episode.'); return; }
-    status('Loading next episode…');
-    const result = await api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: next });
-    playback = { ...context, episode: next, title: result.title };
-    rememberResume({ provider: 'pandaflix', query: context.query, item: context.item, season: context.season, episode: next, title: result.title });
-    await play(result);
-    return;
+    const episode = pick(context.episode, context.items);
+    if (episode == null) return null;
+    return {
+      playback: { ...context, episode },
+      resolve: () => api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),
+      resume: (title) => ({ provider: 'pandaflix', query: context.query, item: context.item, season: context.season, episode, title }),
+    };
   }
-  status('No next episode.');
+  return null;
+}
+
+function nextPlaybackTarget() { return episodeTarget(1); }
+
+// Warm the next episode into the idle video while the current one plays, so an
+// episode change does not have to resolve and buffer from scratch. This is why
+// the active slot alternates between the two stacked <video> elements.
+async function schedulePreload() {
+  const target = nextPlaybackTarget();
+  if (!target || !slots) return;
+  const key = idleSlotKey();
+  const token = ++preloadToken;
+  try {
+    const result = await target.resolve();
+    if (token !== preloadToken || !slots) return;
+    loadIntoSlot(key, result);
+    preloaded = { key, target, result };
+  } catch (_) { /* fall back to resolving on demand */ }
+}
+
+async function advanceToPreloaded() {
+  if (!preloaded) return false;
+  const { key, target, result } = preloaded;
+  preloaded = null;
+  playback = { ...target.playback, title: result.title };
+  rememberResume(target.resume(result.title));
+  showPlayer(result.title);
+  await activateSlot(key);
+  schedulePreload();
+  return true;
+}
+
+async function nextEpisode() {
+  if (!playback) { status('No episode is playing.'); return; }
+  if (await advanceToPreloaded()) return;
+  const target = nextPlaybackTarget();
+  if (!target) { status('No next episode.'); return; }
+  status('Loading next episode…');
+  const result = await target.resolve();
+  playback = { ...target.playback, title: result.title };
+  rememberResume(target.resume(result.title));
+  await play(result);
+}
+
+async function handleEnded() {
+  if (!prefs.autoplay) return;
+  try { await nextEpisode(); } catch (error) { status(error.message); }
+}
+
+// Re-resolve and reload the current stream from the saved position. Proxy
+// tokens are process-local, so a stalled/expired stream needs a fresh resolve.
+async function refreshPlayback() {
+  if (!playback) { status('Nothing is playing.'); return; }
+  const context = playback;
+  const video = slots?.[activeSlotKey]?.video || el('entertainment-video');
+  const position = video ? Math.floor(video.currentTime || 0) : 0;
+  const button = el('entertainment-refresh');
+  if (button) { button.disabled = true; button.dataset.busy = 'true'; button.textContent = '⟳ Refreshing…'; }
+  status('Refreshing stream…');
+  try {
+    const result = context.provider === 'ani-cli'
+      ? await api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: context.episode, quality: context.quality })
+      : await api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: context.episode });
+    pendingResume = position;
+    playback = { ...context, title: result.title };
+    await play(result);
+    status('');
+  } finally {
+    if (button) { button.disabled = false; delete button.dataset.busy; button.textContent = '⟳ Refresh'; }
+  }
+}
+
+async function previousEpisode() {
+  if (!playback) { status('No episode is playing.'); return; }
+  const target = episodeTarget(-1);
+  if (!target) { status('No previous episode.'); return; }
+  status('Loading previous episode…');
+  const result = await target.resolve();
+  playback = { ...target.playback, title: result.title };
+  rememberResume(target.resume(result.title));
+  await play(result);
 }
 
 async function jumpEpisode() {
@@ -329,10 +843,11 @@ async function jumpEpisode() {
 }
 
 async function openFavorite(key) {
-  const entry = prefs.favorites.find(favorite => favorite.key === key);
+  const entry = prefs.favorites.find(favorite => favorite.key === key)
+    || (prefs.watchlist || []).find(watch => watch.key === key);
   if (!entry) return;
   if (!providers.some(provider => provider.id === entry.provider && provider.enabled)) { status('That provider is not installed.'); return; }
-  if (active !== entry.provider) showProvider(entry.provider);
+  showProvider(entry.provider);
   query = entry.query || '';
   el('entertainment-query').value = query;
   selection = null;
@@ -343,10 +858,11 @@ async function resumeSaved() {
   const resume = prefs.resume;
   if (!resume) return;
   if (!providers.some(provider => provider.id === resume.provider && provider.enabled)) { status('That provider is not installed.'); return; }
-  if (active !== resume.provider) showProvider(resume.provider);
+  showProvider(resume.provider);
   query = resume.query || '';
   selection = resume.item;
   el('entertainment-query').value = query;
+  pendingResume = Number(resume.position) || 0;
   try {
     if (resume.provider === 'ani-cli') {
       await playAnimeEpisode(resume.episode);
@@ -361,10 +877,15 @@ function init() {
   initialized = true;
   el('entertainment-close')?.addEventListener('click', closeEntertainment);
   el('entertainment-home')?.addEventListener('click', showLanding);
+  el('entertainment-fanfare-btn')?.addEventListener('click', () => playSound('entertainment-fanfare'));
+  el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
+  document.querySelectorAll('[data-ent-dest]').forEach(button => button.addEventListener('click', () => showCollection(button.dataset.entDest)));
   el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
-  el('entertainment-fullscreen')?.addEventListener('click', () => el('entertainment-video').requestFullscreen?.());
+  initSlots();
+  el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
   el('entertainment-next')?.addEventListener('click', () => nextEpisode().catch(error => status(error.message)));
-  el('entertainment-video')?.addEventListener('ended', () => { if (prefs.autoplay) nextEpisode().catch(error => status(error.message)); });
+  el('entertainment-prev')?.addEventListener('click', () => previousEpisode().catch(error => status(error.message)));
+  el('entertainment-refresh')?.addEventListener('click', () => refreshPlayback().catch(error => status(error.message)));
   el('entertainment-autoplay')?.addEventListener('change', event => {
     prefs.autoplay = event.target.checked;
     const setting = el('entertainment-default-autoplay');
@@ -378,8 +899,8 @@ function init() {
     try { status('Loading history…'); const result = await api('/ani-cli/history', {}); buttons(result.items, 'history', item => `${item.title} · Episode ${item.episode}`); status('Continue watching.'); }
     catch (error) { status(error.message); }
   });
-  el('tool-entertainment-btn')?.addEventListener('click', () => openEntertainment());
-  el('tool-entertainment-btn')?.addEventListener('keydown', event => {
+  el('entertainment-section')?.addEventListener('click', () => openEntertainment());
+  el('entertainment-section')?.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEntertainment(); }
   });
   el('entertainment-default-provider')?.addEventListener('change', readSettingsPanel);
@@ -388,10 +909,13 @@ function init() {
   el('entertainment-default-autoplay')?.addEventListener('change', readSettingsPanel);
   document.addEventListener('click', event => {
     const provider = event.target.closest?.('[data-provider]');
-    if (provider) { showProvider(provider.dataset.provider); return; }
+    if (provider) {
+      playSound(provider.dataset.provider === 'ani-cli' ? 'entertainment-anime-wow' : 'entertainment-welcome-hollywood');
+      showProvider(provider.dataset.provider);
+      return;
+    }
     const favorite = event.target.closest?.('[data-ent-fav]');
-    if (favorite) {
-      const item = el('entertainment-results')._items?.[Number(favorite.dataset.entFav)];
+    if (favorite) {      const item = el('entertainment-results')._items?.[Number(favorite.dataset.entFav)];
       if (item) {
         toggleFavorite(active, item);
         const saved = isFavorite(active, item);
@@ -400,8 +924,26 @@ function init() {
       }
       return;
     }
+    const watch = event.target.closest?.('[data-ent-watch]');
+    if (watch) {
+      const item = el('entertainment-results')._items?.[Number(watch.dataset.entWatch)];
+      if (item) {
+        toggleWatchlist(active, item);
+        const watched = isWatchlisted(active, item);
+        watch.setAttribute('aria-pressed', String(watched));
+        watch.textContent = watched ? '✓' : '＋';
+        watch.setAttribute('title', watched ? 'In watchlist' : 'Add to watchlist');
+        watch.setAttribute('aria-label', `${watched ? 'Remove from watchlist' : 'Add to watchlist'}: ${item.title || 'Title'}`);
+      }
+      return;
+    }
     const openFav = event.target.closest?.('[data-ent-open-fav]');
     if (openFav) { openFavorite(openFav.dataset.entOpenFav).catch(error => status(error.message)); return; }
+    const historyItem = event.target.closest?.('[data-ent-resume-history]');
+    if (historyItem) {
+      resumeHistoryEntry(Number(historyItem.dataset.entResumeHistory)).catch(error => status(error.message));
+      return;
+    }
     const button = event.target.closest?.('[data-ent-action]');
     const more = event.target.closest?.('[data-ent-more]');
     if (more) {
@@ -420,6 +962,15 @@ function init() {
     if (event.key === 'Escape' && !el('entertainment-modal')?.classList.contains('hidden')) closeEntertainment();
   });
   window.addEventListener('pandamonium:extensions-changed', refreshEntertainment);
+  document.querySelectorAll('[data-ent-browse]').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.entBrowse;
+    if (providers.some(provider => provider.id === id)) showProvider(id);
+  }));
+  document.querySelectorAll('[data-ent-nav]').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.entNav;
+    if (id === 'home') { showLanding(); return; }
+    if (providers.some(provider => provider.id === id)) showProvider(id);
+  }));
 }
 
 export async function refreshEntertainment() {
@@ -429,6 +980,8 @@ export async function refreshEntertainment() {
   const installed = providers.length > 0;
   document.querySelector('[data-settings-tab="entertainment"]')?.classList.toggle('hidden', !installed);
   el('entertainment-section')?.classList.toggle('hidden', !installed);
+  const footerVersion = el('entertainment-footer-version');
+  if (footerVersion && window._appVersion) footerVersion.textContent = `v${window._appVersion}`;
   renderSettingsPanel();
   if (!installed) closeEntertainment();
 }
@@ -438,7 +991,7 @@ export async function openEntertainment() {
   if (!providers.length) return;
   applyPrefs();
   const tabs = el('entertainment-tabs');
-  tabs.innerHTML = providers.length > 1 ? providers.map(provider => `<button type="button" data-provider="${provider.id}">${esc(provider.label)}</button>`).join('') : '';
+  if (tabs) tabs.innerHTML = providers.length > 1 ? providers.map(provider => `<button type="button" data-provider="${provider.id}">${esc(provider.label)}</button>`).join('') : '';
   el('entertainment-modal').classList.remove('hidden');
   const preferred = providers.find(provider => provider.id === prefs.provider && provider.enabled);
   if (preferred) showProvider(preferred.id); else showLanding();
@@ -447,4 +1000,17 @@ export async function openEntertainment() {
 export function closeEntertainment() {
   stopPlayer();
   el('entertainment-modal')?.classList.add('hidden');
+}
+
+// Show the sidebar entry as soon as the app loads, not only after Settings has
+// been opened. refreshEntertainment() is otherwise only reached from the
+// settings-open path and the extensions-changed event, which left the launcher
+// invisible on a fresh load.
+if (typeof document !== 'undefined') {
+  const bootEntertainment = () => { refreshEntertainment().catch(() => {}); };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootEntertainment, { once: true });
+  } else {
+    bootEntertainment();
+  }
 }

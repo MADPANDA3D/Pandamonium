@@ -549,11 +549,13 @@ class _CoreResponseStream(httpx.AsyncByteStream):
 
 
 class _StreamingPinnedTransport(httpx.AsyncBaseTransport):
-    def __init__(self, address: ipaddress._BaseAddress):
+    def __init__(self, address: ipaddress._BaseAddress, max_connections: int = 10):
         self._pool = httpcore.AsyncConnectionPool(
             network_backend=_PinnedAsyncBackend(address),
             http1=True,
             http2=False,
+            max_connections=max_connections,
+            max_keepalive_connections=max_connections,
         )
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:

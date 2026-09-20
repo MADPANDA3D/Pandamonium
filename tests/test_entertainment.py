@@ -3,9 +3,11 @@
 import asyncio
 import importlib.util
 import json
+import time
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 import routes.entertainment_routes as routes
 from src.entertainment import PROVIDERS, is_provider, schemas
@@ -149,6 +151,183 @@ def test_generated_player_argument_parsers_keep_real_headers_and_subtitles(tmp_p
         assert result["subtitles"][0]["url"].endswith("sub.vtt")
 
 
+class _FakeJson:
+    status_code = 200
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _FakeResponse:
+    def __init__(self, status_code, content_type, body=b"", headers=None):
+        self.status_code = status_code
+        self.headers = {"content-type": content_type, **(headers or {})}
+        self._body = body
+        self.closed = False
+
+    async def aiter_bytes(self):
+        yield self._body
+
+    async def aclose(self):
+        self.closed = True
+
+
+def test_metadata_route_wraps_covers_in_owner_scoped_image_tokens(monkeypatch):
+    routes._TOKENS.clear()
+
+    async def fake_metadata(provider, items):
+        assert provider == "ani-cli"
+        return {"Naruto": "https://s4.anilist.co/cover.jpg"}
+
+    monkeypatch.setattr(routes, "_metadata", fake_metadata)
+    endpoint = _endpoint(routes.setup_entertainment_routes(), "/api/entertainment/metadata", "POST")
+    payload = asyncio.run(endpoint({"provider": "ani-cli", "items": [{"title": "Naruto"}]}, "alice"))
+    url = payload["covers"]["Naruto"]
+    token = url.rsplit("/", 1)[-1]
+    assert url.startswith("/api/entertainment/image/")
+    assert routes._TOKENS[token].owner == "alice"
+    assert routes._TOKENS[token].url == "https://s4.anilist.co/cover.jpg"
+    assert routes._TOKENS[token].headers == {"User-Agent": routes._IMAGE_UA}
+
+
+def test_metadata_route_rejects_unknown_provider():
+    endpoint = _endpoint(routes.setup_entertainment_routes(), "/api/entertainment/metadata", "POST")
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(endpoint({"provider": "nope", "items": []}, "alice"))
+    assert excinfo.value.status_code == 400
+
+
+def test_metadata_cache_avoids_repeat_lookups(monkeypatch):
+    routes._METADATA.clear()
+    calls = []
+
+    async def fake_anilist(titles):
+        calls.append(list(titles))
+        return {titles[0]: "https://s4.anilist.co/cover.jpg"}
+
+    monkeypatch.setattr(routes, "_anilist_covers", fake_anilist)
+    first = asyncio.run(routes._metadata("ani-cli", [{"title": "Naruto"}]))
+    second = asyncio.run(routes._metadata("ani-cli", [{"title": "Naruto"}]))
+    assert first == second == {"Naruto": "https://s4.anilist.co/cover.jpg"}
+    assert calls == [["Naruto"]]
+
+
+def test_tmdb_cover_builds_native_tmdb_poster_url(monkeypatch):
+    class _Client:
+        async def get(self, url, params=None):
+            assert url == routes._TMDB_SEARCH + "/search/movie"
+            assert params["query"] == "The Blacklist"
+            assert params["year"] == "2021"
+            return _FakeJson({"results": [{"title": "The Blacklist", "poster_path": "/wanted.jpg"}]})
+
+    monkeypatch.setattr(routes, "_meta_client", lambda: _Client())
+    cover = asyncio.run(routes._tmdb_cover(_Client(), "The Blacklist (2021)", "movie", "key"))
+    assert cover == routes._TMDB_IMAGE + "/wanted.jpg"
+
+
+def test_tmdb_key_reads_the_installed_pandaflix_source(monkeypatch, tmp_path):
+    monkeypatch.delenv("PANDAMONIUM_TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    source = tmp_path / "installed/pandaflix/revisions/abc/core/tmdb.go"
+    source.parent.mkdir(parents=True)
+    key = "".join(["653bb8af", "90162bd9", "8fc7ee32", "bcbbfb3d"])
+    source.write_text(f'const TMDB_API_KEY = "{key}"')
+    monkeypatch.setattr(routes, "_TMDB_KEY_CACHE", None)
+    monkeypatch.setattr("src.extension_installer.default_extensions_root", lambda: tmp_path)
+    assert routes._tmdb_key() == key
+
+
+def test_split_year_removes_the_trailing_release_year():
+    assert routes._split_year("The Blacklist (2013)") == ("The Blacklist", "2013")
+    assert routes._split_year("Naruto: Shippuden") == ("Naruto: Shippuden", "")
+
+
+def test_split_year_removes_the_trailing_release_year():
+    assert routes._split_year("The Blacklist (2013)") == ("The Blacklist", "2013")
+    assert routes._split_year("Naruto: Shippuden") == ("Naruto: Shippuden", "")
+
+
+def test_wikipedia_cover_resolves_poster_thumbnail(monkeypatch):
+    class _Client:
+        async def get(self, url, params=None):
+            if url == routes._WIKIPEDIA_SEARCH:
+                return _FakeJson({"query": {"search": [{"title": "Arrival (film)"}]}})
+            return _FakeJson({"thumbnail": {"source": "https://upload.wikimedia.org/arrival.jpg"}})
+
+    monkeypatch.setattr(routes, "_meta_client", lambda: _Client())
+    assert asyncio.run(routes._wikipedia_cover("Arrival", "movie")) == "https://upload.wikimedia.org/arrival.jpg"
+
+
+def test_wikipedia_cover_rejects_unrelated_search_hit(monkeypatch):
+    class _Client:
+        async def get(self, url, params=None):
+            if url == routes._WIKIPEDIA_SEARCH:
+                return _FakeJson({"query": {"search": [{"title": "Designated Survivor (TV series)"}]}})
+            if "Designated" in url:
+                return _FakeJson({"thumbnail": {"source": "https://upload.wikimedia.org/wrong.jpg"}})
+            return _FakeJson({})
+
+    monkeypatch.setattr(routes, "_meta_client", lambda: _Client())
+    assert asyncio.run(routes._wikipedia_cover("The Wake: Blacklist", "movie")) is None
+
+
+def test_tvmaze_cover_scores_the_show_name(monkeypatch):
+    class _Client:
+        async def get(self, url, params=None):
+            return _FakeJson([
+                {"show": {"name": "The Blacklist", "image": {"original": "https://static.tvmaze.com/blacklist.jpg"}}},
+                {"show": {"name": "Black-ish", "image": {"original": "https://static.tvmaze.com/blackish.jpg"}}},
+            ])
+
+    monkeypatch.setattr(routes, "_meta_client", lambda: _Client())
+    assert asyncio.run(routes._tvmaze_cover("The Blacklist")) == "https://static.tvmaze.com/blacklist.jpg"
+
+
+def test_image_proxy_serves_only_public_image_content(monkeypatch):
+    routes._TOKENS.clear()
+    token = asyncio.run(routes._token("alice", "https://s4.anilist.co/cover.jpg", {}))
+    good = _FakeResponse(200, "image/jpeg", b"\xff\xd8\xff")
+
+    async def fake_open(target, range_header):
+        return None, good, target.url
+
+    monkeypatch.setattr(routes, "_open", fake_open)
+    endpoint = _endpoint(routes.setup_entertainment_routes(), "/api/entertainment/image/{token}", "GET")
+    response = asyncio.run(endpoint(token, "alice"))
+    assert response.media_type == "image/jpeg"
+    assert response.headers["cache-control"].startswith("private")
+
+    bad = _FakeResponse(200, "text/html", b"<html>")
+
+    async def fake_open_bad(target, range_header):
+        return None, bad, target.url
+
+    monkeypatch.setattr(routes, "_open", fake_open_bad)
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(endpoint(token, "alice"))
+    assert excinfo.value.status_code == 502
+    assert bad.closed
+
+
+def test_active_streams_refresh_their_token_expiry():
+    routes._TOKENS.clear()
+    token = asyncio.run(routes._token("alice", "https://cdn.example/seg.ts", {}))
+    stale = routes._ProxyTarget("alice", "https://cdn.example/seg.ts", {}, time.monotonic() + 5)
+    routes._TOKENS[token] = stale
+    asyncio.run(routes._touch(token, stale))
+    assert routes._TOKENS[token].expires > time.monotonic() + routes._TOKEN_TTL / 2
+
+
+def test_anilist_variants_strip_noise_for_fuzzy_match():
+    variants = routes._anilist_variants("Naruto Shippuden the Movie 2 -Bonds-")
+    assert "Naruto Shippuden Bonds" in variants
+    assert routes._title_tokens("Naruto Shippuden the Movie: Bonds") >= {"naruto", "shippuden", "bonds"}
+    assert routes._anilist_variants("Jujutsu Kaisen 0: The Movie")[-1] == "Jujutsu Kaisen"
+
+
 def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     source = (ROOT / "static/js/entertainment.js").read_text()
     settings = (ROOT / "static/js/settings.js").read_text()
@@ -156,14 +335,51 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert "providers.length === 1" in source
     assert "providers.length > 1" in source
     assert "providers.length > 0" in source
+    style = (ROOT / "static/style.css").read_text()
+    # The Anime hero uses the provided key art; the next episode is warmed into
+    # the idle player; the ENTERTAINMENT pill plays the fanfare.
+    assert "hero-anime.webp" in style and "--ent-hero-art" in style
+    assert "schedulePreload" in source and 'id="entertainment-video-next"' in index
+    assert 'id="entertainment-fanfare"' in index and "entertainment-fanfare-btn" in source
     assert "requestFullscreen" in source and "window.Hls" in source
     assert "voice" not in source.lower()
     # The launcher lives in the sidebar; Settings owns the defaults panel.
     assert "refreshEntertainment" in settings and "openEntertainment" in source
-    assert 'id="tool-entertainment-btn"' in index
+    # The launcher is a solo clickable sidebar row, not a collapsible section.
+    assert 'class="list-item hidden" id="entertainment-section"' in index
+    assert 'id="tool-entertainment-btn"' not in index
+    assert '<span class="grow">Open Entertainment</span>' not in index
     assert 'data-settings-tab="entertainment"' in index
     assert 'data-settings-panel="entertainment"' in index
-    # Player controls: next/autoplay, episode jump, favorites, continue watching.
+    # Player controls: next/previous, autoplay, and episode jump.
     assert "entertainment-next" in index and "entertainment-autoplay" in index
-    assert "entertainment-jump" in index and "entertainment-resume" in index
-    assert "nextEpisode" in source and "data-ent-fav" in source and "rememberResume" in source
+    assert "entertainment-jump" in index and "entertainment-prev" in index
+    assert "nextEpisode" in source and "previousEpisode" in source and "episodeTarget" in source
+    assert "pendingResume" in source and "data-ent-fav" in source and "rememberResume" in source
+    # Favorites and Watchlist are separate libraries; a library entry always
+    # leaves the collection view before resolving, so clicking a favorite from
+    # the same provider is not a silent no-op.
+    assert "prefs.watchlist" in source and "data-ent-watch" in source and "toggleWatchlist" in source
+    assert "showProvider(entry.provider)" in source and "showProvider(resume.provider)" in source
+    # Cover art: AniList/iTunes metadata is proxied and rendered on cards and
+    # library rows, with the initials placeholder as the fallback.
+    assert "enrichCovers" in source and "enrichLibrary" in source and "/metadata" in source
+    assert "ent-card-cover" in style and "ent-collection-thumb" in style
+    # Recently Watched resumes from history with progress; it is the sidebar tab
+    # for continuing a show without searching again.
+    assert "recentItem" in source and "historyKey" in source and "ent-recent-bar" in style
+    assert 'data-ent-dest="recent"' in index and "Recently Watched" in source
+    # The player bar can re-resolve a stalled stream, and fatal HLS network
+    # errors self-heal once instead of retrying a dead token forever.
+    assert "entertainment-refresh" in index and "refreshPlayback" in source
+    assert "ErrorTypes.NETWORK_ERROR" in source and "lastAutoRefresh" in source
+    # Autoplay moves playback to the preloaded element, which must still get
+    # controls; refresh shows visible progress feedback in the player.
+    assert "video.controls = isActive" in source
+    assert "entertainment-player-status" in index and "ent-player-status" in style
+    assert "⟳ Refreshing…" in source
+    assert "ent-card-tools" in source and "ent-card-tools" in style
+    # Open Pandaflix plays the operator-supplied Hollywood sting.
+    assert "entertainment-welcome-hollywood" in index and "welcome-to-hollywood.mp3" in index
+    assert "entertainment-welcome-hollywood" in source
+    assert (ROOT / "static/entertainment/welcome-to-hollywood.mp3").is_file()

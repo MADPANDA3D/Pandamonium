@@ -1002,14 +1002,9 @@
         </div>
       </div>
 
-      <div class="section hidden" id="entertainment-section">
-        <div class="section-header-flex">
-          <span class="section-title"><svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>Entertainment</span>
-        </div>
-        <div class="list-item" id="tool-entertainment-btn" role="button" tabindex="0">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
-          <span class="grow">Open Entertainment</span>
-        </div>
+      <div class="list-item hidden" id="entertainment-section" role="button" tabindex="0" aria-label="Open Entertainment" title="Entertainment">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+        <span class="grow">Entertainment</span>
       </div>
 
       <div class="section" id="plugins-section" data-section-reorder="true">
@@ -3158,45 +3153,119 @@
   </div>
 
   <div id="entertainment-modal" class="entertainment-shell hidden" role="dialog" aria-modal="true" aria-labelledby="entertainment-title">
-    <header class="entertainment-header">
-      <button id="entertainment-home" class="entertainment-brand" type="button" aria-label="Entertainment home"><span>▶</span><strong id="entertainment-title">ENTERTAINMENT</strong></button>
-      <nav id="entertainment-tabs" aria-label="Entertainment providers"></nav>
-      <button id="entertainment-close" class="entertainment-close" type="button" aria-label="Close Entertainment">✕</button>
+    <header class="ent-topnav">
+      <button id="entertainment-home" class="ent-brand" type="button" aria-label="Entertainment home">
+        <img class="ent-brand-mark" src="/static/icons/pandamonium.png" alt="">
+        <span class="ent-brand-word" id="entertainment-title">PANDA<em>FLIX</em></span>
+      </button>
+      <nav class="ent-topnav-links" aria-label="Entertainment sections">
+        <button type="button" class="ent-nav-link" data-ent-nav="home">Home</button>
+        <span id="entertainment-tabs" class="ent-provider-tabs" aria-label="Entertainment providers"></span>
+        <button type="button" class="ent-section-pill" id="entertainment-fanfare-btn" data-ent-nav="home"><span class="ent-pill-play" aria-hidden="true">▶</span>ENTERTAINMENT</button>
+      </nav>
+      <div class="ent-topnav-right">
+        <button type="button" class="ent-search-field" id="ent-global-search" aria-label="Search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Search anime, movies, shows…</span><kbd>⌘K</kbd>
+        </button>
+        <button type="button" class="ent-avatar" disabled aria-label="Account"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></button>
+      </div>
+      <button id="entertainment-close" class="ent-close" type="button" aria-label="Close Entertainment">✕</button>
+      <audio id="entertainment-fanfare" src="/static/entertainment/fanfare.mp3" preload="auto"></audio>
+      <audio id="entertainment-anime-wow" src="/static/entertainment/anime-wow.mp3" preload="auto"></audio>
+      <audio id="entertainment-anime-search" src="/static/entertainment/anime-search.mp3" preload="auto"></audio>
+      <audio id="entertainment-katon" src="/static/entertainment/katon.mp3" preload="auto"></audio>
+      <audio id="entertainment-welcome-hollywood" src="/static/entertainment/welcome-to-hollywood.mp3" preload="auto"></audio>
     </header>
-    <main class="entertainment-main">
-      <section id="entertainment-landing" class="entertainment-landing" aria-label="Choose a provider"></section>
-      <section id="entertainment-browser" class="entertainment-browser hidden">
-        <div class="entertainment-hero">
-          <p id="entertainment-eyebrow">PRIVATE RUNTIME · UPSTREAM CLI</p>
-          <h1 id="entertainment-heading">Entertainment</h1>
-          <p id="entertainment-copy"></p>
+    <div class="ent-body">
+      <aside class="ent-sidebar">
+        <div class="ent-side-group">
+          <p class="ent-side-title">BROWSE</p>
+          <button type="button" class="ent-side-link" data-ent-browse="ani-cli"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>Anime</button>
+          <button type="button" class="ent-side-link" data-ent-browse="pandaflix"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5M16 4v5"/></svg>Movies &amp; Shows</button>
+          <button type="button" class="ent-side-link" data-ent-dest="genres">Genres</button>
+          <button type="button" class="ent-side-link" data-ent-dest="popular">Popular</button>
+          <button type="button" class="ent-side-link" data-ent-dest="top-rated">Top Rated</button>
+          <button type="button" class="ent-side-link" data-ent-dest="recently-added">Recently Added</button>
         </div>
-        <div id="entertainment-saved" class="entertainment-saved hidden">
-          <button type="button" id="entertainment-resume" class="entertainment-resume hidden"></button>
-          <div id="entertainment-favorites" class="entertainment-favorites"></div>
+        <div class="ent-side-group">
+          <p class="ent-side-title">MY LIBRARY</p>
+          <button type="button" class="ent-side-link" data-ent-dest="recent">Recently Watched</button>
+          <button type="button" class="ent-side-link" data-ent-dest="favorites">My Favorites</button>
+          <button type="button" class="ent-side-link" data-ent-dest="watchlist">Watchlist</button>
+          <button type="button" class="ent-side-link" data-ent-dest="downloads">Downloads</button>
         </div>
-        <form id="entertainment-search" class="entertainment-search">
-          <label class="sr-only" for="entertainment-query">Search titles</label>
-          <input id="entertainment-query" type="search" maxlength="200" autocomplete="off" placeholder="Search titles">
-          <select id="entertainment-mode" aria-label="Anime language"><option value="sub">Sub</option><option value="dub">Dub</option></select>
-          <select id="entertainment-quality" aria-label="Playback quality"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select>
-          <button type="submit">Search</button>
-          <button id="entertainment-history" type="button">Continue</button>
-        </form>
-        <form id="entertainment-jump" class="entertainment-jump hidden">
-          <label for="entertainment-jump-input">Go to episode</label>
-          <input id="entertainment-jump-input" type="number" min="1" step="1" inputmode="numeric" placeholder="#">
-          <button type="submit">Play</button>
-        </form>
-        <p id="entertainment-status" class="entertainment-status" role="status" aria-live="polite"></p>
-        <div id="entertainment-results" class="entertainment-results"></div>
-      </section>
-      <section id="entertainment-player" class="entertainment-player hidden">
-        <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
-        <video id="entertainment-video" controls autoplay playsinline></video>
-      </section>
-    </main>
+        <div class="ent-mascot" aria-hidden="true">
+          <img class="ent-mascot-img" src="/static/entertainment/mascot-panda.webp" alt="">
+          <span>BUILD<br>WATCH<br>REPEAT</span>
+        </div>
+      </aside>
+      <main class="ent-content">
+        <section id="entertainment-landing" class="entertainment-landing" aria-label="Choose a provider"></section>
+        <section id="entertainment-browser" class="entertainment-browser hidden">
+          <div class="ent-hero">
+            <div class="ent-hero-text">
+              <p id="entertainment-eyebrow" class="ent-eyebrow">STREAM ANYTHING · NO LIMITS</p>
+              <h1 id="entertainment-heading">Entertainment</h1>
+              <p id="entertainment-copy" class="ent-hero-sub"></p>
+              <div id="entertainment-chips" class="ent-chips"></div>
+            </div>
+          </div>
+          <form id="entertainment-search" class="ent-searchbar">
+            <label class="ent-field ent-field-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="entertainment-query" type="search" maxlength="200" autocomplete="off" placeholder="Search titles">
+            </label>
+            <label class="ent-field"><span class="ent-field-cap">Type</span><select id="entertainment-type" aria-label="Type"><option value="all">All</option><option value="series">Series</option><option value="movie">Movies</option></select></label>
+            <label class="ent-field"><span class="ent-field-cap">Quality</span><select id="entertainment-quality" aria-label="Playback quality"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select></label>
+            <label class="ent-field"><span class="ent-field-cap">Language</span><select id="entertainment-mode" aria-label="Anime language"><option value="sub">Sub</option><option value="dub">Dub</option></select></label>
+            <button type="submit" class="ent-search-submit">Search</button>
+          </form>
+          <div class="ent-jump-row">
+            <form id="entertainment-jump" class="entertainment-jump hidden">
+              <span class="ent-jump-label">Or go to episode</span>
+              <input id="entertainment-jump-input" type="number" min="1" step="1" inputmode="numeric" placeholder="#">
+              <button type="submit" class="ent-play-btn">▶ Play</button>
+            </form>
+          </div>
+          <div class="ent-results-head">
+            <h2 id="entertainment-results-title">Results</h2>
+            <div class="ent-results-tools" aria-hidden="true">
+              <span>Sort by:</span><select disabled><option>Relevance</option></select>
+              <button type="button" disabled aria-label="Grid view">▦</button>
+              <button type="button" disabled aria-label="List view">☰</button>
+            </div>
+          </div>
+          <p id="entertainment-status" class="entertainment-status" role="status" aria-live="polite"></p>
+          <div id="entertainment-results" class="entertainment-results"></div>
+        </section>
+        <section id="entertainment-collection" class="entertainment-collection hidden">
+          <div class="ent-hero ent-hero--plain">
+            <div class="ent-hero-text">
+              <p id="ent-collection-eyebrow" class="ent-eyebrow">LIBRARY</p>
+              <h1 id="ent-collection-title">Collection</h1>
+              <p id="ent-collection-copy" class="ent-hero-sub"></p>
+            </div>
+          </div>
+          <p id="ent-collection-status" class="entertainment-status" role="status" aria-live="polite"></p>
+          <div id="ent-collection-results" class="entertainment-results"></div>
+        </section>
+        <section id="entertainment-player" class="entertainment-player hidden">
+          <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-refresh" type="button" title="Reload the current stream">⟳ Refresh</button><button id="entertainment-prev" type="button">◂ Previous</button><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+          <p id="entertainment-player-status" class="ent-player-status" role="status" aria-live="polite"></p>
+          <div class="ent-video-stage">
+            <video id="entertainment-video" class="ent-video is-active" controls autoplay playsinline></video>
+            <video id="entertainment-video-next" class="ent-video" controls playsinline muted preload="auto"></video>
+          </div>
+        </section>
+      </main>
+    </div>
+    <footer class="ent-footer">
+      <span>PANDAMONIUM <em id="entertainment-footer-version">v—</em> · Private Runtime · Built for Builders</span>
+      <span>Good Anime. Better People. <i></i> MADPANDA3D</span>
+    </footer>
   </div>
+
 
   <!-- Search overlay (Ctrl+K command palette) -->
   <div class="search-overlay hidden" id="search-overlay">
