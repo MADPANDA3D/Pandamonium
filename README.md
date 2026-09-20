@@ -45,7 +45,8 @@ in the [setup guide](docs/setup.md).
 Pandamonium keeps Odysseus's self-hosted workspace foundation and adds the
 following maintained platform capabilities.
 
-### Model-neutral identity and chat
+<details>
+<summary><strong>Model-neutral identity and chat</strong></summary>
 
 - Installation-owned agent name, ID, constitution, and version instead of a
   model-owned persona.
@@ -107,7 +108,10 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
 
-### Governed agents, tools, and extensions
+</details>
+
+<details>
+<summary><strong>Governed agents, tools, and extensions</strong></summary>
 
 - Built-in tools, MCP servers, skills, files, shell, web, and browser-facing
   foreground actions behind owner, permission, approval, and evidence gates.
@@ -166,7 +170,10 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 - ORACLE remains an optional reference extension; clean installations start
   without private extensions, workers, credentials, or topology.
 
-### Knowledge and workspaces
+</details>
+
+<details>
+<summary><strong>Knowledge and workspaces</strong></summary>
 
 - Owner-scoped long-term memory and document RAG with source provenance,
   compaction, prompt-injection boundaries, and optional Graphify code graphs.
@@ -179,7 +186,10 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 - Integration inventory distinguishes configured services from services that
   have actually passed a live health check.
 
-### Voice Orb and workers
+</details>
+
+<details>
+<summary><strong>Voice Orb and workers</strong></summary>
 
 - Integrated microphone, STT, TTS, interruption, and streamed spoken responses
   that preserve the complete written answer while sanitizing speech-only text.
@@ -195,7 +205,10 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
   exact resume, create, steer, cancel, progress, and cited artifact handoff.
   See the [Voice Orb documentation](docs/voice-orb/README.md).
 
-### Reliability, deployment, and security
+</details>
+
+<details>
+<summary><strong>Reliability, deployment, and security</strong></summary>
 
 - Context budgets use the model server's effective allocated capacity, with
   bounded tool schemas, trimming, and compaction for smaller local models.
@@ -210,7 +223,10 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 - Legacy `odysseus` commands and `ODYSSEUS_*` environment variables remain as
   documented compatibility aliases so existing installations can upgrade.
 
-## Command Line
+</details>
+
+<details>
+<summary><strong>Command Line</strong></summary>
 
 The canonical command is `pandamonium`:
 
@@ -246,12 +262,17 @@ The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment
 variables; the former `ODYSSEUS_*` names remain accepted during migration.
 
-## Security
+</details>
+
+<details>
+<summary><strong>Security</strong></summary>
 
 Pandamonium exposes powerful local tools. Keep authentication enabled, keep
 private data and credentials out of Git, and do not expose raw model or service
 ports publicly. See [SECURITY.md](SECURITY.md) and the
 [deployment guidance](docs/setup.md#security-notes).
+
+</details>
 
 ## Star History
 
