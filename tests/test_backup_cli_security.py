@@ -228,6 +228,45 @@ def test_snapshot_manifest_and_verify_sidecar_record_recovery_evidence(
     assert Path(str(archive) + ".verified.json").exists()
 
 
+def test_snapshot_skips_rederivable_extension_directories(tmp_path, monkeypatch):
+    backup = _load_backup_cli()
+    repo = tmp_path / "repo"
+    data = repo / "data"
+    (data / "state.json").parent.mkdir(parents=True)
+    (data / "state.json").write_text('{"ok": true}', encoding="utf-8")
+    runtime_blob = (
+        data / "extension-runtimes" / "install" / "pkg" / "toolchain" / "go.bin"
+    )
+    runtime_blob.parent.mkdir(parents=True)
+    runtime_blob.write_bytes(b"x" * 2048)
+    removed_blob = data / "extensions" / "removed" / "pkg" / "revision" / "core.bin"
+    removed_blob.parent.mkdir(parents=True)
+    removed_blob.write_bytes(b"y" * 2048)
+    _patch_repo(backup, monkeypatch, repo)
+    archive = tmp_path / "snapshot.tar.gz"
+    emitted = []
+    monkeypatch.setattr(backup, "emit", lambda payload, args: emitted.append(payload))
+
+    backup.cmd_snapshot(_snapshot_args(archive))
+
+    with tarfile.open(archive, "r:gz") as tar:
+        names = tar.getnames()
+        manifest = json.loads(
+            tar.extractfile("data/.pandamonium-backup-manifest.json").read()
+        )
+    assert "data/state.json" in names
+    assert not any(name.startswith("data/extension-runtimes") for name in names)
+    assert not any(name.startswith("data/extensions/removed") for name in names)
+    assert "data/extension-runtimes" in manifest["exclusions"]
+    assert "data/extensions/removed" in manifest["exclusions"]
+    assert manifest["inventory"]["file_count"] == 1
+
+    backup.cmd_verify(_verify_args(archive))
+    proof = emitted.pop()
+    assert proof["ok"] is True
+    assert proof["inventory"]["verified"] is True
+
+
 def test_backup_manifest_larger_than_legacy_limit_round_trips(tmp_path):
     manifest = {
         "schema": "legacy",

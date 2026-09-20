@@ -62,13 +62,31 @@ _DATA_DIR = Path(
 _BACKUP_DIR = _REPO_ROOT / "backups"
 _MANIFEST_NAME = BACKUP_MANIFEST_NAME
 
-# Stuff inside data/ that we explicitly skip — anything we can re-derive
-# from the SQLite DB + JSON state. Keeps the tarball small.
-_SKIP_PATTERNS = {
-    "mail-attachments",     # cached IMAP attachment extractions
-    "deep_research",        # research runs are large; back up explicitly via --include-research
-    "personal_uploads",     # uploaded files; usually wanted, included by default actually
-}
+# Re-derivable directories that must never bloat a verified update backup.
+# Extension runtimes hold per-package build toolchains, module caches, and
+# build caches that are rehydrated on demand from the installed package
+# revisions, and `extensions/removed` is the uninstall graveyard that is never
+# read back. On CT103 these grew the canonical data directory from ~1 GB to
+# 3.2 GB and pushed every updater transaction past 20 minutes.
+_ALWAYS_SKIP_RELATIVE = (
+    PurePosixPath("data/extension-runtimes"),
+    PurePosixPath("data/extensions/removed"),
+)
+
+
+def _is_skipped(rel: PurePosixPath, args) -> bool:
+    """True when a data/ member is excluded from the snapshot.
+
+    `rel` is a POSIX path rooted at `data/` (for example
+    `data/extension-runtimes/.../toolchain/go.bin`)."""
+    for prefix in _ALWAYS_SKIP_RELATIVE:
+        if rel == prefix or prefix in rel.parents:
+            return True
+    if not args.include_research and "deep_research" in rel.parts:
+        return True
+    if not args.include_attachments and "mail-attachments" in rel.parts:
+        return True
+    return False
 
 
 def _sqlite_safe_copy(src: Path, dst: Path) -> None:
@@ -124,7 +142,7 @@ def _sha256(path: Path) -> str:
 
 
 def _backup_manifest(args, inventory: dict) -> dict:
-    exclusions = []
+    exclusions = [str(prefix) for prefix in _ALWAYS_SKIP_RELATIVE]
     if not args.include_research:
         exclusions.append("data/deep_research")
     if not args.include_attachments:
@@ -322,7 +340,12 @@ def cmd_snapshot(args):
     sqlite_dbs = [
         p
         for p in _DATA_DIR.rglob("*.db")
-        if p.is_file() and not p.is_symlink()
+        if p.is_file()
+        and not p.is_symlink()
+        and not _is_skipped(
+            PurePosixPath("data") / PurePosixPath(p.relative_to(_DATA_DIR).as_posix()),
+            args,
+        )
     ]
     inventory_entries = []
     with tempfile.TemporaryDirectory() as tmp_str:
@@ -349,10 +372,8 @@ def cmd_snapshot(args):
                     archive_path = rel.as_posix()
                     if archive_path in BACKUP_MANIFEST_NAMES:
                         continue
-                    # Skip user-asked-to-skip categories.
-                    if not args.include_research and "deep_research" in rel.parts:
-                        continue
-                    if not args.include_attachments and "mail-attachments" in rel.parts:
+                    # Skip re-derivable and user-asked-to-skip categories.
+                    if _is_skipped(PurePosixPath(archive_path), args):
                         continue
                     if p.is_symlink():
                         target, target_metadata = _materialized_symlink_target(p)
