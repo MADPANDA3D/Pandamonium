@@ -163,3 +163,7 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert 'id="tool-entertainment-btn"' in index
     assert 'data-settings-tab="entertainment"' in index
     assert 'data-settings-panel="entertainment"' in index
+    # Player controls: next/autoplay, episode jump, favorites, continue watching.
+    assert "entertainment-next" in index and "entertainment-autoplay" in index
+    assert "entertainment-jump" in index and "entertainment-resume" in index
+    assert "nextEpisode" in source and "data-ent-fav" in source and "rememberResume" in source

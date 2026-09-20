@@ -3126,6 +3126,10 @@
                 <label class="settings-label" for="entertainment-default-quality">Playback quality</label>
                 <select id="entertainment-default-quality" class="settings-select"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select>
               </div>
+              <div class="settings-row">
+                <label class="settings-label" for="entertainment-default-autoplay">Autoplay next</label>
+                <input id="entertainment-default-autoplay" type="checkbox">
+              </div>
             </div>
             <div id="entertainment-settings-status" class="settings-hint" role="status" style="padding-top:8px;"></div>
           </div>
@@ -3167,6 +3171,10 @@
           <h1 id="entertainment-heading">Entertainment</h1>
           <p id="entertainment-copy"></p>
         </div>
+        <div id="entertainment-saved" class="entertainment-saved hidden">
+          <button type="button" id="entertainment-resume" class="entertainment-resume hidden"></button>
+          <div id="entertainment-favorites" class="entertainment-favorites"></div>
+        </div>
         <form id="entertainment-search" class="entertainment-search">
           <label class="sr-only" for="entertainment-query">Search titles</label>
           <input id="entertainment-query" type="search" maxlength="200" autocomplete="off" placeholder="Search titles">
@@ -3175,11 +3183,16 @@
           <button type="submit">Search</button>
           <button id="entertainment-history" type="button">Continue</button>
         </form>
+        <form id="entertainment-jump" class="entertainment-jump hidden">
+          <label for="entertainment-jump-input">Go to episode</label>
+          <input id="entertainment-jump-input" type="number" min="1" step="1" inputmode="numeric" placeholder="#">
+          <button type="submit">Play</button>
+        </form>
         <p id="entertainment-status" class="entertainment-status" role="status" aria-live="polite"></p>
         <div id="entertainment-results" class="entertainment-results"></div>
       </section>
       <section id="entertainment-player" class="entertainment-player hidden">
-        <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+        <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
         <video id="entertainment-video" controls autoplay playsinline></video>
       </section>
     </main>
