@@ -3159,18 +3159,10 @@
         <span class="ent-brand-word" id="entertainment-title">PANDA<em>FLIX</em></span>
       </button>
       <nav class="ent-topnav-links" aria-label="Entertainment sections">
-        <button type="button" class="ent-section-pill" data-ent-nav="home"><span class="ent-pill-play" aria-hidden="true">▶</span>ENTERTAINMENT</button>
-        <button type="button" class="ent-nav-home" data-ent-nav="home">Home</button>
-        <span id="entertainment-tabs" class="ent-provider-tabs" aria-label="Entertainment providers"></span>
-        <button type="button" class="ent-nav-lib" data-ent-nav="mylist" disabled>My List</button>
-        <button type="button" class="ent-nav-lib" data-ent-nav="downloads" disabled>Downloads</button>
+        <button type="button" class="ent-section-pill" id="entertainment-fanfare-btn" data-ent-nav="home"><span class="ent-pill-play" aria-hidden="true">▶</span>ENTERTAINMENT</button>
       </nav>
-      <div class="ent-topnav-right">
-        <button type="button" class="ent-icon-btn" disabled aria-label="Search (coming soon)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
-        <button type="button" class="ent-icon-btn" disabled aria-label="Notifications"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><i class="ent-badge"></i></button>
-        <button type="button" class="ent-avatar" disabled aria-label="Account"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></button>
-      </div>
       <button id="entertainment-close" class="ent-close" type="button" aria-label="Close Entertainment">✕</button>
+      <audio id="entertainment-fanfare" src="/static/entertainment/fanfare.mp3" preload="auto"></audio>
     </header>
     <div class="ent-body">
       <aside class="ent-sidebar">

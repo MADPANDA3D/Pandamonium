@@ -154,8 +154,12 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     settings = (ROOT / "static/js/settings.js").read_text()
     index = (ROOT / "static/index.html").read_text()
     assert "providers.length === 1" in source
-    assert "providers.length > 1" in source
     assert "providers.length > 0" in source
+    # The shell dropped provider tabs; the sidebar switches providers, the next
+    # episode is warmed into the idle player, and the pill plays the fanfare.
+    assert 'id="entertainment-tabs"' not in index
+    assert "schedulePreload" in source and 'id="entertainment-video-next"' in index
+    assert 'id="entertainment-fanfare"' in index and "entertainment-fanfare-btn" in source
     assert "requestFullscreen" in source and "window.Hls" in source
     assert "voice" not in source.lower()
     # The launcher lives in the sidebar; Settings owns the defaults panel.

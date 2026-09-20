@@ -41,7 +41,6 @@ test('Entertainment settings tab holds defaults and the sidebar opens the player
   await expect(page.locator('#entertainment-modal')).toBeVisible();
   await expect(page.locator('#entertainment-heading')).toHaveText('Anime');
   await expect(page.locator('#entertainment-landing')).toBeHidden();
-  await expect(page.locator('#entertainment-tabs button')).toHaveCount(0);
   await page.locator('#entertainment-close').click();
 
   installed = [
@@ -52,7 +51,6 @@ test('Entertainment settings tab holds defaults and the sidebar opens the player
   await page.locator('#entertainment-section').click();
   await expect(page.locator('#entertainment-landing')).toBeVisible();
   await expect(page.locator('.entertainment-choice')).toHaveCount(2);
-  await expect(page.locator('#entertainment-tabs button')).toHaveCount(2);
   await page.locator('.entertainment-choice[data-provider="pandaflix"]').click();
   await page.locator('#entertainment-query').fill('Arrival');
   await page.locator('#entertainment-search button[type="submit"]').click();
@@ -190,4 +188,36 @@ test('Entertainment warms the next episode into the idle player', async ({ page 
   await expect(page.locator('#entertainment-video')).toHaveAttribute('src', 'https://media.example/ep-1.mp4');
   // ...while episode 2 is warmed into the idle element before it is needed.
   await expect(page.locator('#entertainment-video-next')).toHaveAttribute('src', 'https://media.example/ep-2.mp4');
+});
+
+test('Entertainment pill plays the fanfare and the top nav is stripped down', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__entPlayed = [];
+    HTMLMediaElement.prototype.play = function () { window.__entPlayed.push(this.id || 'media'); return Promise.resolve(); };
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [
+      { id: 'ani-cli', label: 'Anime', enabled: true },
+      { id: 'pandaflix', label: 'Movies & Shows', enabled: true },
+    ] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+
+  // No provider tabs and no search/notifications/account icons in the top nav.
+  await expect(page.locator('.ent-provider-tabs')).toHaveCount(0);
+  await expect(page.locator('.ent-icon-btn, .ent-avatar, .ent-global-search')).toHaveCount(0);
+
+  // The ENTERTAINMENT pill plays the fanfare.
+  await expect(page.locator('#entertainment-fanfare')).toHaveCount(1);
+  await page.locator('#entertainment-fanfare-btn').click();
+  await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-fanfare'))).toBe(true);
 });
