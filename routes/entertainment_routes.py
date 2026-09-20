@@ -41,6 +41,16 @@ class _ProxyTarget:
 _TOKENS: dict[str, _ProxyTarget] = {}
 _TOKEN_LOCK = asyncio.Lock()
 
+# Reuse pinned connections + resolved IPs across HLS segments. Creating a fresh
+# transport/client and re-resolving DNS for every segment paid a full TCP/TLS
+# handshake per chunk of video, which is what made proxied playback crawl.
+_CLIENTS: dict[tuple[str, str], httpx.AsyncClient] = {}
+_CLIENT_LOCK = asyncio.Lock()
+_IP_CACHE: dict[str, tuple[float, list]] = {}
+_IP_TTL = 120.0
+_MAX_PINNED_CLIENTS = 16
+_MAX_PINNED_CONNECTIONS = 32
+
 
 def _headers(value: object) -> dict[str, str]:
     if not isinstance(value, dict):
@@ -97,6 +107,40 @@ async def _prepare_playback(owner: str, result: dict) -> dict:
     return prepared
 
 
+def _pinned_ips(url: str) -> list:
+    host = (urlparse(url).hostname or "").lower()
+    now = time.monotonic()
+    cached = _IP_CACHE.get(host)
+    if cached and cached[0] > now:
+        return cached[1]
+    ips = _validated_public_ips(url)
+    _IP_CACHE[host] = (now + _IP_TTL, ips)
+    return ips
+
+
+async def _pinned_client(url: str) -> httpx.AsyncClient:
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    key = (origin, str(_pinned_ips(url)[0]))
+    async with _CLIENT_LOCK:
+        client = _CLIENTS.get(key)
+        if client is not None:
+            return client
+        client = httpx.AsyncClient(
+            transport=_StreamingPinnedTransport(_pinned_ips(url)[0], _MAX_PINNED_CONNECTIONS),
+            timeout=httpx.Timeout(60, connect=15),
+            follow_redirects=False,
+            trust_env=False,
+        )
+        evicted = None
+        if len(_CLIENTS) >= _MAX_PINNED_CLIENTS:
+            _, evicted = _CLIENTS.popitem()
+        _CLIENTS[key] = client
+    if evicted is not None:
+        asyncio.create_task(evicted.aclose())
+    return client
+
+
 async def _open(target: _ProxyTarget, range_header: str | None):
     url = target.url
     headers = dict(target.headers)
@@ -104,27 +148,19 @@ async def _open(target: _ProxyTarget, range_header: str | None):
         if len(range_header) > 100 or not range_header.startswith("bytes="):
             raise HTTPException(416, "Invalid media range")
         headers["Range"] = range_header
+    seen = {url}
     for hop in range(4):
         url = validate_public_http_url(url, max_length=8192)
-        ips = _validated_public_ips(url)
-        client = httpx.AsyncClient(
-            transport=_StreamingPinnedTransport(ips[0]),
-            timeout=httpx.Timeout(60, connect=15),
-            follow_redirects=False,
-            trust_env=False,
-        )
-        try:
-            response = await client.send(client.build_request("GET", url, headers=headers), stream=True)
-        except Exception:
-            await client.aclose()
-            raise
+        client = await _pinned_client(url)
+        response = await client.send(client.build_request("GET", url, headers=headers), stream=True)
         if response.is_redirect:
             location = response.headers.get("location")
             await response.aclose()
-            await client.aclose()
-            if not location or hop == 3:
+            next_url = urljoin(url, location) if location else None
+            if not next_url or hop == 3 or next_url in seen:
                 raise HTTPException(502, "Media redirect limit exceeded")
-            url = urljoin(url, location)
+            seen.add(next_url)
+            url = next_url
             continue
         return client, response, url
     raise HTTPException(502, "Media unavailable")
@@ -208,13 +244,12 @@ def setup_entertainment_routes() -> APIRouter:
         if not identity or not target or target.owner != identity or target.expires <= time.monotonic():
             raise HTTPException(404, "Media link expired")
         try:
-            client, response, final_url = await _open(target, range)
+            _client, response, final_url = await _open(target, range)
         except (httpx.HTTPError, OSError, ValueError) as exc:
             raise HTTPException(502, "Media source unavailable") from exc
         if response.status_code >= 400:
             status = response.status_code
             await response.aclose()
-            await client.aclose()
             raise HTTPException(status if status in {404, 416} else 502, "Media source unavailable")
         content_type = response.headers.get("content-type", "application/octet-stream")
         if "mpegurl" in content_type.lower() or final_url.lower().split("?", 1)[0].endswith(".m3u8"):
@@ -222,9 +257,9 @@ def setup_entertainment_routes() -> APIRouter:
             async for chunk in response.aiter_bytes():
                 content.extend(chunk)
                 if len(content) > _PLAYLIST_BYTES:
-                    await response.aclose(); await client.aclose()
+                    await response.aclose()
                     raise HTTPException(502, "Media playlist is too large")
-            await response.aclose(); await client.aclose()
+            await response.aclose()
             rewritten = await _playlist(identity, final_url, content.decode("utf-8", "replace"), target.headers)
             return Response(rewritten, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "private, no-store"})
 
@@ -238,7 +273,6 @@ def setup_entertainment_routes() -> APIRouter:
                     yield chunk
             finally:
                 await response.aclose()
-                await client.aclose()
 
         forwarded = {name: response.headers[name] for name in ("accept-ranges", "content-length", "content-range") if name in response.headers}
         forwarded.update({"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
