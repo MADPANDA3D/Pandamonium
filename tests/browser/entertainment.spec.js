@@ -153,3 +153,41 @@ test('Entertainment player supports jump, next, autoplay, favorites, and continu
   await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toHaveCount(1);
   await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toContainText('Naruto');
 });
+
+test('Entertainment warms the next episode into the idle player', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [
+      { id: 'ani-cli', label: 'Anime', enabled: true },
+    ] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [
+      { number: '1', label: 'Episode 1' }, { number: '2', label: 'Episode 2' },
+    ], total: 2, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({ json: { title: `Naruto Episode ${body.episode}`, url: `https://media.example/ep-${body.episode}.mp4`, format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+
+  // Episode 1 is playing on the primary element...
+  await expect(page.locator('#entertainment-video')).toHaveAttribute('src', 'https://media.example/ep-1.mp4');
+  // ...while episode 2 is warmed into the idle element before it is needed.
+  await expect(page.locator('#entertainment-video-next')).toHaveAttribute('src', 'https://media.example/ep-2.mp4');
+});

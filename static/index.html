@@ -3156,7 +3156,7 @@
     <header class="ent-topnav">
       <button id="entertainment-home" class="ent-brand" type="button" aria-label="Entertainment home">
         <img class="ent-brand-mark" src="/static/icons/pandamonium.png" alt="">
-        <span class="ent-brand-word" id="entertainment-title">PANDA<em>MONIUM</em></span>
+        <span class="ent-brand-word" id="entertainment-title">PANDA<em>FLIX</em></span>
       </button>
       <nav class="ent-topnav-links" aria-label="Entertainment sections">
         <button type="button" class="ent-section-pill" data-ent-nav="home"><span class="ent-pill-play" aria-hidden="true">▶</span>ENTERTAINMENT</button>
@@ -3234,7 +3234,10 @@
         </section>
         <section id="entertainment-player" class="entertainment-player hidden">
           <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
-          <video id="entertainment-video" controls autoplay playsinline></video>
+          <div class="ent-video-stage">
+            <video id="entertainment-video" class="ent-video is-active" controls autoplay playsinline></video>
+            <video id="entertainment-video-next" class="ent-video" playsinline muted preload="auto"></video>
+          </div>
         </section>
       </main>
     </div>

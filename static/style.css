@@ -44629,6 +44629,9 @@ textarea.bug-report-input {
 .ent-card-play:hover{filter:brightness(1.08)}
 .ent-card-fav{width:42px;border:1px solid #2c1417;border-radius:9px;background:#140f0f;color:#e50914;font-size:17px;cursor:pointer}
 .ent-card-fav[aria-pressed="true"]{background:#2a0a0d;border-color:#e50914}
+.entertainment-player .ent-video-stage{position:relative;flex:1;min-height:0;background:#000}
+.entertainment-player .ent-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;opacity:0;pointer-events:none;transition:opacity .15s linear}
+.entertainment-player .ent-video.is-active{opacity:1;pointer-events:auto}
 @media(max-width:1180px){.entertainment-results.is-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:980px){
   .entertainment-shell{grid-template-rows:60px 1fr 40px}
