@@ -160,7 +160,10 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert "voice" not in source.lower()
     # The launcher lives in the sidebar; Settings owns the defaults panel.
     assert "refreshEntertainment" in settings and "openEntertainment" in source
-    assert 'id="tool-entertainment-btn"' in index
+    # The launcher is a solo clickable sidebar row, not a collapsible section.
+    assert 'class="list-item hidden" id="entertainment-section"' in index
+    assert 'id="tool-entertainment-btn"' not in index
+    assert '<span class="grow">Open Entertainment</span>' not in index
     assert 'data-settings-tab="entertainment"' in index
     assert 'data-settings-panel="entertainment"' in index
     # Player controls: next/autoplay, episode jump, favorites, continue watching.

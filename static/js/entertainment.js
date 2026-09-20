@@ -378,8 +378,8 @@ function init() {
     try { status('Loading history…'); const result = await api('/ani-cli/history', {}); buttons(result.items, 'history', item => `${item.title} · Episode ${item.episode}`); status('Continue watching.'); }
     catch (error) { status(error.message); }
   });
-  el('tool-entertainment-btn')?.addEventListener('click', () => openEntertainment());
-  el('tool-entertainment-btn')?.addEventListener('keydown', event => {
+  el('entertainment-section')?.addEventListener('click', () => openEntertainment());
+  el('entertainment-section')?.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEntertainment(); }
   });
   el('entertainment-default-provider')?.addEventListener('change', readSettingsPanel);
@@ -447,4 +447,17 @@ export async function openEntertainment() {
 export function closeEntertainment() {
   stopPlayer();
   el('entertainment-modal')?.classList.add('hidden');
+}
+
+// Show the sidebar entry as soon as the app loads, not only after Settings has
+// been opened. refreshEntertainment() is otherwise only reached from the
+// settings-open path and the extensions-changed event, which left the launcher
+// invisible on a fresh load.
+if (typeof document !== 'undefined') {
+  const bootEntertainment = () => { refreshEntertainment().catch(() => {}); };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootEntertainment, { once: true });
+  } else {
+    bootEntertainment();
+  }
 }

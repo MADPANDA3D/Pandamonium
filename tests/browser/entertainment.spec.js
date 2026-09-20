@@ -37,7 +37,7 @@ test('Entertainment settings tab holds defaults and the sidebar opens the player
   await expect(page.locator('#entertainment-modal')).toBeHidden();
 
   // The sidebar entry opens the player; one provider opens directly.
-  await page.locator('#tool-entertainment-btn').click();
+  await page.locator('#entertainment-section').click();
   await expect(page.locator('#entertainment-modal')).toBeVisible();
   await expect(page.locator('#entertainment-heading')).toHaveText('Anime');
   await expect(page.locator('#entertainment-landing')).toBeHidden();
@@ -49,7 +49,7 @@ test('Entertainment settings tab holds defaults and the sidebar opens the player
     { id: 'pandaflix', label: 'Movies & Shows', enabled: true },
   ];
   await page.evaluate(async () => { window.dispatchEvent(new Event('pandamonium:extensions-changed')); (await import('/static/js/settings.js')).open(); });
-  await page.locator('#tool-entertainment-btn').click();
+  await page.locator('#entertainment-section').click();
   await expect(page.locator('#entertainment-landing')).toBeVisible();
   await expect(page.locator('.entertainment-choice')).toHaveCount(2);
   await expect(page.locator('#entertainment-tabs button')).toHaveCount(2);
@@ -86,7 +86,7 @@ test('Entertainment defaults from Settings apply when the player opens', async (
   await page.locator('#entertainment-default-language').selectOption('dub');
   await page.locator('#entertainment-default-quality').selectOption('720p');
 
-  await page.locator('#tool-entertainment-btn').click();
+  await page.locator('#entertainment-section').click();
   await expect(page.locator('#entertainment-modal')).toBeVisible();
   await expect(page.locator('#entertainment-heading')).toHaveText('Movies & Shows');
   await expect(page.locator('#entertainment-landing')).toBeHidden();
@@ -124,7 +124,7 @@ test('Entertainment player supports jump, next, autoplay, favorites, and continu
   });
   await page.goto('/static/index.html');
   await page.evaluate(async () => (await import('/static/js/settings.js')).open());
-  await page.locator('#tool-entertainment-btn').click();
+  await page.locator('#entertainment-section').click();
   await page.locator('.entertainment-choice[data-provider="ani-cli"]').click();
   await page.locator('#entertainment-query').fill('Naruto');
   await page.locator('#entertainment-search button[type="submit"]').click();
