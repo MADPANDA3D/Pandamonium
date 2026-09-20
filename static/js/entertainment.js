@@ -181,6 +181,12 @@ function stopPlayer() {
 
 function status(text = '') { el('entertainment-status').textContent = text; }
 
+function playSound(id) {
+  const audio = el(id);
+  if (!audio) return;
+  try { audio.currentTime = 0; audio.play().catch(() => {}); } catch (_) {}
+}
+
 function buttons(items, action, label) {
   const host = el('entertainment-results');
   const cards = action === 'title';
@@ -534,11 +540,7 @@ function init() {
   initialized = true;
   el('entertainment-close')?.addEventListener('click', closeEntertainment);
   el('entertainment-home')?.addEventListener('click', showLanding);
-  el('entertainment-fanfare-btn')?.addEventListener('click', () => {
-    const fanfare = el('entertainment-fanfare');
-    if (!fanfare) return;
-    try { fanfare.currentTime = 0; fanfare.play().catch(() => {}); } catch (_) {}
-  });
+  el('entertainment-fanfare-btn')?.addEventListener('click', () => playSound('entertainment-fanfare'));
   el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
   el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
   initSlots();
@@ -567,7 +569,11 @@ function init() {
   el('entertainment-default-autoplay')?.addEventListener('change', readSettingsPanel);
   document.addEventListener('click', event => {
     const provider = event.target.closest?.('[data-provider]');
-    if (provider) { showProvider(provider.dataset.provider); return; }
+    if (provider) {
+      playSound(provider.dataset.provider === 'ani-cli' ? 'entertainment-anime-wow' : 'entertainment-fanfare');
+      showProvider(provider.dataset.provider);
+      return;
+    }
     const favorite = event.target.closest?.('[data-ent-fav]');
     if (favorite) {
       const item = el('entertainment-results')._items?.[Number(favorite.dataset.entFav)];

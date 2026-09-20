@@ -222,4 +222,13 @@ test('Entertainment pill plays the fanfare and the top nav is stripped down', as
   await expect(page.locator('#entertainment-fanfare')).toHaveCount(1);
   await page.locator('#entertainment-fanfare-btn').click();
   await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-fanfare'))).toBe(true);
+
+  // Open AniCLI plays its own sting; Open Pandaflix plays the fanfare.
+  await page.evaluate(() => { window.__entPlayed.length = 0; });
+  await page.locator('.entertainment-choice[data-provider="ani-cli"]').click();
+  await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-anime-wow'))).toBe(true);
+  await page.locator('#entertainment-home').click();
+  await page.evaluate(() => { window.__entPlayed.length = 0; });
+  await page.locator('.entertainment-choice[data-provider="pandaflix"]').click();
+  await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-fanfare'))).toBe(true);
 });
