@@ -135,3 +135,21 @@ only and cards show title + a generated placeholder cover.
 3. Which shell nav items are functional in v1 vs visual-only?
 4. Landing hero copy locked to the mockup ("What are we watching tonight?", etc.)?
 5. Footer version string should read the live `APP_VERSION`.
+
+## Next — title detail + hover (Crunchyroll reference, 2026-09-20)
+
+Operator supplied Crunchyroll screenshots as the target for these:
+
+1. **Result-card hover**: reveal a description plus three actions — **Save**
+   (favorite), **Add to Watchlist**, and **Play**.
+2. **Title detail page**: clicking a title opens an anime detail view with a
+   **hero section** for the show and an **episode list with video thumbnails**,
+   progress indicators ("2m left" / "Watched"), and a play overlay.
+3. **Per-user History**: `prefs.history` now records provider/title/episode/
+   position per user and the History page lists it and resumes on click. Follow-up:
+   add episode thumbnails, "Xm left"/"Watched" state, and a clear-history action
+   (see Crunchyroll "My Lists → History").
+4. **Watchlist**: separate list from Favorites; add an "Add to Watchlist" action.
+
+These need the metadata/thumbnail source (AniList for anime, pandaflix/TMDB for
+movies) and an episode-thumbnail URL, so they follow the metadata decision.

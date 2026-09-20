@@ -239,8 +239,10 @@ test('Entertainment sidebar destinations open their pages', async ({ page }) => 
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
-    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
-    if (path === '/api/entertainment/ani-cli/history') return route.fulfill({ json: { items: [{ index: 1, episode: '429', title: 'Naruto: Shippuden' }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: {
+      history: [{ provider: 'ani-cli', query: 'Naruto', item: { id: 1, title: 'Naruto' }, episode: '429', title: 'Naruto: Shippuden', position: 132 }],
+      favorites: [{ key: 'ani-cli:1', provider: 'ani-cli', query: 'Naruto', item: { id: 1, title: 'Naruto' }, title: 'Naruto: Shippuden' }],
+    } } });
     if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
     if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
     return route.fulfill({ json: {} });
@@ -251,6 +253,10 @@ test('Entertainment sidebar destinations open their pages', async ({ page }) => 
 
   await page.locator('.ent-sidebar [data-ent-dest="history"]').click();
   await expect(page.locator('#ent-collection-title')).toHaveText('History');
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('Naruto: Shippuden');
+
+  await page.locator('.ent-sidebar [data-ent-dest="favorites"]').click();
+  await expect(page.locator('#ent-collection-title')).toHaveText('My Favorites');
   await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('Naruto: Shippuden');
 
   await page.locator('.ent-sidebar [data-ent-dest="watchlist"]').click();

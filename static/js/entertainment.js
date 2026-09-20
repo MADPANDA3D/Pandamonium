@@ -16,7 +16,7 @@ let initialized = false;
 let playback = null;
 
 const PREFS_KEY = 'entertainment';
-const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], resume: null };
+const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], history: [], resume: null };
 const LANGUAGES = ['sub', 'dub'];
 const QUALITIES = ['best', '1080p', '720p', '480p', '360p'];
 let prefs = { ...DEFAULT_PREFS };
@@ -36,6 +36,7 @@ function normalizePrefs(value) {
   const merged = { ...DEFAULT_PREFS, ...(value && typeof value === 'object' ? value : {}) };
   merged.autoplay = Boolean(merged.autoplay);
   merged.favorites = Array.isArray(merged.favorites) ? merged.favorites.filter(item => item && item.key && item.item).slice(0, 100) : [];
+  merged.history = Array.isArray(merged.history) ? merged.history.filter(entry => entry && entry.title).slice(0, 200) : [];
   merged.resume = merged.resume && typeof merged.resume === 'object' && merged.resume.item ? merged.resume : null;
   return merged;
 }
@@ -125,11 +126,19 @@ function toggleFavorite(provider, item) {
   renderSaved();
 }
 
+function recordHistory(record) {
+  if (!record || !record.title) return;
+  const key = `${record.provider}:${record.item?.id ?? record.item?.selection ?? record.title}:${record.episode ?? ''}`;
+  const rest = (prefs.history || []).filter(entry => entry.key !== key);
+  prefs.history = [{ ...record, key, at: Date.now() }, ...rest].slice(0, 200);
+}
+
 function rememberResume(record) {
   const same = prefs.resume
     && prefs.resume.provider === record.provider
     && String(prefs.resume.episode) === String(record.episode);
   prefs.resume = { ...record, position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
+  recordHistory(prefs.resume);
   savePrefs();
 }
 
@@ -384,17 +393,40 @@ const COLLECTIONS = {
   popular: { eyebrow: 'BROWSE', title: 'Popular', copy: 'Popular titles across the connected providers.' },
   'top-rated': { eyebrow: 'BROWSE', title: 'Top Rated', copy: 'Highest-rated titles across the catalog.' },
   'recently-added': { eyebrow: 'BROWSE', title: 'Recently Added', copy: 'Newest additions to the catalog.' },
-  watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you saved.' },
+  favorites: { eyebrow: 'MY LIBRARY', title: 'My Favorites', copy: 'Titles you saved.' },
+  watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you plan to watch.' },
   history: { eyebrow: 'MY LIBRARY', title: 'History', copy: 'Pick up exactly where you left off.' },
   downloads: { eyebrow: 'MY LIBRARY', title: 'Downloads', copy: 'Downloaded episodes and movies land here.' },
 };
+
+function formatTime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+async function resumeHistoryEntry(index) {
+  const entry = (prefs.history || [])[index];
+  if (!entry) return;
+  if (!providers.some(provider => provider.id === entry.provider && provider.enabled)) { status('That provider is not installed.'); return; }
+  if (active !== entry.provider) showProvider(entry.provider);
+  query = entry.query || '';
+  selection = entry.item || null;
+  el('entertainment-query').value = query;
+  pendingResume = Number(entry.position) || 0;
+  try {
+    if (entry.provider === 'ani-cli') await playAnimeEpisode(entry.episode);
+    else await resolvePanda(entry.season || 0, entry.episode || 0);
+  } catch (error) { status(error.message); }
+}
 
 async function renderCollection(key) {
   const host = el('ent-collection-results');
   const statusEl = el('ent-collection-status');
   statusEl.textContent = '';
   host.innerHTML = '';
-  if (key === 'watchlist') {
+  if (key === 'favorites' || key === 'watchlist') {
     const favorites = prefs.favorites || [];
     host.innerHTML = favorites.length
       ? favorites.map(entry => `<button type="button" class="ent-collection-item" data-ent-open-fav="${esc(entry.key)}">★ ${esc(entry.title)}</button>`).join('')
@@ -402,13 +434,14 @@ async function renderCollection(key) {
     return;
   }
   if (key === 'history') {
-    statusEl.textContent = 'Loading history…';
-    const result = await api('/ani-cli/history');
-    statusEl.textContent = '';
-    const items = result.items || [];
-    host.innerHTML = items.length
-      ? items.map(item => `<button type="button" class="ent-collection-item" data-ent-history="${item.index}">${esc(item.title)} · Episode ${esc(item.episode)}</button>`).join('')
-      : '<p class="entertainment-empty">No watch history yet.</p>';
+    const history = prefs.history || [];
+    host.innerHTML = history.length
+      ? history.map((entry, index) => {
+        const episode = entry.episode != null && entry.episode !== '' ? ` · Episode ${esc(entry.episode)}` : '';
+        const position = entry.position ? ` · ${formatTime(entry.position)}` : '';
+        return `<button type="button" class="ent-collection-item" data-ent-resume-history="${index}"><span>${esc(entry.title)}${episode}${position}</span></button>`;
+      }).join('')
+      : '<p class="entertainment-empty">Nothing watched yet.</p>';
     return;
   }
   if (key === 'downloads') {
@@ -703,12 +736,9 @@ function init() {
     }
     const openFav = event.target.closest?.('[data-ent-open-fav]');
     if (openFav) { openFavorite(openFav.dataset.entOpenFav).catch(error => status(error.message)); return; }
-    const historyItem = event.target.closest?.('[data-ent-history]');
+    const historyItem = event.target.closest?.('[data-ent-resume-history]');
     if (historyItem) {
-      const index = Number(historyItem.dataset.entHistory);
-      api('/ani-cli/continue', { history_index: index, dub: el('entertainment-mode')?.value === 'dub', quality: el('entertainment-quality')?.value || 'best' })
-        .then(result => play(result))
-        .catch(error => status(error.message));
+      resumeHistoryEntry(Number(historyItem.dataset.entResumeHistory)).catch(error => status(error.message));
       return;
     }
     const button = event.target.closest?.('[data-ent-action]');
