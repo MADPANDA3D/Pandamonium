@@ -96,3 +96,60 @@ test('Entertainment defaults from Settings apply when the player opens', async (
   await expect(page.locator('#entertainment-mode')).toHaveValue('dub');
   await expect(page.locator('#entertainment-quality')).toHaveValue('720p');
 });
+
+test('Entertainment player supports jump, next, autoplay, favorites, and continue watching', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [
+      { id: 'ani-cli', label: 'Anime', enabled: true },
+      { id: 'pandaflix', label: 'Movies & Shows', enabled: true },
+    ] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [
+      { number: '1', label: 'Episode 1' }, { number: '2', label: 'Episode 2' }, { number: '3', label: 'Episode 3' },
+    ], total: 3, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({ json: { title: `Naruto Episode ${body.episode}`, url: 'https://media.example/ep.mp4', format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#tool-entertainment-btn').click();
+  await page.locator('.entertainment-choice[data-provider="ani-cli"]').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.entertainment-result').first().click();
+
+  // Jump straight to an episode instead of paging.
+  await expect(page.locator('#entertainment-jump')).toBeVisible();
+  await page.locator('#entertainment-jump-input').fill('3');
+  await page.locator('#entertainment-jump button[type="submit"]').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto Episode 3');
+
+  // Next advances to the following episode, and autoplay can be enabled.
+  await page.locator('#entertainment-next').click();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto Episode 4');
+  await page.locator('#entertainment-autoplay').check();
+  await expect(page.locator('#entertainment-autoplay')).toBeChecked();
+
+  // Continue watching and favorites appear back on the provider page.
+  await page.locator('#entertainment-back').click();
+  await expect(page.locator('#entertainment-resume')).toBeVisible();
+  await expect(page.locator('#entertainment-resume')).toContainText('Naruto Episode 4');
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.entertainment-fav').first().click();
+  await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toHaveCount(1);
+  await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toContainText('Naruto');
+});
