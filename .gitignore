@@ -76,6 +76,8 @@ output.txt.txt
 # …except shipped static assets
 !static/icons/*.png
 !static/vendor/organic-sphere/social/share-1200x630.png
+!static/entertainment/*.webp
+!static/entertainment/*.png
 
 # …except shipped demo assets in docs/ that the README links to.
 !docs/*.jpg

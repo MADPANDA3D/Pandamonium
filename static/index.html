@@ -3156,11 +3156,22 @@
     <header class="ent-topnav">
       <button id="entertainment-home" class="ent-brand" type="button" aria-label="Entertainment home">
         <img class="ent-brand-mark" src="/static/icons/pandamonium.png" alt="">
-        <span class="ent-brand-word" id="entertainment-title">PANDA<em>FLIX</em></span>
+        <span class="ent-brand-word" id="entertainment-title">PANDA<em>MONIUM</em></span>
       </button>
       <nav class="ent-topnav-links" aria-label="Entertainment sections">
+        <button type="button" class="ent-nav-link" data-ent-nav="home">Home</button>
+        <span id="entertainment-tabs" class="ent-provider-tabs" aria-label="Entertainment providers"></span>
+        <button type="button" class="ent-nav-link" data-ent-nav="mylist" disabled>My List</button>
+        <button type="button" class="ent-nav-link" data-ent-nav="downloads" disabled>Downloads</button>
         <button type="button" class="ent-section-pill" id="entertainment-fanfare-btn" data-ent-nav="home"><span class="ent-pill-play" aria-hidden="true">▶</span>ENTERTAINMENT</button>
       </nav>
+      <div class="ent-topnav-right">
+        <button type="button" class="ent-search-field" id="ent-global-search" aria-label="Search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span>Search anime, movies, shows…</span><kbd>⌘K</kbd>
+        </button>
+        <button type="button" class="ent-avatar" disabled aria-label="Account"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></button>
+      </div>
       <button id="entertainment-close" class="ent-close" type="button" aria-label="Close Entertainment">✕</button>
       <audio id="entertainment-fanfare" src="/static/entertainment/fanfare.mp3" preload="auto"></audio>
     </header>
@@ -3191,28 +3202,36 @@
         <section id="entertainment-landing" class="entertainment-landing" aria-label="Choose a provider"></section>
         <section id="entertainment-browser" class="entertainment-browser hidden">
           <div class="ent-hero">
-            <p id="entertainment-eyebrow" class="ent-eyebrow">PRIVATE RUNTIME · UPSTREAM CLI</p>
-            <h1 id="entertainment-heading">Entertainment</h1>
-            <p id="entertainment-copy" class="ent-hero-sub"></p>
-            <div id="entertainment-chips" class="ent-chips"></div>
+            <div class="ent-hero-text">
+              <p id="entertainment-eyebrow" class="ent-eyebrow">STREAM ANYTHING · NO LIMITS</p>
+              <h1 id="entertainment-heading">Entertainment</h1>
+              <p id="entertainment-copy" class="ent-hero-sub"></p>
+              <div id="entertainment-chips" class="ent-chips"></div>
+            </div>
           </div>
           <div id="entertainment-saved" class="entertainment-saved hidden">
             <button type="button" id="entertainment-resume" class="entertainment-resume hidden"></button>
             <div id="entertainment-favorites" class="entertainment-favorites"></div>
           </div>
-          <form id="entertainment-search" class="entertainment-search">
-            <label class="sr-only" for="entertainment-query">Search titles</label>
-            <input id="entertainment-query" type="search" maxlength="200" autocomplete="off" placeholder="Search titles">
-            <select id="entertainment-mode" aria-label="Anime language"><option value="sub">Sub</option><option value="dub">Dub</option></select>
-            <select id="entertainment-quality" aria-label="Playback quality"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select>
-            <button type="submit">Search</button>
-            <button id="entertainment-history" type="button">Continue</button>
+          <form id="entertainment-search" class="ent-searchbar">
+            <label class="ent-field ent-field-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="entertainment-query" type="search" maxlength="200" autocomplete="off" placeholder="Search titles">
+            </label>
+            <label class="ent-field"><span class="ent-field-cap">Type</span><select id="entertainment-type" aria-label="Type"><option value="all">All</option><option value="series">Series</option><option value="movie">Movies</option></select></label>
+            <label class="ent-field"><span class="ent-field-cap">Quality</span><select id="entertainment-quality" aria-label="Playback quality"><option value="best">Best quality</option><option value="1080p">1080p</option><option value="720p">720p</option><option value="480p">480p</option><option value="360p">360p</option></select></label>
+            <label class="ent-field"><span class="ent-field-cap">Language</span><select id="entertainment-mode" aria-label="Anime language"><option value="sub">Sub</option><option value="dub">Dub</option></select></label>
+            <button type="submit" class="ent-search-submit">Search</button>
           </form>
-          <form id="entertainment-jump" class="entertainment-jump hidden">
-            <label for="entertainment-jump-input">Go to episode</label>
-            <input id="entertainment-jump-input" type="number" min="1" step="1" inputmode="numeric" placeholder="#">
-            <button type="submit">Play</button>
-          </form>
+          <div class="ent-jump-row">
+            <form id="entertainment-jump" class="entertainment-jump hidden">
+              <span class="ent-jump-label">Or go to episode</span>
+              <input id="entertainment-jump-input" type="number" min="1" step="1" inputmode="numeric" placeholder="#">
+              <button type="submit" class="ent-play-btn">▶ Play</button>
+            </form>
+            <button id="entertainment-history" type="button" class="ent-continue-btn hidden">Continue</button>
+            <button type="button" class="ent-random-btn" disabled>⤨ Random Anime</button>
+          </div>
           <div class="ent-results-head">
             <h2 id="entertainment-results-title">Results</h2>
             <div class="ent-results-tools" aria-hidden="true">

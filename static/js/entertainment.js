@@ -244,6 +244,7 @@ function showProvider(id) {
   el('entertainment-results').replaceChildren();
   status('');
   renderSaved();
+  el('entertainment-tabs')?.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.provider === id));
   document.querySelectorAll('[data-ent-browse]').forEach(button => button.classList.toggle('active', button.dataset.entBrowse === id));
   el('entertainment-query').focus();
 }
@@ -538,6 +539,7 @@ function init() {
     if (!fanfare) return;
     try { fanfare.currentTime = 0; fanfare.play().catch(() => {}); } catch (_) {}
   });
+  el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
   el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
   initSlots();
   el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
@@ -625,6 +627,8 @@ export async function openEntertainment() {
   await refreshEntertainment();
   if (!providers.length) return;
   applyPrefs();
+  const tabs = el('entertainment-tabs');
+  if (tabs) tabs.innerHTML = providers.length > 1 ? providers.map(provider => `<button type="button" data-provider="${provider.id}">${esc(provider.label)}</button>`).join('') : '';
   el('entertainment-modal').classList.remove('hidden');
   const preferred = providers.find(provider => provider.id === prefs.provider && provider.enabled);
   if (preferred) showProvider(preferred.id); else showLanding();

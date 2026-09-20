@@ -212,9 +212,11 @@ test('Entertainment pill plays the fanfare and the top nav is stripped down', as
   await page.evaluate(async () => (await import('/static/js/settings.js')).open());
   await page.locator('#entertainment-section').click();
 
-  // No provider tabs and no search/notifications/account icons in the top nav.
-  await expect(page.locator('.ent-provider-tabs')).toHaveCount(0);
-  await expect(page.locator('.ent-icon-btn, .ent-avatar, .ent-global-search')).toHaveCount(0);
+  // The landing nav is stripped: only the ENTERTAINMENT pill and close remain.
+  await expect(page.locator('.ent-provider-tabs').first()).toBeHidden();
+  await expect(page.locator('.ent-nav-link').first()).toBeHidden();
+  await expect(page.locator('.ent-search-field').first()).toBeHidden();
+  await expect(page.locator('.ent-avatar').first()).toBeHidden();
 
   // The ENTERTAINMENT pill plays the fanfare.
   await expect(page.locator('#entertainment-fanfare')).toHaveCount(1);
