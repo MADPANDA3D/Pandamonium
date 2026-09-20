@@ -106,9 +106,9 @@ and [full sources](docs/screenshots/workspace-sources-desktop.png).
 Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png).
 Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png).
 
-![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
-
 </details>
+
+![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
 
 <details>
 <summary><strong>Governed agents, tools, and extensions</strong></summary>
@@ -131,8 +131,6 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 - Approval cards offer deny, approve once, and explicit narrow approve-always;
   persistent receipts remain inspectable and revocable, while target or argument
   changes require a new decision.
-
-![Native MCP approval controls on desktop](docs/images/portal-native-approval-desktop.png)
 
 - Jarvis OS protocol coverage for identity, bounded context, memory provenance,
   action envelopes, authority receipts, learning controls, and operational
@@ -171,6 +169,8 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
   without private extensions, workers, credentials, or topology.
 
 </details>
+
+![Native MCP approval controls on desktop](docs/images/portal-native-approval-desktop.png)
 
 <details>
 <summary><strong>Knowledge and workspaces</strong></summary>
@@ -256,13 +256,13 @@ GHCR images embed their exact source revision. Source-built Docker installs can
 preserve the same provenance by passing `PANDAMONIUM_SOURCE_REVISION` during the
 Compose build, as shown in the setup guide.
 
-![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
-
 The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment
 variables; the former `ODYSSEUS_*` names remain accepted during migration.
 
 </details>
+
+![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
 
 <details>
 <summary><strong>Security</strong></summary>
