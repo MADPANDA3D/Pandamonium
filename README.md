@@ -99,18 +99,13 @@ following maintained platform capabilities.
   collapsed after completion, expands in the page flow without a nested scroll
   region, and remains keyboard-accessible after reopening a saved conversation.
 
-Native history and Details demo views: [compact card](docs/screenshots/workspace-history-desktop.png),
-[full sources](docs/screenshots/workspace-sources-desktop.png), and
-[phone panel](docs/screenshots/workspace-sources-mobile.png).
+Native history and Details demo views: [compact card](docs/screenshots/workspace-history-desktop.png)
+and [full sources](docs/screenshots/workspace-sources-desktop.png).
 
-Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png)
-and [mobile preview](docs/screenshots/workspace-shared-mobile.png).
-Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png)
-and [mobile](docs/screenshots/workspace-context-mobile.png).
+Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png).
+Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png).
 
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
-
-![Assistant turn disclosure on mobile](docs/images/chat-turn-disclosure-mobile.png)
 
 ### Governed agents, tools, and extensions
 
@@ -134,8 +129,6 @@ and [mobile](docs/screenshots/workspace-context-mobile.png).
   changes require a new decision.
 
 ![Native MCP approval controls on desktop](docs/images/portal-native-approval-desktop.png)
-
-![Native MCP approval controls on mobile](docs/images/portal-native-approval-mobile.png)
 
 - Jarvis OS protocol coverage for identity, bounded context, memory provenance,
   action envelopes, authority receipts, learning controls, and operational
@@ -248,8 +241,6 @@ preserve the same provenance by passing `PANDAMONIUM_SOURCE_REVISION` during the
 Compose build, as shown in the setup guide.
 
 ![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
-
-![Updater release control panel on mobile](docs/images/updater-control-panel-mobile.png)
 
 The former `odysseus` command names remain as compatibility aliases for
 existing installations. New configuration uses `PANDAMONIUM_*` environment
