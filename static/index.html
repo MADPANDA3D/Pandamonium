@@ -3175,6 +3175,7 @@
       <audio id="entertainment-anime-wow" src="/static/entertainment/anime-wow.mp3" preload="auto"></audio>
       <audio id="entertainment-anime-search" src="/static/entertainment/anime-search.mp3" preload="auto"></audio>
       <audio id="entertainment-katon" src="/static/entertainment/katon.mp3" preload="auto"></audio>
+      <audio id="entertainment-welcome-hollywood" src="/static/entertainment/welcome-to-hollywood.mp3" preload="auto"></audio>
     </header>
     <div class="ent-body">
       <aside class="ent-sidebar">
@@ -3189,9 +3190,9 @@
         </div>
         <div class="ent-side-group">
           <p class="ent-side-title">MY LIBRARY</p>
+          <button type="button" class="ent-side-link" data-ent-dest="recent">Recently Watched</button>
           <button type="button" class="ent-side-link" data-ent-dest="favorites">My Favorites</button>
           <button type="button" class="ent-side-link" data-ent-dest="watchlist">Watchlist</button>
-          <button type="button" class="ent-side-link" data-ent-dest="history">History</button>
           <button type="button" class="ent-side-link" data-ent-dest="downloads">Downloads</button>
         </div>
         <div class="ent-mascot" aria-hidden="true">
@@ -3250,10 +3251,11 @@
           <div id="ent-collection-results" class="entertainment-results"></div>
         </section>
         <section id="entertainment-player" class="entertainment-player hidden">
-          <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-prev" type="button">◂ Previous</button><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+          <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-refresh" type="button" title="Reload the current stream">⟳ Refresh</button><button id="entertainment-prev" type="button">◂ Previous</button><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+          <p id="entertainment-player-status" class="ent-player-status" role="status" aria-live="polite"></p>
           <div class="ent-video-stage">
             <video id="entertainment-video" class="ent-video is-active" controls autoplay playsinline></video>
-            <video id="entertainment-video-next" class="ent-video" playsinline muted preload="auto"></video>
+            <video id="entertainment-video-next" class="ent-video" controls playsinline muted preload="auto"></video>
           </div>
         </section>
       </main>

@@ -138,11 +138,18 @@ test('Entertainment player supports jump, next, autoplay, favorites, and continu
   // Next advances to the following episode, and autoplay can be enabled.
   await page.locator('#entertainment-next').click();
   await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto Episode 4');
+  // The advanced-to (preloaded) element must still expose native controls.
+  await expect(page.locator('.ent-video.is-active')).toHaveAttribute('controls', '');
   await page.locator('#entertainment-autoplay').check();
   await expect(page.locator('#entertainment-autoplay')).toBeChecked();
 
   // Previous steps back if you skip too far ahead.
   await page.locator('#entertainment-prev').click();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto Episode 3');
+
+  // Refresh re-resolves the current stream in place, keeping the title.
+  await page.locator('#entertainment-refresh').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
   await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto Episode 3');
 
   // Favoriting still works from the result card.
@@ -224,14 +231,14 @@ test('Entertainment pill plays the fanfare and the top nav is stripped down', as
   await page.locator('#entertainment-fanfare-btn').click();
   await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-fanfare'))).toBe(true);
 
-  // Open AniCLI plays its own sting; Open Pandaflix plays the fanfare.
+  // Open AniCLI plays its own sting; Open Pandaflix plays the Hollywood sting.
   await page.evaluate(() => { window.__entPlayed.length = 0; });
   await page.locator('.entertainment-choice[data-provider="ani-cli"]').click();
   await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-anime-wow'))).toBe(true);
   await page.locator('#entertainment-home').click();
   await page.evaluate(() => { window.__entPlayed.length = 0; });
   await page.locator('.entertainment-choice[data-provider="pandaflix"]').click();
-  await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-fanfare'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-welcome-hollywood'))).toBe(true);
 });
 
 test('Entertainment sidebar destinations open their pages', async ({ page }) => {
@@ -240,9 +247,12 @@ test('Entertainment sidebar destinations open their pages', async ({ page }) => 
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
     if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: {
-      history: [{ provider: 'ani-cli', query: 'Naruto', item: { id: 1, title: 'Naruto' }, episode: '429', title: 'Naruto: Shippuden', position: 132 }],
+      history: [{ provider: 'ani-cli', query: 'Naruto', item: { id: 1, title: 'Naruto' }, episode: '429', title: 'Naruto: Shippuden', position: 132, duration: 600 }],
       favorites: [{ key: 'ani-cli:1', provider: 'ani-cli', query: 'Naruto', item: { id: 1, title: 'Naruto' }, title: 'Naruto: Shippuden' }],
     } } });
+    if (path === '/api/entertainment/ani-cli/resolve') return route.fulfill({ json: {
+      title: 'Naruto: Shippuden', url: 'https://media.example/naruto.mp4', format: 'file', proxied: false, subtitles: [],
+    } });
     if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
     if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
     return route.fulfill({ json: {} });
@@ -251,9 +261,16 @@ test('Entertainment sidebar destinations open their pages', async ({ page }) => 
   await page.evaluate(async () => (await import('/static/js/settings.js')).open());
   await page.locator('#entertainment-section').click();
 
-  await page.locator('.ent-sidebar [data-ent-dest="history"]').click();
-  await expect(page.locator('#ent-collection-title')).toHaveText('History');
+  await page.locator('.ent-sidebar [data-ent-dest="recent"]').click();
+  await expect(page.locator('#ent-collection-title')).toHaveText('Recently Watched');
   await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('Naruto: Shippuden');
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('7:48 left');
+
+  // Clicking a recently watched title resumes it without a new search.
+  await page.locator('#ent-collection-results .ent-collection-item').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto: Shippuden');
+  await page.locator('#entertainment-back').click();
 
   await page.locator('.ent-sidebar [data-ent-dest="favorites"]').click();
   await expect(page.locator('#ent-collection-title')).toHaveText('My Favorites');
@@ -267,4 +284,83 @@ test('Entertainment sidebar destinations open their pages', async ({ page }) => 
 
   await page.locator('.ent-sidebar [data-ent-dest="popular"]').click();
   await expect(page.locator('#ent-collection-title')).toHaveText('Popular');
+});
+
+test('Entertainment favorites open from the library and watchlist stays separate', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }, { id: 2, title: 'Bleach' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [{ number: '1', label: 'Episode 1' }], total: 1, next_offset: -1 } });
+    if (path === '/api/entertainment/metadata') return route.fulfill({ json: { covers: { Naruto: '/api/entertainment/image/naruto' } } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+
+  await page.locator('.ent-card').nth(0).locator('.ent-card-fav').click();
+  await expect(page.locator('.ent-card').nth(0).locator('.ent-card-fav')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('.ent-card').nth(1).locator('.ent-card-watch').click();
+  await expect(page.locator('.ent-card').nth(1).locator('.ent-card-watch')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.ent-card').nth(0).locator('.ent-card-cover')).toHaveCount(1);
+
+  await page.locator('.ent-sidebar [data-ent-dest="favorites"]').click();
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toHaveCount(1);
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('Naruto');
+  await page.locator('.ent-sidebar [data-ent-dest="watchlist"]').click();
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toHaveCount(1);
+  await expect(page.locator('#ent-collection-results .ent-collection-item')).toContainText('Bleach');
+
+  await page.locator('.ent-sidebar [data-ent-dest="favorites"]').click();
+  await page.locator('#ent-collection-results .ent-collection-item').click();
+  await expect(page.locator('#entertainment-collection')).toBeHidden();
+  await expect(page.locator('#entertainment-browser')).toBeVisible();
+  await expect(page.locator('.entertainment-result')).toContainText('Episode 1');
+});
+
+test('Entertainment refresh shows visible progress while re-resolving', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [{ number: '1', label: 'Episode 1' }], total: 1, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') {
+      await new Promise(resolve => setTimeout(resolve, 400));
+      return route.fulfill({ json: { title: 'Naruto Episode 1', url: 'https://media.example/ep1.mp4', format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+
+  await page.locator('#entertainment-refresh').click();
+  await expect(page.locator('#entertainment-player-status')).toHaveText('Refreshing stream…');
+  await expect(page.locator('#entertainment-refresh')).toBeDisabled();
+  await expect(page.locator('#entertainment-refresh')).toHaveText('⟳ Refresh');
+  await expect(page.locator('#entertainment-player-status')).toBeEmpty();
 });

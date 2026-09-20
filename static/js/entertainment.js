@@ -12,11 +12,12 @@ let preloaded = null;
 let preloadToken = 0;
 let pendingResume = 0;
 let resumeSaveAt = 0;
+let lastAutoRefresh = 0;
 let initialized = false;
 let playback = null;
 
 const PREFS_KEY = 'entertainment';
-const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], history: [], resume: null };
+const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
 const LANGUAGES = ['sub', 'dub'];
 const QUALITIES = ['best', '1080p', '720p', '480p', '360p'];
 let prefs = { ...DEFAULT_PREFS };
@@ -36,6 +37,7 @@ function normalizePrefs(value) {
   const merged = { ...DEFAULT_PREFS, ...(value && typeof value === 'object' ? value : {}) };
   merged.autoplay = Boolean(merged.autoplay);
   merged.favorites = Array.isArray(merged.favorites) ? merged.favorites.filter(item => item && item.key && item.item).slice(0, 100) : [];
+  merged.watchlist = Array.isArray(merged.watchlist) ? merged.watchlist.filter(item => item && item.key && item.item).slice(0, 100) : [];
   merged.history = Array.isArray(merged.history) ? merged.history.filter(entry => entry && entry.title).slice(0, 200) : [];
   merged.resume = merged.resume && typeof merged.resume === 'object' && merged.resume.item ? merged.resume : null;
   return merged;
@@ -126,9 +128,28 @@ function toggleFavorite(provider, item) {
   renderSaved();
 }
 
+function isWatchlisted(provider, item) {
+  const key = favKey(provider, item);
+  return (prefs.watchlist || []).some(entry => entry.key === key);
+}
+
+function toggleWatchlist(provider, item) {
+  if (!item) return;
+  const key = favKey(provider, item);
+  const index = prefs.watchlist.findIndex(entry => entry.key === key);
+  if (index >= 0) prefs.watchlist.splice(index, 1);
+  else prefs.watchlist.unshift({ key, provider, query, item, title: item.title || 'Title' });
+  prefs.watchlist = prefs.watchlist.slice(0, 100);
+  savePrefs();
+}
+
+function historyKey(record) {
+  return `${record.provider}:${record.item?.id ?? record.item?.selection ?? record.title}:${record.episode ?? ''}`;
+}
+
 function recordHistory(record) {
   if (!record || !record.title) return;
-  const key = `${record.provider}:${record.item?.id ?? record.item?.selection ?? record.title}:${record.episode ?? ''}`;
+  const key = historyKey(record);
   const rest = (prefs.history || []).filter(entry => entry.key !== key);
   prefs.history = [{ ...record, key, at: Date.now() }, ...rest].slice(0, 200);
 }
@@ -137,7 +158,7 @@ function rememberResume(record) {
   const same = prefs.resume
     && prefs.resume.provider === record.provider
     && String(prefs.resume.episode) === String(record.episode);
-  prefs.resume = { ...record, position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
+  prefs.resume = { ...record, key: historyKey(record), position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
   recordHistory(prefs.resume);
   savePrefs();
 }
@@ -176,7 +197,15 @@ function initSlots() {
       const now = Date.now();
       if (now - resumeSaveAt < 5000) return;
       resumeSaveAt = now;
-      if (prefs.resume) { prefs.resume.position = Math.floor(event.target.currentTime || 0); prefs.resume.at = now; savePrefs(); }
+      if (!prefs.resume) return;
+      const position = Math.floor(event.target.currentTime || 0);
+      const duration = Math.floor(event.target.duration || 0);
+      prefs.resume.position = position;
+      prefs.resume.duration = duration;
+      prefs.resume.at = now;
+      const entry = (prefs.history || []).find(item => item.key === prefs.resume.key);
+      if (entry) { entry.position = position; entry.duration = duration; entry.at = now; }
+      savePrefs();
     });
   }
 }
@@ -201,12 +230,32 @@ function stopPlayer() {
   activeSlotKey = null;
 }
 
-function status(text = '') { el('entertainment-status').textContent = text; }
+function status(text = '') {
+  const browser = el('entertainment-status');
+  if (browser) browser.textContent = text;
+  const player = el('entertainment-player-status');
+  if (player) player.textContent = text;
+}
 
 function playSound(id) {
   const audio = el(id);
   if (!audio) return;
   try { audio.currentTime = 0; audio.play().catch(() => {}); } catch (_) {}
+}
+
+function cardArt(item) {
+  if (item.cover) {
+    return `<span class="ent-card-art"><img class="ent-card-cover" src="${esc(item.cover)}" alt="" loading="lazy" decoding="async"></span>`;
+  }
+  return `<span class="ent-card-art" aria-hidden="true"><span class="ent-card-initials">${esc((item.title || '?').trim().slice(0, 2).toUpperCase())}</span></span>`;
+}
+
+function cardBadges(item, kind) {
+  const badges = [];
+  if (kind) badges.push(kind);
+  if (item.year) badges.push(String(item.year));
+  for (const genre of (Array.isArray(item.genres) ? item.genres : []).slice(0, 2)) badges.push(genre);
+  return badges.length ? `<div class="ent-card-badges">${badges.map(badge => `<span>${esc(badge)}</span>`).join('')}</div>` : '';
 }
 
 function buttons(items, action, label) {
@@ -223,16 +272,20 @@ function buttons(items, action, label) {
       return `<button type="button" class="entertainment-result" data-ent-action="${action}" data-ent-index="${index}"><span>${esc(label(item))}</span><b>›</b></button>`;
     }
     const saved = isFavorite(active, item);
+    const watched = isWatchlisted(active, item);
     const kind = item.kind === 'series' ? 'TV Series' : (item.kind === 'movie' ? 'Movie' : '');
     const cta = active === 'ani-cli' ? 'View Episodes' : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
-    return `<article class="ent-card" data-kind="${esc(active)}">
-      <span class="ent-card-art" aria-hidden="true"><span class="ent-card-initials">${esc((item.title || '?').trim().slice(0, 2).toUpperCase())}</span></span>
+    return `<article class="ent-card" data-kind="${esc(active)}" data-ent-card="${index}">
+      ${cardArt(item)}
       <div class="ent-card-body">
         <h3>${esc(item.title)}</h3>
-        ${kind ? `<div class="ent-card-badges"><span>${kind}</span></div>` : ''}
+        ${cardBadges(item, kind)}
         <div class="ent-card-actions">
           <button type="button" class="ent-card-play" data-ent-action="${action}" data-ent-index="${index}">▶ ${cta}</button>
-          <button type="button" class="ent-card-fav" data-ent-fav="${index}" aria-pressed="${saved}" aria-label="${saved ? 'Remove favorite' : 'Save favorite'}: ${esc(item.title)}">${saved ? '★' : '☆'}</button>
+          <div class="ent-card-tools">
+            <button type="button" class="ent-card-fav" data-ent-fav="${index}" aria-pressed="${saved}" aria-label="${saved ? 'Remove favorite' : 'Save favorite'}: ${esc(item.title)}" title="${saved ? 'In favorites' : 'Save favorite'}">${saved ? '★' : '☆'}</button>
+            <button type="button" class="ent-card-watch" data-ent-watch="${index}" aria-pressed="${watched}" aria-label="${watched ? 'Remove from watchlist' : 'Add to watchlist'}: ${esc(item.title)}" title="${watched ? 'In watchlist' : 'Add to watchlist'}">${watched ? '✓' : '＋'}</button>
+          </div>
         </div>
       </div>
     </article>`;
@@ -360,6 +413,19 @@ function loadIntoSlot(key, result) {
       fragLoadingRetryDelay: 500,
     });
     instance.loadSource(result.url); instance.attachMedia(video);
+    instance.on(window.Hls.Events.ERROR, (_event, data) => {
+      if (!data?.fatal) return;
+      if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { instance.recoverMediaError(); return; }
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+        // A stale/expired proxy token is fatal and retries forever. Re-resolve
+        // once so the stream self-heals instead of freezing on the same URL.
+        const now = Date.now();
+        if (now - lastAutoRefresh < 15000) return;
+        lastAutoRefresh = now;
+        status('Stream stalled — reloading…');
+        refreshPlayback().catch(() => {});
+      }
+    });
     slot.hls = instance;
   } else {
     video.src = result.url;
@@ -374,6 +440,9 @@ async function activateSlot(key) {
     if (!video) continue;
     const isActive = name === key;
     video.classList.toggle('is-active', isActive);
+    // The preloaded slot is created without controls; give the active element
+    // controls so an autoplayed next episode is still pausable/seekable.
+    video.controls = isActive;
     video.muted = !isActive;
   }
   const video = slots[key].video;
@@ -395,6 +464,7 @@ const COLLECTIONS = {
   'recently-added': { eyebrow: 'BROWSE', title: 'Recently Added', copy: 'Newest additions to the catalog.' },
   favorites: { eyebrow: 'MY LIBRARY', title: 'My Favorites', copy: 'Titles you saved.' },
   watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you plan to watch.' },
+  recent: { eyebrow: 'MY LIBRARY', title: 'Recently Watched', copy: 'Pick up exactly where you left off.' },
   history: { eyebrow: 'MY LIBRARY', title: 'History', copy: 'Pick up exactly where you left off.' },
   downloads: { eyebrow: 'MY LIBRARY', title: 'Downloads', copy: 'Downloaded episodes and movies land here.' },
 };
@@ -410,7 +480,7 @@ async function resumeHistoryEntry(index) {
   const entry = (prefs.history || [])[index];
   if (!entry) return;
   if (!providers.some(provider => provider.id === entry.provider && provider.enabled)) { status('That provider is not installed.'); return; }
-  if (active !== entry.provider) showProvider(entry.provider);
+  showProvider(entry.provider);
   query = entry.query || '';
   selection = entry.item || null;
   el('entertainment-query').value = query;
@@ -421,16 +491,89 @@ async function resumeHistoryEntry(index) {
   } catch (error) { status(error.message); }
 }
 
+function collectionThumb(entry) {
+  if (entry.item?.cover) {
+    return `<img class="ent-collection-thumb" src="${esc(entry.item.cover)}" alt="" loading="lazy" decoding="async">`;
+  }
+  return `<span class="ent-collection-thumb ent-collection-thumb--empty" aria-hidden="true">${esc((entry.title || '?').trim().slice(0, 2).toUpperCase())}</span>`;
+}
+
+function collectionItem(entry, glyph, index) {
+  const provider = entry.provider === 'ani-cli' ? 'Anime' : 'Movies & Shows';
+  return `<button type="button" class="ent-collection-item" data-ent-open-fav="${esc(entry.key)}" data-ent-lib-index="${index}">
+    ${collectionThumb(entry)}
+    <span class="ent-collection-item-body"><strong>${esc(entry.title)}</strong><small>${esc(provider)}</small></span>
+    <b class="ent-collection-glyph" aria-hidden="true">${glyph}</b>
+  </button>`;
+}
+
+async function enrichLibrary(entries) {
+  const host = el('ent-collection-results');
+  const groups = new Map();
+  (entries || []).forEach((entry, index) => {
+    if (!entry?.item || entry.item.cover || !entry.title) return;
+    if (!groups.has(entry.provider)) groups.set(entry.provider, []);
+    groups.get(entry.provider).push({ entry, index });
+  });
+  for (const [provider, rows] of groups) {
+    let covers = {};
+    try {
+      const result = await api('/metadata', { provider, items: rows.map(({ entry }) => ({ title: entry.title, kind: entry.item.kind || '' })) });
+      covers = result.covers || {};
+    } catch (_) { continue; }
+    let changed = false;
+    for (const { entry, index } of rows) {
+      const cover = covers[entry.title];
+      if (!cover) continue;
+      entry.item.cover = cover;
+      changed = true;
+      const thumb = host.querySelector(`[data-ent-lib-index="${index}"] .ent-collection-thumb`);
+      if (thumb) thumb.outerHTML = `<img class="ent-collection-thumb" src="${esc(cover)}" alt="" loading="lazy" decoding="async">`;
+    }
+    if (changed) savePrefs();
+  }
+}
+
+function recentItem(entry, index) {
+  const provider = entry.provider === 'ani-cli' ? 'Anime' : 'Movies & Shows';
+  const episode = entry.episode != null && entry.episode !== '' ? `Episode ${entry.episode}` : (entry.item?.kind === 'movie' ? 'Movie' : '');
+  const bits = [provider, episode].filter(Boolean);
+  const duration = Number(entry.duration) || 0;
+  const position = Number(entry.position) || 0;
+  const percent = duration > 0 ? Math.min(100, Math.round((position / duration) * 100)) : 0;
+  const left = duration > 0 ? `${formatTime(Math.max(0, duration - position))} left` : (position ? formatTime(position) : '');
+  return `<button type="button" class="ent-collection-item ent-recent" data-ent-resume-history="${index}" data-ent-lib-index="${index}">
+    ${collectionThumb(entry)}
+    <span class="ent-collection-item-body">
+      <strong>${esc(entry.title)}</strong>
+      <small>${esc(bits.join(' · '))}${left ? ` · ${esc(left)}` : ''}</small>
+      ${percent ? `<span class="ent-recent-bar" aria-hidden="true"><i style="width:${percent}%"></i></span>` : ''}
+    </span>
+    <b class="ent-collection-glyph" aria-hidden="true">▶</b>
+  </button>`;
+}
+
 async function renderCollection(key) {
   const host = el('ent-collection-results');
   const statusEl = el('ent-collection-status');
   statusEl.textContent = '';
   host.innerHTML = '';
   if (key === 'favorites' || key === 'watchlist') {
-    const favorites = prefs.favorites || [];
-    host.innerHTML = favorites.length
-      ? favorites.map(entry => `<button type="button" class="ent-collection-item" data-ent-open-fav="${esc(entry.key)}">★ ${esc(entry.title)}</button>`).join('')
-      : '<p class="entertainment-empty">Nothing saved yet. Use the star on a result card to add titles.</p>';
+    const entries = (key === 'favorites' ? prefs.favorites : prefs.watchlist) || [];
+    host.innerHTML = entries.length
+      ? entries.map((entry, index) => collectionItem(entry, key === 'favorites' ? '★' : '＋', index)).join('')
+      : `<p class="entertainment-empty">${key === 'favorites'
+        ? 'No favorites yet. Use the star on a result card to save titles.'
+        : 'Your watchlist is empty. Use ＋ on a result card to add titles.'}</p>`;
+    enrichLibrary(entries).catch(() => {});
+    return;
+  }
+  if (key === 'recent') {
+    const history = prefs.history || [];
+    host.innerHTML = history.length
+      ? history.map((entry, index) => recentItem(entry, index)).join('')
+      : '<p class="entertainment-empty">Nothing watched yet. Play an episode and it will show up here so you can resume it.</p>';
+    enrichLibrary(history).catch(() => {});
     return;
   }
   if (key === 'history') {
@@ -439,9 +582,10 @@ async function renderCollection(key) {
       ? history.map((entry, index) => {
         const episode = entry.episode != null && entry.episode !== '' ? ` · Episode ${esc(entry.episode)}` : '';
         const position = entry.position ? ` · ${formatTime(entry.position)}` : '';
-        return `<button type="button" class="ent-collection-item" data-ent-resume-history="${index}"><span>${esc(entry.title)}${episode}${position}</span></button>`;
+        return `<button type="button" class="ent-collection-item" data-ent-resume-history="${index}" data-ent-lib-index="${index}">${collectionThumb(entry)}<span class="ent-collection-item-body"><strong>${esc(entry.title)}${episode}</strong><small>${position.replace(' · ', '') || 'Watched'}</small></span><b class="ent-collection-glyph" aria-hidden="true">▶</b></button>`;
       }).join('')
       : '<p class="entertainment-empty">Nothing watched yet.</p>';
+    enrichLibrary(history).catch(() => {});
     return;
   }
   if (key === 'downloads') {
@@ -483,6 +627,25 @@ async function play(result) {
   schedulePreload();
 }
 
+async function enrichCovers(provider, items) {
+  const host = el('entertainment-results');
+  const pending = (items || []).filter(item => item && item.title && !item.cover).slice(0, 50);
+  if (!pending.length) return;
+  let covers = {};
+  try {
+    const result = await api('/metadata', { provider, items: pending.map(item => ({ title: item.title, kind: item.kind || '' })) });
+    covers = result.covers || {};
+  } catch (_) { return; }
+  for (const item of pending) {
+    const cover = covers[item.title];
+    if (!cover) continue;
+    item.cover = cover;
+    const index = (host?._items || []).indexOf(item);
+    const art = index >= 0 ? host.querySelector(`[data-ent-card="${index}"] .ent-card-art`) : null;
+    if (art) art.innerHTML = `<img class="ent-card-cover" src="${esc(cover)}" alt="" loading="lazy" decoding="async">`;
+  }
+}
+
 async function search() {
   query = el('entertainment-query').value.trim();
   if (!query) return;
@@ -493,6 +656,7 @@ async function search() {
   buttons(result.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
   el('entertainment-results-title').textContent = `${result.items.length} Results for “${query}”`;
   status('');
+  enrichCovers(active, result.items).catch(() => {});
 }
 
 async function chooseTitle(item) {
@@ -637,6 +801,29 @@ async function handleEnded() {
   try { await nextEpisode(); } catch (error) { status(error.message); }
 }
 
+// Re-resolve and reload the current stream from the saved position. Proxy
+// tokens are process-local, so a stalled/expired stream needs a fresh resolve.
+async function refreshPlayback() {
+  if (!playback) { status('Nothing is playing.'); return; }
+  const context = playback;
+  const video = slots?.[activeSlotKey]?.video || el('entertainment-video');
+  const position = video ? Math.floor(video.currentTime || 0) : 0;
+  const button = el('entertainment-refresh');
+  if (button) { button.disabled = true; button.dataset.busy = 'true'; button.textContent = '⟳ Refreshing…'; }
+  status('Refreshing stream…');
+  try {
+    const result = context.provider === 'ani-cli'
+      ? await api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: context.episode, quality: context.quality })
+      : await api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: context.episode });
+    pendingResume = position;
+    playback = { ...context, title: result.title };
+    await play(result);
+    status('');
+  } finally {
+    if (button) { button.disabled = false; delete button.dataset.busy; button.textContent = '⟳ Refresh'; }
+  }
+}
+
 async function previousEpisode() {
   if (!playback) { status('No episode is playing.'); return; }
   const target = episodeTarget(-1);
@@ -656,10 +843,11 @@ async function jumpEpisode() {
 }
 
 async function openFavorite(key) {
-  const entry = prefs.favorites.find(favorite => favorite.key === key);
+  const entry = prefs.favorites.find(favorite => favorite.key === key)
+    || (prefs.watchlist || []).find(watch => watch.key === key);
   if (!entry) return;
   if (!providers.some(provider => provider.id === entry.provider && provider.enabled)) { status('That provider is not installed.'); return; }
-  if (active !== entry.provider) showProvider(entry.provider);
+  showProvider(entry.provider);
   query = entry.query || '';
   el('entertainment-query').value = query;
   selection = null;
@@ -670,7 +858,7 @@ async function resumeSaved() {
   const resume = prefs.resume;
   if (!resume) return;
   if (!providers.some(provider => provider.id === resume.provider && provider.enabled)) { status('That provider is not installed.'); return; }
-  if (active !== resume.provider) showProvider(resume.provider);
+  showProvider(resume.provider);
   query = resume.query || '';
   selection = resume.item;
   el('entertainment-query').value = query;
@@ -697,6 +885,7 @@ function init() {
   el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
   el('entertainment-next')?.addEventListener('click', () => nextEpisode().catch(error => status(error.message)));
   el('entertainment-prev')?.addEventListener('click', () => previousEpisode().catch(error => status(error.message)));
+  el('entertainment-refresh')?.addEventListener('click', () => refreshPlayback().catch(error => status(error.message)));
   el('entertainment-autoplay')?.addEventListener('change', event => {
     prefs.autoplay = event.target.checked;
     const setting = el('entertainment-default-autoplay');
@@ -721,7 +910,7 @@ function init() {
   document.addEventListener('click', event => {
     const provider = event.target.closest?.('[data-provider]');
     if (provider) {
-      playSound(provider.dataset.provider === 'ani-cli' ? 'entertainment-anime-wow' : 'entertainment-fanfare');
+      playSound(provider.dataset.provider === 'ani-cli' ? 'entertainment-anime-wow' : 'entertainment-welcome-hollywood');
       showProvider(provider.dataset.provider);
       return;
     }
@@ -732,6 +921,19 @@ function init() {
         const saved = isFavorite(active, item);
         favorite.setAttribute('aria-pressed', String(saved));
         favorite.textContent = saved ? '★' : '☆';
+      }
+      return;
+    }
+    const watch = event.target.closest?.('[data-ent-watch]');
+    if (watch) {
+      const item = el('entertainment-results')._items?.[Number(watch.dataset.entWatch)];
+      if (item) {
+        toggleWatchlist(active, item);
+        const watched = isWatchlisted(active, item);
+        watch.setAttribute('aria-pressed', String(watched));
+        watch.textContent = watched ? '✓' : '＋';
+        watch.setAttribute('title', watched ? 'In watchlist' : 'Add to watchlist');
+        watch.setAttribute('aria-label', `${watched ? 'Remove from watchlist' : 'Add to watchlist'}: ${item.title || 'Title'}`);
       }
       return;
     }
