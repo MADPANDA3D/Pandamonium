@@ -141,15 +141,16 @@ test('Entertainment player supports jump, next, autoplay, favorites, and continu
   await page.locator('#entertainment-autoplay').check();
   await expect(page.locator('#entertainment-autoplay')).toBeChecked();
 
-  // Continue watching and favorites appear back on the provider page.
+  // Previous steps back if you skip too far ahead.
+  await page.locator('#entertainment-prev').click();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto Episode 3');
+
+  // Favoriting still works from the result card.
   await page.locator('#entertainment-back').click();
-  await expect(page.locator('#entertainment-resume')).toBeVisible();
-  await expect(page.locator('#entertainment-resume')).toContainText('Naruto Episode 4');
   await page.locator('#entertainment-query').fill('Naruto');
   await page.locator('#entertainment-search button[type="submit"]').click();
   await page.locator('.ent-card-fav').first().click();
-  await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toHaveCount(1);
-  await expect(page.locator('#entertainment-favorites .entertainment-favorite')).toContainText('Naruto');
+  await expect(page.locator('.ent-card-fav').first()).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('Entertainment warms the next episode into the idle player', async ({ page }) => {

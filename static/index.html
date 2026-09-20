@@ -3156,7 +3156,7 @@
     <header class="ent-topnav">
       <button id="entertainment-home" class="ent-brand" type="button" aria-label="Entertainment home">
         <img class="ent-brand-mark" src="/static/icons/pandamonium.png" alt="">
-        <span class="ent-brand-word" id="entertainment-title">PANDA<em>MONIUM</em></span>
+        <span class="ent-brand-word" id="entertainment-title">PANDA<em>FLIX</em></span>
       </button>
       <nav class="ent-topnav-links" aria-label="Entertainment sections">
         <button type="button" class="ent-nav-link" data-ent-nav="home">Home</button>
@@ -3183,7 +3183,6 @@
           <button type="button" class="ent-side-link" data-ent-browse="ani-cli"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>Anime</button>
           <button type="button" class="ent-side-link" data-ent-browse="pandaflix"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5M16 4v5"/></svg>Movies &amp; Shows</button>
           <button type="button" class="ent-side-link" disabled>Genres</button>
-          <button type="button" class="ent-side-link" disabled>Calendar</button>
           <button type="button" class="ent-side-link" disabled>Popular</button>
           <button type="button" class="ent-side-link" disabled>Top Rated</button>
           <button type="button" class="ent-side-link" disabled>Recently Added</button>
@@ -3195,7 +3194,7 @@
           <button type="button" class="ent-side-link" disabled>Downloads</button>
         </div>
         <div class="ent-mascot" aria-hidden="true">
-          <svg viewBox="0 0 100 100"><circle cx="24" cy="26" r="15" fill="#0a0a0a" stroke="#5a1116" stroke-width="4"/><circle cx="76" cy="26" r="15" fill="#0a0a0a" stroke="#5a1116" stroke-width="4"/><circle cx="50" cy="54" r="40" fill="#111"/><ellipse cx="34" cy="50" rx="13" ry="17" fill="#000"/><ellipse cx="66" cy="50" rx="13" ry="17" fill="#000"/><path d="M27 48q9-7 17 0-9 7-17 0z" fill="#e50914"/><path d="M56 48q9-7 17 0-9 7-17 0z" fill="#e50914"/><ellipse cx="50" cy="74" rx="8" ry="6" fill="#000"/></svg>
+          <img class="ent-mascot-img" src="/static/entertainment/mascot-panda.webp" alt="">
           <span>BUILD<br>WATCH<br>REPEAT</span>
         </div>
       </aside>
@@ -3209,10 +3208,6 @@
               <p id="entertainment-copy" class="ent-hero-sub"></p>
               <div id="entertainment-chips" class="ent-chips"></div>
             </div>
-          </div>
-          <div id="entertainment-saved" class="entertainment-saved hidden">
-            <button type="button" id="entertainment-resume" class="entertainment-resume hidden"></button>
-            <div id="entertainment-favorites" class="entertainment-favorites"></div>
           </div>
           <form id="entertainment-search" class="ent-searchbar">
             <label class="ent-field ent-field-search">
@@ -3245,7 +3240,7 @@
           <div id="entertainment-results" class="entertainment-results"></div>
         </section>
         <section id="entertainment-player" class="entertainment-player hidden">
-          <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+          <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-prev" type="button">◂ Previous</button><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
           <div class="ent-video-stage">
             <video id="entertainment-video" class="ent-video is-active" controls autoplay playsinline></video>
             <video id="entertainment-video-next" class="ent-video" playsinline muted preload="auto"></video>

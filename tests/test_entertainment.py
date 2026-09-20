@@ -172,7 +172,8 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert '<span class="grow">Open Entertainment</span>' not in index
     assert 'data-settings-tab="entertainment"' in index
     assert 'data-settings-panel="entertainment"' in index
-    # Player controls: next/autoplay, episode jump, favorites, continue watching.
+    # Player controls: next/previous, autoplay, and episode jump.
     assert "entertainment-next" in index and "entertainment-autoplay" in index
-    assert "entertainment-jump" in index and "entertainment-resume" in index
-    assert "nextEpisode" in source and "data-ent-fav" in source and "rememberResume" in source
+    assert "entertainment-jump" in index and "entertainment-prev" in index
+    assert "nextEpisode" in source and "previousEpisode" in source and "episodeTarget" in source
+    assert "pendingResume" in source and "data-ent-fav" in source and "rememberResume" in source

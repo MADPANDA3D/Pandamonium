@@ -10,6 +10,8 @@ let slots = null;
 let activeSlotKey = null;
 let preloaded = null;
 let preloadToken = 0;
+let pendingResume = 0;
+let resumeSaveAt = 0;
 let initialized = false;
 let playback = null;
 
@@ -124,7 +126,10 @@ function toggleFavorite(provider, item) {
 }
 
 function rememberResume(record) {
-  prefs.resume = { ...record, at: Date.now() };
+  const same = prefs.resume
+    && prefs.resume.provider === record.provider
+    && String(prefs.resume.episode) === String(record.episode);
+  prefs.resume = { ...record, position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
   savePrefs();
 }
 
@@ -157,6 +162,13 @@ function initSlots() {
   };
   for (const key of ['a', 'b']) {
     slots[key].video?.addEventListener('ended', () => { if (key === activeSlotKey) handleEnded(); });
+    slots[key].video?.addEventListener('timeupdate', event => {
+      if (!activeSlotKey || slots[activeSlotKey].video !== event.target || !playback) return;
+      const now = Date.now();
+      if (now - resumeSaveAt < 5000) return;
+      resumeSaveAt = now;
+      if (prefs.resume) { prefs.resume.position = Math.floor(event.target.currentTime || 0); prefs.resume.at = now; savePrefs(); }
+    });
   }
 }
 
@@ -322,7 +334,14 @@ function loadIntoSlot(key, result) {
     video.appendChild(track);
   }
   if (result.format === 'hls' && window.Hls?.isSupported()) {
-    const instance = new window.Hls({ enableWorker: true, maxBufferLength: 30 });
+    const instance = new window.Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      maxBufferLength: 60,
+      maxMaxBufferLength: 600,
+      maxBufferSize: 120 * 1000 * 1000,
+      backBufferLength: 30,
+    });
     instance.loadSource(result.url); instance.attachMedia(video);
     slot.hls = instance;
   } else {
@@ -356,6 +375,12 @@ async function play(result) {
   showPlayer(result.title);
   const key = idleSlotKey();
   loadIntoSlot(key, result);
+  if (pendingResume > 0) {
+    const video = slots[key].video;
+    const seek = () => { try { video.currentTime = pendingResume; } catch (_) {} };
+    if (video.readyState >= 1) seek(); else video.addEventListener('loadedmetadata', seek, { once: true });
+    pendingResume = 0;
+  }
   await activateSlot(key);
   schedulePreload();
 }
@@ -431,29 +456,41 @@ function nextNumber(current, items) {
   return Number.isFinite(numeric) ? String(numeric + 1) : null;
 }
 
-function nextPlaybackTarget() {
+function previousNumber(current, items) {
+  if (Array.isArray(items)) {
+    const index = items.findIndex(value => String(value.number) === String(current));
+    if (index > 0) return items[index - 1].number;
+  }
+  const numeric = Number(current);
+  return Number.isFinite(numeric) && numeric > 1 ? String(numeric - 1) : null;
+}
+
+function episodeTarget(step) {
   if (!playback) return null;
   const context = playback;
+  const pick = (current, items) => (step > 0 ? nextNumber(current, items) : previousNumber(current, items));
   if (context.provider === 'ani-cli') {
-    const next = nextNumber(context.episode, context.items);
-    if (next == null) return null;
+    const episode = pick(context.episode, context.items);
+    if (episode == null) return null;
     return {
-      playback: { ...context, episode: next },
-      resolve: () => api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: next, quality: context.quality }),
-      resume: (title) => ({ provider: 'ani-cli', query: context.query, item: context.item, episode: next, dub: context.dub, quality: context.quality, title }),
+      playback: { ...context, episode },
+      resolve: () => api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode, quality: context.quality }),
+      resume: (title) => ({ provider: 'ani-cli', query: context.query, item: context.item, episode, dub: context.dub, quality: context.quality, title }),
     };
   }
   if (context.provider === 'pandaflix' && context.item?.kind !== 'movie') {
-    const next = nextNumber(context.episode, context.items);
-    if (next == null) return null;
+    const episode = pick(context.episode, context.items);
+    if (episode == null) return null;
     return {
-      playback: { ...context, episode: next },
-      resolve: () => api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: next }),
-      resume: (title) => ({ provider: 'pandaflix', query: context.query, item: context.item, season: context.season, episode: next, title }),
+      playback: { ...context, episode },
+      resolve: () => api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),
+      resume: (title) => ({ provider: 'pandaflix', query: context.query, item: context.item, season: context.season, episode, title }),
     };
   }
   return null;
 }
+
+function nextPlaybackTarget() { return episodeTarget(1); }
 
 // Warm the next episode into the idle video while the current one plays, so an
 // episode change does not have to resolve and buffer from scratch. This is why
@@ -500,6 +537,17 @@ async function handleEnded() {
   try { await nextEpisode(); } catch (error) { status(error.message); }
 }
 
+async function previousEpisode() {
+  if (!playback) { status('No episode is playing.'); return; }
+  const target = episodeTarget(-1);
+  if (!target) { status('No previous episode.'); return; }
+  status('Loading previous episode…');
+  const result = await target.resolve();
+  playback = { ...target.playback, title: result.title };
+  rememberResume(target.resume(result.title));
+  await play(result);
+}
+
 async function jumpEpisode() {
   if (active !== 'ani-cli' || !selection) return;
   const value = el('entertainment-jump-input').value.trim();
@@ -526,6 +574,7 @@ async function resumeSaved() {
   query = resume.query || '';
   selection = resume.item;
   el('entertainment-query').value = query;
+  pendingResume = Number(resume.position) || 0;
   try {
     if (resume.provider === 'ani-cli') {
       await playAnimeEpisode(resume.episode);
@@ -546,6 +595,7 @@ function init() {
   initSlots();
   el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
   el('entertainment-next')?.addEventListener('click', () => nextEpisode().catch(error => status(error.message)));
+  el('entertainment-prev')?.addEventListener('click', () => previousEpisode().catch(error => status(error.message)));
   el('entertainment-autoplay')?.addEventListener('change', event => {
     prefs.autoplay = event.target.checked;
     const setting = el('entertainment-default-autoplay');
