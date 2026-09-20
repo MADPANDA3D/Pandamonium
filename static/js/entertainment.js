@@ -499,6 +499,7 @@ async function chooseTitle(item) {
   selection = item;
   status('Loading title…');
   if (active === 'ani-cli') {
+    playSound('entertainment-katon');
     const body = { query, selection_index: item.id, dub: el('entertainment-mode').value === 'dub' };
     const result = await api('/ani-cli/episodes', { ...body, offset: 0 });
     episodeButtons(result, 'anime-episode', '/ani-cli/episodes', body);

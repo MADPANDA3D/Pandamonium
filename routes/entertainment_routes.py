@@ -40,6 +40,12 @@ class _ProxyTarget:
 # storage only if Pandamonium gains multiple web workers.
 _TOKENS: dict[str, _ProxyTarget] = {}
 _TOKEN_LOCK = asyncio.Lock()
+# A 309-segment manifest creates ~310 tokens; ABR switching across quality
+# levels and watching several episodes quickly overflowed the old 512 cap and
+# evicted the *active* playlist's tokens, so later segments 404'd and playback
+# stalled. Keep a larger bound plus an O(1) reverse index for dedupe.
+_TOKEN_INDEX: dict[tuple[str, str, tuple], str] = {}
+_TOKEN_CAP = 16384
 
 # Reuse pinned connections + resolved IPs across HLS segments. Creating a fresh
 # transport/client and re-resolving DNS for every segment paid a full TCP/TLS
@@ -64,23 +70,34 @@ def _headers(value: object) -> dict[str, str]:
     return result
 
 
+def _token_index_key(owner: str, url: str, headers: dict[str, str]) -> tuple[str, str, tuple]:
+    return (owner, url, tuple(sorted(headers.items())))
+
+
 async def _token(owner: str, url: str, headers: dict[str, str]) -> str:
     url = (url or "").strip()
     parsed = urlparse(url)
     if len(url) > 8192 or parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("Invalid media URL")
     now = time.monotonic()
+    index_key = _token_index_key(owner, url, headers)
     async with _TOKEN_LOCK:
+        existing = _TOKEN_INDEX.get(index_key)
+        if existing is not None and existing in _TOKENS and _TOKENS[existing].expires > now:
+            return existing
+        if existing is not None:
+            _TOKEN_INDEX.pop(index_key, None)
+            _TOKENS.pop(existing, None)
         for key in [key for key, value in _TOKENS.items() if value.expires <= now]:
-            _TOKENS.pop(key, None)
-        # ponytail: bounded 512-entry scan; add a reverse index only if the cap grows.
-        for key, value in _TOKENS.items():
-            if value.owner == owner and value.url == url and value.headers == headers:
-                return key
-        while len(_TOKENS) >= 512:
-            _TOKENS.pop(next(iter(_TOKENS)))
+            target = _TOKENS.pop(key)
+            _TOKEN_INDEX.pop(_token_index_key(target.owner, target.url, target.headers), None)
+        while len(_TOKENS) >= _TOKEN_CAP:
+            oldest = next(iter(_TOKENS))
+            target = _TOKENS.pop(oldest)
+            _TOKEN_INDEX.pop(_token_index_key(target.owner, target.url, target.headers), None)
         key = secrets.token_urlsafe(24)
         _TOKENS[key] = _ProxyTarget(owner, url, headers, now + _TOKEN_TTL)
+        _TOKEN_INDEX[index_key] = key
     return key
 
 
