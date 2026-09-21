@@ -238,3 +238,33 @@ def test_install_route_confirms_connection_after_install(ssh_env, router, monkey
     audit = Path(ssh_connections.SSH_AUDIT_FILE).read_text(encoding="utf-8")
     assert "install-key" in audit
     assert PASSWORD not in audit
+
+
+def test_install_route_prefers_install_message_on_failure(ssh_env, router, monkeypatch):
+    _insert_connection(ssh_env.SessionLocal, last_status="auth_failed")
+    monkeypatch.setattr(
+        ssh_connections,
+        "install_public_key",
+        lambda connection, password: {
+            "ok": False,
+            "state": "auth_failed",
+            "reason": "authentication_failed",
+            "message": ssh_connections.INSTALL_AUTH_FAILED_MESSAGE,
+        },
+    )
+    monkeypatch.setattr(
+        ssh_connections,
+        "run_connection_test",
+        lambda connection: {
+            "ok": False,
+            "state": "auth_failed",
+            "reason": "authentication_failed",
+            "message": ssh_connections.AUTH_FAILED_MESSAGE,
+        },
+    )
+
+    endpoint = _route(router, "/api/ssh/connections/{connection_id}/install-key", "POST")
+    payload = endpoint(_admin_request(), connection_id=NODE_ID, password=PASSWORD)
+
+    assert payload["ok"] is False
+    assert payload["message"] == ssh_connections.INSTALL_AUTH_FAILED_MESSAGE

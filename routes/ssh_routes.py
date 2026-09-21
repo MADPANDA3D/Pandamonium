@@ -341,7 +341,14 @@ def setup_ssh_routes() -> APIRouter:
                 "ok": bool(install.get("ok")) and bool(confirm.get("ok")),
                 "state": confirm["state"],
                 "reason": install.get("reason") or "",
-                "message": confirm.get("message") or install.get("message") or "",
+                # On a failed install the install guidance (password rejected /
+                # password sign-in unavailable) is more useful than the generic
+                # test message.
+                "message": (
+                    confirm.get("message") or install.get("message") or ""
+                    if install.get("ok")
+                    else install.get("message") or confirm.get("message") or ""
+                ),
             }
         )
         return ssh.redact_payload(payload)
