@@ -60,6 +60,12 @@ def setup_ssh_routes() -> APIRouter:
             rows = session.query(SshConnection).order_by(SshConnection.created_at.asc()).all()
             return {"connections": [ssh.connection_payload(row) for row in rows]}
 
+    @router.get("/api/ssh/discover")
+    def discover_ssh_tailnet(request: Request):
+        """List online tailnet peers as opaque ids for the Settings scan (MAD-976)."""
+        require_admin(request)
+        return ssh.discover_tailnet_peers()
+
     @router.post("/api/ssh/connections")
     def add_ssh_connection(
         request: Request,
@@ -68,10 +74,18 @@ def setup_ssh_routes() -> APIRouter:
         user: str = Form(""),
         port: str = Form("22"),
         keyless: str = Form("false"),
+        tailnet_peer_id: str = Form(""),
     ):
         require_admin(request)
         label_value = ssh.validate_label(_form_text(label))
-        host_value = ssh.validate_host(_form_text(host))
+        # A scanned tailnet node wins over a typed host: the address is resolved
+        # server-side from the opaque id issued by /api/ssh/discover, so the
+        # browser never has to send (or know) the tailnet address.
+        peer_ref = _form_text(tailnet_peer_id).strip()
+        if peer_ref:
+            host_value = ssh.resolve_tailnet_peer(peer_ref)
+        else:
+            host_value = ssh.validate_host(_form_text(host))
         user_value = ssh.validate_user(_form_text(user))
         port_value = ssh.validate_port(_form_text(port, "22"))
         enabled = _truthy(_form_text(keyless, "false"))

@@ -23,10 +23,13 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -55,6 +58,22 @@ DEFAULT_SSH_PORT = 22
 CONNECT_TIMEOUT_SECONDS = 8
 COMMAND_TIMEOUT_SECONDS = 20
 SCAN_TIMEOUT_SECONDS = 10
+
+# ── tailnet discovery (MAD-976) ──────────────────────────────────────────
+#
+# The Settings tab can list online tailnet peers so an operator does not have
+# to type a node's address. The browser receives an opaque, short-lived peer id
+# plus the node name and OS — never the tailnet address. The address is resolved
+# server-side only when the operator adds the connection.
+TAILNET_STATUS_TIMEOUT_SECONDS = 3
+TAILNET_PEER_TTL_SECONDS = 600
+TAILNET_MAX_PEERS = 32
+_TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_KNOWN_PEER_OS = {"android", "darwin", "freebsd", "ios", "linux", "windows"}
+_OPAQUE_PEER_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+_tailnet_secret = secrets.token_bytes(32)
+_tailnet_issued: dict[str, float] = {}
+_tailnet_lock = threading.Lock()
 
 STATE_UNKNOWN = "unknown"
 STATE_CONNECTED = "connected"
@@ -745,6 +764,10 @@ def resolve_ssh_keyscan_binary() -> str | None:
     return _which("ssh-keyscan")
 
 
+def resolve_tailscale_binary() -> str | None:
+    return _which("tailscale")
+
+
 def _run_command(argv: list[str], timeout: int = COMMAND_TIMEOUT_SECONDS):
     """Run one OpenSSH command without a shell, capturing text output."""
     try:
@@ -1071,6 +1094,135 @@ def run_connection_test(connection: Any) -> dict[str, Any]:
     result = classify_ssh_failure(getattr(proc, "stderr", "") or "")
     result["ok"] = False
     return result
+
+
+# ── tailnet discovery (MAD-976) ──────────────────────────────────────────
+
+
+def _tailscale_status() -> dict[str, Any]:
+    """Return one bounded, read-only Tailscale status snapshot."""
+    binary = resolve_tailscale_binary()
+    if not binary:
+        return {}
+    try:
+        result = subprocess.run(
+            [binary, "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=TAILNET_STATUS_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return {}
+    if result.returncode != 0 or len(result.stdout) > 2_000_000:
+        return {}
+    try:
+        data = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _first_tailnet_ipv4(value: Any) -> str | None:
+    """First IPv4 address in the Tailscale CGNAT range, or None."""
+    if not isinstance(value, list):
+        return None
+    for item in value:
+        try:
+            address = ipaddress.ip_address(str(item))
+        except ValueError:
+            continue
+        if address.version == 4 and address in _TAILSCALE_CGNAT:
+            return str(address)
+    return None
+
+
+def _tailnet_peer_id(source: str) -> str:
+    """Stable, opaque, non-reversible id for one tailnet peer."""
+    return hmac.new(_tailnet_secret, str(source).encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+
+def _tailnet_records(status: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract only online peers that hold a CGNAT IPv4 address."""
+    peers = status.get("Peer") if isinstance(status.get("Peer"), dict) else {}
+    records: list[dict[str, str]] = []
+    for stable_key, peer in peers.items():
+        if not isinstance(peer, dict) or peer.get("Online") is not True:
+            continue
+        address = _first_tailnet_ipv4(peer.get("TailscaleIPs"))
+        if not address:
+            continue
+        name = str(peer.get("HostName") or peer.get("DNSName") or address).strip().rstrip(".")[:128]
+        os_name = str(peer.get("OS") or "").strip().lower()
+        records.append(
+            {
+                "key": str(peer.get("ID") or stable_key),
+                "address": address,
+                "name": name,
+                "os": os_name if os_name in _KNOWN_PEER_OS else "other",
+            }
+        )
+    return records
+
+
+def discover_tailnet_peers() -> dict[str, Any]:
+    """List online tailnet peers for the Settings SSH tab.
+
+    Self is never listed (you do not SSH into the node running Pandamonium) and
+    only the Tailscale CGNAT range is accepted, so a public address can never be
+    presented as a tailnet target. Addresses stay server-side; the browser gets
+    an opaque id, the node name, and the OS.
+    """
+    if not resolve_tailscale_binary():
+        return {
+            "available": False,
+            "peers": [],
+            "message": "Tailscale is not available on this machine, so the tailnet cannot be scanned.",
+        }
+    status = _tailscale_status()
+    if not status:
+        return {
+            "available": False,
+            "peers": [],
+            "message": "Could not read the tailnet status. Check that this node is connected to the tailnet.",
+        }
+    records = _tailnet_records(status)
+    now = time.time()
+    peers: list[dict[str, str]] = []
+    with _tailnet_lock:
+        for expired in [key for key, expires in _tailnet_issued.items() if expires <= now]:
+            _tailnet_issued.pop(expired, None)
+        for record in records[:TAILNET_MAX_PEERS]:
+            peer_id = _tailnet_peer_id(record["key"])
+            _tailnet_issued[peer_id] = now + TAILNET_PEER_TTL_SECONDS
+            peers.append({"id": peer_id, "name": record["name"], "os": record["os"]})
+    message = (
+        f"Found {len(peers)} online tailnet node(s)."
+        if peers
+        else "No online tailnet nodes were found."
+    )
+    return {"available": True, "peers": peers, "message": message}
+
+
+def resolve_tailnet_peer(peer_id: Any) -> str:
+    """Resolve one opaque scanned peer id to its tailnet IPv4 address.
+
+    Only ids issued by a recent ``discover_tailnet_peers`` call are accepted, so
+    an arbitrary address can never be smuggled through this path.
+    """
+    peer = str(peer_id or "").strip()
+    now = time.time()
+    with _tailnet_lock:
+        expires = _tailnet_issued.get(peer)
+    if not _OPAQUE_PEER_ID_RE.match(peer) or not expires or expires <= now:
+        raise HTTPException(
+            400,
+            "That tailnet node listing expired. Scan the tailnet again and pick the node.",
+        )
+    for record in _tailnet_records(_tailscale_status()):
+        if _tailnet_peer_id(record["key"]) == peer:
+            return record["address"]
+    raise HTTPException(400, "That tailnet node is no longer online. Scan the tailnet again.")
 
 
 # ── payloads and audit ───────────────────────────────────────────────────

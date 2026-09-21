@@ -16300,6 +16300,28 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 .ssh-editor-form { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-top: 10px; }
 .ssh-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 
+/* SSH tailnet scan (MAD-976). */
+.ssh-tailnet-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ssh-tailnet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--border) 60%, transparent);
+}
+.ssh-tailnet-row:last-child { border-bottom: none; }
+.ssh-tailnet-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ssh-tailnet-info .ssh-meta { margin-top: 0; }
+
 /* Training Runtime tab (MAD-796). Reuses the admin row/button language. */
 .unsloth-row .unsloth-meta {
   font-size: 11px;

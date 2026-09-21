@@ -13,6 +13,7 @@ import uiModule from './ui.js';
 const LIST_ID = 'ssh-connections-list';
 const EDITOR_ID = 'ssh-editor';
 const MSG_ID = 'ssh-msg';
+const TAILNET_ID = 'ssh-tailnet-results';
 
 const STATE_LABELS = {
   connected: 'Connected',
@@ -28,6 +29,7 @@ const STATE_LABELS = {
 let _loaded = false;
 let _connections = [];
 let _editingId = null;
+let _pendingTailnetPeer = null;
 const _expanded = new Set();
 
 function el(id) { return document.getElementById(id); }
@@ -106,21 +108,24 @@ function renderList() {
   host.innerHTML = _connections.map(rowHtml).join('');
 }
 
-function openEditor(connection) {
+function openEditor(connection, prefill = null) {
   const host = el(EDITOR_ID);
   if (!host) return;
   _editingId = connection ? connection.id : null;
+  _pendingTailnetPeer = !connection && prefill && prefill.tailnetPeer ? prefill.tailnetPeer : null;
+  const peer = _pendingTailnetPeer;
   host.classList.remove('hidden');
   host.innerHTML = `
     <div class="admin-model-form ssh-editor-form">
       <div class="settings-row">
         <label class="settings-label" for="ssh-edit-label">Label</label>
-        <input id="ssh-edit-label" class="settings-select" type="text" maxlength="80" autocomplete="off" value="${esc(connection ? connection.label : '')}">
+        <input id="ssh-edit-label" class="settings-select" type="text" maxlength="80" autocomplete="off" value="${esc(connection ? connection.label : (peer ? peer.name : ''))}">
       </div>
       <div class="settings-row">
         <label class="settings-label" for="ssh-edit-host">Host</label>
-        <input id="ssh-edit-host" class="settings-select" type="text" autocapitalize="off" spellcheck="false" placeholder="192.168.1.20 or vps.example.com" value="${esc(connection ? connection.host : '')}">
+        <input id="ssh-edit-host" class="settings-select" type="text" autocapitalize="off" spellcheck="false" placeholder="192.168.1.20 or vps.example.com" value="${esc(connection ? connection.host : '')}"${peer ? ' disabled' : ''}>
       </div>
+      ${peer ? `<div class="ssh-note">Tailnet node "${esc(peer.name)}" (${esc(peer.os || 'unknown OS')}) selected. Its tailnet address is resolved when you save.</div>` : ''}
       <div class="settings-row">
         <label class="settings-label" for="ssh-edit-user">User</label>
         <input id="ssh-edit-user" class="settings-select" type="text" autocapitalize="off" spellcheck="false" placeholder="root" value="${esc(connection ? connection.user : '')}">
@@ -140,6 +145,7 @@ function openEditor(connection) {
 function closeEditor() {
   const host = el(EDITOR_ID);
   _editingId = null;
+  _pendingTailnetPeer = null;
   if (host) {
     host.classList.add('hidden');
     host.innerHTML = '';
@@ -155,7 +161,12 @@ async function saveEditor() {
   if (!label || !host || !user || !port) return;
   const body = new FormData();
   body.append('label', label.value);
-  body.append('host', host.value);
+  if (_pendingTailnetPeer && !_editingId) {
+    body.append('host', '');
+    body.append('tailnet_peer_id', _pendingTailnetPeer.id);
+  } else {
+    body.append('host', host.value);
+  }
   body.append('user', user.value);
   body.append('port', port.value);
   try {
@@ -246,9 +257,56 @@ async function handleAction(action, connection) {
   }
 }
 
+async function scanTailnet() {
+  const results = el(TAILNET_ID);
+  if (!results) return;
+  const button = el('ssh-scan-btn');
+  if (button) button.disabled = true;
+  results.classList.remove('hidden');
+  results.innerHTML = '<div class="admin-empty">Scanning your tailnet…</div>';
+  try {
+    const data = await api('/api/ssh/discover');
+    renderTailnetPeers(data);
+  } catch (error) {
+    results.innerHTML = `<div class="admin-empty">${esc(error.message)}</div>`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderTailnetPeers(data) {
+  const results = el(TAILNET_ID);
+  if (!results) return;
+  const peers = data && Array.isArray(data.peers) ? data.peers : [];
+  if (!data || data.available === false || !peers.length) {
+    results.innerHTML = `<div class="admin-empty">${esc((data && data.message) || 'No online tailnet nodes were found.')}</div>`;
+    return;
+  }
+  results.innerHTML = `
+    <div class="ssh-tailnet-panel">
+      <div class="ssh-field-label">Online tailnet nodes — pick one to add</div>
+      ${peers.map((peer) => `
+        <div class="ssh-tailnet-row">
+          <div class="ssh-tailnet-info">
+            <span class="admin-user-name">${esc(peer.name)}</span>
+            <span class="ssh-meta">${esc(peer.os || 'unknown OS')}</span>
+          </div>
+          <button type="button" class="admin-btn-sm" data-ssh-tailnet="${esc(peer.id)}">Add</button>
+        </div>`).join('')}
+    </div>`;
+  results.querySelectorAll('[data-ssh-tailnet]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const peer = peers.find((item) => item.id === button.dataset.sshTailnet);
+      if (!peer) return;
+      openEditor(null, { tailnetPeer: peer });
+      const editor = el(EDITOR_ID);
+      if (editor && editor.scrollIntoView) editor.scrollIntoView({ block: 'nearest' });
+    });
+  });
+}
+
 let _bound = false;
-function bind() {
-  if (_bound) return;
+function bind() {  if (_bound) return;
   const list = el(LIST_ID);
   if (!list) return;
   _bound = true;
@@ -263,6 +321,8 @@ function bind() {
   });
   const addButton = el('ssh-add-btn');
   if (addButton) addButton.addEventListener('click', () => openEditor(null));
+  const scanButton = el('ssh-scan-btn');
+  if (scanButton) scanButton.addEventListener('click', scanTailnet);
   const refreshButton = el('ssh-refresh-btn');
   if (refreshButton) refreshButton.addEventListener('click', () => load(true));
   const editor = el(EDITOR_ID);
