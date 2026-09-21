@@ -723,6 +723,20 @@ function createSessionItem(s) {
   span.title = (s.model ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
   span.classList.add('text-ellipsis');
 
+  // Hover reveals a truncated title by scrolling it (Codex-style) instead of
+  // showing the drag dots. The distance is measured on hover because the row
+  // width and text length change with the sidebar.
+  div.addEventListener('mouseenter', () => {
+    if (document.body.classList.contains('rearrange-mode')) return;
+    const shift = span.scrollWidth - span.clientWidth;
+    if (shift > 4) {
+      span.style.setProperty('--marquee-shift', `-${shift}px`);
+      span.style.setProperty('--marquee-duration', `${Math.min(12, Math.max(1.8, shift / 45))}s`);
+      span.classList.add('marquee');
+    }
+  });
+  div.addEventListener('mouseleave', () => span.classList.remove('marquee'));
+
   // Double-click to rename (only when session is already selected)
   if (!isOpenClaw) {
     span.addEventListener('dblclick', (e) => {

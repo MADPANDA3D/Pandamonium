@@ -43987,6 +43987,22 @@ body.rearrange-mode #session-list .session-folder-header > .folder-name { transf
 #session-list .session-folder.dragging .folder-drag-handle,
 body.rearrange-mode #session-list .item-drag-handle,
 body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-events: auto; }
+/* Chats: hover scrolls a truncated title instead of revealing the drag dots.
+   The handle stays invisible but interactive, so chats can still be reordered. */
+#session-list .list-item:hover .item-drag-handle,
+#session-list .list-item:has(.item-drag-handle:focus-visible) .item-drag-handle,
+#session-list .list-item.dragging .item-drag-handle { opacity: 0; pointer-events: auto; }
+#session-list .list-item:hover > .session-star,
+#session-list .list-item:hover > .session-icon,
+#session-list .list-item:hover > .grow { transform: none; }
+#session-list .list-item > .grow.marquee {
+  text-overflow: clip;
+  animation: session-title-marquee var(--marquee-duration, 2s) ease-in-out infinite alternate;
+}
+@keyframes session-title-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(var(--marquee-shift, 0)); }
+}
 /* Touch layouts have no hover: keep the handles available for ordering. */
 @media (hover: none) {
   #session-list .item-drag-handle, #session-list .folder-drag-handle { opacity: .55; pointer-events: auto; }
