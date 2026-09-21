@@ -38,6 +38,19 @@ test('chat hover scrolls a truncated title and hides the drag dots', async ({ pa
   const shift = await grow.evaluate(el => getComputedStyle(el).getPropertyValue('--marquee-shift'));
   expect(parseFloat(shift)).toBeLessThan(0);
 
+  // The inner text is wider than the clipping window and actually animates,
+  // while the outer clip window stays put.
+  const inner = grow.locator(':scope > .grow-inner');
+  await expect(inner).toHaveCount(1);
+  expect(await inner.evaluate(el => el.scrollWidth)).toBeGreaterThan(await grow.evaluate(el => el.clientWidth));
+  expect(await inner.evaluate(el => getComputedStyle(el).animationName)).toBe('session-title-marquee');
+  const outerTransform = await grow.evaluate(el => getComputedStyle(el).transform);
+  expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(outerTransform);
+  const firstFrame = await inner.evaluate(el => getComputedStyle(el).transform);
+  await page.waitForTimeout(400);
+  const laterFrame = await inner.evaluate(el => getComputedStyle(el).transform);
+  expect(firstFrame).not.toBe(laterFrame);
+
   // The drag dots stay invisible, but the drag zone remains interactive.
   const handle = row.locator('.item-drag-handle');
   expect(await handle.evaluate(el => getComputedStyle(el).opacity)).toBe('0');

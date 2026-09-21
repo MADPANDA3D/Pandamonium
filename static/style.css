@@ -43995,8 +43995,12 @@ body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-ev
 #session-list .list-item:hover > .session-star,
 #session-list .list-item:hover > .session-icon,
 #session-list .list-item:hover > .grow { transform: none; }
-#session-list .list-item > .grow.marquee {
-  text-overflow: clip;
+#session-list .list-item > .grow > .grow-inner {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+#session-list .list-item > .grow.marquee > .grow-inner {
   animation: session-title-marquee var(--marquee-duration, 2s) ease-in-out infinite alternate;
 }
 @keyframes session-title-marquee {

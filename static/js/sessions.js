@@ -713,22 +713,25 @@ function createSessionItem(s) {
 
   const span = document.createElement('span');
   span.className = 'grow';
+  const inner = document.createElement('span');
+  inner.className = 'grow-inner';
   let chatTitle = s.name || '';
   if (_isFork) chatTitle = chatTitle.replace(/^Fork:\s*/, '').replace(/^\u2ADD\s*/, '');
   if (_isGroup) chatTitle = chatTitle.replace(/^\[GRP\]\s*/, '');
   let label = chatTitle;
   if (s.model) label += ' · ' + s.model.split('/').pop();
   if (s.archived) label += ' [archived]';
-  span.textContent = label;
+  inner.textContent = label;
+  span.appendChild(inner);
   span.title = (s.model ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
   span.classList.add('text-ellipsis');
 
-  // Hover reveals a truncated title by scrolling it (Codex-style) instead of
-  // showing the drag dots. The distance is measured on hover because the row
-  // width and text length change with the sidebar.
+  // Hover reveals a truncated title by scrolling an inner span inside the
+  // fixed, clipping outer span (Codex-style). The outer must not move, or its
+  // clip window would slide with the text and the hidden part never appears.
   div.addEventListener('mouseenter', () => {
     if (document.body.classList.contains('rearrange-mode')) return;
-    const shift = span.scrollWidth - span.clientWidth;
+    const shift = inner.scrollWidth - span.clientWidth;
     if (shift > 4) {
       span.style.setProperty('--marquee-shift', `-${shift}px`);
       span.style.setProperty('--marquee-duration', `${Math.min(12, Math.max(1.8, shift / 45))}s`);
