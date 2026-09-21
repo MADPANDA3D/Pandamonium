@@ -16321,6 +16321,8 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 .ssh-tailnet-row:last-child { border-bottom: none; }
 .ssh-tailnet-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ssh-tailnet-info .ssh-meta { margin-top: 0; }
+.ssh-install-row { display: flex; align-items: center; gap: 6px; }
+.ssh-install-row .ssh-password-input { flex: 1; min-width: 0; font-size: 11px; }
 
 /* Training Runtime tab (MAD-796). Reuses the admin row/button language. */
 .unsloth-row .unsloth-meta {

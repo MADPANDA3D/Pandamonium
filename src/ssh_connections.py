@@ -58,6 +58,7 @@ DEFAULT_SSH_PORT = 22
 CONNECT_TIMEOUT_SECONDS = 8
 COMMAND_TIMEOUT_SECONDS = 20
 SCAN_TIMEOUT_SECONDS = 10
+INSTALL_TIMEOUT_SECONDS = 30
 
 # ── tailnet discovery (MAD-976) ──────────────────────────────────────────
 #
@@ -108,6 +109,23 @@ FAILED_MESSAGE = (
     "The connection failed. Check the node's SSH service and this connection's "
     "settings, then try again."
 )
+
+# ── password-assisted key install (MAD-976) ──────────────────────────────
+#
+# The node password is used once to append this connection's public key to the
+# node's authorized_keys. It travels only through the child process environment
+# to a short-lived askpass helper; it is never written to argv, disk, the audit,
+# or any returned payload, and it is never logged.
+MISSING_PASSWORD_MESSAGE = (
+    "Enter the node's password once to finish setup. It is used only to install "
+    "this connection's public key and is never stored."
+)
+MISSING_PUBLIC_KEY_MESSAGE = "Generate this connection's keypair first, then install it on the node."
+INSTALL_AUTH_FAILED_MESSAGE = (
+    "The node rejected the password or does not allow password sign-in. Check the "
+    "password, or enable password authentication or Tailscale SSH on the node."
+)
+INSTALL_CONNECTED_MESSAGE = "Public key installed on the node. The connection is ready."
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{3,31}$")
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$")
@@ -785,6 +803,30 @@ def _run_command(argv: list[str], timeout: int = COMMAND_TIMEOUT_SECONDS):
         return SimpleNamespace(returncode=127, stdout="", stderr=str(exc))
 
 
+def _run_command_env(argv: list[str], timeout: int = INSTALL_TIMEOUT_SECONDS, env: dict | None = None):
+    """Run one OpenSSH command in its own session with a controlled environment.
+
+    Used for the password-assisted key install so the askpass helper is the only
+    thing that ever sees the password. ``start_new_session`` detaches the child
+    from any controlling terminal so OpenSSH is forced onto the askpass path.
+    """
+    try:
+        return subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
+            start_new_session=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return SimpleNamespace(returncode=124, stdout=exc.stdout or "", stderr=exc.stderr or "")
+    except OSError as exc:
+        return SimpleNamespace(returncode=127, stdout="", stderr=str(exc))
+
+
 # ── key material ─────────────────────────────────────────────────────────
 
 
@@ -1094,6 +1136,139 @@ def run_connection_test(connection: Any) -> dict[str, Any]:
     result = classify_ssh_failure(getattr(proc, "stderr", "") or "")
     result["ok"] = False
     return result
+
+
+# ── password-assisted key install (MAD-976) ──────────────────────────────
+
+
+def build_install_config(connection: Any, *, known_hosts_path: str | None = None) -> str:
+    """Managed OpenSSH config for the one-time password-assisted key install.
+
+    Deliberately password-capable and key-free: no IdentityFile, and pubkey auth
+    is disabled so the single password prompt is the only authentication path.
+    """
+    lines = [
+        f"Host {managed_alias(connection.id)}",
+        f"  HostName {connection.host}",
+        f"  User {connection.user}",
+        f"  Port {int(connection.port or DEFAULT_SSH_PORT)}",
+        "  BatchMode no",
+        "  PubkeyAuthentication no",
+        "  PasswordAuthentication yes",
+        "  KbdInteractiveAuthentication yes",
+        "  PreferredAuthentications password,keyboard-interactive",
+        "  NumberOfPasswordPrompts 1",
+        "  StrictHostKeyChecking yes",
+        f"  ConnectTimeout {CONNECT_TIMEOUT_SECONDS}",
+        "  LogLevel ERROR",
+    ]
+    if known_hosts_path:
+        lines.append(f"  UserKnownHostsFile {known_hosts_path}")
+        lines.append(f"  GlobalKnownHostsFile {_DEV_NULL}")
+    return "\n".join(lines) + "\n"
+
+
+def install_public_key(connection: Any, password: str) -> dict[str, Any]:
+    """Install this connection's public key on the node using the password once.
+
+    Fails closed without a pinned host key or a password. The password is passed
+    only through the child environment to a short-lived askpass helper and is
+    never written to argv, disk, the audit, or any returned payload.
+    """
+    binary = resolve_ssh_binary()
+    if not binary:
+        return {
+            "ok": False,
+            "state": STATE_UNAVAILABLE,
+            "reason": "openssh_unavailable",
+            "message": UNAVAILABLE_MESSAGE,
+        }
+    public_key = str(getattr(connection, "public_key", "") or "").strip()
+    if not public_key:
+        return {
+            "ok": False,
+            "state": STATE_FAILED,
+            "reason": "missing_public_key",
+            "message": MISSING_PUBLIC_KEY_MESSAGE,
+        }
+    if not getattr(connection, "host_key", None):
+        return {
+            "ok": False,
+            "state": STATE_HOST_KEY_UNKNOWN,
+            "reason": "host_key_unknown",
+            "message": HOST_KEY_UNKNOWN_MESSAGE,
+        }
+    secret = str(password or "")
+    if not secret:
+        return {
+            "ok": False,
+            "state": STATE_FAILED,
+            "reason": "missing_password",
+            "message": MISSING_PASSWORD_MESSAGE,
+        }
+    try:
+        workdir = ensure_connection_dir(connection.id)
+    except HTTPException as exc:
+        return {
+            "ok": False,
+            "state": STATE_FAILED,
+            "reason": "storage_unavailable",
+            "message": str(exc.detail),
+        }
+    known_hosts_path = workdir / "known_hosts"
+    _write_owner_only(known_hosts_path, str(connection.host_key))
+    try:
+        with tempfile.TemporaryDirectory(prefix="install-", dir=workdir) as tmp:
+            askpass_path = os.path.join(tmp, "askpass.sh")
+            _write_owner_only(
+                askpass_path,
+                "#!/bin/sh\nprintf '%s\\n' \"$PANDAMONIUM_SSH_PASSWORD\"\n",
+            )
+            safe_chmod(askpass_path, 0o700)
+            config_path = os.path.join(tmp, "config")
+            _write_owner_only(
+                config_path,
+                build_install_config(connection, known_hosts_path=str(known_hosts_path)),
+            )
+            alias = managed_alias(connection.id)
+            remote_command = (
+                "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; "
+                f"grep -qF {_shell_quote(public_key)} ~/.ssh/authorized_keys || "
+                f"printf '%s\\n' {_shell_quote(public_key)} >> ~/.ssh/authorized_keys; "
+                "echo installed"
+            )
+            env = dict(os.environ)
+            env.pop("SSH_AUTH_SOCK", None)
+            env["SSH_ASKPASS"] = askpass_path
+            env["SSH_ASKPASS_REQUIRE"] = "force"
+            env["PANDAMONIUM_SSH_PASSWORD"] = secret
+            proc = _run_command_env(
+                [binary, "-F", config_path, alias, remote_command],
+                timeout=INSTALL_TIMEOUT_SECONDS,
+                env=env,
+            )
+    except OSError as exc:
+        logger.warning("SSH key install IO failure: %s", exc.__class__.__name__)
+        return {
+            "ok": False,
+            "state": STATE_FAILED,
+            "reason": "storage_unavailable",
+            "message": FAILED_MESSAGE,
+        }
+    if proc.returncode == 0:
+        return {"ok": True, "state": STATE_CONNECTED, "reason": "", "message": INSTALL_CONNECTED_MESSAGE}
+    if proc.returncode == 124:
+        return {"ok": False, "state": STATE_UNREACHABLE, "reason": "timeout", "message": TIMEOUT_MESSAGE}
+    classified = classify_ssh_failure(getattr(proc, "stderr", "") or "")
+    if classified["state"] == STATE_AUTH_FAILED:
+        return {
+            "ok": False,
+            "state": STATE_AUTH_FAILED,
+            "reason": classified["reason"],
+            "message": INSTALL_AUTH_FAILED_MESSAGE,
+        }
+    classified["ok"] = False
+    return classified
 
 
 # ── tailnet discovery (MAD-976) ──────────────────────────────────────────

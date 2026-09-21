@@ -25,8 +25,8 @@ const ADDED = {
   status: { state: 'unknown', reason: '', message: '', checked_at: null },
 };
 
-function stubApi(page, { discover, onRequest } = {}) {
-  let connections = [];
+function stubApi(page, { discover, initialConnections = [], onRequest } = {}) {
+  let connections = initialConnections;
   return page.route('**/api/**', async route => {
     const req = route.request();
     const url = new URL(req.url());
@@ -47,6 +47,10 @@ function stubApi(page, { discover, onRequest } = {}) {
     if (path === '/api/ssh/connections' && req.method() === 'POST') {
       connections = [ADDED];
       return route.fulfill({ json: { ...ADDED, message: 'Connection added. Install the public key on the node.' } });
+    }
+    if (path.endsWith('/install-key')) {
+      connections = [{ ...connections[0], status: { state: 'connected', reason: '', message: 'Connected. The connection is authorized, and no prompt was needed.', checked_at: null } }];
+      return route.fulfill({ json: { ...connections[0], ok: true, state: 'connected', message: 'Public key installed on the node. The connection is ready.' } });
     }
     if (['/api/sessions', '/api/models', '/api/plugins', '/api/tools', '/api/selector-catalog'].includes(path)) {
       return route.fulfill({ json: [] });
@@ -115,4 +119,30 @@ test('an unavailable or empty tailnet shows honest copy', async ({ page }) => {
   await page.locator('#ssh-scan-btn').click();
   await expect(page.locator('#ssh-tailnet-results')).toContainText('Tailscale is not available');
   await expect(page.locator('#ssh-tailnet-results .ssh-tailnet-panel')).toHaveCount(0);
+});
+
+test('finishing setup installs the key with the node password and goes green', async ({ page }) => {
+  let installBody = '';
+  const authFailed = {
+    ...ADDED,
+    status: { state: 'auth_failed', reason: 'authentication_failed', message: 'The node rejected the key. Install this connection\u2019s public key on the node, then test again.', checked_at: null },
+  };
+  await stubApi(page, {
+    initialConnections: [authFailed],
+    onRequest: (req, path) => {
+      if (path.endsWith('/install-key')) installBody = req.postData() || '';
+    },
+  });
+  await openSshTab(page);
+
+  const row = page.locator('.ssh-row[data-ssh-id="ssh-newtailnet1"]');
+  await expect(row).toContainText('Auth failed');
+  await row.locator('[data-ssh-action="detail"]').click();
+  await row.locator('[data-ssh-password]').fill('hunter2');
+  await row.locator('[data-ssh-action="install-key"]').click();
+
+  await expect(page.locator('#ssh-msg')).toContainText('installed on the node');
+  expect(installBody).toContain('password');
+  expect(installBody).toContain('hunter2');
+  await expect(row).toContainText('Connected');
 });

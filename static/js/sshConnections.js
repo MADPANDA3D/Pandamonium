@@ -82,6 +82,13 @@ function rowHtml(connection) {
         ${connection.has_private_key
           ? `<div class="ssh-field-label">Public key — install this on the node</div><pre class="ssh-key">${esc(connection.public_key)}</pre>`
           : '<div class="ssh-note">No key on this connection yet. Generate one, or paste an existing private key below.</div>'}
+        ${connection.has_private_key && (!connection.status || connection.status.state !== 'connected')
+          ? `<div class="ssh-field-label">Finish setup — install this key with the node password (used once, never stored)</div>
+             <div class="ssh-install-row">
+               <input type="password" class="settings-select ssh-password-input" data-ssh-password autocomplete="off" placeholder="Password for ${esc(connection.user)}@${esc(connection.host)}">
+               <button type="button" class="admin-btn-sm" data-ssh-action="install-key">Install key</button>
+             </div>`
+          : ''}
         <div class="ssh-field-label">Paste an existing private key</div>
         <textarea class="settings-select ssh-key-input" data-ssh-key-input rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
         <button type="button" class="admin-btn-sm" data-ssh-action="import-key">Save private key</button>
@@ -233,6 +240,22 @@ async function handleAction(action, connection) {
       _expanded.add(connection.id);
       await load(true);
       setMessage(data.message || 'Private key saved.', true);
+      return;
+    }
+    if (action === 'install-key') {
+      const row = document.querySelector(`.ssh-row[data-ssh-id="${CSS.escape(connection.id)}"]`);
+      const input = row ? row.querySelector('[data-ssh-password]') : null;
+      const password = input ? input.value : '';
+      if (!password) {
+        setMessage('Enter the node password to finish setup.', false);
+        return;
+      }
+      const body = new FormData();
+      body.append('password', password);
+      const data = await api(connectionPath(connection.id, '/install-key'), { method: 'POST', body });
+      if (input) input.value = '';
+      await load(true);
+      setMessage(data.message || 'Key installed.', data.ok === true);
       return;
     }
     if (action === 'detail') {

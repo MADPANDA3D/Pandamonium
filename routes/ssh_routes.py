@@ -294,6 +294,58 @@ def setup_ssh_routes() -> APIRouter:
         ssh.record_ssh_audit(payload["id"], "host-key", "pinned", "", _actor(request))
         return ssh.redact_payload(payload)
 
+    @router.post("/api/ssh/connections/{connection_id}/install-key")
+    def install_ssh_key(
+        request: Request,
+        connection_id: str,
+        password: str = Form(""),
+    ):
+        """One-time password-assisted install of this connection's public key.
+
+        The password is used for this single call and is never stored. The route
+        pins the host key first when needed, installs the key, then confirms the
+        connection so the row can report Connected.
+        """
+        require_admin(request)
+        secret = _form_text(password)
+        if not secret:
+            raise HTTPException(400, ssh.MISSING_PASSWORD_MESSAGE)
+        with SessionLocal() as session:
+            row = _require_row(session, connection_id)
+            if not row.host_key:
+                try:
+                    entries = ssh.scan_host_key(row.host, int(row.port or ssh.DEFAULT_SSH_PORT))
+                    ssh.store_host_key(row, entries)
+                    session.commit()
+                    session.refresh(row)
+                except ssh.SshScanError as exc:
+                    raise HTTPException(400, str(exc)) from exc
+            install = ssh.install_public_key(row, secret)
+            confirm = ssh.run_connection_test(row)
+            row.last_status = confirm["state"]
+            row.last_status_reason = confirm.get("reason") or ""
+            row.last_status_message = confirm.get("message") or ""
+            row.last_checked_at = datetime.utcnow()
+            session.commit()
+            session.refresh(row)
+            payload = ssh.connection_payload(row)
+        ssh.record_ssh_audit(
+            payload["id"],
+            "install-key",
+            install["state"],
+            install.get("reason") or "",
+            _actor(request),
+        )
+        payload.update(
+            {
+                "ok": bool(install.get("ok")) and bool(confirm.get("ok")),
+                "state": confirm["state"],
+                "reason": install.get("reason") or "",
+                "message": confirm.get("message") or install.get("message") or "",
+            }
+        )
+        return ssh.redact_payload(payload)
+
     @router.post("/api/ssh/connections/{connection_id}/test")
     def test_ssh_connection(request: Request, connection_id: str):
         require_admin(request)
