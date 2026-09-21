@@ -364,3 +364,31 @@ test('Entertainment refresh shows visible progress while re-resolving', async ({
   await expect(page.locator('#entertainment-refresh')).toHaveText('⟳ Refresh');
   await expect(page.locator('#entertainment-player-status')).toBeEmpty();
 });
+
+test('Entertainment plays the anime sting when an episode starts', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__entPlayed = [];
+    HTMLMediaElement.prototype.play = function () { window.__entPlayed.push(this.id || 'media'); return Promise.resolve(); };
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [{ number: '1', label: 'Episode 1' }], total: 1, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') return route.fulfill({ json: { title: 'Naruto Episode 1', url: 'https://media.example/ep1.mp4', format: 'file', proxied: false, subtitles: [] } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+  await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-anime-play'))).toBe(true);
+});

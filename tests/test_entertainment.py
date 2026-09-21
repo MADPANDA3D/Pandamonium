@@ -383,3 +383,7 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert "entertainment-welcome-hollywood" in index and "welcome-to-hollywood.mp3" in index
     assert "entertainment-welcome-hollywood" in source
     assert (ROOT / "static/entertainment/welcome-to-hollywood.mp3").is_file()
+    # Starting an anime episode from the browser plays the 2-second sting.
+    assert "entertainment-anime-play" in index and "anime-play.mp3" in index
+    assert "entertainment-anime-play" in source
+    assert (ROOT / "static/entertainment/anime-play.mp3").is_file()

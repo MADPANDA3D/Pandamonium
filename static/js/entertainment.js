@@ -697,7 +697,7 @@ async function playAnimeEpisode(number) {
 
 async function choose(action, item) {
   if (action === 'title') return chooseTitle(item);
-  if (action === 'anime-episode') return playAnimeEpisode(item.number);
+  if (action === 'anime-episode') { playSound('entertainment-anime-play'); return playAnimeEpisode(item.number); }
   if (action === 'season') {
     selection.season = item.number;
     const body = { query, selection: selection.selection, season: item.number };
@@ -839,6 +839,7 @@ async function jumpEpisode() {
   if (active !== 'ani-cli' || !selection) return;
   const value = el('entertainment-jump-input').value.trim();
   if (!value) return;
+  playSound('entertainment-anime-play');
   await playAnimeEpisode(value);
 }
 
