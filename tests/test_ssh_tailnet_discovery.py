@@ -176,6 +176,50 @@ def test_discovery_reports_unavailable_without_tailscale(monkeypatch):
     assert result["message"]
 
 
+# ── tailscale ssh execution ──────────────────────────────────────────────
+
+
+def test_tailscale_test_surfaces_check_link_without_crashing(monkeypatch):
+    monkeypatch.setattr(ssh_connections, "resolve_tailscale_binary", lambda: "/usr/bin/tailscale")
+    connection = SimpleNamespace(id="conn01a2b3", user="root", host="100.117.131.123", auth_mode="tailscale_ssh")
+    proc = SimpleNamespace(
+        returncode=124,
+        stdout=b"",
+        stderr=b"# Tailscale SSH requires an additional check.\n# To authenticate, visit: https://login.tailscale.com/a/abc123\n",
+    )
+    monkeypatch.setattr(ssh_connections, "_run_command", lambda argv, timeout=None: proc)
+
+    result = ssh_connections.run_connection_test(connection)
+
+    assert result["state"] == "check_required"
+    assert "https://login.tailscale.com/a/abc123" in result["message"]
+
+
+def test_tailscale_test_reports_connected_on_success(monkeypatch):
+    monkeypatch.setattr(ssh_connections, "resolve_tailscale_binary", lambda: "/usr/bin/tailscale")
+    connection = SimpleNamespace(id="conn01a2b3", user="root", host="100.117.131.123", auth_mode="tailscale_ssh")
+    monkeypatch.setattr(
+        ssh_connections,
+        "_run_command",
+        lambda argv, timeout=None: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+
+    result = ssh_connections.run_connection_test(connection)
+
+    assert result["ok"] is True
+    assert result["state"] == "connected"
+
+
+def test_tailscale_test_fails_honestly_without_tailscale(monkeypatch):
+    monkeypatch.setattr(ssh_connections, "resolve_tailscale_binary", lambda: None)
+    connection = SimpleNamespace(id="conn01a2b3", user="root", host="100.117.131.123", auth_mode="tailscale_ssh")
+
+    result = ssh_connections.run_connection_test(connection)
+
+    assert result["ok"] is False
+    assert result["state"] == "unavailable"
+
+
 # ── routes ───────────────────────────────────────────────────────────────
 
 

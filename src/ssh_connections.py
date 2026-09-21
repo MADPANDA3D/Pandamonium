@@ -48,6 +48,13 @@ from src.constants import SSH_AUDIT_FILE, SSH_CONNECTIONS_DIR
 
 logger = logging.getLogger(__name__)
 
+
+def _coerce_text(value: Any) -> str:
+    """Decode a subprocess timeout capture, which arrives as bytes even with text=True."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
 # OpenSSH on Windows uses NUL instead of /dev/null for the global known-hosts
 # sink. Either way the system file is ignored so only the pinned managed host
 # key can satisfy strict checking.
@@ -825,7 +832,11 @@ def _run_command(argv: list[str], timeout: int = COMMAND_TIMEOUT_SECONDS):
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        return SimpleNamespace(returncode=124, stdout=exc.stdout or "", stderr=exc.stderr or "")
+        return SimpleNamespace(
+            returncode=124,
+            stdout=_coerce_text(exc.stdout),
+            stderr=_coerce_text(exc.stderr),
+        )
     except OSError as exc:
         return SimpleNamespace(returncode=127, stdout="", stderr=str(exc))
 
@@ -849,7 +860,11 @@ def _run_command_env(argv: list[str], timeout: int = INSTALL_TIMEOUT_SECONDS, en
             start_new_session=True,
         )
     except subprocess.TimeoutExpired as exc:
-        return SimpleNamespace(returncode=124, stdout=exc.stdout or "", stderr=exc.stderr or "")
+        return SimpleNamespace(
+            returncode=124,
+            stdout=_coerce_text(exc.stdout),
+            stderr=_coerce_text(exc.stderr),
+        )
     except OSError as exc:
         return SimpleNamespace(returncode=127, stdout="", stderr=str(exc))
 
@@ -1112,7 +1127,9 @@ def _tailscale_check_url(text: str) -> str:
 
 def _tailscale_check_result(proc: Any) -> dict[str, Any] | None:
     url = _tailscale_check_url(
-        (getattr(proc, "stdout", "") or "") + "\n" + (getattr(proc, "stderr", "") or "")
+        _coerce_text(getattr(proc, "stdout", ""))
+        + "\n"
+        + _coerce_text(getattr(proc, "stderr", ""))
     )
     if not url:
         return None
