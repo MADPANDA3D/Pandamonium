@@ -1,22 +1,24 @@
-// MAD-976: Settings → SSH Connections tailnet scan.
-// Verifies the scan lists online tailnet nodes by name and OS, never exposes a
-// tailnet address to the browser, and adds the selected node through the
-// opaque peer id so the server resolves the address.
+// MAD-976: Settings → SSH Connections tailnet scan + keyless Tailscale SSH.
+// Verifies the scan lists online tailnet nodes by name and OS (never exposing a
+// tailnet address), that adding a node resolves the address server-side, that a
+// node advertising Tailscale SSH is added keyless, and that finishing setup with
+// the node password installs the managed key.
 import { expect, test } from '@playwright/test';
 
 const PEERS = [
-  { id: 'a'.repeat(32), name: 'madpanda-workstation', os: 'linux' },
-  { id: 'b'.repeat(32), name: 'oracle', os: 'linux' },
-  { id: 'c'.repeat(32), name: 'iphone172', os: 'ios' },
+  { id: 'a'.repeat(32), name: 'madpanda-workstation', os: 'linux', keyless: false },
+  { id: 'b'.repeat(32), name: 'oracle', os: 'linux', keyless: true },
+  { id: 'c'.repeat(32), name: 'iphone172', os: 'ios', keyless: false },
 ];
 
 const ADDED = {
   id: 'ssh-newtailnet1',
-  label: 'oracle',
-  host: '100.117.131.123',
-  user: 'root',
+  label: 'madpanda-workstation',
+  host: '100.64.242.88',
+  user: 'leo',
   port: 22,
   keyless: true,
+  auth_mode: 'managed_key',
   has_private_key: true,
   public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakePublicKeyForTests pandamonium-ssh:ssh-newtailnet1',
   host_key_pinned: true,
@@ -76,7 +78,7 @@ test('scanning the tailnet lists nodes by name and OS without leaking addresses'
   await expect(panel).toContainText('madpanda-workstation');
   await expect(panel).toContainText('oracle');
   await expect(panel).toContainText('iphone172');
-  await expect(panel).toContainText('ios');
+  await expect(panel).toContainText('Keyless (Tailscale SSH)');
   await expect(page.locator('body')).not.toContainText('100.117.131.123');
   await expect(page.locator('body')).not.toContainText('100.64.242.88');
 });
@@ -91,23 +93,58 @@ test('adding a scanned node sends the opaque peer id and resolves the address se
   await openSshTab(page);
 
   await page.locator('#ssh-scan-btn').click();
-  const oracleRow = page.locator('#ssh-tailnet-results .ssh-tailnet-row', { hasText: 'oracle' });
-  await oracleRow.locator('[data-ssh-tailnet]').click();
+  const row = page.locator('#ssh-tailnet-results .ssh-tailnet-row', { hasText: 'madpanda-workstation' });
+  await row.locator('[data-ssh-tailnet]').click();
 
-  await expect(page.locator('#ssh-edit-label')).toHaveValue('oracle');
+  await expect(page.locator('#ssh-edit-label')).toHaveValue('madpanda-workstation');
   await expect(page.locator('#ssh-edit-host')).toBeDisabled();
   await expect(page.locator('#ssh-edit-host')).toHaveValue('');
-  await page.locator('#ssh-edit-user').fill('root');
+  await page.locator('#ssh-edit-user').fill('leo');
   await page.locator('#ssh-edit-keyless').check();
   await page.locator('[data-ssh-editor="save"]').click();
 
   await expect(page.locator('#ssh-msg')).toContainText('Install the public key');
   expect(addBody).toContain('tailnet_peer_id');
-  expect(addBody).toContain('b'.repeat(32));
+  expect(addBody).toContain('a'.repeat(32));
+
+  const saved = page.locator('.ssh-row[data-ssh-id="ssh-newtailnet1"]');
+  await expect(saved).toContainText('madpanda-workstation');
+  await expect(saved).toContainText('leo@100.64.242.88:22');
+});
+
+test('a node with Tailscale SSH is added keyless with no key setup', async ({ page }) => {
+  await stubApi(page);
+  await openSshTab(page);
+
+  await page.locator('#ssh-scan-btn').click();
+  const oracleRow = page.locator('#ssh-tailnet-results .ssh-tailnet-row', { hasText: 'oracle' });
+  await expect(oracleRow).toContainText('Keyless (Tailscale SSH)');
+  await oracleRow.locator('[data-ssh-tailnet]').click();
+
+  await expect(page.locator('#ssh-edit-host')).toBeDisabled();
+  await expect(page.locator('#ssh-edit-keyless')).toHaveCount(0);
+  await expect(page.locator('#ssh-editor')).toContainText('no key or password is needed');
+});
+
+test('a Tailscale SSH connection hides key controls and shows the badge', async ({ page }) => {
+  const tailscaleConn = {
+    ...ADDED,
+    label: 'oracle',
+    host: '100.117.131.123',
+    auth_mode: 'tailscale_ssh',
+    has_private_key: false,
+    public_key: '',
+    host_key_pinned: false,
+  };
+  await stubApi(page, { initialConnections: [tailscaleConn] });
+  await openSshTab(page);
 
   const row = page.locator('.ssh-row[data-ssh-id="ssh-newtailnet1"]');
-  await expect(row).toContainText('oracle');
-  await expect(row).toContainText('root@100.117.131.123:22');
+  await expect(row).toContainText('Tailscale SSH');
+  await expect(row).toContainText('no key needed');
+  await expect(row.locator('[data-ssh-action="host-key"]')).toHaveCount(0);
+  await expect(row.locator('[data-ssh-action="detail"]')).toHaveCount(0);
+  await expect(row.locator('[data-ssh-action="test"]')).toHaveCount(1);
 });
 
 test('an unavailable or empty tailnet shows honest copy', async ({ page }) => {

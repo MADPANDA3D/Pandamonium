@@ -33,17 +33,18 @@ PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakePublicKeyForTests pandamo
 HOST_KEY_LINE = "100.106.175.62 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKeyMaterialForTests"
 
 
-def _peer(peer_id: str, name: str, ips, os_name: str = "linux", online: bool = True):
-    return {
-        peer_id: {
-            "ID": peer_id,
-            "HostName": name,
-            "DNSName": f"{name}.tailf5266c.ts.net.",
-            "TailscaleIPs": ips,
-            "OS": os_name,
-            "Online": online,
-        }
+def _peer(peer_id: str, name: str, ips, os_name: str = "linux", online: bool = True, keyless: bool = False):
+    peer = {
+        "ID": peer_id,
+        "HostName": name,
+        "DNSName": f"{name}.tailf5266c.ts.net.",
+        "TailscaleIPs": ips,
+        "OS": os_name,
+        "Online": online,
     }
+    if keyless:
+        peer["sshHostKeys"] = ["ssh-ed25519 AAAATestHostKey"]
+    return {peer_id: peer}
 
 
 def _status(peers, self_ips=("100.91.21.24",)):
@@ -59,7 +60,7 @@ def fake_tailscale(monkeypatch):
         {
             **_peer("n-workstation", "madpanda-workstation", ["100.64.242.88", "fd7a::1"]),
             **_peer("n-charter", "srv779520-charter-vps", ["100.106.175.62"]),
-            **_peer("n-oracle", "oracle", ["100.117.131.123"]),
+            **_peer("n-oracle", "oracle", ["100.117.131.123"], keyless=True),
             **_peer("n-offline", "hermes", ["100.119.195.80"], online=False),
             **_peer("n-public", "weird-public", ["203.0.113.9"]),
             **_peer("n-ios", "iphone172", ["100.119.79.92"], os_name="iOS"),
@@ -68,6 +69,7 @@ def fake_tailscale(monkeypatch):
     monkeypatch.setattr(ssh_connections, "_tailscale_status", lambda: snapshot)
     monkeypatch.setattr(ssh_connections, "resolve_tailscale_binary", lambda: "/usr/bin/tailscale")
     monkeypatch.setattr(ssh_connections, "_tailnet_issued", {})
+    monkeypatch.setattr(ssh_connections, "_tailnet_peer_info", {})
     return snapshot
 
 
@@ -196,7 +198,8 @@ def test_discover_route_requires_admin(monkeypatch, router):
 
 
 def test_add_connection_from_tailnet_peer_resolves_host(ssh_env, fake_tailscale, router, monkeypatch):
-    peer = next(p for p in ssh_connections.discover_tailnet_peers()["peers"] if p["name"] == "oracle")
+    peer = next(p for p in ssh_connections.discover_tailnet_peers()["peers"] if p["name"] == "madpanda-workstation")
+    assert peer["keyless"] is False
     monkeypatch.setattr(ssh_connections, "generate_keypair", lambda cid: {"private_key": PRIVATE_KEY, "public_key": PUBLIC_KEY})
     monkeypatch.setattr(ssh_connections, "scan_host_key", lambda host, port: [
         {"key_type": "ssh-ed25519", "fingerprint": "SHA256:TEST", "known_hosts_line": HOST_KEY_LINE}
@@ -205,19 +208,39 @@ def test_add_connection_from_tailnet_peer_resolves_host(ssh_env, fake_tailscale,
     endpoint = _route(router, "/api/ssh/connections", "POST")
     payload = endpoint(
         _admin_request(),
-        label="Oracle",
+        label="Workstation",
         host="",
-        user="root",
+        user="leo",
         port="22",
         keyless="true",
         tailnet_peer_id=peer["id"],
     )
 
-    assert payload["host"] == "100.117.131.123"
+    assert payload["host"] == "100.64.242.88"
+    assert payload["auth_mode"] == "managed_key"
     assert payload["host_key_pinned"] is True
     encoded = json.dumps(payload)
     assert '"private_key"' not in encoded
     assert "BEGIN OPENSSH PRIVATE KEY" not in encoded
+
+
+def test_add_connection_from_keyless_peer_defaults_to_tailscale_ssh(ssh_env, fake_tailscale, router):
+    peer = next(p for p in ssh_connections.discover_tailnet_peers()["peers"] if p["name"] == "oracle")
+    assert peer["keyless"] is True
+
+    endpoint = _route(router, "/api/ssh/connections", "POST")
+    payload = endpoint(
+        _admin_request(),
+        label="Oracle",
+        host="",
+        user="root",
+        port="22",
+        keyless="false",
+        tailnet_peer_id=peer["id"],
+    )
+
+    assert payload["host"] == "100.117.131.123"
+    assert payload["auth_mode"] == "tailscale_ssh"
 
 
 def test_add_connection_still_requires_host_without_tailnet_peer(ssh_env, router, monkeypatch):

@@ -574,6 +574,11 @@ class SshConnection(TimestampMixin, Base):
     # ambient agent/default keys. Disabling it keeps the stored key so the
     # operator can re-enable without re-generating.
     keyless = Column(Boolean, default=False)
+    # Authentication mode (MAD-976). "managed_key" (default) uses this
+    # connection's stored key with a pinned host key; "tailscale_ssh" uses the
+    # node's Tailscale SSH, where the tailnet identity authenticates and no key
+    # or host-key pinning is needed.
+    auth_mode = Column(String, nullable=False, default="managed_key")
     private_key = Column(EncryptedText, nullable=True)
     public_key = Column(Text, nullable=True)
     # Pinned host key as a managed known_hosts line (or lines) plus the
@@ -964,6 +969,39 @@ def _migrate_add_ssh_allowed_commands_column():
             )
     except Exception as e:
         logging.getLogger(__name__).warning(f"ssh_connections.allowed_commands migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _migrate_add_ssh_auth_mode_column():
+    """Add the SSH authentication-mode column (MAD-976). Idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='ssh_connections'"
+            ).fetchall()
+        ]
+        if "ssh_connections" not in tables:
+            return
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(ssh_connections)").fetchall()]
+        if "auth_mode" not in columns:
+            conn.execute(
+                "ALTER TABLE ssh_connections ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'managed_key'"
+            )
+            conn.commit()
+            logging.getLogger(__name__).info(
+                "Migrated: added 'auth_mode' to ssh_connections"
+            )
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"ssh_connections.auth_mode migration failed: {e}")
     finally:
         if conn is not None:
             conn.close()
@@ -2335,6 +2373,7 @@ def init_db():
     _migrate_add_session_workspace_column()
     _migrate_add_session_identity_columns()
     _migrate_add_ssh_allowed_commands_column()
+    _migrate_add_ssh_auth_mode_column()
     _migrate_add_folder_column()
     _migrate_add_project_id_column()
     _migrate_add_token_columns()

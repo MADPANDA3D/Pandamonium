@@ -67,18 +67,34 @@ function statusChip(status) {
 
 function rowHtml(connection) {
   const expanded = _expanded.has(connection.id);
+  const isTailscale = connection.auth_mode === 'tailscale_ssh';
   const keylessLabel = connection.keyless ? 'Disable keyless' : 'Enable keyless';
   const keyLabel = connection.has_private_key ? 'Show public key' : 'Use existing key';
+  const meta = isTailscale
+    ? `${esc(connection.user)}@${esc(connection.host)}:${esc(connection.port)} · Tailscale SSH (no key needed)`
+    : `${esc(connection.user)}@${esc(connection.host)}:${esc(connection.port)}${connection.host_key_pinned ? ` · host key ${esc(connection.host_key_fingerprint || 'pinned')}` : ' · host key not pinned'}`;
+  const actions = isTailscale
+    ? `<button type="button" class="admin-btn-sm" data-ssh-action="test">Test</button>
+        <button type="button" class="admin-btn-sm" data-ssh-action="edit">Edit</button>
+        <button type="button" class="admin-btn-delete" data-ssh-action="remove">Remove</button>`
+    : `<button type="button" class="admin-btn-sm" data-ssh-action="test">Test</button>
+        <button type="button" class="admin-btn-sm" data-ssh-action="keyless">${keylessLabel}</button>
+        ${connection.has_private_key ? '' : '<button type="button" class="admin-btn-sm" data-ssh-action="keypair">Generate key</button>'}
+        <button type="button" class="admin-btn-sm" data-ssh-action="host-key">Pin host key</button>
+        <button type="button" class="admin-btn-sm" data-ssh-action="detail">${keyLabel}</button>
+        <button type="button" class="admin-btn-sm" data-ssh-action="edit">Edit</button>
+        <button type="button" class="admin-btn-delete" data-ssh-action="remove">Remove</button>`;
   return `
     <div class="admin-user-row ssh-row" data-ssh-id="${esc(connection.id)}">
       <div class="admin-user-info">
         <span class="admin-user-name">${esc(connection.label)}</span>
         ${statusChip(connection.status)}
+        ${isTailscale ? '<span class="ssh-chip ssh-chip-key">Tailscale SSH</span>' : ''}
         ${connection.keyless ? '<span class="ssh-chip ssh-chip-key">Keyless</span>' : ''}
       </div>
-      <div class="ssh-meta">${esc(connection.user)}@${esc(connection.host)}:${esc(connection.port)}${connection.host_key_pinned ? ` · host key ${esc(connection.host_key_fingerprint || 'pinned')}` : ' · host key not pinned'}</div>
+      <div class="ssh-meta">${meta}</div>
       ${connection.status && connection.status.message ? `<div class="ssh-note">${esc(connection.status.message)}</div>` : ''}
-      <div class="ssh-detail ${expanded ? '' : 'hidden'}" data-ssh-detail>
+      ${isTailscale ? '' : `<div class="ssh-detail ${expanded ? '' : 'hidden'}" data-ssh-detail>
         ${connection.has_private_key
           ? `<div class="ssh-field-label">Public key — install this on the node</div><pre class="ssh-key">${esc(connection.public_key)}</pre>`
           : '<div class="ssh-note">No key on this connection yet. Generate one, or paste an existing private key below.</div>'}
@@ -92,16 +108,8 @@ function rowHtml(connection) {
         <div class="ssh-field-label">Paste an existing private key</div>
         <textarea class="settings-select ssh-key-input" data-ssh-key-input rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
         <button type="button" class="admin-btn-sm" data-ssh-action="import-key">Save private key</button>
-      </div>
-      <div class="ssh-actions">
-        <button type="button" class="admin-btn-sm" data-ssh-action="test">Test</button>
-        <button type="button" class="admin-btn-sm" data-ssh-action="keyless">${keylessLabel}</button>
-        ${connection.has_private_key ? '' : '<button type="button" class="admin-btn-sm" data-ssh-action="keypair">Generate key</button>'}
-        <button type="button" class="admin-btn-sm" data-ssh-action="host-key">Pin host key</button>
-        <button type="button" class="admin-btn-sm" data-ssh-action="detail">${keyLabel}</button>
-        <button type="button" class="admin-btn-sm" data-ssh-action="edit">Edit</button>
-        <button type="button" class="admin-btn-delete" data-ssh-action="remove">Remove</button>
-      </div>
+      </div>`}
+      <div class="ssh-actions">${actions}</div>
     </div>`;
 }
 
@@ -141,7 +149,9 @@ function openEditor(connection, prefill = null) {
         <label class="settings-label" for="ssh-edit-port">Port</label>
         <input id="ssh-edit-port" class="settings-select" type="text" inputmode="numeric" style="width:110px" value="${esc(connection ? connection.port : 22)}">
       </div>
-      <label class="ssh-check"><input type="checkbox" id="ssh-edit-keyless" ${connection && connection.keyless ? 'checked' : ''}> Keyless — generate a keypair and preset it for this node</label>
+      ${peer && peer.keyless
+        ? '<div class="ssh-note">This node has Tailscale SSH enabled — no key or password is needed.</div>'
+        : `<label class="ssh-check"><input type="checkbox" id="ssh-edit-keyless" ${connection && connection.keyless ? 'checked' : ''}> Keyless — generate a keypair and preset it for this node</label>`}
       <div class="ssh-editor-actions">
         <button type="button" class="admin-btn-sm" data-ssh-editor="cancel">Cancel</button>
         <button type="button" class="admin-btn-add" data-ssh-editor="save">${connection ? 'Save changes' : 'Add connection'}</button>
@@ -312,7 +322,7 @@ function renderTailnetPeers(data) {
         <div class="ssh-tailnet-row">
           <div class="ssh-tailnet-info">
             <span class="admin-user-name">${esc(peer.name)}</span>
-            <span class="ssh-meta">${esc(peer.os || 'unknown OS')}</span>
+            <span class="ssh-meta">${esc(peer.os || 'unknown OS')}${peer.keyless ? ' · Keyless (Tailscale SSH)' : ''}</span>
           </div>
           <button type="button" class="admin-btn-sm" data-ssh-tailnet="${esc(peer.id)}">Add</button>
         </div>`).join('')}

@@ -74,6 +74,7 @@ _KNOWN_PEER_OS = {"android", "darwin", "freebsd", "ios", "linux", "windows"}
 _OPAQUE_PEER_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 _tailnet_secret = secrets.token_bytes(32)
 _tailnet_issued: dict[str, float] = {}
+_tailnet_peer_info: dict[str, dict[str, Any]] = {}
 _tailnet_lock = threading.Lock()
 
 STATE_UNKNOWN = "unknown"
@@ -84,6 +85,22 @@ STATE_HOST_KEY_CHANGED = "host_key_changed"
 STATE_UNREACHABLE = "unreachable"
 STATE_UNAVAILABLE = "unavailable"
 STATE_FAILED = "failed"
+STATE_CHECK_REQUIRED = "check_required"
+
+# ── authentication modes (MAD-976) ───────────────────────────────────────
+#
+# managed_key: this connection's stored key + a pinned host key (default).
+# tailscale_ssh: the node's Tailscale SSH. The tailnet identity authenticates
+# and Tailscale provides host verification, so no key or pin is needed.
+AUTH_MODE_MANAGED = "managed_key"
+AUTH_MODE_TAILSCALE = "tailscale_ssh"
+VALID_AUTH_MODES = (AUTH_MODE_MANAGED, AUTH_MODE_TAILSCALE)
+TAILSCALE_UNAVAILABLE_MESSAGE = (
+    "Tailscale is not available on this machine, so a Tailscale SSH connection cannot run."
+)
+TAILSCALE_FAILED_MESSAGE = (
+    "Tailscale SSH could not connect to the node. Check that the node has Tailscale SSH enabled."
+)
 
 CONNECTED_MESSAGE = "Connected. The connection is authorized, and no prompt was needed."
 AUTH_FAILED_MESSAGE = (
@@ -418,28 +435,38 @@ def _run_remote(
     max_bytes: int = AGENT_RUN_MAX_BYTES,
 ):
     """Run one bounded remote command through the managed OpenSSH config."""
-    with managed_agent_material(connection) as (binary, config_path, known_hosts_path):
-        alias = managed_alias(connection.id)
-        argv = [
-            binary,
-            "-F",
-            config_path,
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "-o",
-            "PasswordAuthentication=no",
-            "-o",
-            f"UserKnownHostsFile={known_hosts_path}",
-            "-o",
-            f"GlobalKnownHostsFile={_DEV_NULL}",
-            alias,
-            remote_command,
-        ]
+    if effective_auth_mode(connection) == AUTH_MODE_TAILSCALE:
+        argv = build_tailscale_ssh_argv(connection, remote_command)
+        if not argv:
+            raise SshAgentError(
+                "unavailable",
+                TAILSCALE_UNAVAILABLE_MESSAGE,
+                reason="tailscale_unavailable",
+            )
         proc = _run_command_bounded(argv, timeout=timeout, max_bytes=max_bytes)
+    else:
+        with managed_agent_material(connection) as (binary, config_path, known_hosts_path):
+            alias = managed_alias(connection.id)
+            argv = [
+                binary,
+                "-F",
+                config_path,
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "PasswordAuthentication=no",
+                "-o",
+                f"UserKnownHostsFile={known_hosts_path}",
+                "-o",
+                f"GlobalKnownHostsFile={_DEV_NULL}",
+                alias,
+                remote_command,
+            ]
+            proc = _run_command_bounded(argv, timeout=timeout, max_bytes=max_bytes)
     if proc.truncated and proc.stdout:
         return proc
     if proc.returncode == 0:
@@ -1052,13 +1079,86 @@ def classify_ssh_failure(stderr: str) -> dict[str, str]:
     return {"state": STATE_FAILED, "reason": "command_failed", "message": FAILED_MESSAGE}
 
 
+# ── authentication mode ──────────────────────────────────────────────────
+
+
+def effective_auth_mode(connection: Any) -> str:
+    mode = str(getattr(connection, "auth_mode", "") or "").strip().lower()
+    return mode if mode in VALID_AUTH_MODES else AUTH_MODE_MANAGED
+
+
+def validate_auth_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode not in VALID_AUTH_MODES:
+        raise HTTPException(400, "Unknown SSH authentication mode.")
+    return mode
+
+
+def build_tailscale_ssh_argv(connection: Any, remote_command: str | None = None) -> list[str] | None:
+    """Build the ``tailscale ssh`` argv for one connection (no keys, no pinning)."""
+    binary = resolve_tailscale_binary()
+    if not binary:
+        return None
+    argv = [binary, "ssh", f"{connection.user}@{connection.host}"]
+    if remote_command:
+        argv.append(remote_command)
+    return argv
+
+
+def _tailscale_check_url(text: str) -> str:
+    match = re.search(r"https://login\.tailscale\.com/\S+", str(text or ""))
+    return match.group(0) if match else ""
+
+
+def _tailscale_check_result(proc: Any) -> dict[str, Any] | None:
+    url = _tailscale_check_url(
+        (getattr(proc, "stdout", "") or "") + "\n" + (getattr(proc, "stderr", "") or "")
+    )
+    if not url:
+        return None
+    return {
+        "ok": False,
+        "state": STATE_CHECK_REQUIRED,
+        "reason": "check_required",
+        "message": f"Approve this device on your tailnet, then test again: {url}",
+    }
+
+
+def _run_tailscale_test(connection: Any) -> dict[str, Any]:
+    argv = build_tailscale_ssh_argv(connection, "true")
+    if not argv:
+        return {
+            "ok": False,
+            "state": STATE_UNAVAILABLE,
+            "reason": "tailscale_unavailable",
+            "message": TAILSCALE_UNAVAILABLE_MESSAGE,
+        }
+    proc = _run_command(argv, timeout=COMMAND_TIMEOUT_SECONDS)
+    if proc.returncode == 0:
+        return {"ok": True, "state": STATE_CONNECTED, "reason": "", "message": CONNECTED_MESSAGE}
+    check = _tailscale_check_result(proc)
+    if check:
+        return check
+    if proc.returncode == 124:
+        return {"ok": False, "state": STATE_UNREACHABLE, "reason": "timeout", "message": TIMEOUT_MESSAGE}
+    return {
+        "ok": False,
+        "state": STATE_FAILED,
+        "reason": "tailscale_failed",
+        "message": TAILSCALE_FAILED_MESSAGE,
+    }
+
+
 def run_connection_test(connection: Any) -> dict[str, Any]:
     """Test one saved connection through the system OpenSSH client.
 
     Fails closed before running when no host key is pinned. The command is
     argv-only (no shell) with BatchMode=yes so a saved connection never
-    prompts. Raw stderr is classified and never echoed.
+    prompts. Raw stderr is classified and never echoed. Tailscale SSH
+    connections skip keys and host-key pinning entirely.
     """
+    if effective_auth_mode(connection) == AUTH_MODE_TAILSCALE:
+        return _run_tailscale_test(connection)
     binary = resolve_ssh_binary()
     if not binary:
         return {
@@ -1335,6 +1435,7 @@ def _tailnet_records(status: dict[str, Any]) -> list[dict[str, str]]:
                 "address": address,
                 "name": name,
                 "os": os_name if os_name in _KNOWN_PEER_OS else "other",
+                "keyless": bool(peer.get("sshHostKeys")),
             }
         )
     return records
@@ -1363,14 +1464,27 @@ def discover_tailnet_peers() -> dict[str, Any]:
         }
     records = _tailnet_records(status)
     now = time.time()
-    peers: list[dict[str, str]] = []
+    peers: list[dict[str, Any]] = []
     with _tailnet_lock:
         for expired in [key for key, expires in _tailnet_issued.items() if expires <= now]:
             _tailnet_issued.pop(expired, None)
+            _tailnet_peer_info.pop(expired, None)
         for record in records[:TAILNET_MAX_PEERS]:
             peer_id = _tailnet_peer_id(record["key"])
             _tailnet_issued[peer_id] = now + TAILNET_PEER_TTL_SECONDS
-            peers.append({"id": peer_id, "name": record["name"], "os": record["os"]})
+            _tailnet_peer_info[peer_id] = {
+                "address": record["address"],
+                "name": record["name"],
+                "keyless": bool(record.get("keyless")),
+            }
+            peers.append(
+                {
+                    "id": peer_id,
+                    "name": record["name"],
+                    "os": record["os"],
+                    "keyless": bool(record.get("keyless")),
+                }
+            )
     message = (
         f"Found {len(peers)} online tailnet node(s)."
         if peers
@@ -1379,25 +1493,28 @@ def discover_tailnet_peers() -> dict[str, Any]:
     return {"available": True, "peers": peers, "message": message}
 
 
+def resolve_tailnet_peer_info(peer_id: Any) -> dict[str, Any]:
+    """Resolve one opaque scanned peer id to its address, name, and keyless flag."""
+    peer = str(peer_id or "").strip()
+    now = time.time()
+    with _tailnet_lock:
+        expires = _tailnet_issued.get(peer)
+        info = dict(_tailnet_peer_info.get(peer) or {})
+    if not _OPAQUE_PEER_ID_RE.match(peer) or not expires or expires <= now or not info:
+        raise HTTPException(
+            400,
+            "That tailnet node listing expired. Scan the tailnet again and pick the node.",
+        )
+    return info
+
+
 def resolve_tailnet_peer(peer_id: Any) -> str:
     """Resolve one opaque scanned peer id to its tailnet IPv4 address.
 
     Only ids issued by a recent ``discover_tailnet_peers`` call are accepted, so
     an arbitrary address can never be smuggled through this path.
     """
-    peer = str(peer_id or "").strip()
-    now = time.time()
-    with _tailnet_lock:
-        expires = _tailnet_issued.get(peer)
-    if not _OPAQUE_PEER_ID_RE.match(peer) or not expires or expires <= now:
-        raise HTTPException(
-            400,
-            "That tailnet node listing expired. Scan the tailnet again and pick the node.",
-        )
-    for record in _tailnet_records(_tailscale_status()):
-        if _tailnet_peer_id(record["key"]) == peer:
-            return record["address"]
-    raise HTTPException(400, "That tailnet node is no longer online. Scan the tailnet again.")
+    return str(resolve_tailnet_peer_info(peer_id)["address"])
 
 
 # ── payloads and audit ───────────────────────────────────────────────────
@@ -1413,6 +1530,7 @@ def connection_payload(connection: Any) -> dict[str, Any]:
         "user": connection.user,
         "port": int(connection.port or DEFAULT_SSH_PORT),
         "keyless": bool(getattr(connection, "keyless", False)),
+        "auth_mode": effective_auth_mode(connection),
         "has_private_key": bool(getattr(connection, "private_key", None)),
         "public_key": connection.public_key or "",
         "host_key_pinned": bool(getattr(connection, "host_key", None)),

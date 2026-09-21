@@ -75,20 +75,29 @@ def setup_ssh_routes() -> APIRouter:
         port: str = Form("22"),
         keyless: str = Form("false"),
         tailnet_peer_id: str = Form(""),
+        auth_mode: str = Form(""),
     ):
         require_admin(request)
         label_value = ssh.validate_label(_form_text(label))
         # A scanned tailnet node wins over a typed host: the address is resolved
         # server-side from the opaque id issued by /api/ssh/discover, so the
-        # browser never has to send (or know) the tailnet address.
+        # browser never has to send (or know) the tailnet address. A node that
+        # advertises Tailscale SSH defaults to the keyless tailscale_ssh mode.
         peer_ref = _form_text(tailnet_peer_id).strip()
+        mode_value = _form_text(auth_mode).strip().lower()
         if peer_ref:
-            host_value = ssh.resolve_tailnet_peer(peer_ref)
+            info = ssh.resolve_tailnet_peer_info(peer_ref)
+            host_value = str(info["address"])
+            if not mode_value:
+                mode_value = (
+                    ssh.AUTH_MODE_TAILSCALE if info.get("keyless") else ssh.AUTH_MODE_MANAGED
+                )
         else:
             host_value = ssh.validate_host(_form_text(host))
+        mode_value = ssh.validate_auth_mode(mode_value or ssh.AUTH_MODE_MANAGED)
         user_value = ssh.validate_user(_form_text(user))
         port_value = ssh.validate_port(_form_text(port, "22"))
-        enabled = _truthy(_form_text(keyless, "false"))
+        enabled = _truthy(_form_text(keyless, "false")) and mode_value == ssh.AUTH_MODE_MANAGED
         message = "Connection added."
         with SessionLocal() as session:
             row = SshConnection(
@@ -98,11 +107,14 @@ def setup_ssh_routes() -> APIRouter:
                 user=user_value,
                 port=port_value,
                 keyless=enabled,
+                auth_mode=mode_value,
             )
             session.add(row)
             session.commit()
             session.refresh(row)
-            if enabled:
+            if mode_value == ssh.AUTH_MODE_TAILSCALE:
+                message = "Connection added. Test it to connect over Tailscale SSH."
+            elif enabled:
                 try:
                     pair = ssh.generate_keypair(row.id)
                 except HTTPException as exc:
@@ -140,6 +152,7 @@ def setup_ssh_routes() -> APIRouter:
         user: Optional[str] = Form(None),
         port: Optional[str] = Form(None),
         allowed_commands: Optional[str] = Form(None),
+        auth_mode: Optional[str] = Form(None),
     ):
         require_admin(request)
         with SessionLocal() as session:
@@ -150,6 +163,8 @@ def setup_ssh_routes() -> APIRouter:
                 row.user = ssh.validate_user(user)
             if isinstance(port, str):
                 row.port = ssh.validate_port(port)
+            if isinstance(auth_mode, str) and auth_mode.strip():
+                row.auth_mode = ssh.validate_auth_mode(auth_mode)
             if isinstance(allowed_commands, str):
                 # MAD-936: the agent command policy. Empty clears back to the
                 # built-in read-only default; values are validated against a
@@ -312,6 +327,11 @@ def setup_ssh_routes() -> APIRouter:
             raise HTTPException(400, ssh.MISSING_PASSWORD_MESSAGE)
         with SessionLocal() as session:
             row = _require_row(session, connection_id)
+            if ssh.effective_auth_mode(row) == ssh.AUTH_MODE_TAILSCALE:
+                raise HTTPException(
+                    400,
+                    "This connection uses Tailscale SSH, so no key install is needed.",
+                )
             if not row.host_key:
                 try:
                     entries = ssh.scan_host_key(row.host, int(row.port or ssh.DEFAULT_SSH_PORT))
