@@ -399,6 +399,7 @@ def setup_ssh_routes() -> APIRouter:
                 "state": result["state"],
                 "reason": result.get("reason") or "",
                 "message": result.get("message") or "",
+                "check_url": result.get("check_url") or "",
             }
         )
         return ssh.redact_payload(payload)

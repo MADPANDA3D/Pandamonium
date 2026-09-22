@@ -79,6 +79,8 @@ test('scanning the tailnet lists nodes by name and OS without leaking addresses'
   await expect(panel).toContainText('oracle');
   await expect(panel).toContainText('iphone172');
   await expect(panel).toContainText('Keyless (Tailscale SSH)');
+  await expect(panel).toContainText('SSH not enabled');
+  await expect(panel).toContainText('sudo tailscale set --ssh');
   await expect(page.locator('body')).not.toContainText('100.117.131.123');
   await expect(page.locator('body')).not.toContainText('100.64.242.88');
 });
@@ -156,6 +158,33 @@ test('an unavailable or empty tailnet shows honest copy', async ({ page }) => {
   await page.locator('#ssh-scan-btn').click();
   await expect(page.locator('#ssh-tailnet-results')).toContainText('Tailscale is not available');
   await expect(page.locator('#ssh-tailnet-results .ssh-tailnet-panel')).toHaveCount(0);
+});
+
+test('a Tailscale check requirement renders a clickable approval link', async ({ page }) => {
+  const checkConn = {
+    ...ADDED,
+    label: 'madpanda-workstation',
+    host: '100.64.242.88',
+    auth_mode: 'tailscale_ssh',
+    has_private_key: false,
+    public_key: '',
+    host_key_pinned: false,
+    status: {
+      state: 'check_required',
+      reason: 'check_required',
+      message: 'Approve this device on your tailnet, then test again: https://login.tailscale.com/a/abc123',
+      checked_at: null,
+    },
+  };
+  await stubApi(page, { initialConnections: [checkConn] });
+  await openSshTab(page);
+
+  const row = page.locator('.ssh-row[data-ssh-id="ssh-newtailnet1"]');
+  await expect(row).toContainText('Approval required');
+  const link = row.locator('a.ssh-approve-link');
+  await expect(link).toHaveAttribute('href', 'https://login.tailscale.com/a/abc123');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(row.locator('a.ssh-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/abc123');
 });
 
 test('finishing setup installs the key with the node password and goes green', async ({ page }) => {

@@ -192,6 +192,7 @@ def test_tailscale_test_surfaces_check_link_without_crashing(monkeypatch):
     result = ssh_connections.run_connection_test(connection)
 
     assert result["state"] == "check_required"
+    assert result["check_url"] == "https://login.tailscale.com/a/abc123"
     assert "https://login.tailscale.com/a/abc123" in result["message"]
 
 
@@ -300,3 +301,35 @@ def test_add_connection_still_requires_host_without_tailnet_peer(ssh_env, router
             tailnet_peer_id="",
         )
     assert excinfo.value.status_code == 400
+
+
+def test_test_route_surfaces_tailscale_check_url(ssh_env, fake_tailscale, router, monkeypatch):
+    peer = next(p for p in ssh_connections.discover_tailnet_peers()["peers"] if p["name"] == "oracle")
+    add = _route(router, "/api/ssh/connections", "POST")
+    payload = add(
+        _admin_request(),
+        label="Oracle",
+        host="",
+        user="root",
+        port="22",
+        keyless="false",
+        tailnet_peer_id=peer["id"],
+    )
+    assert payload["auth_mode"] == "tailscale_ssh"
+
+    monkeypatch.setattr(
+        ssh_connections,
+        "run_connection_test",
+        lambda connection: {
+            "ok": False,
+            "state": "check_required",
+            "reason": "check_required",
+            "message": "Approve this device on your tailnet, then test again: https://login.tailscale.com/a/abc123",
+            "check_url": "https://login.tailscale.com/a/abc123",
+        },
+    )
+    test_endpoint = _route(router, "/api/ssh/connections/{connection_id}/test", "POST")
+    result = test_endpoint(_admin_request(), payload["id"])
+
+    assert result["state"] == "check_required"
+    assert result["check_url"] == "https://login.tailscale.com/a/abc123"

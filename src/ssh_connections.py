@@ -1138,6 +1138,7 @@ def _tailscale_check_result(proc: Any) -> dict[str, Any] | None:
         "state": STATE_CHECK_REQUIRED,
         "reason": "check_required",
         "message": f"Approve this device on your tailnet, then test again: {url}",
+        "check_url": url,
     }
 
 

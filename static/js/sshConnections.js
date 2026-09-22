@@ -23,6 +23,7 @@ const STATE_LABELS = {
   unreachable: 'Unreachable',
   unavailable: 'OpenSSH unavailable',
   failed: 'Failed',
+  check_required: 'Approval required',
   unknown: 'Not tested',
 };
 
@@ -35,10 +36,22 @@ const _expanded = new Set();
 function el(id) { return document.getElementById(id); }
 function esc(value) { return uiModule.esc(value == null ? '' : String(value)); }
 
+// Escape first, then turn http(s) URLs into real links so a node that needs
+// tailnet approval is never a dead-end wall of text.
+function linkify(text) {
+  return esc(text).replace(/(https?:\/\/[^\s<"'&]+)/g, (url) =>
+    `<a class="ssh-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+}
+
+function checkUrlFromMessage(message) {
+  const match = String(message || '').match(/https:\/\/login\.tailscale\.com\/[^\s<"'&]+/);
+  return match ? match[0] : '';
+}
+
 function setMessage(text, ok) {
   const node = el(MSG_ID);
   if (!node) return;
-  node.textContent = text || '';
+  node.innerHTML = text ? linkify(text) : '';
   node.style.color = ok ? 'var(--green, #50fa7b)' : (text ? 'var(--red, #ff3347)' : '');
 }
 
@@ -73,6 +86,10 @@ function rowHtml(connection) {
   const meta = isTailscale
     ? `${esc(connection.user)}@${esc(connection.host)}:${esc(connection.port)} · Tailscale SSH (no key needed)`
     : `${esc(connection.user)}@${esc(connection.host)}:${esc(connection.port)}${connection.host_key_pinned ? ` · host key ${esc(connection.host_key_fingerprint || 'pinned')}` : ' · host key not pinned'}`;
+  const statusMessage = connection.status && connection.status.message ? String(connection.status.message) : '';
+  const checkUrl = connection.status && connection.status.state === 'check_required'
+    ? checkUrlFromMessage(statusMessage)
+    : '';
   const actions = isTailscale
     ? `<button type="button" class="admin-btn-sm" data-ssh-action="test">Test</button>
         <button type="button" class="admin-btn-sm" data-ssh-action="edit">Edit</button>
@@ -93,7 +110,8 @@ function rowHtml(connection) {
         ${connection.keyless ? '<span class="ssh-chip ssh-chip-key">Keyless</span>' : ''}
       </div>
       <div class="ssh-meta">${meta}</div>
-      ${connection.status && connection.status.message ? `<div class="ssh-note">${esc(connection.status.message)}</div>` : ''}
+      ${statusMessage ? `<div class="ssh-note">${linkify(statusMessage)}</div>` : ''}
+      ${checkUrl ? `<div class="ssh-approve"><a class="admin-btn-sm ssh-approve-link" href="${esc(checkUrl)}" target="_blank" rel="noopener noreferrer">Approve on tailnet →</a></div>` : ''}
       ${isTailscale ? '' : `<div class="ssh-detail ${expanded ? '' : 'hidden'}" data-ssh-detail>
         ${connection.has_private_key
           ? `<div class="ssh-field-label">Public key — install this on the node</div><pre class="ssh-key">${esc(connection.public_key)}</pre>`
@@ -318,11 +336,13 @@ function renderTailnetPeers(data) {
   results.innerHTML = `
     <div class="ssh-tailnet-panel">
       <div class="ssh-field-label">Online tailnet nodes — pick one to add</div>
+      <div class="ssh-note">Nodes marked <strong>Keyless (Tailscale SSH)</strong> are ready now. For any other node, run the shown command on that node, then Refresh.</div>
       ${peers.map((peer) => `
         <div class="ssh-tailnet-row">
           <div class="ssh-tailnet-info">
             <span class="admin-user-name">${esc(peer.name)}</span>
-            <span class="ssh-meta">${esc(peer.os || 'unknown OS')}${peer.keyless ? ' · Keyless (Tailscale SSH)' : ''}</span>
+            <span class="ssh-meta">${esc(peer.os || 'unknown OS')}${peer.keyless ? ' · Keyless (Tailscale SSH)' : ' · SSH not enabled'}</span>
+            ${peer.keyless ? '' : `<div class="ssh-note">Run <code class="ssh-cmd">sudo tailscale set --ssh</code> on ${esc(peer.name)}, then Refresh.<button type="button" class="admin-btn-sm ssh-copy-btn" data-ssh-copy="sudo tailscale set --ssh">Copy</button></div>`}
           </div>
           <button type="button" class="admin-btn-sm" data-ssh-tailnet="${esc(peer.id)}">Add</button>
         </div>`).join('')}
@@ -334,6 +354,16 @@ function renderTailnetPeers(data) {
       openEditor(null, { tailnetPeer: peer });
       const editor = el(EDITOR_ID);
       if (editor && editor.scrollIntoView) editor.scrollIntoView({ block: 'nearest' });
+    });
+  });
+  results.querySelectorAll('[data-ssh-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.sshCopy);
+        button.textContent = 'Copied';
+      } catch (_) {
+        button.textContent = 'Select';
+      }
     });
   });
 }

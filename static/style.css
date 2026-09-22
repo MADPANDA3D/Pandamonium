@@ -16323,6 +16323,19 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 .ssh-tailnet-info .ssh-meta { margin-top: 0; }
 .ssh-install-row { display: flex; align-items: center; gap: 6px; }
 .ssh-install-row .ssh-password-input { flex: 1; min-width: 0; font-size: 11px; }
+.ssh-link { color: var(--accent, var(--red)); text-decoration: underline; word-break: break-all; }
+.ssh-approve { margin-top: 6px; }
+.ssh-approve-link { text-decoration: none; }
+.ssh-cmd {
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  user-select: all;
+}
+.ssh-copy-btn { margin-left: 6px; }
 
 /* Training Runtime tab (MAD-796). Reuses the admin row/button language. */
 .unsloth-row .unsloth-meta {
