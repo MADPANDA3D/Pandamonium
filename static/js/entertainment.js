@@ -1,4 +1,5 @@
 import uiModule from './ui.js';
+import { setView, clearView } from './viewState.js';
 
 const el = id => document.getElementById(id);
 const esc = value => uiModule.esc(String(value));
@@ -994,6 +995,7 @@ export async function openEntertainment() {
   const tabs = el('entertainment-tabs');
   if (tabs) tabs.innerHTML = providers.length > 1 ? providers.map(provider => `<button type="button" data-provider="${provider.id}">${esc(provider.label)}</button>`).join('') : '';
   el('entertainment-modal').classList.remove('hidden');
+  setView('entertainment');
   const preferred = providers.find(provider => provider.id === prefs.provider && provider.enabled);
   if (preferred) showProvider(preferred.id); else showLanding();
 }
@@ -1001,6 +1003,7 @@ export async function openEntertainment() {
 export function closeEntertainment() {
   stopPlayer();
   el('entertainment-modal')?.classList.add('hidden');
+  clearView('entertainment');
 }
 
 // Show the sidebar entry as soon as the app loads, not only after Settings has

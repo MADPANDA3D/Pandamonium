@@ -29,6 +29,7 @@ import { previewZoneAt, clearPreview, snapModalToZone } from './tileManager.js';
 import { suspendDock, resumeDock, clearRightDock, applyEdgeDock, edgeDockAvailable } from './modalSnap.js';
 import { dismissOrRemove } from './escMenuStack.js';
 import { nextToolWindowZ } from './toolWindowZOrder.js';
+import { rememberOpenTool, forgetOpenTool } from './viewState.js';
 
 const _state = new Map(); // id -> { restoreFn, closeFn, railBtnId, isMinimized, restoreMinHeight }
 const _REPORTABLE_VIEWS = {
@@ -108,6 +109,9 @@ function _bringToFront(modal) {
 }
 
 function _emitModalOpened(id, modal) {
+  try {
+    rememberOpenTool(id);
+  } catch (_) {}
   try {
     window.dispatchEvent(new CustomEvent('odysseus:modal-opened', {
       detail: { id, modal },
@@ -1261,6 +1265,7 @@ export function unregister(id) {
   if (s) _setBadge(s.btnIds, false);
   _state.delete(id);
   _chipPositions.delete(id);
+  try { forgetOpenTool(id); } catch (_) {}
   // Drop any per-popup _LABELS entry created at register-time.
   if (_customLabelIds.has(id)) {
     delete _LABELS[id];
@@ -1451,9 +1456,10 @@ export function close(id) {
       content.style.opacity = '';
     }
   }
-  _setBadge(s.btnIds, false);
+_setBadge(s.btnIds, false);
   _state.delete(id);
   _chipPositions.delete(id);
+  try { forgetOpenTool(id); } catch (_) {}
   _saveDockState();
   _renderDock();
 }

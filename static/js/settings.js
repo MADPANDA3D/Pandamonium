@@ -15,6 +15,7 @@ import sshConnectionsModule from './sshConnections.js';
 import unslothRuntimeModule from './unslothRuntime.js';
 import { openSoundboard, refreshSoundboard } from './soundboard.js';
 import { refreshEntertainment } from './entertainment.js';
+import { setView, clearView } from './viewState.js';
 import { startVoicePreview } from './voicePreview.js';
 import { initModelHelp } from './modelHelp.js';
 
@@ -6580,6 +6581,7 @@ export function open(tab) {
     resetWindowPlacement();
   }
   modalEl.classList.remove('hidden');
+  setView('settings');
   // Open docked to the right on desktop (same edge-dock the user can drag
   // away from); mobile keeps the full-sheet layout.
   if (window.innerWidth > 768) {
@@ -6607,6 +6609,7 @@ export function open(tab) {
 
 export function close() {
   if (!modalEl) return;
+  clearView('settings');
   // Always clear the appearance-tab body class so the rest of the app
   // doesn't keep its dimmed state if the modal got closed mid-tab.
   document.body.classList.remove('settings-appearance-open');
