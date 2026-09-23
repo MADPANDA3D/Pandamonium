@@ -217,3 +217,20 @@ test('marketplace renders loading, offline, empty, and mobile detail navigation'
   await page.locator('#marketplace-retry').click();
   await expect(page.locator('#marketplace-results')).toContainText('No plugins published');
 });
+
+test('marketplace lists not-installed plugins before installed ones', async ({ page }) => {
+  await mockApp(page);
+  await page.route('**/api/extensions/installed', route => route.fulfill({
+    json: { plugins: [
+      { id: 'atlas', name: 'Atlas', version: '2.0.0', state: 'enabled', runtime: 'openapi', descriptor: 'openapi', origin: 'registry', capability_count: 1 },
+    ] },
+  }));
+  await page.goto('/static/index.html');
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+  await page.getByRole('tab', { name: 'Marketplace' }).click();
+
+  const cards = page.locator('#marketplace-results .marketplace-card');
+  await expect(cards.first()).toHaveAttribute('data-plugin-id', 'robin');
+  await expect(cards.nth(1)).toHaveAttribute('data-plugin-id', 'atlas');
+  await expect(cards.nth(1)).toContainText('Installed');
+});

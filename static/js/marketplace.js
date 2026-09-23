@@ -147,6 +147,9 @@ function statusBadges(plugin) {
   if (installation !== 'available') {
     nodes.push(badge(labels[installation] || installation, installation === 'update_available' ? 'warning' : 'positive'));
   }
+  if (plugin.installed && installation !== 'installed') {
+    nodes.push(badge('Installed', 'positive'));
+  }
   if (plugin.availability !== 'available') {
     nodes.push(badge(labels[plugin.availability] || plugin.availability, plugin.availability === 'revoked' ? 'danger' : 'warning'));
   }
@@ -244,11 +247,11 @@ async function loadInstalled(generation) {
 
 function renderReadiness(plugin) {
   const value = plugin.readiness || { state: plugin.state === 'disabled' ? 'disabled' : 'needs_setup', message: 'Install or enable to verify setup and capabilities.' };
-  const names = { ready: 'Ready', needs_setup: 'Needs setup', preparing: 'Preparing', failed: 'Failed', disabled: 'Disabled' };
+  const names = { ready: 'Ready', available: 'Available', needs_setup: 'Needs setup', preparing: 'Preparing', failed: 'Failed', disabled: 'Disabled' };
   const section = element('div', 'marketplace-readiness');
   section.dataset.readiness = value.state;
   section.setAttribute('role', 'status');
-  section.append(badge(names[value.state] || 'Needs setup', value.state === 'ready' ? 'positive' : value.state === 'failed' ? 'danger' : 'warning'), element('p', '', value.message));
+  section.append(badge(names[value.state] || 'Needs setup', (value.state === 'ready' || value.state === 'available') ? 'positive' : value.state === 'failed' ? 'danger' : 'warning'), element('p', '', value.message));
   return section;
 }
 
@@ -1037,7 +1040,18 @@ function mergeInstalledIntoMarketplace(catalogPlugins) {
   const extras = installedPlugins
     .filter(plugin => !known.has(plugin.id))
     .map(installedMarketplaceEntry);
-  return [...catalogPlugins.map(plugin => ({ ...plugin, readiness: installedPlugins.find(item => item.id === plugin.id)?.readiness || { state: 'needs_setup', message: 'Not installed in this account. Install to complete setup and validation.' } })), ...extras];
+  const merged = catalogPlugins.map(plugin => {
+    const installed = installedPlugins.find(item => item.id === plugin.id);
+    return {
+      ...plugin,
+      installed: Boolean(installed),
+      readiness: installed?.readiness || { state: 'needs_setup', message: 'Not installed in this account. Install to complete setup and validation.' },
+    };
+  });
+  // Not-installed first, so the operator sees what they can add without
+  // scrolling past everything already installed. Stable within each group.
+  merged.sort((a, b) => Number(a.installed) - Number(b.installed));
+  return [...merged, ...extras];
 }
 
 async function load() {

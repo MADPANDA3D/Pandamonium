@@ -27,7 +27,7 @@ def _tool(name: str) -> dict:
     }
 
 
-def _registry_with_oracle(tmp_path: Path) -> ExtensionRegistry:
+def _registry_with_oracle(tmp_path: Path, *, disabled: bool = True) -> ExtensionRegistry:
     registry = ExtensionRegistry(tmp_path / "extensions.json")
     oracle = _manifest("oracle")
     oracle["configuration"] = [
@@ -51,7 +51,8 @@ def _registry_with_oracle(tmp_path: Path) -> ExtensionRegistry:
         source_revision=revision,
         health_available=True,
     )
-    registry.disable("oracle")
+    if disabled:
+        registry.disable("oracle")
     return registry
 
 
@@ -72,6 +73,17 @@ def test_rows_include_registry_and_configured_and_registry_wins(tmp_path):
     assert by_id["browser-tools"]["origin"] == "configured"
     assert by_id["browser-tools"]["state"] == "configured"
     assert [row["id"] for row in rows] == sorted(by_id, key=lambda key: (by_id[key]["name"].lower(), key))
+
+
+def test_enabled_web_surface_reports_available_not_needs_setup(tmp_path):
+    registry = _registry_with_oracle(tmp_path, disabled=False)
+
+    rows = installed_plugin_rows(registry)
+    oracle = next(row for row in rows if row["id"] == "oracle")
+
+    assert oracle["state"] == "enabled"
+    assert oracle["readiness"]["state"] == "available"
+    assert "surface" in oracle["readiness"]["message"].lower()
 
 
 def test_registry_detail_exposes_capabilities_with_descriptions_and_no_secrets(tmp_path):

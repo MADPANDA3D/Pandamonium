@@ -57,6 +57,11 @@ def plugin_readiness(record: Mapping[str, Any], *, owner: str | None = None, roo
         if owner and declared and declared <= admitted:
             return {"state": "ready", "message": "Skills are admitted in the native Skills manager. Skills provide instructions; they are not executable tools."}
         return {"state": "needs_setup", "message": "The declared skills are not all admitted for this account. Open Plugins as the installing owner to check setup."}
+    runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), Mapping) else {}
+    capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), Mapping) else {}
+    descriptor_block = capabilities.get("descriptor") if isinstance(capabilities.get("descriptor"), Mapping) else {}
+    if str(runtime.get("type") or "") in {"web", "browser"} or descriptor_block.get("type") == "live_catalog":
+        return {"state": "available", "message": BROWSER_SURFACE_NOTE}
     return {"state": "needs_setup", "message": "Connect or open the configured surface to check its live capabilities. An enabled record alone does not verify execution."}
 
 BROWSER_SURFACE_NOTE = (
