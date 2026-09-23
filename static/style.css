@@ -44271,6 +44271,9 @@ body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-ev
   flex-direction: column;
   gap: 16px;
 }
+/* display:flex outranks the UA [hidden] rule; without this every step's panel
+   renders stacked and the tabs/Next look broken. */
+.bug-report-panel[hidden] { display: none; }
 .bug-report-field {
   display: flex;
   flex-direction: column;

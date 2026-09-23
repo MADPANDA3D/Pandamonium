@@ -545,28 +545,9 @@ function _renderCapture() {
     rows: 3, placeholder: 'Include the exact error text if you saw one', maxLength: 4000,
   }));
 
-  const stepsField = document.createElement('div');
-  stepsField.className = 'bug-report-field';
-  const stepsLabel = document.createElement('span');
-  stepsLabel.className = 'bug-report-label';
-  stepsLabel.textContent = 'Steps to reproduce (ordered)';
-  stepsField.appendChild(stepsLabel);
-  const list = document.createElement('div');
-  list.id = 'bug-report-steps-list';
-  list.className = 'bug-report-steps';
-  stepsField.appendChild(list);
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.id = 'bug-report-step-add';
-  add.className = 'bug-report-add-step';
-  add.textContent = '+ Add step';
-  add.addEventListener('click', () => {
-    if (_state.draft.steps.length >= 30) return;
-    _state.draft.steps.push('');
-    _renderSteps();
-  });
-  stepsField.appendChild(add);
-  panel.appendChild(stepsField);
+  // Reproduction steps are no longer requested: every report already carries
+  // redacted diagnostics, the exact route, and screenshots automatically.
+  _state.draft.steps = [];
 
   panel.appendChild(_field('Workaround', 'bug-report-workaround', {
     rows: 2, placeholder: 'How did you get past it? (optional)', maxLength: 2000,
@@ -592,51 +573,6 @@ function _renderCapture() {
   bindField('bug-report-actual', 'actual');
   bindField('bug-report-workaround', 'workaround');
   bindField('bug-report-reviewed-text', 'reviewed_text');
-
-  _renderSteps();
-}
-
-function _renderSteps() {
-  const list = _byId('bug-report-steps-list');
-  if (!list) return;
-  if (!_state.draft.steps.length) _state.draft.steps = [''];
-  list.replaceChildren();
-  _state.draft.steps.forEach((value, index) => {
-    const row = document.createElement('div');
-    row.className = 'bug-report-step';
-    const number = document.createElement('span');
-    number.className = 'bug-report-step-number';
-    number.textContent = String(index + 1);
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'styled-prompt-input bug-report-step-input';
-    input.maxLength = 600;
-    input.value = value || '';
-    input.setAttribute('aria-label', `Reproduction step ${index + 1}`);
-    input.addEventListener('input', () => {
-      _state.draft.steps[index] = input.value;
-      _persistDraft();
-    });
-    const up = _iconButton('↑', `Move step ${index + 1} up`, () => _moveStep(index, -1));
-    const down = _iconButton('↓', `Move step ${index + 1} down`, () => _moveStep(index, 1));
-    const remove = _iconButton('✖', `Remove step ${index + 1}`, () => {
-      _state.draft.steps.splice(index, 1);
-      if (!_state.draft.steps.length) _state.draft.steps = [''];
-      _persistDraft();
-      _renderSteps();
-    });
-    row.append(number, input, up, down, remove);
-    list.appendChild(row);
-  });
-}
-
-function _moveStep(index, delta) {
-  const target = index + delta;
-  if (target < 0 || target >= _state.draft.steps.length) return;
-  const [value] = _state.draft.steps.splice(index, 1);
-  _state.draft.steps.splice(target, 0, value);
-  _persistDraft();
-  _renderSteps();
 }
 
 function _iconButton(glyph, label, handler) {

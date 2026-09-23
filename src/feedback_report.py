@@ -275,12 +275,6 @@ def _bullets(lines: list[str]) -> str:
     return "\n".join(f"- {line}" for line in lines) if lines else "_Not provided._"
 
 
-def _numbered(steps: list[str]) -> str:
-    if not steps:
-        return "_Not provided._"
-    return "\n".join(f"{index}. {step}" for index, step in enumerate(steps, 1))
-
-
 def _diagnostics_block(diagnostics: Mapping[str, Any] | None) -> str:
     if not diagnostics:
         return "_Diagnostics were not included._"
@@ -329,14 +323,12 @@ def build_issue_body(
 ) -> str:
     """The exact public markdown body shown in review and posted to GitHub."""
     meta = REPORT_TYPES[str(draft.get("type") or "bug")]
-    steps = list(draft.get("steps") or [])
     body = "\n".join(
         [
             f"### Summary\n{draft.get('summary') or ''}",
             f"### What I was trying to do\n{draft.get('goal') or '_Not provided._'}",
             f"### Expected behavior\n{draft.get('expected') or '_Not provided._'}",
             f"### Actual behavior / error\n{draft.get('actual') or '_Not provided._'}",
-            f"### Steps to reproduce\n{_numbered(steps)}",
             f"### Workaround\n{draft.get('workaround') or '_None found._'}",
             f"### Report type\n{meta['label']}",
             "### Diagnostics (automatic, redacted)\n"
