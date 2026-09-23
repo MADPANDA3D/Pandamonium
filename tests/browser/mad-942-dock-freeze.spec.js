@@ -21,8 +21,8 @@ async function installMockRoutes(page) {
 async function openDockedUpdater(page) {
   await installMockRoutes(page);
   await page.goto('/static/index.html');
-  await expect(page.locator('#sidebar-update-check')).toBeVisible();
-  await page.locator('#sidebar-update-check').click();
+  await expect(page.locator('#sidebar-version-btn')).toBeVisible();
+  await page.locator('#sidebar-version-btn').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-modal')).toHaveClass(/modal-right-docked/);
 }

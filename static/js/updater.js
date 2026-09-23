@@ -47,6 +47,9 @@ function setState(text, kind = 'unknown') {
   if (!state) return;
   state.textContent = text;
   state.className = `sidebar-update-state is-${kind}`;
+  // The sidebar stays sleek: only surface a status line while something is
+  // actually happening or needs attention. Up-to-date / available are implied.
+  state.hidden = kind === 'current' || kind === 'available';
 }
 
 function setPill(state, label) {
@@ -154,9 +157,13 @@ function renderFacts(data = {}) {
 
   const sidebarVersion = el('sidebar-update-version');
   const sidebarCommit = el('sidebar-update-commit');
-  if (sidebarVersion) sidebarVersion.textContent = `Version ${version}`;
+  if (sidebarVersion) {
+    sidebarVersion.textContent = version;
+    sidebarVersion.title = data.commit ? `${version} · ${shortCommit(data.commit)}` : version;
+  }
   if (sidebarCommit) {
-    sidebarCommit.textContent = `Deployed ${deploymentLabel(data)} · ${shortCommit(data.commit)}`;
+    sidebarCommit.hidden = true;
+    sidebarCommit.textContent = '';
   }
   if (data.version) window._appVersion = data.version;
 }
@@ -240,7 +247,7 @@ function renderRelease(data, { preserveOperation = false } = {}) {
   const apply = el('updater-apply');
   const hasReleaseAction = Boolean(data.update_available);
   const canApply = Boolean(data.update_available && data.can_update);
-  if (check) check.hidden = hasReleaseAction;
+  if (check) check.hidden = true;
   if (action) {
     action.hidden = !hasReleaseAction;
     action.textContent = data.latest_version
@@ -258,12 +265,9 @@ function renderRelease(data, { preserveOperation = false } = {}) {
       data.compatible ? 'available' : 'unknown',
     );
     const detail = el('sidebar-update-detail');
-    const compatibility = data.compatible
-      ? (data.can_update ? 'Signed update ready' : data.installation?.reason)
-      : data.compatibility_reason;
-    if (detail && compatibility) {
-      detail.hidden = false;
-      detail.textContent = compatibility;
+    if (detail) {
+      detail.hidden = true;
+      detail.textContent = '';
     }
   } else if (data.update_status === 'current') {
     setState('Up to date', 'current');
@@ -295,7 +299,7 @@ function renderOperation(operation = {}) {
     checkButton.textContent = active ? 'View update progress' : 'Check for updates';
   }
   if (active) {
-    if (checkButton) checkButton.hidden = false;
+    if (checkButton) checkButton.hidden = true;
     if (action) action.hidden = true;
     if (modalCheck) modalCheck.hidden = true;
   }
@@ -339,7 +343,7 @@ function renderOperation(operation = {}) {
   }
   const backupLocation = operation.backup_location || '';
   if (backup) {
-    backup.hidden = !backupLocation;
+    backup.hidden = true;
     backup.textContent = backupLocation ? `Backup: ${backupLocation}` : '';
   }
   if (modalBackup) {
@@ -347,7 +351,7 @@ function renderOperation(operation = {}) {
     modalBackup.textContent = backupLocation ? `Protected backup: ${backupLocation}` : '';
   }
   const showRollback = Boolean(operation.rollback_available && !active);
-  if (rollback) rollback.hidden = !showRollback;
+  if (rollback) rollback.hidden = true;
   if (modalRollback) modalRollback.hidden = !showRollback;
 }
 
@@ -611,7 +615,7 @@ function closeModal() {
   const opener = modalOpener;
   modalOpener = null;
   const fallback = el('sidebar-update-action')?.hidden
-    ? el('sidebar-update-check')
+    ? el('sidebar-version-btn')
     : el('sidebar-update-action');
   window.setTimeout(() => (opener?.hidden ? fallback : opener)?.focus?.(), 0);
 }
@@ -619,7 +623,7 @@ function closeModal() {
 function openModal({ checkNow = false, opener = null } = {}) {
   const modal = el(MODAL_ID);
   if (!modal) return;
-  modalOpener = opener || document.activeElement || el('sidebar-update-check');
+  modalOpener = opener || document.activeElement || el('sidebar-version-btn');
   modal.classList.remove('hidden');
   modal.removeAttribute('aria-hidden');
   // Open docked to the right on desktop; still draggable off the edge.
@@ -771,6 +775,12 @@ async function init() {
       window.setTimeout(() => window.location.reload(), 0);
     }
   });
+  el('sidebar-version-btn')?.addEventListener('click', event => {
+    openModal({
+      checkNow: !ACTIVE_STATUSES.has(lastOperation.status),
+      opener: event.currentTarget,
+    });
+  });
   el('sidebar-update-check')?.addEventListener('click', event => {
     openModal({
       checkNow: !ACTIVE_STATUSES.has(lastOperation.status),
@@ -819,7 +829,7 @@ async function init() {
     } catch (_) {}
   }
   if ((revisionReconciled || workerReconcile) && reopenModal) {
-    openModal({ checkNow: false, opener: el('sidebar-update-check') });
+    openModal({ checkNow: false, opener: el('sidebar-version-btn') });
   }
 }
 

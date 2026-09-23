@@ -542,25 +542,33 @@ body.bg-pattern-sparkles {
       align-items: stretch;
       gap: 5px;
       margin: 6px 12px 0;
-      padding: 7px 9px;
       flex-shrink: 0;
-      border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--fg) 3%, transparent);
     }
 
-    .sidebar-update-copy {
+    .sidebar-version {
       display: flex;
-      flex-direction: column;
-      min-width: 0;
-      gap: 1px;
+      align-items: center;
+      gap: 7px;
+      width: 100%;
+      min-height: 24px;
+      padding: 3px 5px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      text-align: left;
     }
+
+    .sidebar-version:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 
     .sidebar-update-version {
       color: var(--fg);
-      font-size: 12px;
-      font-weight: 650;
-      letter-spacing: 0.02em;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      opacity: 0.5;
+      font-variant-numeric: tabular-nums;
     }
 
     .sidebar-update-state {
@@ -569,7 +577,7 @@ body.bg-pattern-sparkles {
       gap: 5px;
       color: var(--fg);
       font-size: 11px;
-      opacity: 0.6;
+      opacity: 0.7;
       line-height: 1.3;
     }
 
@@ -586,6 +594,8 @@ body.bg-pattern-sparkles {
     .sidebar-update-state.is-available { color: var(--green, #50fa7b); opacity: 1; }
     .sidebar-update-state.is-unknown { opacity: 0.45; }
     .sidebar-update-state.is-checking { color: var(--green, #50fa7b); opacity: 0.8; }
+    /* display:flex above outranks the UA [hidden] rule, so restore it. */
+    .sidebar-update-state[hidden] { display: none; }
 
     .sidebar-update-commit,
     .sidebar-update-detail,
@@ -600,14 +610,8 @@ body.bg-pattern-sparkles {
       overflow-wrap: normal;
     }
 
-    .sidebar-update-actions {
-      display: flex;
-      gap: 4px;
-    }
-
     .sidebar-update-action {
-      flex: 1 1 auto;
-      min-width: 0;
+      width: 100%;
       min-height: 26px;
       padding: 5px 8px;
       border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);

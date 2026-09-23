@@ -1144,7 +1144,7 @@ export async function openBugReport() {
     restoreFn: () => { openBugReport(); },
     closeFn: () => { closeBugReport(); },
     minimizeFn: () => { closeBugReport(); },
-    sidebarBtnId: ['overflow-bug-report-btn', 'user-bar-report'],
+    sidebarBtnId: ['overflow-bug-report-btn', 'tool-report-btn'],
     label: 'Bug report',
     icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   });
@@ -1182,7 +1182,7 @@ export function initBugReport() {
   _ensureModal();
   const button = _byId('overflow-bug-report-btn');
   if (button) button.addEventListener('click', () => { openBugReport(); });
-  const sidebarButton = _byId('user-bar-report');
+  const sidebarButton = _byId('tool-report-btn');
   if (sidebarButton) sidebarButton.addEventListener('click', () => { openBugReport(); });
 }
 

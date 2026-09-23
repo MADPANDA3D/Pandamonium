@@ -52,9 +52,9 @@ test('the sidebar exposes a Report a bug button that opens the panel', async ({ 
   await mockApi(page);
   await boot(page);
 
-  const button = page.locator('#user-bar-report');
+  const button = page.locator('#tool-report-btn');
   await expect(button).toBeVisible();
-  await expect(button).toContainText('Report');
+  await expect(button).toContainText('Report a bug');
 
   await button.click();
   await expect(page.locator('#bug-report-modal')).toBeVisible();
