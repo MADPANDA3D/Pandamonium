@@ -3,6 +3,31 @@ import { setView, clearView } from './viewState.js';
 
 const el = id => document.getElementById(id);
 const esc = value => uiModule.esc(String(value));
+
+// ani-cli presents its in-player controls ("next", "replay", "previous",
+// "select", "change_quality", "quit") through the same menu channel it uses for
+// episodes. For a single-entry title (a movie) there is no episode menu, so the
+// adapter captures those controls instead. Never show them as episodes.
+const ANIME_CONTROL_LABELS = new Set([
+  'next', 'replay', 'previous', 'prev', 'select', 'change_quality',
+  'change quality', 'quality', 'quit', 'exit',
+]);
+
+function isAnimeMovie(item) {
+  if (!item) return false;
+  if (item.kind === 'movie') return true;
+  return /\b(movie|film|gekijouban)\b|劇場版/i.test(String(item.title || ''));
+}
+
+function filterAnimeEpisodes(items) {
+  return (items || []).filter(item => {
+    const number = String(item.number ?? '').trim().toLowerCase();
+    if (!number) return false;
+    if (ANIME_CONTROL_LABELS.has(number)) return false;
+    const label = String(item.label ?? '').replace(/^episode\s+/i, '').trim().toLowerCase();
+    return !ANIME_CONTROL_LABELS.has(label);
+  });
+}
 let providers = [];
 let active = null;
 let query = '';
@@ -275,7 +300,9 @@ function buttons(items, action, label) {
     const saved = isFavorite(active, item);
     const watched = isWatchlisted(active, item);
     const kind = item.kind === 'series' ? 'TV Series' : (item.kind === 'movie' ? 'Movie' : '');
-    const cta = active === 'ani-cli' ? 'View Episodes' : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
+    const cta = active === 'ani-cli'
+      ? (isAnimeMovie(item) ? 'Play movie' : 'View episodes')
+      : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
     return `<article class="ent-card" data-kind="${esc(active)}" data-ent-card="${index}">
       ${cardArt(item)}
       <div class="ent-card-body">
@@ -662,14 +689,25 @@ async function search() {
 
 async function chooseTitle(item) {
   selection = item;
+  el('entertainment-results-title').textContent = item.title;
   status('Loading title…');
   if (active === 'ani-cli') {
     playSound('entertainment-katon');
+    if (isAnimeMovie(item)) {
+      status('Playing movie…');
+      return playAnimeEpisode('1');
+    }
     const body = { query, selection_index: item.id, dub: el('entertainment-mode').value === 'dub' };
     const result = await api('/ani-cli/episodes', { ...body, offset: 0 });
-    episodeButtons(result, 'anime-episode', '/ani-cli/episodes', body);
+    const episodes = filterAnimeEpisodes(result.items);
+    if (!episodes.length) {
+      // A single-entry title whose "episodes" were really the in-player controls.
+      status('Playing movie…');
+      return playAnimeEpisode('1');
+    }
+    episodeButtons({ ...result, items: episodes }, 'anime-episode', '/ani-cli/episodes', body);
     el('entertainment-jump').classList.remove('hidden');
-    status(`Choose an episode · ${result.total} available.`);
+    status(`Choose an episode · ${episodes.length} available.`);
   } else if (item.kind === 'movie') {
     await resolvePanda(0, 0);
   } else {
@@ -951,7 +989,9 @@ function init() {
     if (more) {
       const host = el('entertainment-results'); const page = host._page;
       api(page.path, { ...page.body, offset: Number(more.dataset.entMore) }).then(result => {
-        const existing = host._items || []; const combined = [...existing, ...result.items];
+        const existing = host._items || [];
+        const incoming = page.action === 'anime-episode' ? filterAnimeEpisodes(result.items) : result.items;
+        const combined = [...existing, ...incoming];
         episodeButtons({ ...result, items: combined }, page.action, page.path, page.body);
       }).catch(error => status(error.message));
       return;
