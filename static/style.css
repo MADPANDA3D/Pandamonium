@@ -44213,7 +44213,7 @@ body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-ev
    panel; mobile (<=768px): the shared bottom-sheet becomes a full-width
    surface with a scrollable body. */
 .bug-report-modal .bug-report-content {
-  width: min(560px, 94vw);
+  width: min(640px, 94vw);
   max-height: 88vh;
 }
 .bug-report-header {
@@ -44230,18 +44230,18 @@ body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-ev
 .bug-report-tabs {
   display: flex;
   gap: 4px;
-  padding: 0 0 8px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--border);
 }
 .bug-report-tab {
   flex: 1;
-  padding: 5px 6px;
+  padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   opacity: 0.6;
   cursor: pointer;
 }
@@ -44261,40 +44261,46 @@ body.rearrange-mode #session-list .folder-drag-handle { opacity: .75; pointer-ev
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 2px;
+  padding: 14px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
 }
 .bug-report-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 .bug-report-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
 .bug-report-label {
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.65;
+  letter-spacing: 0.05em;
+  opacity: 0.75;
 }
 .bug-report-input {
   width: 100%;
   box-sizing: border-box;
+  min-height: 40px;
+  font-size: 13px;
 }
 textarea.bug-report-input {
   resize: vertical;
-  min-height: 34px;
+  min-height: 72px;
+  padding: 9px 10px;
+  line-height: 1.5;
   font-family: inherit;
 }
 .bug-report-hint {
-  margin: 0;
-  font-size: 12px;
-  opacity: 0.7;
+  margin: 0 0 2px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  opacity: 0.75;
 }
 .bug-report-steps {
   display: flex;
@@ -44342,15 +44348,22 @@ textarea.bug-report-input {
 .bug-report-icon-btn:hover { background: var(--card, rgba(255, 255, 255, 0.05)); }
 .bug-report-drop-zone {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 14px;
+  gap: 10px;
+  padding: 18px 14px;
   border: 1px dashed var(--border);
   border-radius: 8px;
-  font-size: 12px;
-  opacity: 0.8;
+  font-size: 12.5px;
+  opacity: 0.85;
   cursor: pointer;
+}
+.bug-report-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
 }
 .bug-report-drop-zone.is-dragover,
 .bug-report-drop-zone:focus-visible {

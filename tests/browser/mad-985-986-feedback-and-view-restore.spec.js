@@ -85,6 +85,29 @@ test('closing Settings clears the saved view so reload returns to chat', async (
   await expect(page.locator('#settings-modal')).toBeHidden();
 });
 
+test('the evidence step offers a Capture screen action', async ({ page }) => {
+  await mockApi(page);
+  await boot(page);
+
+  await page.locator('#tool-report-btn').click();
+  await expect(page.locator('#bug-report-modal')).toBeVisible();
+  await page.locator('.bug-report-tab[data-step="1"]').click();
+
+  const capture = page.locator('#bug-report-capture-screen');
+  await expect(capture).toBeVisible();
+  await expect(capture).toHaveText('Capture screen');
+  await expect(page.locator('#bug-report-choose-files')).toBeVisible();
+
+  // An unsupported browser is told honestly instead of failing silently.
+  await page.evaluate(() => {
+    try {
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: undefined });
+    } catch (_) {}
+  });
+  await capture.click();
+  await expect(page.locator('#bug-report-status')).toContainText('not available');
+});
+
 test('an unknown persisted view falls back to chat without an error loop', async ({ page }) => {
   await mockApi(page);
   await page.addInitScript(() => {
