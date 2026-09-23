@@ -2101,14 +2101,20 @@ body.bg-pattern-sparkles {
       text-overflow: clip;
       white-space: nowrap;
     }
-    /* Top-level sidebar rows (New task / Entertainment / Report a bug) must
-       match the section-header titles (15px). They inherit the tiny
-       .list-item span size otherwise, which is what made them look ~10px. */
-    #sidebar-new-chat-btn .grow,
-    #entertainment-section .grow,
-    #tool-report-btn .grow {
+    /* List-item labels inherited the tiny .list-item span size (9.75px) while
+       section headers are 15px; match them so the whole sidebar reads evenly. */
+    .list-item .grow {
       font-size: 15px;
       font-weight: 500;
+    }
+    /* Entertainment and Report a bug sit beside the section headers; give them
+       the same row height (36px) so the vertical rhythm is even instead of the
+       two rows looking glued together. */
+    #entertainment-section,
+    #tool-report-btn {
+      padding: 8px 8px;
+      min-height: 36px;
+      box-sizing: border-box;
     }
     input, textarea, button, select {
       background:var(--bg);
