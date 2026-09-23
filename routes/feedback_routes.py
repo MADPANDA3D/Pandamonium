@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -77,6 +78,37 @@ def _submission_status() -> dict[str, Any]:
     return status
 
 
+def _flat_relay_diagnostics(bundle: Any) -> dict[str, Any]:
+    """Flatten the nested diagnostic bundle to the relay's flat contract.
+
+    The n8n relay validates diagnostics as a flat object whose keys must be a
+    subset of the agreed allowlist, so nested ``app``/``client``/``session``
+    maps are lifted to top-level keys (and nothing else is sent).
+    """
+    if not isinstance(bundle, Mapping) or not bundle.get("included", True):
+        return {}
+    app = bundle.get("app") if isinstance(bundle.get("app"), Mapping) else {}
+    client = bundle.get("client") if isinstance(bundle.get("client"), Mapping) else {}
+    session = bundle.get("session") if isinstance(bundle.get("session"), Mapping) else {}
+    correlation = bundle.get("correlation") if isinstance(bundle.get("correlation"), Mapping) else {}
+    return {
+        "version": app.get("version", ""),
+        "revision": app.get("revision", ""),
+        "installation_method": app.get("installation_method", ""),
+        "runtime": app.get("runtime", ""),
+        "platform_class": app.get("platform_class", ""),
+        "platform_release": app.get("platform_release", ""),
+        "route": bundle.get("route", ""),
+        "browser_class": client.get("user_agent_class", ""),
+        "viewport_class": client.get("viewport_class", ""),
+        "locale": client.get("locale", ""),
+        "session_id": session.get("id", ""),
+        "request_id": correlation.get("request_id", ""),
+        "last_error": bundle.get("latest_error") or {},
+        "health": bundle.get("service_health") or {},
+    }
+
+
 def _relay_payload(
     draft: dict[str, Any],
     *,
@@ -121,7 +153,7 @@ def _relay_payload(
             "revision": str((app or {}).get("revision") or ""),
             "installation_method": str((app or {}).get("installation_method") or ""),
         },
-        "diagnostics": bundle if draft.get("include_diagnostics", True) else {},
+        "diagnostics": _flat_relay_diagnostics(bundle),
         "attachments": attachments,
     }
 

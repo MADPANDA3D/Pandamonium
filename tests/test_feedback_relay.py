@@ -118,6 +118,14 @@ def test_submit_uses_relay_and_returns_issue(env, router, relay_env):
     assert call["body"]["title"].startswith("[Bug]")
     assert "### Summary" in call["body"]["body_markdown"]
     assert call["body"]["install"]["version"]
+    diagnostics = call["body"]["diagnostics"]
+    assert set(diagnostics) <= {
+        "version", "revision", "installation_method", "runtime", "platform_class",
+        "platform_release", "route", "browser_class", "viewport_class", "locale",
+        "session_id", "request_id", "last_error", "health",
+    }
+    assert diagnostics["version"]
+    assert diagnostics["route"]
 
 
 def test_relay_retryable_failure_keeps_draft(env, router, relay_env):
