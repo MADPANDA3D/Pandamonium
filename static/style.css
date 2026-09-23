@@ -2101,6 +2101,15 @@ body.bg-pattern-sparkles {
       text-overflow: clip;
       white-space: nowrap;
     }
+    /* Top-level sidebar rows (New task / Entertainment / Report a bug) must
+       match the section-header titles (15px). They inherit the tiny
+       .list-item span size otherwise, which is what made them look ~10px. */
+    #sidebar-new-chat-btn .grow,
+    #entertainment-section .grow,
+    #tool-report-btn .grow {
+      font-size: 15px;
+      font-weight: 500;
+    }
     input, textarea, button, select {
       background:var(--bg);
       color:var(--fg);

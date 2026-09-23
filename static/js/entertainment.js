@@ -538,20 +538,29 @@ function collectionItem(entry, glyph, index) {
 async function enrichLibrary(entries) {
   const host = el('ent-collection-results');
   const groups = new Map();
+  // History/favourite rows are titled "Show Episode N"; the metadata lookup is
+  // by show title, so strip the episode/movie suffix (or prefer the saved item
+  // title) before asking for a cover.
+  const showTitle = (entry) => String((entry.item && entry.item.title) || entry.title || '')
+    .replace(/\s+Episode\s+\d+\s*$/i, '')
+    .replace(/\s+(?:the\s+)?Movie\s*$/i, '')
+    .trim();
   (entries || []).forEach((entry, index) => {
     if (!entry?.item || entry.item.cover || !entry.title) return;
+    const title = showTitle(entry);
+    if (!title) return;
     if (!groups.has(entry.provider)) groups.set(entry.provider, []);
-    groups.get(entry.provider).push({ entry, index });
+    groups.get(entry.provider).push({ entry, index, title });
   });
   for (const [provider, rows] of groups) {
     let covers = {};
     try {
-      const result = await api('/metadata', { provider, items: rows.map(({ entry }) => ({ title: entry.title, kind: entry.item.kind || '' })) });
+      const result = await api('/metadata', { provider, items: rows.map(({ entry, title }) => ({ title, kind: entry.item.kind || '' })) });
       covers = result.covers || {};
     } catch (_) { continue; }
     let changed = false;
-    for (const { entry, index } of rows) {
-      const cover = covers[entry.title];
+    for (const { entry, index, title } of rows) {
+      const cover = covers[title];
       if (!cover) continue;
       entry.item.cover = cover;
       changed = true;
