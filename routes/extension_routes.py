@@ -50,6 +50,7 @@ from src.marketplace_catalog import (
 )
 from src.marketplace_channel import channel_status, load_channel
 from src.marketplace_publish import PublicationError, PublicationJobs
+from src.operational_protocol import record_operational_event
 
 MARKETPLACE_DIR = Path(DATA_DIR) / "marketplace"
 
@@ -118,6 +119,13 @@ class ConfigurationRequest(BaseModel):
 
     values: dict[str, str | None] = Field(max_length=32)
     plan_id: str | None = Field(default=None, max_length=64)
+
+
+class SystemRequirementsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capabilities: list[str] = Field(min_length=1, max_length=16)
+    password: str | None = Field(default=None, max_length=512)
 
 
 def public_extension_catalog(registry) -> dict[str, list[dict[str, str]]]:
@@ -615,5 +623,38 @@ def setup_extension_routes(
             )
         except (ExtensionLifecycleError, ExtensionContractError, PackageError) as exc:
             raise _http_error(exc) from exc
+
+    @router.post("/system-requirements", dependencies=[Depends(require_admin)])
+    async def provision_system_requirements(
+        payload: SystemRequirementsRequest, owner: str = Depends(require_user)
+    ):
+        from src.system_requirements import SystemRequirementError, provision
+
+        operator = _operator(owner)
+
+        def run() -> dict:
+            return provision(payload.capabilities, password=payload.password)
+
+        try:
+            result = await asyncio.to_thread(run)
+        except SystemRequirementError as exc:
+            status = (
+                400
+                if exc.code == "system_requirement_unknown_capability"
+                else 409
+            )
+            raise HTTPException(status, exc.code) from exc
+        record_operational_event(
+            operator_id=operator,
+            actor="odysseus:system-provisioner",
+            component="extension-system-requirements",
+            event_type="result",
+            status="succeeded",
+            metadata={
+                "capabilities": list(payload.capabilities),
+                "packages": result.get("installed_packages", []),
+            },
+        )
+        return result
 
     return router

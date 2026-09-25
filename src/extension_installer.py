@@ -370,6 +370,28 @@ _ACTION_SCHEMAS = [
 _ACTION_CATALOG = compose_capability_catalog(_ACTION_SCHEMAS)
 
 
+def host_requirements_summary(plan: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Read-only host capability report for a generated-package plan."""
+    manifest = plan.get("manifest") or {}
+    runtime = (manifest.get("runtime") or {}).get("type")
+    declared = (manifest.get("metadata") or {}).get("host_requirements")
+    if runtime not in {"service", "cli", "mcp"} and not declared:
+        return None
+    from src.system_requirements import (
+        SystemRequirementError,
+        capabilities_for_package,
+        report,
+    )
+
+    try:
+        capabilities = capabilities_for_package(manifest, plan.get("execution_recipe"))
+    except SystemRequirementError:
+        return None
+    if not capabilities:
+        return None
+    return report(capabilities)
+
+
 class ExtensionLifecycleManager:
     def __init__(
         self,
@@ -883,6 +905,9 @@ class ExtensionLifecycleManager:
                 **(manifest.get("rollback") or {}),
                 "available_revisions": list(plan.get("available_revisions") or []),
             }
+            requirements = host_requirements_summary(plan)
+            if requirements is not None:
+                result["system_requirements"] = requirements
         if plan.get("distribution"):
             result["marketplace"] = dict(plan["distribution"])
         if plan.get("execution_recipe") is not None:

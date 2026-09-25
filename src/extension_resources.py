@@ -19,12 +19,14 @@ TASKS = 256
 
 def storage_root() -> Path:
     """Require a dedicated, finite filesystem, never a directory size estimate."""
-    raw = os.getenv("ODYSSEUS_EXTENSION_RUNTIME_ROOT", "")
-    root = Path(raw)
-    if not raw or not root.is_absolute() or root.is_symlink() or not root.is_dir():
+    from src.system_requirements import DEFAULT_RUNTIME_MOUNT
+
+    raw = os.getenv("ODYSSEUS_EXTENSION_RUNTIME_ROOT", "").strip()
+    root = Path(raw) if raw else DEFAULT_RUNTIME_MOUNT
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise ExtensionLifecycleError(
             "extension_needs_setup:Mount a dedicated filesystem (at most 8 GiB, "
-            "at most 1000000 inodes) at ODYSSEUS_EXTENSION_RUNTIME_ROOT."
+            f"at most 1000000 inodes) at {root}."
         )
     root = root.resolve()
     stat = os.statvfs(root)
