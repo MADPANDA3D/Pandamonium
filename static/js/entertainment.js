@@ -41,6 +41,10 @@ let resumeSaveAt = 0;
 let lastAutoRefresh = 0;
 let initialized = false;
 let playback = null;
+// In-browser drill-down history (results -> seasons -> episodes). Each entry is
+// a view descriptor rendered by renderStep; Back pops one level.
+let navStack = [];
+let currentStep = null;
 
 const PREFS_KEY = 'entertainment';
 const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
@@ -329,6 +333,47 @@ function episodeButtons(result, action, path, body) {
   }
 }
 
+function updateBackButton() {
+  const button = el('entertainment-results-back');
+  if (button) button.classList.toggle('hidden', navStack.length === 0);
+}
+
+function renderStep(step) {
+  currentStep = step;
+  el('entertainment-results-title').textContent = step.title || 'Results';
+  el('entertainment-jump')?.classList.toggle('hidden', step.kind !== 'anime-episodes');
+  if (step.kind === 'titles') {
+    buttons(step.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
+  } else if (step.kind === 'seasons') {
+    buttons(step.items, 'season', value => value.label);
+  } else if (step.kind === 'panda-episodes') {
+    episodeButtons(step.result, 'panda-episode', '/pandaflix/episodes', step.body);
+  } else if (step.kind === 'anime-episodes') {
+    episodeButtons({ ...step.result, items: step.episodes }, 'anime-episode', '/ani-cli/episodes', step.body);
+  } else if (step.kind === 'history') {
+    buttons(step.items, 'history', item => `${item.title} · Episode ${item.episode}`);
+  }
+  status(step.status || '');
+  updateBackButton();
+}
+
+function navigate(step) {
+  if (currentStep) navStack.push(currentStep);
+  renderStep(step);
+}
+
+function goBack() {
+  const previous = navStack.pop();
+  if (!previous) { updateBackButton(); return; }
+  renderStep(previous);
+}
+
+function resetNavigation() {
+  navStack = [];
+  currentStep = null;
+  updateBackButton();
+}
+
 function showProvider(id) {
   active = id;
   selection = null;
@@ -352,6 +397,7 @@ function showProvider(id) {
   el('entertainment-jump').classList.add('hidden');
   el('entertainment-query').placeholder = anime ? 'Search anime' : 'Search movies and shows';
   el('entertainment-results').replaceChildren();
+  resetNavigation();
   status('');
   renderSaved();
   el('entertainment-tabs')?.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.provider === id));
@@ -690,15 +736,13 @@ async function search() {
   status('Searching upstream…'); el('entertainment-results').replaceChildren();
   const body = active === 'ani-cli' ? { query, dub: el('entertainment-mode').value === 'dub' } : { query };
   const result = await api(`/${active}/search`, body);
-  buttons(result.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
-  el('entertainment-results-title').textContent = `${result.items.length} Results for “${query}”`;
-  status('');
+  resetNavigation();
+  navigate({ kind: 'titles', items: result.items, title: `${result.items.length} Results for “${query}”`, status: '' });
   enrichCovers(active, result.items).catch(() => {});
 }
 
 async function chooseTitle(item) {
   selection = item;
-  el('entertainment-results-title').textContent = item.title;
   status('Loading title…');
   if (active === 'ani-cli') {
     playSound('entertainment-katon');
@@ -714,14 +758,12 @@ async function chooseTitle(item) {
       status('Playing movie…');
       return playAnimeEpisode('1');
     }
-    episodeButtons({ ...result, items: episodes }, 'anime-episode', '/ani-cli/episodes', body);
-    el('entertainment-jump').classList.remove('hidden');
-    status(`Choose an episode · ${episodes.length} available.`);
+    navigate({ kind: 'anime-episodes', result, episodes, body, title: item.title, status: `Choose an episode · ${episodes.length} available.` });
   } else if (item.kind === 'movie') {
     await resolvePanda(0, 0);
   } else {
     const result = await api('/pandaflix/seasons', { query, selection: item.selection });
-    buttons(result.items, 'season', value => value.label); status('Choose a season.');
+    navigate({ kind: 'seasons', items: result.items, title: item.title, status: 'Choose a season.' });
   }
 }
 
@@ -750,7 +792,7 @@ async function choose(action, item) {
     selection.season = item.number;
     const body = { query, selection: selection.selection, season: item.number };
     const result = await api('/pandaflix/episodes', { ...body, offset: 0 });
-    episodeButtons(result, 'panda-episode', '/pandaflix/episodes', body); status(`Choose an episode · ${result.total} available.`); return;
+    navigate({ kind: 'panda-episodes', result, body, title: selection.title || 'Episodes', status: `Choose an episode · ${result.total} available.` }); return;
   }
   if (action === 'panda-episode') return resolvePanda(selection.season, item.number);
   if (action === 'history') {
@@ -929,7 +971,14 @@ function init() {
   el('entertainment-fanfare-btn')?.addEventListener('click', () => playSound('entertainment-fanfare'));
   el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
   document.querySelectorAll('[data-ent-dest]').forEach(button => button.addEventListener('click', () => showCollection(button.dataset.entDest)));
-  el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
+  el('entertainment-back')?.addEventListener('click', () => {
+    stopPlayer();
+    el('entertainment-player').classList.add('hidden');
+    el('entertainment-collection')?.classList.add('hidden');
+    el('entertainment-browser').classList.remove('hidden');
+    if (currentStep) renderStep(currentStep); else showProvider(active);
+  });
+  el('entertainment-results-back')?.addEventListener('click', () => goBack());
   initSlots();
   el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
   el('entertainment-next')?.addEventListener('click', () => nextEpisode().catch(error => status(error.message)));
@@ -945,7 +994,7 @@ function init() {
   el('entertainment-search')?.addEventListener('submit', event => { event.preventDefault(); search().catch(error => status(error.message)); });
   el('entertainment-jump')?.addEventListener('submit', event => { event.preventDefault(); jumpEpisode().catch(error => status(error.message)); });
   el('entertainment-history')?.addEventListener('click', async () => {
-    try { status('Loading history…'); const result = await api('/ani-cli/history', {}); buttons(result.items, 'history', item => `${item.title} · Episode ${item.episode}`); status('Continue watching.'); }
+    try { status('Loading history…'); const result = await api('/ani-cli/history', {}); navigate({ kind: 'history', items: result.items, title: 'History', status: 'Continue watching.' }); }
     catch (error) { status(error.message); }
   });
   el('entertainment-section')?.addEventListener('click', () => openEntertainment());

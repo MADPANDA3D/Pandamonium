@@ -392,3 +392,57 @@ test('Entertainment plays the anime sting when an episode starts', async ({ page
   await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
   await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-anime-play'))).toBe(true);
 });
+
+test('Entertainment back button walks results -> seasons -> episodes', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'pandaflix', label: 'Movies & Shows', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/pandaflix/search') return route.fulfill({ json: { items: [
+      { selection: '[series] The Blacklist (2013)', kind: 'series', title: 'The Blacklist (2013)' },
+    ] } });
+    if (path === '/api/entertainment/pandaflix/seasons') return route.fulfill({ json: { items: [
+      { number: 1, label: 'Season 1' }, { number: 2, label: 'Season 2' },
+    ] } });
+    if (path === '/api/entertainment/pandaflix/episodes') return route.fulfill({ json: {
+      items: [{ number: 1, label: 'E01 - Pilot' }, { number: 2, label: 'E02 - The Freelancer' }], total: 2, next_offset: -1,
+    } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('The Blacklist');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+
+  // Root results view: nothing to go back to.
+  await expect(page.locator('#entertainment-results-title')).toContainText('Results for');
+  await expect(page.locator('#entertainment-results-back')).toBeHidden();
+
+  // Open the series -> seasons, and the back control appears.
+  await page.locator('.ent-card-play').click();
+  await expect(page.locator('.entertainment-result', { hasText: 'Season 1' })).toBeVisible();
+  await expect(page.locator('#entertainment-results-back')).toBeVisible();
+
+  // Open a season -> episodes.
+  await page.locator('.entertainment-result', { hasText: 'Season 1' }).click();
+  await expect(page.locator('.entertainment-result', { hasText: 'E01 - Pilot' })).toBeVisible();
+
+  // Back -> seasons.
+  await page.locator('#entertainment-results-back').click();
+  await expect(page.locator('.entertainment-result', { hasText: 'Season 1' })).toBeVisible();
+  await expect(page.locator('.entertainment-result', { hasText: 'E01 - Pilot' })).toHaveCount(0);
+  await expect(page.locator('#entertainment-results-back')).toBeVisible();
+
+  // Back -> results, and the control hides again.
+  await page.locator('#entertainment-results-back').click();
+  await expect(page.locator('#entertainment-results-title')).toContainText('Results for');
+  await expect(page.locator('#entertainment-results-back')).toBeHidden();
+});

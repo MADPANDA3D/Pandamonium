@@ -44720,6 +44720,10 @@ textarea.bug-report-input {
 .entertainment-saved{margin:0 40px 8px}
 .ent-results-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:20px clamp(20px,2.6vw,56px) 12px}
 .ent-results-head h2{font-size:17px;margin:0}
+.ent-results-title{display:flex;align-items:center;gap:12px;min-width:0}
+.ent-results-back{display:inline-flex;align-items:center;gap:6px;border:1px solid #2c1417;border-radius:8px;background:#121010;color:#d7d2d2;padding:7px 12px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.ent-results-back:hover{border-color:#5a1a20;color:#fff}
+.ent-results-back.hidden{display:none}
 .ent-results-tools{display:flex;align-items:center;gap:8px;color:#8d8888;font-size:12.5px}
 .ent-results-tools select{border:1px solid #2c1417;border-radius:8px;background:#121010;color:#d7d2d2;padding:6px 10px}
 .ent-results-tools button{border:1px solid #2c1417;border-radius:8px;background:#121010;color:#8d8888;padding:6px 10px}
