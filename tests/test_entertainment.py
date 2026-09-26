@@ -83,6 +83,40 @@ def test_playback_is_direct_first_and_proxy_tokens_are_owner_scoped(monkeypatch)
     assert proxied["subtitles"][0]["url"].startswith("/api/entertainment/proxy/")
 
 
+def test_playback_skips_upstream_local_subtitle_paths():
+    # PandaFlix hands back its self-fetched subtitles as sandbox-local paths
+    # (/runtime/cache/...). They are not browser-loadable, so a bad subtitle
+    # must be dropped instead of 500-ing the whole resolve. Uses the real
+    # validator: the public IP literal never hits DNS.
+    routes._TOKENS.clear()
+    prepared = asyncio.run(routes._prepare_playback("alice", {
+        "title": "The Odyssey",
+        "url": "https://93.184.216.34/playlist/777012.m3u8",
+        "headers": {},
+        "subtitles": [{"url": "/runtime/cache/pandaflix-web-abc/sub.srt", "label": "Subtitles", "language": "en"}],
+    }))
+    assert prepared["url"] == "https://93.184.216.34/playlist/777012.m3u8"
+    assert prepared["format"] == "hls"
+    assert prepared["subtitles"] == []
+
+
+def test_extensionless_provider_playlist_is_classified_as_hls():
+    # PandaFlix/cinejoy resolves to an extensionless playlist endpoint that
+    # serves application/vnd.apple.mpegurl. Chrome needs hls.js for it, so the
+    # server must not label it a plain file.
+    routes._TOKENS.clear()
+    prepared = asyncio.run(routes._prepare_playback("alice", {
+        "title": "The Odyssey",
+        "url": "https://93.184.216.34/playlist/777012?token=x",
+        "headers": {},
+        "subtitles": [],
+    }))
+    assert prepared["format"] == "hls"
+    assert routes._is_hls("https://cdn.example/video.mp4") is False
+    assert routes._is_hls("https://cdn.example/master.m3u8") is True
+    assert routes._is_hls("https://cdn.example/watch/asset.mp4?x=1") is False
+
+
 def test_playlist_rewrites_segments_and_embedded_subtitle_uris(monkeypatch):
     monkeypatch.setattr(routes, "validate_public_http_url", lambda url, **_: url)
     routes._TOKENS.clear()

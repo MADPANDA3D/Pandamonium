@@ -136,18 +136,33 @@ async def _token(owner: str, url: str, headers: dict[str, str]) -> str:
     return key
 
 
+def _is_hls(url: str) -> bool:
+    # Chrome cannot play HLS through a native <video>. Providers such as
+    # PandaFlix/cinejoy expose an extensionless playlist endpoint that serves
+    # application/vnd.apple.mpegurl, so treat a URL with no file extension as
+    # HLS and let the client load it through hls.js.
+    last = urlparse(url).path.rsplit("/", 1)[-1]
+    return ".m3u8" in url.lower() or "." not in last
+
+
 async def _prepare_playback(owner: str, result: dict) -> dict:
     url = validate_public_http_url(str(result.get("url") or ""), max_length=8192)
     headers = _headers(result.get("headers"))
     prepared = dict(result)
     prepared["url"] = f"/api/entertainment/proxy/{await _token(owner, url, headers)}" if headers else url
     prepared["proxied"] = bool(headers)
-    prepared["format"] = "hls" if ".m3u8" in url.lower() else "file"
+    prepared["format"] = "hls" if _is_hls(url) else "file"
     subtitles = []
     for raw in result.get("subtitles", [])[:16] if isinstance(result.get("subtitles"), list) else []:
         if not isinstance(raw, dict):
             continue
-        sub_url = validate_public_http_url(str(raw.get("url") or ""), max_length=8192)
+        try:
+            sub_url = validate_public_http_url(str(raw.get("url") or ""), max_length=8192)
+        except ValueError:
+            # Upstream CLIs (PandaFlix) can return a self-fetched subtitle as a
+            # local runtime path. The browser cannot load that, so drop the
+            # track instead of failing the whole resolve with a 500.
+            continue
         sub_headers = _headers(raw.get("headers")) or headers
         subtitles.append({
             "url": f"/api/entertainment/proxy/{await _token(owner, sub_url, sub_headers)}" if sub_headers else sub_url,
