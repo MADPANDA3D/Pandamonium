@@ -446,3 +446,62 @@ test('Entertainment back button walks results -> seasons -> episodes', async ({ 
   await expect(page.locator('#entertainment-results-title')).toContainText('Results for');
   await expect(page.locator('#entertainment-results-back')).toBeHidden();
 });
+
+test('Continue Watching holds in-progress titles, queues the next episode, and supports removal', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [
+      { number: '1', label: 'Episode 1' }, { number: '2', label: 'Episode 2' }, { number: '3', label: 'Episode 3' },
+    ], total: 3, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({ json: { title: `Naruto Episode ${body.episode}`, url: 'https://media.example/ep.mp4', format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+
+  // Report partial progress, then open the library: the title is in progress.
+  await page.evaluate(() => {
+    const video = document.getElementById('entertainment-video');
+    Object.defineProperty(video, 'duration', { configurable: true, get: () => 1000 });
+    Object.defineProperty(video, 'currentTime', { configurable: true, get: () => 200, set: () => {} });
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await page.locator('#entertainment-back').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+  await expect(page.locator('.ent-continue-main')).toContainText('Naruto Episode 1');
+
+  // Finish the episode with autoplay off: the finished one drops out and the
+  // next episode is queued as "Up next".
+  await page.locator('.ent-continue-main').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('ended')));
+  await page.locator('#entertainment-back').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+  await expect(page.locator('.ent-continue-item')).toHaveCount(1);
+  await expect(page.locator('.ent-continue-main')).toContainText('Episode 2');
+  await expect(page.locator('.ent-continue-main')).toContainText('Up next');
+
+  // The user can remove an entry from Continue Watching.
+  await page.locator('.ent-continue-remove').click();
+  await expect(page.locator('.ent-continue-item')).toHaveCount(0);
+  await expect(page.locator('#ent-collection-results .entertainment-empty')).toBeVisible();
+});

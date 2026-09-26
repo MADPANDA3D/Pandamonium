@@ -185,10 +185,12 @@ function recordHistory(record) {
 }
 
 function rememberResume(record) {
+  const key = historyKey(record);
+  const previous = (prefs.history || []).find(entry => entry.key === key);
   const same = prefs.resume
     && prefs.resume.provider === record.provider
     && String(prefs.resume.episode) === String(record.episode);
-  prefs.resume = { ...record, key: historyKey(record), position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
+  prefs.resume = { ...record, key, position: same ? (prefs.resume.position || 0) : 0, at: Date.now(), finished: false, ...(previous?.upNext ? { upNext: true } : {}) };
   recordHistory(prefs.resume);
   savePrefs();
 }
@@ -233,8 +235,9 @@ function initSlots() {
       prefs.resume.position = position;
       prefs.resume.duration = duration;
       prefs.resume.at = now;
+      if (position > 0) { prefs.resume.upNext = false; prefs.resume.finished = false; }
       const entry = (prefs.history || []).find(item => item.key === prefs.resume.key);
-      if (entry) { entry.position = position; entry.duration = duration; entry.at = now; }
+      if (entry) { entry.position = position; entry.duration = duration; entry.at = now; entry.finished = false; if (position > 0) entry.upNext = false; }
       savePrefs();
     });
   }
@@ -538,6 +541,7 @@ const COLLECTIONS = {
   'recently-added': { eyebrow: 'BROWSE', title: 'Recently Added', copy: 'Newest additions to the catalog.' },
   favorites: { eyebrow: 'MY LIBRARY', title: 'My Favorites', copy: 'Titles you saved.' },
   watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you plan to watch.' },
+  continue: { eyebrow: 'MY LIBRARY', title: 'Continue Watching', copy: 'Unfinished titles stay here until you finish or remove them. Finishing an episode lines up the next one.' },
   recent: { eyebrow: 'MY LIBRARY', title: 'Recently Watched', copy: 'Pick up exactly where you left off.' },
   history: { eyebrow: 'MY LIBRARY', title: 'History', copy: 'Pick up exactly where you left off.' },
   downloads: { eyebrow: 'MY LIBRARY', title: 'Downloads', copy: 'Downloaded episodes and movies land here.' },
@@ -636,6 +640,59 @@ function recentItem(entry, index) {
   </button>`;
 }
 
+function entryProgress(entry) {
+  const position = Number(entry?.position) || 0;
+  const duration = Number(entry?.duration) || 0;
+  return { position, duration, ratio: duration > 0 ? position / duration : 0 };
+}
+
+// "Finished" is explicit (video `ended`) or effectively complete (>= 98%).
+function isFinished(entry) {
+  if (!entry || entry.finished === true) return Boolean(entry);
+  const { duration, ratio } = entryProgress(entry);
+  return duration > 0 && ratio >= 0.98;
+}
+
+// Anything started but not finished stays in Continue Watching. A queued
+// "up next" episode (position 0, upNext) counts as started so it is clickable.
+function isContinueWatching(entry) {
+  if (!entry || !entry.title || isFinished(entry)) return false;
+  const { position } = entryProgress(entry);
+  return position > 0 || entry.upNext === true;
+}
+
+function continueItem(entry, index) {
+  const provider = entry.provider === 'ani-cli' ? 'Anime' : 'Movies & Shows';
+  const episode = entry.episode != null && entry.episode !== '' ? `Episode ${entry.episode}` : (entry.item?.kind === 'movie' ? 'Movie' : '');
+  const bits = [provider, episode].filter(Boolean);
+  const { position, duration } = entryProgress(entry);
+  const percent = duration > 0 ? Math.min(100, Math.round((position / duration) * 100)) : 0;
+  const left = entry.upNext
+    ? 'Up next'
+    : (duration > 0 ? `${formatTime(Math.max(0, duration - position))} left` : (position ? formatTime(position) : ''));
+  return `<div class="ent-continue-item" data-ent-lib-index="${index}">
+    <button type="button" class="ent-collection-item ent-continue-main" data-ent-resume-history="${index}">
+      ${collectionThumb(entry)}
+      <span class="ent-collection-item-body">
+        <strong>${esc(entry.title)}</strong>
+        <small>${esc(bits.join(' · '))}${left ? ` · ${esc(left)}` : ''}</small>
+        ${percent ? `<span class="ent-recent-bar" aria-hidden="true"><i style="width:${percent}%"></i></span>` : ''}
+      </span>
+      <b class="ent-collection-glyph" aria-hidden="true">▶</b>
+    </button>
+    <button type="button" class="ent-continue-remove" data-ent-remove-continue="${index}" aria-label="Remove ${esc(entry.title)} from Continue Watching" title="Remove from Continue Watching">✕</button>
+  </div>`;
+}
+
+function removeContinueEntry(index) {
+  const entry = (prefs.history || [])[index];
+  if (!entry) return;
+  prefs.history.splice(index, 1);
+  if (prefs.resume && prefs.resume.key === entry.key) prefs.resume = null;
+  savePrefs();
+  renderCollection('continue').catch(error => { el('ent-collection-status').textContent = error.message; });
+}
+
 async function renderCollection(key) {
   const host = el('ent-collection-results');
   const statusEl = el('ent-collection-status');
@@ -649,6 +706,14 @@ async function renderCollection(key) {
         ? 'No favorites yet. Use the star on a result card to save titles.'
         : 'Your watchlist is empty. Use ＋ on a result card to add titles.'}</p>`;
     enrichLibrary(entries).catch(() => {});
+    return;
+  }
+  if (key === 'continue') {
+    const indexed = (prefs.history || []).map((entry, index) => ({ entry, index })).filter(({ entry }) => isContinueWatching(entry));
+    host.innerHTML = indexed.length
+      ? indexed.map(({ entry, index }) => continueItem(entry, index)).join('')
+      : '<p class="entertainment-empty">Nothing in progress. Start an episode or movie and it will wait here until you finish or remove it.</p>';
+    enrichLibrary(indexed.map(({ entry }) => entry)).catch(() => {});
     return;
   }
   if (key === 'recent') {
@@ -886,8 +951,49 @@ async function nextEpisode() {
   await play(result);
 }
 
+function finishCurrentPlayback(record) {
+  if (!record) return;
+  const key = historyKey(record);
+  const entry = (prefs.history || []).find(item => item.key === key);
+  if (entry) {
+    entry.finished = true;
+    entry.upNext = false;
+    entry.position = entry.duration || entry.position || 0;
+    entry.at = Date.now();
+  }
+  if (prefs.resume && prefs.resume.key === key) prefs.resume = null;
+}
+
+// After a finished episode, queue the next one at position 0 so it shows in
+// Continue Watching as "Up next" even when autoplay is off. Guarded so movies
+// and single-entry titles never queue a phantom "next episode".
+function queueNextEpisode(record) {
+  const items = record?.items;
+  const current = record?.episode;
+  const hasNext = Array.isArray(items) && items.some(item => String(item?.number) === String(current));
+  if (!hasNext) return;
+  if (record.provider === 'ani-cli' && isAnimeMovie(record.item)) return;
+  const target = nextPlaybackTarget();
+  if (!target) return;
+  const next = target.resume(String(record.item?.title || record.title || 'Next episode'));
+  const key = historyKey(next);
+  const previous = (prefs.history || []).find(item => item.key === key);
+  const entry = {
+    ...next, key, upNext: true, finished: false,
+    position: previous?.position || 0, duration: previous?.duration || 0, at: Date.now(),
+  };
+  prefs.history = [entry, ...(prefs.history || []).filter(item => item.key !== key)].slice(0, 200);
+}
+
 async function handleEnded() {
-  if (!prefs.autoplay) return;
+  const current = playback;
+  finishCurrentPlayback(current);
+  queueNextEpisode(current);
+  savePrefs();
+  if (!prefs.autoplay) {
+    status('Finished. The next episode is queued in Continue Watching.');
+    return;
+  }
   try { await nextEpisode(); } catch (error) { status(error.message); }
 }
 
@@ -1037,6 +1143,8 @@ function init() {
     }
     const openFav = event.target.closest?.('[data-ent-open-fav]');
     if (openFav) { openFavorite(openFav.dataset.entOpenFav).catch(error => status(error.message)); return; }
+    const removeContinue = event.target.closest?.('[data-ent-remove-continue]');
+    if (removeContinue) { removeContinueEntry(Number(removeContinue.dataset.entRemoveContinue)); return; }
     const historyItem = event.target.closest?.('[data-ent-resume-history]');
     if (historyItem) {
       resumeHistoryEntry(Number(historyItem.dataset.entResumeHistory)).catch(error => status(error.message));
