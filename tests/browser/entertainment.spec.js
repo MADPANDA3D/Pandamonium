@@ -505,3 +505,38 @@ test('Continue Watching holds in-progress titles, queues the next episode, and s
   await expect(page.locator('.ent-continue-item')).toHaveCount(0);
   await expect(page.locator('#ent-collection-results .entertainment-empty')).toBeVisible();
 });
+
+test('Continue Watching collapses a show to its latest episode and recovers a broken cover', async ({ page }) => {
+  const seeded = {
+    provider: 'ani-cli', language: 'sub', quality: 'best', autoplay: false,
+    favorites: [], watchlist: [], resume: null,
+    history: [
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden', cover: '/api/entertainment/image/stale10' }, episode: '10', title: 'Naruto: Shippuden Episode 10', position: 100, duration: 1400, at: 1000, key: 'ani-cli:1:10' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden', cover: '/api/entertainment/image/stale11' }, episode: '11', title: 'Naruto: Shippuden Episode 11', position: 120, duration: 1400, at: 2000, key: 'ani-cli:1:11' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden', cover: '/api/entertainment/image/stale12' }, episode: '12', title: 'Naruto: Shippuden Episode 12', position: 130, duration: 1400, at: 3000, key: 'ani-cli:1:12' },
+      { provider: 'ani-cli', query: 'the last', item: { id: 3, title: 'The Last: Naruto the Movie', cover: '/api/entertainment/image/stale-movie' }, episode: '1', title: 'The Last: Naruto the Movie Episode 1', position: 50, duration: 5000, at: 4000, key: 'ani-cli:3:1' },
+    ],
+  };
+  await page.addInitScript(() => { HTMLMediaElement.prototype.play = async function () {}; });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: seeded } });
+    if (path === '/api/entertainment/metadata') return route.fulfill({ json: { covers: {} } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+
+  // One row per show, not one per nexted episode.
+  await expect(page.locator('.ent-continue-item')).toHaveCount(2);
+  await expect(page.locator('.ent-continue-item', { hasText: 'Episode 12' })).toHaveCount(1);
+  await expect(page.locator('.ent-continue-item', { hasText: 'Episode 11' })).toHaveCount(0);
+
+  // A cover token that no longer resolves degrades to the initials tile.
+  await expect(page.locator('.ent-collection-thumb--empty').first()).toBeVisible();
+});

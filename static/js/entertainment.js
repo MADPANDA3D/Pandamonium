@@ -570,10 +570,11 @@ async function resumeHistoryEntry(index) {
 }
 
 function collectionThumb(entry) {
+  const initials = esc((entry.title || '?').trim().slice(0, 2).toUpperCase());
   if (entry.item?.cover) {
-    return `<img class="ent-collection-thumb" src="${esc(entry.item.cover)}" alt="" loading="lazy" decoding="async">`;
+    return `<img class="ent-collection-thumb" src="${esc(entry.item.cover)}" alt="" data-ent-initials="${initials}" loading="lazy" decoding="async">`;
   }
-  return `<span class="ent-collection-thumb ent-collection-thumb--empty" aria-hidden="true">${esc((entry.title || '?').trim().slice(0, 2).toUpperCase())}</span>`;
+  return `<span class="ent-collection-thumb ent-collection-thumb--empty" aria-hidden="true">${initials}</span>`;
 }
 
 function collectionItem(entry, glyph, index) {
@@ -596,7 +597,11 @@ async function enrichLibrary(entries) {
     .replace(/\s+(?:the\s+)?Movie\s*$/i, '')
     .trim();
   (entries || []).forEach((entry, index) => {
-    if (!entry?.item || entry.item.cover || !entry.title) return;
+    if (!entry?.item || !entry.title) return;
+    // Resolved covers are process-local image tokens that expire on restart, so
+    // only trust a non-proxy URL; refresh anything that looks like a token.
+    const stored = String(entry.item.cover || '');
+    if (stored && !stored.startsWith('/api/entertainment/image/')) return;
     const title = showTitle(entry);
     if (!title) return;
     if (!groups.has(entry.provider)) groups.set(entry.provider, []);
@@ -614,8 +619,9 @@ async function enrichLibrary(entries) {
       if (!cover) continue;
       entry.item.cover = cover;
       changed = true;
+      const initials = (entry.title || '?').trim().slice(0, 2).toUpperCase();
       const thumb = host.querySelector(`[data-ent-lib-index="${index}"] .ent-collection-thumb`);
-      if (thumb) thumb.outerHTML = `<img class="ent-collection-thumb" src="${esc(cover)}" alt="" loading="lazy" decoding="async">`;
+      if (thumb) thumb.outerHTML = `<img class="ent-collection-thumb" src="${esc(cover)}" alt="" data-ent-initials="${esc(initials)}" loading="lazy" decoding="async">`;
     }
     if (changed) savePrefs();
   }
@@ -659,6 +665,26 @@ function isContinueWatching(entry) {
   if (!entry || !entry.title || isFinished(entry)) return false;
   const { position } = entryProgress(entry);
   return position > 0 || entry.upNext === true;
+}
+
+// One row per show: skipping ahead leaves the previous episode unfinished, so
+// collapse a series' episodes to the most recently touched one instead of
+// listing every episode that was "nexted" past.
+function showIdentity(entry) {
+  const item = entry?.item || {};
+  const base = item.id ?? item.selection ?? String(entry.title || '').replace(/\s+Episode\s+\d+\s*$/i, '');
+  return `${entry.provider}:${base}`;
+}
+
+function continueGroups() {
+  const byShow = new Map();
+  (prefs.history || []).forEach((entry, index) => {
+    if (!isContinueWatching(entry)) return;
+    const id = showIdentity(entry);
+    const current = byShow.get(id);
+    if (!current || (Number(entry.at) || 0) > (Number(current.entry.at) || 0)) byShow.set(id, { entry, index });
+  });
+  return [...byShow.values()].sort((a, b) => (Number(b.entry.at) || 0) - (Number(a.entry.at) || 0));
 }
 
 function continueItem(entry, index) {
@@ -709,11 +735,11 @@ async function renderCollection(key) {
     return;
   }
   if (key === 'continue') {
-    const indexed = (prefs.history || []).map((entry, index) => ({ entry, index })).filter(({ entry }) => isContinueWatching(entry));
-    host.innerHTML = indexed.length
-      ? indexed.map(({ entry, index }) => continueItem(entry, index)).join('')
+    const groups = continueGroups();
+    host.innerHTML = groups.length
+      ? groups.map(({ entry, index }) => continueItem(entry, index)).join('')
       : '<p class="entertainment-empty">Nothing in progress. Start an episode or movie and it will wait here until you finish or remove it.</p>';
-    enrichLibrary(indexed.map(({ entry }) => entry)).catch(() => {});
+    enrichLibrary(groups.map(({ entry }) => entry)).catch(() => {});
     return;
   }
   if (key === 'recent') {
@@ -1077,6 +1103,17 @@ function init() {
   el('entertainment-fanfare-btn')?.addEventListener('click', () => playSound('entertainment-fanfare'));
   el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
   document.querySelectorAll('[data-ent-dest]').forEach(button => button.addEventListener('click', () => showCollection(button.dataset.entDest)));
+  // A stale/expired cover token must degrade to the initials tile, not a
+  // broken-image icon. Capture phase catches <img> error events.
+  el('ent-collection-results')?.addEventListener('error', event => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains('ent-collection-thumb')) return;
+    const span = document.createElement('span');
+    span.className = 'ent-collection-thumb ent-collection-thumb--empty';
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = img.dataset.entInitials || '?';
+    img.replaceWith(span);
+  }, true);
   el('entertainment-back')?.addEventListener('click', () => {
     stopPlayer();
     el('entertainment-player').classList.add('hidden');
