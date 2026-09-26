@@ -540,3 +540,40 @@ test('Continue Watching collapses a show to its latest episode and recovers a br
   // A cover token that no longer resolves degrades to the initials tile.
   await expect(page.locator('.ent-collection-thumb--empty').first()).toBeVisible();
 });
+
+test('Continue Watching uses the furthest episode reached, not recency', async ({ page }) => {
+  // Finishing the last episode must drop the show even when earlier episodes
+  // still have unfinished progress; a queued next episode keeps it.
+  const seeded = {
+    provider: 'ani-cli', language: 'sub', quality: 'best', autoplay: false,
+    favorites: [], watchlist: [], resume: null,
+    history: [
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden' }, episode: '10', title: 'Naruto: Shippuden Episode 10', position: 100, duration: 1400, at: 1000, key: 'ani-cli:1:10' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden' }, episode: '12', title: 'Naruto: Shippuden Episode 12', position: 1390, duration: 1400, at: 2000, key: 'ani-cli:1:12' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden' }, episode: '13', title: 'Naruto: Shippuden Episode 13', position: 0, duration: 0, upNext: true, at: 3000, key: 'ani-cli:1:13' },
+      { provider: 'ani-cli', query: 'bleach', item: { id: 2, title: 'Bleach' }, episode: '5', title: 'Bleach Episode 5', position: 100, duration: 1400, at: 1500, key: 'ani-cli:2:5' },
+      { provider: 'ani-cli', query: 'bleach', item: { id: 2, title: 'Bleach' }, episode: '6', title: 'Bleach Episode 6', position: 1400, duration: 1400, at: 1600, key: 'ani-cli:2:6' },
+    ],
+  };
+  await page.addInitScript(() => { HTMLMediaElement.prototype.play = async function () {}; });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: seeded } });
+    if (path === '/api/entertainment/metadata') return route.fulfill({ json: { covers: {} } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+
+  // Bleach is done (furthest episode finished) so it drops out entirely;
+  // Naruto keeps its queued Episode 13.
+  await expect(page.locator('.ent-continue-item')).toHaveCount(1);
+  await expect(page.locator('.ent-continue-main')).toContainText('Episode 13');
+  await expect(page.locator('.ent-continue-main')).toContainText('Up next');
+  await expect(page.locator('.ent-continue-item', { hasText: 'Bleach' })).toHaveCount(0);
+});

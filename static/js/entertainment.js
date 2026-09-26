@@ -667,24 +667,59 @@ function isContinueWatching(entry) {
   return position > 0 || entry.upNext === true;
 }
 
-// One row per show: skipping ahead leaves the previous episode unfinished, so
-// collapse a series' episodes to the most recently touched one instead of
-// listing every episode that was "nexted" past.
+// One row per show. Group by the show title (AniCLI's item.id is only the
+// search-result index, so it is not stable across searches).
 function showIdentity(entry) {
   const item = entry?.item || {};
-  const base = item.id ?? item.selection ?? String(entry.title || '').replace(/\s+Episode\s+\d+\s*$/i, '');
-  return `${entry.provider}:${base}`;
+  const title = String(item.title || entry.title || '').replace(/\s+Episode\s+\d+\s*$/i, '').trim().toLowerCase();
+  const kind = item.kind === 'movie' ? 'movie' : 'series';
+  return `${entry.provider}:${kind}:${title}`;
+}
+
+function episodeRank(entry) {
+  const season = Number(entry?.season);
+  const episode = Number(entry?.episode);
+  return [Number.isFinite(season) ? season : 0, Number.isFinite(episode) ? episode : 0];
+}
+
+// Is `a` a later episode than `b` (season first, then episode, then recency)?
+function isFurtherEpisode(a, b) {
+  const ra = episodeRank(a);
+  const rb = episodeRank(b);
+  if (ra[0] !== rb[0]) return ra[0] > rb[0];
+  if (ra[1] !== rb[1]) return ra[1] > rb[1];
+  return (Number(a.at) || 0) > (Number(b.at) || 0);
 }
 
 function continueGroups() {
   const byShow = new Map();
   (prefs.history || []).forEach((entry, index) => {
-    if (!isContinueWatching(entry)) return;
+    if (!entry?.title) return;
+    // Only entries that were actually engaged count as "viewed": played,
+    // finished, or queued as up next. A resolved-but-unplayed entry does not.
+    if (!isFinished(entry) && !isContinueWatching(entry)) return;
     const id = showIdentity(entry);
-    const current = byShow.get(id);
-    if (!current || (Number(entry.at) || 0) > (Number(current.entry.at) || 0)) byShow.set(id, { entry, index });
+    if (!byShow.has(id)) byShow.set(id, []);
+    byShow.get(id).push({ entry, index });
   });
-  return [...byShow.values()].sort((a, b) => (Number(b.entry.at) || 0) - (Number(a.entry.at) || 0));
+  const rows = [];
+  for (const group of byShow.values()) {
+    // The furthest episode reached decides the show's state, not the most
+    // recently touched one.
+    const reached = group.reduce((best, cur) => (isFurtherEpisode(cur.entry, best.entry) ? cur : best));
+    let candidate = null;
+    if (!isFinished(reached.entry)) {
+      candidate = reached;
+    } else {
+      // The furthest episode is done: only a later, unfinished queued episode
+      // keeps the show; otherwise the show is finished and leaves the list.
+      candidate = group
+        .filter(({ entry }) => !isFinished(entry) && isFurtherEpisode(entry, reached.entry))
+        .reduce((best, cur) => (!best || isFurtherEpisode(cur.entry, best.entry) ? cur : best), null);
+    }
+    if (candidate) rows.push(candidate);
+  }
+  return rows.sort((a, b) => (Number(b.entry.at) || 0) - (Number(a.entry.at) || 0));
 }
 
 function continueItem(entry, index) {
