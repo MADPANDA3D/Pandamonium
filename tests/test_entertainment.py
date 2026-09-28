@@ -421,3 +421,14 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert "entertainment-anime-play" in index and "anime-play.mp3" in index
     assert "entertainment-anime-play" in source
     assert (ROOT / "static/entertainment/anime-play.mp3").is_file()
+
+
+def test_player_starts_on_the_smallest_level_and_bounds_buffering():
+    source = (ROOT / "static/js/entertainment.js").read_text()
+    # Multi-bitrate TV masters list 1080p first; the player must start small and
+    # let ABR ramp instead of buffering the whole episode at 1080p.
+    assert "capLevelToPlayerSize: true" in source
+    assert "autoLevelCapping" in source
+    assert "MANIFEST_PARSED" in source
+    assert "maxBufferLength: 3600" not in source
+    assert "maxBufferSize: 4 * 1000 * 1000 * 1000" not in source

@@ -479,15 +479,28 @@ function loadIntoSlot(key, result) {
     const instance = new window.Hls({
       enableWorker: true,
       lowLatencyMode: false,
-      // Buffer the whole episode: effectively no forward cap for a ~30 min show.
-      maxBufferLength: 3600,
-      maxMaxBufferLength: 7200,
-      maxBufferSize: 4 * 1000 * 1000 * 1000,
-      backBufferLength: 120,
+      capLevelToPlayerSize: true,
+      // Keep a modest forward buffer. The old "buffer the whole episode"
+      // setting (3600s / 4GB) made multi-bitrate TV masters pull ~1GB of
+      // 1080p fragments before settling, so playback looked stuck buffering.
+      maxBufferLength: 60,
+      maxMaxBufferLength: 180,
+      maxBufferSize: 200 * 1000 * 1000,
+      backBufferLength: 30,
       fragLoadingMaxRetry: 8,
       manifestLoadingMaxRetry: 6,
       levelLoadingMaxRetry: 6,
       fragLoadingRetryDelay: 500,
+    });
+    // Multi-bitrate VOD masters (PandaFlix TV) list 1080p first. Start on the
+    // smallest level so the first frame arrives fast, then let ABR ramp up.
+    instance.on(window.Hls.Events.MANIFEST_PARSED, () => {
+      const levels = instance.levels || [];
+      if (levels.length < 2) return;
+      let lowest = 0;
+      levels.forEach((level, index) => { if ((level.bitrate || 0) < (levels[lowest].bitrate || 0)) lowest = index; });
+      instance.autoLevelCapping = lowest;
+      setTimeout(() => { instance.autoLevelCapping = -1; }, 8000);
     });
     instance.loadSource(result.url); instance.attachMedia(video);
     instance.on(window.Hls.Events.ERROR, (_event, data) => {
