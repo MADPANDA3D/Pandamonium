@@ -577,3 +577,33 @@ test('Continue Watching uses the furthest episode reached, not recency', async (
   await expect(page.locator('.ent-continue-main')).toContainText('Up next');
   await expect(page.locator('.ent-continue-item', { hasText: 'Bleach' })).toHaveCount(0);
 });
+
+test('Entertainment clears the resolving status once the stream starts', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [{ number: '1', label: 'Episode 1' }], total: 1, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') return route.fulfill({ json: { title: 'Naruto Episode 1', url: 'https://media.example/ep.mp4', format: 'file', proxied: false, subtitles: [] } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+  await expect(page.locator('#entertainment-player-status')).toHaveText('Resolving stream…');
+
+  await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('playing')));
+  await expect(page.locator('#entertainment-player-status')).toBeEmpty();
+});

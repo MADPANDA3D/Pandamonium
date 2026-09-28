@@ -224,6 +224,9 @@ function initSlots() {
   };
   for (const key of ['a', 'b']) {
     slots[key].video?.addEventListener('ended', () => { if (key === activeSlotKey) handleEnded(); });
+    // Drop the "Resolving stream…" bubble once the active stream actually
+    // starts; nothing else clears it, so it lingered over the video forever.
+    slots[key].video?.addEventListener('playing', () => { if (key === activeSlotKey) status(''); });
     slots[key].video?.addEventListener('timeupdate', event => {
       if (!activeSlotKey || slots[activeSlotKey].video !== event.target || !playback) return;
       const now = Date.now();
