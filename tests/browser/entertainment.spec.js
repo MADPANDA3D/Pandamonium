@@ -607,3 +607,35 @@ test('Entertainment clears the resolving status once the stream starts', async (
   await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('playing')));
   await expect(page.locator('#entertainment-player-status')).toBeEmpty();
 });
+
+test('Entertainment retries a transient resolve failure', async ({ page }) => {
+  let resolveCalls = 0;
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'pandaflix', label: 'Movies & Shows', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/pandaflix/search') return route.fulfill({ json: { items: [{ selection: '[movie] Arrival (2016)', kind: 'movie', title: 'Arrival (2016)' }] } });
+    if (path === '/api/entertainment/pandaflix/resolve') {
+      resolveCalls += 1;
+      if (resolveCalls < 3) return route.fulfill({ status: 503, json: { detail: 'Entertainment provider unavailable; check plugin setup or try again' } });
+      return route.fulfill({ json: { title: 'Arrival', url: 'https://media.example/arrival.mp4', format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Arrival');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Arrival');
+  expect(resolveCalls).toBe(3);
+});

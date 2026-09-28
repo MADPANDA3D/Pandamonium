@@ -58,9 +58,34 @@ async function api(path = '', body) {
     credentials: 'same-origin',
     ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Entertainment unavailable');
+  const text = await response.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {}; }
+  if (!response.ok) {
+    const error = new Error(typeof data.detail === 'string' ? data.detail : `Entertainment request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
+}
+
+// Provider resolution is the flaky part: the upstream CLI occasionally fails to
+// resolve a source on the first try ("provider unavailable") even though the
+// same episode resolves moments later, so retry a couple of times before
+// surfacing the error (e.g. when resuming from Continue Watching).
+async function resolveStream(path, body, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await api(path, body);
+    } catch (error) {
+      lastError = error;
+      const retryable = !error.status || error.status >= 500;
+      if (attempt >= attempts || !retryable) throw error;
+      await new Promise(resolve => setTimeout(resolve, 600 * attempt));
+    }
+  }
+  throw lastError;
 }
 
 function normalizePrefs(value) {
@@ -483,13 +508,13 @@ function loadIntoSlot(key, result) {
       enableWorker: true,
       lowLatencyMode: false,
       capLevelToPlayerSize: true,
-      // Keep a modest forward buffer. The old "buffer the whole episode"
-      // setting (3600s / 4GB) made multi-bitrate TV masters pull ~1GB of
-      // 1080p fragments before settling, so playback looked stuck buffering.
-      maxBufferLength: 60,
-      maxMaxBufferLength: 180,
-      maxBufferSize: 200 * 1000 * 1000,
-      backBufferLength: 30,
+      // Load well ahead while watching, like the single-bitrate anime stream
+      // does. Starting on the smallest level (below) keeps the first frame fast,
+      // so a large forward buffer no longer strands the player at 1080p.
+      maxBufferLength: 3600,
+      maxMaxBufferLength: 7200,
+      maxBufferSize: 1500 * 1000 * 1000,
+      backBufferLength: 600,
       fragLoadingMaxRetry: 8,
       manifestLoadingMaxRetry: 6,
       levelLoadingMaxRetry: 6,
@@ -911,7 +936,7 @@ async function chooseTitle(item) {
 
 async function resolvePanda(season, episode) {
   status('Resolving stream…');
-  const result = await api('/pandaflix/resolve', { query, selection: selection.selection, kind: selection.kind, season, episode });
+  const result = await resolveStream('/pandaflix/resolve', { query, selection: selection.selection, kind: selection.kind, season, episode });
   playback = { provider: 'pandaflix', query, item: selection, season, episode, items: el('entertainment-results')._items, title: result.title };
   rememberResume({ provider: 'pandaflix', query, item: selection, season, episode, title: result.title });
   await play(result);
@@ -921,7 +946,7 @@ async function playAnimeEpisode(number) {
   const dub = el('entertainment-mode').value === 'dub';
   const quality = el('entertainment-quality').value;
   status('Resolving stream…');
-  const result = await api('/ani-cli/resolve', { query, selection_index: selection.id, dub, episode: number, quality });
+  const result = await resolveStream('/ani-cli/resolve', { query, selection_index: selection.id, dub, episode: number, quality });
   playback = { provider: 'ani-cli', query, item: selection, episode: number, dub, quality, items: el('entertainment-results')._items, title: result.title };
   rememberResume({ provider: 'ani-cli', query, item: selection, episode: number, dub, quality, title: result.title });
   await play(result);
@@ -939,7 +964,7 @@ async function choose(action, item) {
   if (action === 'panda-episode') return resolvePanda(selection.season, item.number);
   if (action === 'history') {
     status('Resolving your next episode…');
-    return play(await api('/ani-cli/continue', { history_index: item.index, dub: el('entertainment-mode').value === 'dub', quality: el('entertainment-quality').value }));
+    return play(await resolveStream('/ani-cli/continue', { history_index: item.index, dub: el('entertainment-mode').value === 'dub', quality: el('entertainment-quality').value }));
   }
 }
 
@@ -970,7 +995,7 @@ function episodeTarget(step) {
     if (episode == null) return null;
     return {
       playback: { ...context, episode },
-      resolve: () => api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode, quality: context.quality }),
+      resolve: () => resolveStream('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode, quality: context.quality }),
       resume: (title) => ({ provider: 'ani-cli', query: context.query, item: context.item, episode, dub: context.dub, quality: context.quality, title }),
     };
   }
@@ -979,7 +1004,7 @@ function episodeTarget(step) {
     if (episode == null) return null;
     return {
       playback: { ...context, episode },
-      resolve: () => api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),
+      resolve: () => resolveStream('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),
       resume: (title) => ({ provider: 'pandaflix', query: context.query, item: context.item, season: context.season, episode, title }),
     };
   }
@@ -1086,8 +1111,8 @@ async function refreshPlayback() {
   status('Refreshing stream…');
   try {
     const result = context.provider === 'ani-cli'
-      ? await api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: context.episode, quality: context.quality })
-      : await api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: context.episode });
+      ? await resolveStream('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: context.episode, quality: context.quality })
+      : await resolveStream('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: context.episode });
     pendingResume = position;
     playback = { ...context, title: result.title };
     await play(result);
