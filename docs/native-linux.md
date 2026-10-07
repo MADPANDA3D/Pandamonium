@@ -172,6 +172,9 @@ the tests, not a maximum for longer viewing sessions.
 Signed AniCLI 5.1.2 and PandaFlix 1.2.1 installed without a chat model. Actual
 desktop tests covered search, episodes/seasons, HLS decoding, quality selection,
 seeking, next episode and reopening saved history at the recorded position.
+PandaFlix also advanced automatically at a resumed episode's natural end, with
+the inactive player paused. Failed operations record a local failure code in
+the journal without logging provider response text or stream URLs.
 PandaFlix HLS captions loaded and displayed English cues:
 
 ![PandaFlix playback with embedded English captions](images/native-linux-playback.png)
