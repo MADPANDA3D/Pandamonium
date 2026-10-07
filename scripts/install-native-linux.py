@@ -502,6 +502,21 @@ admit()
                 raise RuntimeError(
                     "Startup/version proof failed. See journalctl --user -u " + UNIT
                 )
+            run(
+                [
+                    str(candidate / "venv/bin/python"),
+                    "-c",
+                    "from src.readiness import check_readiness; import json; report = check_readiness(); print(json.dumps(report)); assert report['ready'], 'Native database/data readiness failed'",
+                ],
+                cwd=candidate,
+                env={
+                    **os.environ,
+                    "PANDAMONIUM_DATA_DIR": str(data),
+                    "ODYSSEUS_DATA_DIR": str(data),
+                    "DATABASE_URL": "sqlite:///" + str(data / "app.db"),
+                    "PANDAMONIUM_LOCAL_EMBEDDINGS": "false",
+                },
+            )
             atomic_json(
                 root / "installation.json",
                 {

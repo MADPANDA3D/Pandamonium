@@ -59,7 +59,9 @@ def test_directory_guard_rejects_symlink_into_another_install(tmp_path):
     assert not (real / "data").exists()
 
 
-@pytest.mark.parametrize("failure", ["startup", "backup", "stop", "restore"])
+@pytest.mark.parametrize(
+    "failure", ["startup", "backup", "stop", "restore", "readiness"]
+)
 def test_failed_upgrade_restores_previous_app_data_and_launcher(
     tmp_path, monkeypatch, failure
 ):
@@ -98,6 +100,8 @@ def test_failed_upgrade_restores_previous_app_data_and_launcher(
     def runner(argv, **kwargs):
         nonlocal active
         calls.append(argv)
+        if failure == "readiness" and "-c" in argv and "check_readiness" in argv[-1]:
+            raise subprocess.CalledProcessError(1, argv)
         if argv[:4] == ["systemctl", "--user", "stop", native.UNIT]:
             if failure == "stop":
                 raise subprocess.CalledProcessError(1, argv)
@@ -111,7 +115,7 @@ def test_failed_upgrade_restores_previous_app_data_and_launcher(
     def failed_health(*args):
         if failure == "restore":
             (data / "retained.txt").write_text("failed candidate data")
-        return False
+        return failure == "readiness"
 
     monkeypatch.setattr(native, "health", failed_health)
     original = subprocess.run
@@ -180,7 +184,7 @@ def test_failed_upgrade_restores_previous_app_data_and_launcher(
         "previous": "before"
     }
     assert active
-    if failure == "startup":
+    if failure in {"startup", "readiness"}:
         assert list((root / "backups").glob("*/failed-data/retained.txt"))
     else:
         assert not list((root / "backups").glob("*/failed-data"))
