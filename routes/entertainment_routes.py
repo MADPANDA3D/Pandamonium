@@ -16,13 +16,12 @@ from fastapi.responses import Response, StreamingResponse
 
 from src.auth_helpers import require_user
 from src.authority_protocol import operator_identity
+from src.entertainment import PROVIDERS
 from src.extension_cli_adapter import execute_cli_tool
 from src.extension_registry import ExtensionRegistry
-from src.entertainment import PROVIDERS
 from src.external_agent_bridge import _StreamingPinnedTransport
 from src.url_security import validate_public_http_url
 from src.webhook_manager import _validated_public_ips
-
 
 _ALLOWED_HEADERS = {"referer": "Referer", "user-agent": "User-Agent", "origin": "Origin", "cookie": "Cookie"}
 _PLAYLIST_BYTES = 2 * 1024 * 1024
@@ -136,18 +135,33 @@ async def _token(owner: str, url: str, headers: dict[str, str]) -> str:
     return key
 
 
+def _is_hls(url: str) -> bool:
+    # Chrome cannot play HLS through a native <video>. Providers such as
+    # PandaFlix/cinejoy expose an extensionless playlist endpoint that serves
+    # application/vnd.apple.mpegurl, so treat a URL with no file extension as
+    # HLS and let the client load it through hls.js.
+    last = urlparse(url).path.rsplit("/", 1)[-1]
+    return ".m3u8" in url.lower() or "." not in last
+
+
 async def _prepare_playback(owner: str, result: dict) -> dict:
     url = validate_public_http_url(str(result.get("url") or ""), max_length=8192)
     headers = _headers(result.get("headers"))
     prepared = dict(result)
     prepared["url"] = f"/api/entertainment/proxy/{await _token(owner, url, headers)}" if headers else url
     prepared["proxied"] = bool(headers)
-    prepared["format"] = "hls" if ".m3u8" in url.lower() else "file"
+    prepared["format"] = "hls" if _is_hls(url) else "file"
     subtitles = []
     for raw in result.get("subtitles", [])[:16] if isinstance(result.get("subtitles"), list) else []:
         if not isinstance(raw, dict):
             continue
-        sub_url = validate_public_http_url(str(raw.get("url") or ""), max_length=8192)
+        try:
+            sub_url = validate_public_http_url(str(raw.get("url") or ""), max_length=8192)
+        except ValueError:
+            # Upstream CLIs (PandaFlix) can return a self-fetched subtitle as a
+            # local runtime path. The browser cannot load that, so drop the
+            # track instead of failing the whole resolve with a 500.
+            continue
         sub_headers = _headers(raw.get("headers")) or headers
         subtitles.append({
             "url": f"/api/entertainment/proxy/{await _token(owner, sub_url, sub_headers)}" if sub_headers else sub_url,
@@ -363,7 +377,7 @@ async def _tvmaze_cover(title: str) -> str | None:
     best_score = 0.0
     for entry in results or []:
         show = (entry or {}).get("show") or {}
-        image = str(((show.get("image") or {}).get("original") or "")).strip()
+        image = str((show.get("image") or {}).get("original") or "").strip()
         if not image:
             continue
         score = len(query_tokens & _title_tokens(str(show.get("name") or ""))) / max(1, len(query_tokens))
@@ -544,8 +558,9 @@ async def _playlist(owner: str, base_url: str, content: str, headers: dict[str, 
 def _installed(owner: str) -> tuple[dict, dict]:
     identity = operator_identity(owner)
     try:
-        from src.extension_installer import default_extensions_root
         import json
+
+        from src.extension_installer import default_extensions_root
 
         lifecycle = json.loads((default_extensions_root() / "lifecycle.json").read_text())["extensions"]
     except (FileNotFoundError, KeyError, TypeError, ValueError):

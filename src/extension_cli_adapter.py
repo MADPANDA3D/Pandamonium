@@ -80,7 +80,8 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
         i["name"]: i for i in integration["interfaces"] if i["kind"] == "tool"
     }
     prefix = manifest["extension_id"].replace("-", "_") + "__"
-    from src.entertainment import PROVIDERS, is_provider, schemas as entertainment_schemas
+    from src.entertainment import PROVIDERS, is_provider
+    from src.entertainment import schemas as entertainment_schemas
     media_ui = is_provider(manifest)
     if (
         not tools
@@ -138,10 +139,15 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
                 raise ExtensionLifecycleError("extension_soundboard_contract_invalid")
         elif media_ui:
             parameters, output = entertainment_schemas(provider_tools[name])
+            accepted_outputs = [output]
+            if provider_tools[name] == "entertainment.ani.search":
+                # Existing signed AniCLI packages predate the explicit kind.
+                # Admit exactly that old bounded schema, without broadening it.
+                accepted_outputs.append(entertainment_schemas(provider_tools[name], legacy=True)[1])
             if (
                 binding != provider_tools[name]
                 or tool["parameters"] != parameters
-                or interfaces[name]["output_schema"] != output
+                or interfaces[name]["output_schema"] not in accepted_outputs
             ):
                 raise ExtensionLifecycleError("extension_entertainment_contract_invalid")
         elif not media_ui and mode not in {"external_side_effect", "controlled_administrative", "destructive"}:
@@ -867,7 +873,7 @@ class GeneratedCliAdapter:
         """App startup restores only unchanged, previously enabled owner packages."""
         from src.extension_registry import ExtensionRegistry
 
-        result = {}
+        result: dict[str, str] = {}
         with _LOCK:
             lifecycle = self.root / "lifecycle.json"
             if not lifecycle.exists():

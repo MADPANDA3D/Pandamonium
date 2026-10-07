@@ -2,6 +2,31 @@ import uiModule from './ui.js';
 
 const el = id => document.getElementById(id);
 const esc = value => uiModule.esc(String(value));
+
+// ani-cli presents its in-player controls ("next", "replay", "previous",
+// "select", "change_quality", "quit") through the same menu channel it uses for
+// episodes. For a single-entry title (a movie) there is no episode menu, so the
+// adapter captures those controls instead. Never show them as episodes.
+const ANIME_CONTROL_LABELS = new Set([
+  'next', 'replay', 'previous', 'prev', 'select', 'change_quality',
+  'change quality', 'quality', 'quit', 'exit',
+]);
+
+function isAnimeMovie(item) {
+  if (!item) return false;
+  if (item.kind === 'movie') return true;
+  return /\b(movie|film|gekijouban)\b|劇場版/i.test(String(item.title || ''));
+}
+
+function filterAnimeEpisodes(items) {
+  return (items || []).filter(item => {
+    const number = String(item.number ?? '').trim().toLowerCase();
+    if (!number) return false;
+    if (ANIME_CONTROL_LABELS.has(number)) return false;
+    const label = String(item.label ?? '').replace(/^episode\s+/i, '').trim().toLowerCase();
+    return !ANIME_CONTROL_LABELS.has(label);
+  });
+}
 let providers = [];
 let active = null;
 let query = '';
@@ -28,9 +53,24 @@ async function api(path = '', body) {
     credentials: 'same-origin',
     ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Entertainment unavailable');
+  const raw = await response.text();
+  let data;
+  try { data = raw ? JSON.parse(raw) : {}; } catch (_) { data = null; }
+  if (!response.ok || !data || typeof data !== 'object') {
+    const error = new Error(typeof data?.detail === 'string' ? data.detail : 'Entertainment unavailable');
+    error.status = response.ok ? 502 : response.status;
+    throw error;
+  }
   return data;
+}
+
+async function resolveStream(path, body, attempts = 3) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { return await api(path, body); } catch (error) {
+      if (attempt + 1 >= attempts || (error.status && error.status < 500)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
 }
 
 function normalizePrefs(value) {
@@ -192,6 +232,7 @@ function initSlots() {
   };
   for (const key of ['a', 'b']) {
     slots[key].video?.addEventListener('ended', () => { if (key === activeSlotKey) handleEnded(); });
+    slots[key].video?.addEventListener('playing', () => { if (key === activeSlotKey) status(''); });
     slots[key].video?.addEventListener('timeupdate', event => {
       if (!activeSlotKey || slots[activeSlotKey].video !== event.target || !playback) return;
       const now = Date.now();
@@ -216,6 +257,7 @@ function idleSlotKey() {
 
 function teardownSlot(slot) {
   if (!slot) return;
+  if (slot.startupTimer) { clearTimeout(slot.startupTimer); slot.startupTimer = null; }
   if (slot.hls) { slot.hls.destroy(); slot.hls = null; }
   const video = slot.video;
   if (video) { video.pause(); video.removeAttribute('src'); video.replaceChildren(); video.load(); }
@@ -274,7 +316,9 @@ function buttons(items, action, label) {
     const saved = isFavorite(active, item);
     const watched = isWatchlisted(active, item);
     const kind = item.kind === 'series' ? 'TV Series' : (item.kind === 'movie' ? 'Movie' : '');
-    const cta = active === 'ani-cli' ? 'View Episodes' : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
+    const cta = active === 'ani-cli'
+      ? (isAnimeMovie(item) ? 'Play movie' : 'View episodes')
+      : (item.kind === 'movie' ? 'Watch Now' : 'View Seasons');
     return `<article class="ent-card" data-kind="${esc(active)}" data-ent-card="${index}">
       ${cardArt(item)}
       <div class="ent-card-body">
@@ -402,21 +446,34 @@ function loadIntoSlot(key, result) {
     const instance = new window.Hls({
       enableWorker: true,
       lowLatencyMode: false,
-      // Buffer the whole episode: effectively no forward cap for a ~30 min show.
+      capLevelToPlayerSize: true,
+      // Keep the requested long forward buffer while starting at a small level.
       maxBufferLength: 3600,
       maxMaxBufferLength: 7200,
-      maxBufferSize: 4 * 1000 * 1000 * 1000,
-      backBufferLength: 120,
+      maxBufferSize: 1.5 * 1024 * 1024 * 1024,
+      backBufferLength: 600,
       fragLoadingMaxRetry: 8,
       manifestLoadingMaxRetry: 6,
       levelLoadingMaxRetry: 6,
       fragLoadingRetryDelay: 500,
     });
-    instance.loadSource(result.url); instance.attachMedia(video);
+    instance.on(window.Hls.Events.MANIFEST_PARSED, () => {
+      if (!instance.levels.length) return;
+      const lowest = instance.levels.reduce((best, level, index) => (
+        level.bitrate < instance.levels[best].bitrate ? index : best
+      ), 0);
+      instance.autoLevelCapping = lowest;
+      if (slot.startupTimer) clearTimeout(slot.startupTimer);
+      slot.startupTimer = setTimeout(() => {
+        if (slot.hls === instance) instance.autoLevelCapping = -1;
+        slot.startupTimer = null;
+      }, 8000);
+    });
     instance.on(window.Hls.Events.ERROR, (_event, data) => {
       if (!data?.fatal) return;
       if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) { instance.recoverMediaError(); return; }
       if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+        if (key !== activeSlotKey) return;
         // A stale/expired proxy token is fatal and retries forever. Re-resolve
         // once so the stream self-heals instead of freezing on the same URL.
         const now = Date.now();
@@ -427,6 +484,7 @@ function loadIntoSlot(key, result) {
       }
     });
     slot.hls = instance;
+    instance.loadSource(result.url); instance.attachMedia(video);
   } else {
     video.src = result.url;
   }
@@ -661,14 +719,26 @@ async function search() {
 
 async function chooseTitle(item) {
   selection = item;
+  el('entertainment-results-title').textContent = item.title;
   status('Loading title…');
   if (active === 'ani-cli') {
     playSound('entertainment-katon');
+    if (isAnimeMovie(item)) {
+      status('Playing movie…');
+      return playAnimeEpisode('1');
+    }
     const body = { query, selection_index: item.id, dub: el('entertainment-mode').value === 'dub' };
     const result = await api('/ani-cli/episodes', { ...body, offset: 0 });
-    episodeButtons(result, 'anime-episode', '/ani-cli/episodes', body);
+    const episodes = filterAnimeEpisodes(result.items);
+    if (!episodes.length) {
+      // A single-entry title whose "episodes" were really the in-player controls.
+      selection = { ...item, kind: 'movie' };
+      status('Playing movie…');
+      return playAnimeEpisode('1');
+    }
+    episodeButtons({ ...result, items: episodes }, 'anime-episode', '/ani-cli/episodes', body);
     el('entertainment-jump').classList.remove('hidden');
-    status(`Choose an episode · ${result.total} available.`);
+    status(`Choose an episode · ${episodes.length} available.`);
   } else if (item.kind === 'movie') {
     await resolvePanda(0, 0);
   } else {
@@ -679,7 +749,7 @@ async function chooseTitle(item) {
 
 async function resolvePanda(season, episode) {
   status('Resolving stream…');
-  const result = await api('/pandaflix/resolve', { query, selection: selection.selection, kind: selection.kind, season, episode });
+  const result = await resolveStream('/pandaflix/resolve', { query, selection: selection.selection, kind: selection.kind, season, episode });
   playback = { provider: 'pandaflix', query, item: selection, season, episode, items: el('entertainment-results')._items, title: result.title };
   rememberResume({ provider: 'pandaflix', query, item: selection, season, episode, title: result.title });
   await play(result);
@@ -689,7 +759,7 @@ async function playAnimeEpisode(number) {
   const dub = el('entertainment-mode').value === 'dub';
   const quality = el('entertainment-quality').value;
   status('Resolving stream…');
-  const result = await api('/ani-cli/resolve', { query, selection_index: selection.id, dub, episode: number, quality });
+  const result = await resolveStream('/ani-cli/resolve', { query, selection_index: selection.id, dub, episode: number, quality });
   playback = { provider: 'ani-cli', query, item: selection, episode: number, dub, quality, items: el('entertainment-results')._items, title: result.title };
   rememberResume({ provider: 'ani-cli', query, item: selection, episode: number, dub, quality, title: result.title });
   await play(result);
@@ -707,7 +777,7 @@ async function choose(action, item) {
   if (action === 'panda-episode') return resolvePanda(selection.season, item.number);
   if (action === 'history') {
     status('Resolving your next episode…');
-    return play(await api('/ani-cli/continue', { history_index: item.index, dub: el('entertainment-mode').value === 'dub', quality: el('entertainment-quality').value }));
+    return play(await resolveStream('/ani-cli/continue', { history_index: item.index, dub: el('entertainment-mode').value === 'dub', quality: el('entertainment-quality').value }));
   }
 }
 
@@ -734,11 +804,12 @@ function episodeTarget(step) {
   const context = playback;
   const pick = (current, items) => (step > 0 ? nextNumber(current, items) : previousNumber(current, items));
   if (context.provider === 'ani-cli') {
+    if (isAnimeMovie(context.item)) return null;
     const episode = pick(context.episode, context.items);
     if (episode == null) return null;
     return {
       playback: { ...context, episode },
-      resolve: () => api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode, quality: context.quality }),
+      resolve: () => resolveStream('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode, quality: context.quality }),
       resume: (title) => ({ provider: 'ani-cli', query: context.query, item: context.item, episode, dub: context.dub, quality: context.quality, title }),
     };
   }
@@ -747,7 +818,7 @@ function episodeTarget(step) {
     if (episode == null) return null;
     return {
       playback: { ...context, episode },
-      resolve: () => api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),
+      resolve: () => resolveStream('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),
       resume: (title) => ({ provider: 'pandaflix', query: context.query, item: context.item, season: context.season, episode, title }),
     };
   }
@@ -813,8 +884,8 @@ async function refreshPlayback() {
   status('Refreshing stream…');
   try {
     const result = context.provider === 'ani-cli'
-      ? await api('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: context.episode, quality: context.quality })
-      : await api('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: context.episode });
+      ? await resolveStream('/ani-cli/resolve', { query: context.query, selection_index: context.item.id, dub: context.dub, episode: context.episode, quality: context.quality })
+      : await resolveStream('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode: context.episode });
     pendingResume = position;
     playback = { ...context, title: result.title };
     await play(result);
@@ -950,7 +1021,9 @@ function init() {
     if (more) {
       const host = el('entertainment-results'); const page = host._page;
       api(page.path, { ...page.body, offset: Number(more.dataset.entMore) }).then(result => {
-        const existing = host._items || []; const combined = [...existing, ...result.items];
+        const existing = host._items || [];
+        const incoming = page.action === 'anime-episode' ? filterAnimeEpisodes(result.items) : result.items;
+        const combined = [...existing, ...incoming];
         episodeButtons({ ...result, items: combined }, page.action, page.path, page.body);
       }).catch(error => status(error.message));
       return;
