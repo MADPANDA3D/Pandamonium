@@ -59,7 +59,10 @@ def test_directory_guard_rejects_symlink_into_another_install(tmp_path):
     assert not (real / "data").exists()
 
 
-def test_failed_upgrade_restores_previous_app_data_and_launcher(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", ["startup", "backup", "stop", "restore"])
+def test_failed_upgrade_restores_previous_app_data_and_launcher(
+    tmp_path, monkeypatch, failure
+):
     repo, revision = repository(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
@@ -77,28 +80,79 @@ def test_failed_upgrade_restores_previous_app_data_and_launcher(tmp_path, monkey
     data.mkdir()
     (data / "retained.txt").write_text("existing user data")
     (root / "installation.json").write_text(json.dumps({"previous": "before"}))
+    native.atomic_json(
+        root / "owner.json",
+        {
+            "schema": "pandamonium.native-source.v1",
+            "uid": native.os.getuid(),
+            "root": str(root),
+        },
+    )
     launcher = home / ".local/bin/pandamonium-desktop"
     launcher.parent.mkdir(parents=True)
     launcher.write_text("existing launcher")
     launcher.chmod(0o755)
     calls = []
+    active = True
 
     def runner(argv, **kwargs):
+        nonlocal active
         calls.append(argv)
+        if argv[:4] == ["systemctl", "--user", "stop", native.UNIT]:
+            if failure == "stop":
+                raise subprocess.CalledProcessError(1, argv)
+            active = False
+        if argv[:4] == ["systemctl", "--user", "start", native.UNIT]:
+            active = True
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(native, "run", runner)
-    monkeypatch.setattr(native, "health", lambda *args: False)
+
+    def failed_health(*args):
+        if failure == "restore":
+            (data / "retained.txt").write_text("failed candidate data")
+        return False
+
+    monkeypatch.setattr(native, "health", failed_health)
     original = subprocess.run
+    if failure == "backup":
+
+        def fail_copy(*args, **kwargs):
+            raise OSError("backup disk is full")
+
+        monkeypatch.setattr(native.shutil, "copytree", fail_copy)
+    if failure == "restore":
+        copy = native.shutil.copytree
+
+        def fail_restore(source, destination, *args, **kwargs):
+            if Path(destination).name == "restored-data":
+                raise OSError("restore disk is full")
+            return copy(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(native.shutil, "copytree", fail_restore)
     with patch.object(native.subprocess, "run", wraps=original) as proc:
 
         def fake_process(argv, **kwargs):
+            nonlocal active
             if argv[0] == "systemctl":
+                if "show" in argv:
+                    state = "active" if active else "inactive"
+                    pid = "123" if active else "0"
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout=f"ActiveState={state}\nMainPID={pid}\n"
+                    )
+                if "is-active" in argv:
+                    return subprocess.CompletedProcess(argv, 0 if active else 3)
+                if "stop" in argv:
+                    active = False
+                if "start" in argv:
+                    active = True
+                calls.append(argv)
                 return subprocess.CompletedProcess(argv, 0)
             return original(argv, **kwargs)
 
         proc.side_effect = fake_process
-        with pytest.raises(RuntimeError, match="Startup/version proof failed"):
+        with pytest.raises((RuntimeError, OSError, subprocess.CalledProcessError)):
             native.install(
                 Namespace(
                     source=str(repo),
@@ -108,11 +162,28 @@ def test_failed_upgrade_restores_previous_app_data_and_launcher(tmp_path, monkey
                     provision_runtime=False,
                 )
             )
+    if failure == "restore":
+        assert not active
+        assert (root / "recovery.json").exists()
+        assert (data / "retained.txt").read_text() == "failed candidate data"
+        assert (
+            next((root / "backups").glob("*/data/retained.txt")).read_text()
+            == "existing user data"
+        )
+        return
+    assert not (root / "recovery.json").exists()
     assert (root / "current").resolve() == previous
     assert (data / "retained.txt").read_text() == "existing user data"
     assert launcher.read_text() == "existing launcher"
     assert launcher.stat().st_mode & 0o777 == 0o755
-    assert list((root / "backups").glob("*/failed-data/retained.txt"))
+    assert json.loads((root / "installation.json").read_text()) == {
+        "previous": "before"
+    }
+    assert active
+    if failure == "startup":
+        assert list((root / "backups").glob("*/failed-data/retained.txt"))
+    else:
+        assert not list((root / "backups").glob("*/failed-data"))
 
 
 def test_launcher_uses_loopback_and_keeps_models_out_of_startup():
@@ -120,3 +191,61 @@ def test_launcher_uses_loopback_and_keeps_models_out_of_startup():
     assert "--host 127.0.0.1" in unit
     assert "--workers 1" in unit
     assert "[Install]" not in unit
+    assert "DATABASE_URL=sqlite:////home/user/app/data/app.db" in unit
+    assert "PANDAMONIUM_DATA_DIR=/home/user/app/data" in unit
+    assert "ODYSSEUS_DATA_DIR=/home/user/app/data" in unit
+
+
+@pytest.mark.parametrize(
+    "report",
+    ["", "ActiveState=inactive\nMainPID=23", "ActiveState=deactivating\nMainPID=0"],
+)
+def test_unknown_or_live_service_state_never_authorizes_data_restore(
+    monkeypatch, report
+):
+    monkeypatch.setattr(native, "output", lambda args: report)
+    with pytest.raises(RuntimeError, match="stop was not confirmed"):
+        native.require_stopped()
+
+
+def test_ownership_marker_requires_exact_user_and_path(tmp_path):
+    native.atomic_json(
+        tmp_path / "owner.json",
+        {
+            "schema": "pandamonium.native-source.v1",
+            "uid": native.os.getuid(),
+            "root": str(tmp_path),
+        },
+    )
+    assert native.owned_install(tmp_path)
+    native.atomic_json(tmp_path / "owner.json", {"root": "/unrelated"})
+    with pytest.raises(RuntimeError, match="ownership does not match"):
+        native.owned_install(tmp_path)
+    (tmp_path / "owner.json").unlink()
+    (tmp_path / "owner.json").symlink_to(tmp_path / "outside")
+    with pytest.raises(RuntimeError, match="symlink"):
+        native.owned_install(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "key", ["PANDAMONIUM_DATA_DIR", "ODYSSEUS_DATA_DIR", "DATABASE_URL"]
+)
+def test_external_data_configuration_is_refused(tmp_path, key):
+    config = tmp_path / "native.env"
+    config.write_text(f'{key}="/outside-this-install"\n')
+    with pytest.raises(RuntimeError, match="outside this profile"):
+        native.check_config(config, tmp_path / "data")
+
+
+def test_atomic_metadata_failure_preserves_previous_marker(tmp_path, monkeypatch):
+    marker = tmp_path / "installation.json"
+    marker.write_text('{"previous": "retained"}\n')
+
+    def full_disk(fd):
+        raise OSError("disk is full")
+
+    monkeypatch.setattr(native.os, "fsync", full_disk)
+    with pytest.raises(OSError, match="disk is full"):
+        native.atomic_json(marker, {"previous": "replacement"})
+    assert json.loads(marker.read_text()) == {"previous": "retained"}
+    assert list(tmp_path.iterdir()) == [marker]

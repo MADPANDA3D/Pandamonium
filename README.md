@@ -40,6 +40,11 @@ docker compose logs pandamonium
 Native Linux, macOS, Windows, GPU, HTTPS, and configuration instructions are
 in the [setup guide](docs/setup.md).
 
+For the tested EndeavourOS/Arch laptop profile without containers or local model
+downloads, see the [native Linux installer guide](docs/native-linux.md). It uses
+an isolated Python environment and an on-demand desktop launcher. This source
+profile is under development; signed public release acceptance is still pending.
+
 ## Pandamonium Upgrades
 
 Pandamonium keeps Odysseus's self-hosted workspace foundation and adds the

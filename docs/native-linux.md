@@ -23,8 +23,24 @@ requires installing uv separately from its official distribution. The installer
 reports missing tools and streams its dependency output; it never installs a
 package into the distro Python.
 
-Clone the repository, check out the exact reviewed commit, inspect the script,
-then run this single installation command from that checkout:
+Install the prerequisites on Arch or EndeavourOS if they are missing:
+
+```bash
+sudo pacman -S --needed git uv python xdg-utils
+```
+
+Use your installed browser. Chrome or Chromium opens an app window; other
+browsers use a normal tab. Clone the repository and check out the exact reviewed
+commit from the installer PR or release notes:
+
+```bash
+git clone https://github.com/MADPANDA3D/Pandamonium.git
+cd Pandamonium
+git checkout --detach <reviewed-full-commit-sha>
+```
+
+Inspect `scripts/install-native-linux.py`, then run this single installation
+command from that checkout:
 
 ```bash
 python3 scripts/install-native-linux.py --revision HEAD --provision-runtime
@@ -36,6 +52,13 @@ hash-locked laptop profile; native package compilation fails clearly if a
 compatible wheel is unavailable. Existing install paths are checked before
 replacement. A failed upgrade preserves failed data for inspection and restores
 the previous snapshot and stopped-state data backup.
+The profile pins accounts, plugin state and SQLite to its own `data/` directory.
+An existing configuration pointing those files elsewhere is refused, so the
+backup cannot silently omit a separate database. Backup failure before switching
+versions restarts the previous service without changing its data.
+If restoring a failed upgrade cannot finish, the backend stays stopped and
+`recovery.json` records the exact backup and snapshots. Reinstalling is blocked
+until that recovery is inspected; partial restored data is never started.
 
 `--provision-runtime` explicitly authorizes the existing first-party sandbox
 provisioner. It asks for sudo in the terminal when necessary; no password is

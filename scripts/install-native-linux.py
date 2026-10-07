@@ -50,10 +50,89 @@ def safe_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
 
 
+def atomic_json(path: Path, value: dict[str, object]) -> None:
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            json.dump(value, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def owned_install(root: Path) -> bool:
+    marker = root / "owner.json"
+    if marker.is_symlink():
+        raise RuntimeError(f"Install ownership marker is a symlink: {marker}")
+    if not marker.exists():
+        return False
+    try:
+        value = json.loads(marker.read_text())
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"Invalid install ownership marker: {marker}") from error
+    if value != {
+        "schema": "pandamonium.native-source.v1",
+        "uid": os.getuid(),
+        "root": str(root),
+    }:
+        raise RuntimeError(
+            f"Install ownership does not match this user and path: {root}"
+        )
+    return True
+
+
+def check_config(config: Path, data: Path) -> None:
+    # This profile backs up only its own data directory. Never silently use an
+    # external database while presenting that directory as a complete backup.
+    expected = {
+        "PANDAMONIUM_DATA_DIR": str(data),
+        "ODYSSEUS_DATA_DIR": str(data),
+        "DATABASE_URL": "sqlite:///" + str(data / "app.db"),
+    }
+    for line in config.read_text().splitlines():
+        key, separator, raw = line.strip().partition("=")
+        if separator and key in expected:
+            try:
+                values = shlex.split(raw)
+            except ValueError as error:
+                raise RuntimeError(f"Invalid {key} in {config}") from error
+            if len(values) != 1 or values[0] != expected[key]:
+                raise RuntimeError(
+                    f"{key} in {config} points outside this profile. "
+                    "Preserve it and use a separately managed installation."
+                )
+
+
 def systemd_quote(value: str) -> str:
     return (
         '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
     )
+
+
+def require_stopped() -> None:
+    values = dict(
+        line.split("=", 1)
+        for line in output(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                UNIT,
+                "--property=ActiveState,MainPID",
+            ]
+        ).splitlines()
+        if "=" in line
+    )
+    if (
+        values.get("ActiveState") not in {"inactive", "failed"}
+        or values.get("MainPID") != "0"
+    ):
+        raise RuntimeError(
+            "Backend stop was not confirmed; refusing to copy or restore live data."
+        )
 
 
 def health(port: int, revision: str | None = None, timeout: int = 90) -> bool:
@@ -98,6 +177,9 @@ After=network.target
 Type=simple
 WorkingDirectory={str(root / "current").replace("%", "%%")}
 EnvironmentFile={str(config).replace("%", "%%")}
+Environment={systemd_quote("DATABASE_URL=sqlite:///" + str(root / "data/app.db"))}
+Environment={systemd_quote("PANDAMONIUM_DATA_DIR=" + str(root / "data"))}
+Environment={systemd_quote("ODYSSEUS_DATA_DIR=" + str(root / "data"))}
 ExecStart={systemd_quote(str(root / "current/venv/bin/python"))} -m uvicorn app:app --host 127.0.0.1 --port 7000 --workers 1
 Restart=on-failure
 RestartSec=5
@@ -159,6 +241,8 @@ def install(args: argparse.Namespace) -> None:
             "Commit or preserve tracked changes first. Only exact committed source is installed."
         )
     root = Path(args.root).expanduser().absolute()
+    if any(character in str(root) for character in ("\n", "\r", "\x00")):
+        raise RuntimeError("Install paths cannot contain control characters.")
     config = Path.home() / ".config/pandamonium/native.env"
     unit_path = Path.home() / ".config/systemd/user" / UNIT
     launcher = Path.home() / ".local/bin/pandamonium-desktop"
@@ -178,6 +262,30 @@ def install(args: argparse.Namespace) -> None:
     print(
         f"Linux {platform.machine()}, available RAM {memory_kib / 1024**2:.1f} GiB, disk free {shutil.disk_usage(existing_parent).free / 1024**3:.1f} GiB"
     )
+    release = Path("/etc/os-release")
+    distro = (
+        next(
+            (
+                line.partition("=")[2].strip('"')
+                for line in release.read_text().splitlines()
+                if line.startswith("PRETTY_NAME=")
+            ),
+            "unknown",
+        )
+        if release.exists()
+        else "unknown"
+    )
+    browser = next(
+        (
+            shutil.which(name)
+            for name in ("google-chrome-stable", "google-chrome", "chromium")
+            if shutil.which(name)
+        ),
+        None,
+    )
+    print(
+        f"Distribution: {distro}; browser: {browser or 'default browser via xdg-open'}"
+    )
     if memory_kib < 2 * 1024**2:
         raise RuntimeError(
             "Close other applications: at least 2 GiB available RAM is required for bounded plugin builds."
@@ -188,31 +296,57 @@ def install(args: argparse.Namespace) -> None:
     print(
         "Updates: host-managed pinned source; root-owned signed in-app updater is NOT enabled."
     )
+    owned = owned_install(root)
+    for child in (
+        "versions",
+        "backups",
+        "data",
+        "logs",
+        "install.lock",
+        "current.next",
+        "installation.json",
+        "recovery.json",
+    ):
+        if (root / child).is_symlink():
+            raise RuntimeError(
+                f"Install path is a symlink; inspect it first: {root / child}"
+            )
+    current = root / "current"
+    previous = current.resolve() if current.is_symlink() else None
+    if previous and (not owned or previous.parent != root / "versions"):
+        raise RuntimeError("Active snapshot is outside this owned installation.")
+    if current.exists() and not current.is_symlink():
+        raise RuntimeError(
+            "current is not this install's symlink; refusing to replace it."
+        )
+    if root.exists() and any(root.iterdir()) and not owned:
+        raise RuntimeError(f"Nonempty unowned installation path: {root}")
+    recovery = root / "recovery.json"
+    if recovery.exists():
+        raise RuntimeError(
+            f"An incomplete recovery needs inspection before reinstalling: {recovery}"
+        )
     for target in (config, unit_path, launcher, desktop):
         if target.is_symlink():
             raise RuntimeError(f"Install file is a symlink; inspect it first: {target}")
-        if (
-            target.exists()
-            and not (root / "installation.json").exists()
-            and not (root / "owner.json").exists()
-        ):
+        if target.exists() and not owned:
             raise RuntimeError(
                 f"Existing unrelated install file: {target}. Inspect and back it up first."
             )
+    if config.exists():
+        check_config(config, root / "data")
     if args.check:
         return
     safe_directory(root)
     with (root / "install.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        (root / "owner.json").write_text(
-            json.dumps(
-                {
-                    "schema": "pandamonium.native-source.v1",
-                    "uid": os.getuid(),
-                    "root": str(root),
-                }
-            )
-            + "\n"
+        atomic_json(
+            root / "owner.json",
+            {
+                "schema": "pandamonium.native-source.v1",
+                "uid": os.getuid(),
+                "root": str(root),
+            },
         )
         versions = root / "versions"
         versions.mkdir(exist_ok=True)
@@ -227,11 +361,15 @@ def install(args: argparse.Namespace) -> None:
         )
         env_digest = hashlib.sha256(revision_lock).hexdigest()[:12]
         candidate = versions / f"{revision[:12]}-{env_digest}"
+        if candidate.is_symlink():
+            raise RuntimeError(f"Candidate snapshot is a symlink: {candidate}")
         if candidate.exists() and not (candidate / ".install-complete").exists():
             # Preserve interrupted candidates for inspection; stage a fresh one.
-            candidate = versions / (candidate.name + f"-{int(time.time())}")
-        if not candidate.exists():
-            candidate.mkdir()
+            candidate = Path(
+                tempfile.mkdtemp(prefix=candidate.name + "-", dir=versions)
+            )
+        if not (candidate / ".install-complete").exists():
+            candidate.mkdir(exist_ok=True)
             export_snapshot(source, revision, candidate)
             run(["uv", "python", "install", PYTHON])
             run(["uv", "venv", "--python", PYTHON, str(candidate / "venv")])
@@ -250,6 +388,16 @@ def install(args: argparse.Namespace) -> None:
             )
             (candidate / ".install-complete").touch()
         else:
+            if (
+                (candidate / "SOURCE_REVISION").read_text().strip() != revision
+                or (candidate / "packaging/native-linux/requirements.txt").read_bytes()
+                != revision_lock
+                or not (candidate / "venv/bin/python").is_file()
+                or (candidate / ".install-complete").is_symlink()
+            ):
+                raise RuntimeError(
+                    f"Completed snapshot identity is invalid: {candidate}"
+                )
             print("Reusing exact completed source/dependency snapshot.")
         data = root / "data"
         safe_directory(data)
@@ -290,14 +438,10 @@ admit()
                 env={
                     **os.environ,
                     "PANDAMONIUM_DATA_DIR": str(data),
+                    "ODYSSEUS_DATA_DIR": str(data),
+                    "DATABASE_URL": "sqlite:///" + str(data / "app.db"),
                     "PANDAMONIUM_LOCAL_EMBEDDINGS": "false",
                 },
-            )
-        current = root / "current"
-        previous = current.resolve() if current.is_symlink() else None
-        if current.exists() and not current.is_symlink():
-            raise RuntimeError(
-                "current is not this install's symlink; refusing to replace it."
             )
         # Refuse to take over a port held by an unrelated process.
         active = (
@@ -310,22 +454,40 @@ admit()
             with socket.socket() as sock:
                 if sock.connect_ex(("127.0.0.1", 7000)) == 0:
                     raise RuntimeError("Port 7000 is occupied by another service.")
-        backup = root / "backups" / time.strftime("%Y%m%dT%H%M%S")
-        backup.mkdir(parents=True)
-        run(["systemctl", "--user", "stop", UNIT], check=False)
-        shutil.copytree(data, backup / "data")
+        safe_directory(root / "backups")
+        backup = Path(
+            tempfile.mkdtemp(
+                prefix=time.strftime("%Y%m%dT%H%M%S") + "-", dir=root / "backups"
+            )
+        )
         saved = {
             target: target.read_bytes() if target.exists() else None
-            for target in (unit_path, launcher, desktop)
+            for target in (unit_path, launcher, desktop, root / "installation.json")
         }
-        for target, content in saved.items():
-            if content is not None:
-                (backup / target.name).write_bytes(content)
+        stopped = False
+        switched = False
         try:
+            run(["systemctl", "--user", "stop", UNIT], check=active)
+            require_stopped()
+            stopped = True
+            shutil.copytree(data, backup / "data")
+            for target, content in saved.items():
+                if content is not None:
+                    (backup / target.name).write_bytes(content)
             next_link = root / "current.next"
             next_link.unlink(missing_ok=True)
             next_link.symlink_to(candidate, target_is_directory=True)
+            atomic_json(
+                recovery,
+                {
+                    "previous": str(previous) if previous else None,
+                    "candidate": str(candidate),
+                    "backup": str(backup),
+                    "instruction": "Keep the backend stopped; restore the stopped-state backup and saved unit before removing this marker.",
+                },
+            )
             next_link.replace(current)
+            switched = True
             unit_path.write_text(service_text(root, config))
             run(["systemd-analyze", "--user", "verify", str(unit_path)])
             launcher.write_text(launcher_text(root))
@@ -340,35 +502,42 @@ admit()
                 raise RuntimeError(
                     "Startup/version proof failed. See journalctl --user -u " + UNIT
                 )
-            (root / "installation.json").write_text(
-                json.dumps(
-                    {
-                        "profile": "host-managed-source",
-                        "revision": revision,
-                        "python": PYTHON,
-                        "lock_sha256": hashlib.sha256(revision_lock).hexdigest(),
-                        "previous": str(previous) if previous else None,
-                        "backup": str(backup),
-                    },
-                    indent=2,
-                )
-                + "\n"
+            atomic_json(
+                root / "installation.json",
+                {
+                    "profile": "host-managed-source",
+                    "revision": revision,
+                    "python": PYTHON,
+                    "lock_sha256": hashlib.sha256(revision_lock).hexdigest(),
+                    "previous": str(previous) if previous else None,
+                    "backup": str(backup),
+                },
             )
+            recovery.unlink()
         except BaseException:
-            subprocess.run(["systemctl", "--user", "stop", UNIT], check=False)
-            # Keep failed data intact and restore the verified, stopped-state copy.
-            data.rename(backup / "failed-data")
-            shutil.copytree(backup / "data", data)
-            current.unlink(missing_ok=True)
-            if previous:
-                current.symlink_to(previous, target_is_directory=True)
-            for target, content in saved.items():
-                if content is None:
-                    target.unlink(missing_ok=True)
-                else:
-                    target.write_bytes(content)
-            subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
-            if active and previous:
+            if switched:
+                subprocess.run(["systemctl", "--user", "stop", UNIT], check=False)
+                require_stopped()
+                # Keep failed data intact and restore the verified, stopped-state copy.
+                # A failed restore copy leaves current data intact and the recovery
+                # marker blocks the next install from treating partial data as good.
+                restored_data = backup / "restored-data"
+                shutil.copytree(backup / "data", restored_data)
+                data.rename(backup / "failed-data")
+                restored_data.replace(data)
+                current.unlink(missing_ok=True)
+                if previous:
+                    current.symlink_to(previous, target_is_directory=True)
+                for target, content in saved.items():
+                    if content is None:
+                        target.unlink(missing_ok=True)
+                    elif target.name == "installation.json":
+                        atomic_json(target, json.loads(content))
+                    else:
+                        target.write_bytes(content)
+                subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+            recovery.unlink(missing_ok=True)
+            if stopped and active and previous:
                 subprocess.run(["systemctl", "--user", "start", UNIT], check=False)
             raise
         print("Installed: http://127.0.0.1:7000 — create your account in the browser.")
