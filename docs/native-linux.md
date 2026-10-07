@@ -30,13 +30,16 @@ sudo pacman -S --needed git uv python xdg-utils
 ```
 
 Use your installed browser. Chrome or Chromium opens an app window; other
-browsers use a normal tab. Clone the repository and check out the exact reviewed
-commit from the installer PR or release notes:
+browsers use a normal tab. Keep the installer checkout on the local SSD. This
+[partial clone](https://git-scm.com/docs/git-clone) defers historical file
+contents; checking out the pinned revision downloads its required files.
+The validated source revision below is available in [PR312](https://github.com/MADPANDA3D/Pandamonium/pull/312):
 
 ```bash
-git clone https://github.com/MADPANDA3D/Pandamonium.git
-cd Pandamonium
-git checkout --detach <reviewed-full-commit-sha>
+mkdir -p ~/.local/state/pandamonium-install
+git clone --filter=blob:none --no-checkout https://github.com/MADPANDA3D/Pandamonium.git ~/.local/state/pandamonium-install/source
+cd ~/.local/state/pandamonium-install/source
+git checkout --detach 580c90c3802c7dbab88fae770e8bdd99df3b54cb
 ```
 
 Inspect `scripts/install-native-linux.py`, then run this single installation
@@ -45,6 +48,9 @@ command from that checkout:
 ```bash
 python3 scripts/install-native-linux.py --revision HEAD --provision-runtime
 ```
+
+If you already have the checkout, reuse it; `git clone` refuses a nonempty
+destination. Review future revisions explicitly before updating the pin.
 
 The command refuses tracked edits and exports only committed files, excluding
 `.env`, local data and Git metadata. Python dependencies come from the committed
