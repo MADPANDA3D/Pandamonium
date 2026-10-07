@@ -10,6 +10,8 @@ export const MODEL_SETUP_ENTRY_LABEL = 'Connect a model engine';
 // a message plus next step; any other code-shaped detail falls back to generic
 // recovery copy instead of leaking the code.
 const SETUP_ERROR_MESSAGES = {
+  marketplace_artifact_timeout:
+    'The signed package download exceeded its time limit. Check your connection and retry the install preview.',
   extension_scan_model_unavailable:
     'The configured model could not analyze this source. Connect a working Background Tasks or Default model in Settings, then retry.',
   extension_scan_model_timeout:
@@ -84,6 +86,26 @@ const SETUP_ERROR_MESSAGES = {
     'Another update is already running. Wait for it to finish, then check for updates again.',
   update_failed:
     'The update did not finish. The previous release is still active — try again, or roll back from Settings.',
+  authority_decision_not_pending:
+    'That approval was already used or has expired. Preview the install again and approve the fresh request.',
+  authority_decision_already_resolved:
+    'That approval was already used. Preview the install again and approve the fresh request.',
+  authority_decision_expired:
+    'That approval expired. Preview the install again and approve the fresh request.',
+  authority_decision_not_found:
+    'That approval is no longer available. Preview the install again.',
+  authority_execution_context_unavailable:
+    'The app restarted after the preview, so the approval could not be completed. Preview the install again.',
+  authority_execution_context_changed:
+    'The host changed after the preview, so the approval was not used. Preview the install again.',
+  system_requirement_unknown_capability:
+    'This package asks for a system requirement this version does not know. Update Pandamonium and retry.',
+  system_requirements_container_unsupported:
+    'This package needs a host sandbox that a container cannot provide. Install Pandamonium natively to use it.',
+  system_requirements_distro_unsupported:
+    'Automatic system setup is not available on this Linux distribution yet. Install bubblewrap and util-linux, then retry.',
+  system_requirements_provision_failed:
+    'System requirements could not be installed. Check the administrator password and try again.',
 };
 
 // Every backend family gets actionable copy, so no reachable failure lands on

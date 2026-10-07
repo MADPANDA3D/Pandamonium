@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import threading
+import uuid
 
 import pytest
 from sqlalchemy import create_engine
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from core.database import Base, Integration
 from src import extension_configuration as configuration
 from src import extension_resources as resources
+from src import system_requirements
 from src.authority_protocol import AuthorityStore
 from src.extension_cli_adapter import GeneratedCliAdapter
 from src.extension_installer import ExtensionLifecycleManager
@@ -168,6 +170,9 @@ def test_resource_admission_fails_before_execution(tmp_path, monkeypatch):
     with pytest.raises(Exception, match="enforced filesystem"):
         resources.storage_root()
     monkeypatch.delenv("ODYSSEUS_EXTENSION_RUNTIME_ROOT")
+    monkeypatch.setattr(
+        system_requirements, "DEFAULT_RUNTIME_MOUNT", tmp_path / "missing-runtime"
+    )
     with pytest.raises(Exception, match="dedicated filesystem"):
         resources.admit()
 
@@ -430,7 +435,9 @@ def test_kernel_task_limit_contains_many_children(tmp_path):
     from src.extension_cli_adapter import _run
 
     path, manifest = package(tmp_path)
-    runtime = resources.storage_root() / tmp_path.name / "runtime"
+    runtime = (
+        resources.storage_root() / f"{tmp_path.name}-{uuid.uuid4().hex}" / "runtime"
+    )
     runtime.mkdir(parents=True)
     (path / ".pandamonium/limits.py").write_text("""import subprocess,json
 children=[]

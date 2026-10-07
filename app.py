@@ -177,6 +177,8 @@ from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
 from starlette.responses import JSONResponse as _JSONResponse
 
 REQUEST_HARD_TIMEOUT = float(os.getenv("REQUEST_HARD_TIMEOUT", "45"))
+_EXTENSION_PREVIEW_TIMEOUT = 300.0
+_EXTENSION_EXECUTE_TIMEOUT = 360.0
 _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/chat",            # streaming
     "/api/shell/stream",    # SSE
@@ -210,16 +212,30 @@ def _is_timeout_exempt(path: str) -> bool:
     )
 
 
+def _request_hard_timeout(path: str, method: str) -> float:
+    # Signed packages can contain a pinned toolchain. Give those two bounded
+    # operations enough time without extending unrelated request deadlines.
+    if method == "POST":
+        if path == "/api/extensions/marketplace/plans":
+            return _EXTENSION_PREVIEW_TIMEOUT
+        parts = path.strip("/").split("/")
+        if (len(parts) == 5 and parts[:3] == ["api", "extensions", "plans"]
+                and parts[3] and parts[4] == "execute"):
+            return _EXTENSION_EXECUTE_TIMEOUT
+    return REQUEST_HARD_TIMEOUT
+
+
 class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         path = request.url.path or ""
         if _is_timeout_exempt(path):
             return await call_next(request)
+        timeout = _request_hard_timeout(path, request.method)
         try:
-            return await _asyncio.wait_for(call_next(request), timeout=REQUEST_HARD_TIMEOUT)
+            return await _asyncio.wait_for(call_next(request), timeout=timeout)
         except _asyncio.TimeoutError:
             return _JSONResponse(
-                {"detail": f"Request exceeded {REQUEST_HARD_TIMEOUT:.0f}s timeout"},
+                {"detail": f"Request exceeded {timeout:.0f}s timeout"},
                 status_code=504,
             )
 

@@ -1,6 +1,15 @@
 """Strict native UI contracts for the two supported upstream media CLIs."""
 
-PROVIDERS = {
+from typing import TypedDict
+
+
+class _Provider(TypedDict):
+    label: str
+    source: str
+    tools: dict[str, tuple[str, str]]
+
+
+PROVIDERS: dict[str, _Provider] = {
     "ani-cli": {
         "label": "Anime",
         "source": "https://github.com/pystardust/ani-cli.git",
@@ -28,7 +37,8 @@ PROVIDERS = {
 
 
 def is_provider(manifest: dict) -> bool:
-    provider = PROVIDERS.get(manifest.get("extension_id"))
+    extension_id = manifest.get("extension_id")
+    provider = PROVIDERS.get(extension_id) if isinstance(extension_id, str) else None
     return bool(provider and manifest.get("source", {}).get("url") == provider["source"])
 
 
@@ -57,14 +67,17 @@ def _playback():
                     "subtitles": _array(subtitle, 16)}, ["title", "url", "headers", "subtitles"])
 
 
-def schemas(binding: str):
+def schemas(binding: str, *, legacy: bool = False):
     empty = _object({}, [])
     status = _object({"version": _string(80)}, ["version"])
     if binding.endswith(".status"):
         return empty, status
     if binding == "entertainment.ani.search":
         params = _object({"query": _string(200, minLength=1), "dub": {"type": "boolean"}}, ["query", "dub"])
-        item = _object({"id": {"type": "integer", "minimum": 1, "maximum": 50}, "title": _string()}, ["id", "title"])
+        properties = {"id": {"type": "integer", "minimum": 1, "maximum": 50}, "title": _string()}
+        if not legacy:
+            properties["kind"] = {"type": "string", "enum": ["movie", "series"]}
+        item = _object(properties, list(properties))
         return params, _object({"items": _array(item, 50)}, ["items"])
     ani_selection = {"query": _string(200, minLength=1), "selection_index": {"type": "integer", "minimum": 1, "maximum": 50}, "dub": {"type": "boolean"}}
     if binding == "entertainment.ani.episodes":

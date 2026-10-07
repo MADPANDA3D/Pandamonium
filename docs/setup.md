@@ -49,6 +49,9 @@ only when you intentionally want LAN/reverse-proxy access.
 > run natively instead — see [Apple Silicon](#apple-silicon) below.
 
 ### Native Linux / macOS
+For the on-demand Linux desktop profile, see the [native laptop installer](native-linux.md).
+It separates user data, pins Python and dependencies, and keeps models optional.
+
 ```bash
 git clone https://github.com/MADPANDA3D/Pandamonium.git
 cd Pandamonium
