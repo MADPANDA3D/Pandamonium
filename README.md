@@ -106,14 +106,21 @@ following maintained platform capabilities.
   region, and remains keyboard-accessible after reopening a saved conversation.
 
 Native history and Details demo views: [compact card](docs/screenshots/workspace-history-desktop.png)
-and [full sources](docs/screenshots/workspace-sources-desktop.png).
+and [full sources](docs/screenshots/workspace-sources-desktop.png), with a
+[mobile Sources demo](docs/screenshots/workspace-sources-mobile.png).
 
 Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png).
-Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png).
+The [historical mobile work-budget preview](docs/screenshots/workspace-shared-mobile.png)
+shows earlier defaults, rather than the current round limits above.
+Earlier native Codex identity and reasoning views:
+[desktop](docs/screenshots/workspace-context-desktop.png) and
+[mobile](docs/screenshots/workspace-context-mobile.png).
 
 </details>
 
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
+
+[Assistant reasoning and tool disclosure on mobile](docs/images/chat-turn-disclosure-mobile.png).
 
 <details>
 <summary><strong>Governed agents, tools, and extensions</strong></summary>
@@ -176,6 +183,8 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 </details>
 
 ![Native MCP approval controls on desktop](docs/images/portal-native-approval-desktop.png)
+
+[MCP approval controls on mobile](docs/images/portal-native-approval-mobile.png).
 
 <details>
 <summary><strong>Knowledge and workspaces</strong></summary>
@@ -268,6 +277,8 @@ variables; the former `ODYSSEUS_*` names remain accepted during migration.
 </details>
 
 ![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
+
+[Historical mobile updater preview, v1.0.21](docs/images/updater-control-panel-mobile.png).
 
 <details>
 <summary><strong>Security</strong></summary>
