@@ -257,6 +257,7 @@ function idleSlotKey() {
 
 function teardownSlot(slot) {
   if (!slot) return;
+  if (slot.seekListener) { slot.video?.removeEventListener('loadedmetadata', slot.seekListener); slot.seekListener = null; }
   if (slot.startupTimer) { clearTimeout(slot.startupTimer); slot.startupTimer = null; }
   if (slot.hls) { slot.hls.destroy(); slot.hls = null; }
   const video = slot.video;
@@ -498,6 +499,7 @@ async function activateSlot(key) {
     if (!video) continue;
     const isActive = name === key;
     video.classList.toggle('is-active', isActive);
+    if (!isActive) video.pause();
     // The preloaded slot is created without controls; give the active element
     // controls so an autoplayed next episode is still pausable/seekable.
     video.controls = isActive;
@@ -677,8 +679,15 @@ async function play(result) {
   loadIntoSlot(key, result);
   if (pendingResume > 0) {
     const video = slots[key].video;
-    const seek = () => { try { video.currentTime = pendingResume; } catch (_) {} };
-    if (video.readyState >= 1) seek(); else video.addEventListener('loadedmetadata', seek, { once: true });
+    const position = pendingResume;
+    const seek = () => {
+      slots[key].seekListener = null;
+      try { video.currentTime = position; } catch (_) {}
+    };
+    if (video.readyState >= 1) seek(); else {
+      slots[key].seekListener = seek;
+      video.addEventListener('loadedmetadata', seek, { once: true });
+    }
     pendingResume = 0;
   }
   await activateSlot(key);

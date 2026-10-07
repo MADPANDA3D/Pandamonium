@@ -196,6 +196,26 @@ test('Entertainment warms the next episode into the idle player', async ({ page 
   await expect(page.locator('#entertainment-video')).toHaveAttribute('src', 'https://media.example/ep-1.mp4');
   // ...while episode 2 is warmed into the idle element before it is needed.
   await expect(page.locator('#entertainment-video-next')).toHaveAttribute('src', 'https://media.example/ep-2.mp4');
+
+  // The old episode must stop decoding immediately, even while the following
+  // episode is still resolving into that slot.
+  await page.evaluate(() => {
+    window.__entPaused = [];
+    HTMLMediaElement.prototype.pause = function () { window.__entPaused.push(this.id); };
+  });
+  let followingResolve;
+  await page.route('**/api/entertainment/ani-cli/resolve', route => {
+    if (route.request().postDataJSON().episode !== '3') return route.fallback();
+    followingResolve = route;
+  });
+  await page.locator('#entertainment-next').click();
+  await expect(page.locator('#entertainment-video-next')).toHaveClass(/is-active/);
+  await expect.poll(() => !!followingResolve).toBe(true);
+  try {
+    expect(await page.evaluate(() => window.__entPaused)).toContain('entertainment-video');
+  } finally {
+    await followingResolve.fulfill({ json: { title: 'Naruto Episode 3', url: 'https://media.example/ep-3.mp4', format: 'file', subtitles: [] } });
+  }
 });
 
 test('Entertainment pill plays the fanfare and the top nav is stripped down', async ({ page }) => {
@@ -562,3 +582,22 @@ test('Entertainment starts HLS at the smallest level then allows adaptive qualit
   await page.clock.fastForward(8000);
   expect(await page.evaluate(() => ({ destroyed: window.__hlsInstances[1].destroyed, cap: window.__hlsInstances[1].autoLevelCapping }))).toEqual({ destroyed: true, cap: 2 });
 });
+
+for (const replace of [false, true]) {
+  test(`Entertainment ${replace ? 'drops a pending seek when refreshing before metadata' : 'resumes the saved position after delayed metadata'}`, async ({ page }) => {
+    await playbackFixture(page, {
+      preferences: { history: [{ provider: 'pandaflix', query: 'Arrival', item: { selection: '[movie] Arrival', kind: 'movie', title: 'Arrival' }, title: 'Arrival', season: 0, episode: 0, position: 75 }] },
+      resolve: route => route.fulfill({ json: fixturePlayback }),
+    });
+    await page.locator('.ent-sidebar [data-ent-dest="recent"]').click();
+    await page.locator('#ent-collection-results .ent-collection-item').click();
+    await expect(page.locator('#entertainment-player')).toBeVisible();
+    expect(await page.locator('#entertainment-video').evaluate(video => video.currentTime)).toBe(0);
+    if (replace) {
+      await page.locator('#entertainment-refresh').click();
+      await expect(page.locator('#entertainment-refresh')).toBeEnabled();
+    }
+    await page.locator('#entertainment-video').evaluate(video => video.dispatchEvent(new Event('loadedmetadata')));
+    expect(await page.locator('#entertainment-video').evaluate(video => video.currentTime)).toBe(replace ? 0 : 75);
+  });
+}
