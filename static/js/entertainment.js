@@ -823,8 +823,9 @@ function episodeTarget(step) {
     };
   }
   if (context.provider === 'pandaflix' && context.item?.kind !== 'movie') {
-    const episode = pick(context.episode, context.items);
-    if (episode == null) return null;
+    const next = pick(context.episode, context.items);
+    if (next == null) return null;
+    const episode = Number(next);
     return {
       playback: { ...context, episode },
       resolve: () => resolveStream('/pandaflix/resolve', { query: context.query, selection: context.item.selection, kind: context.item.kind, season: context.season, episode }),

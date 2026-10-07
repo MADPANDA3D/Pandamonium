@@ -443,6 +443,29 @@ async function selectFixtureTitle(page, title = 'Arrival') {
 
 const fixturePlayback = { title: 'Arrival', url: 'https://media.example/arrival.mp4', format: 'file', subtitles: [] };
 
+test('Entertainment preloads and autoplays an integer PandaFlix episode after history resume', async ({ page }) => {
+  const episodes = [];
+  await playbackFixture(page, {
+    preferences: {
+      autoplay: true,
+      history: [{ provider: 'pandaflix', title: 'Breaking Bad Episode 2', query: 'Breaking Bad', item: { selection: '[series] Breaking Bad', kind: 'series', title: 'Breaking Bad' }, season: 1, episode: 2 }],
+    },
+    resolve: route => {
+      const episode = route.request().postDataJSON().episode;
+      episodes.push(episode);
+      if (!Number.isInteger(episode)) return route.fulfill({ status: 503, json: { detail: 'Episode must be an integer' } });
+      return route.fulfill({ json: { ...fixturePlayback, title: `Breaking Bad Episode ${episode}` } });
+    },
+  });
+  await page.locator('[data-ent-dest="recent"]').click();
+  await page.locator('[data-ent-resume-history]').first().click();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Breaking Bad Episode 2');
+  await expect.poll(() => episodes.includes(3)).toBe(true);
+  await page.locator('.ent-video.is-active').evaluate(video => video.dispatchEvent(new Event('ended')));
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Breaking Bad Episode 3');
+  expect(episodes.every(Number.isInteger)).toBe(true);
+});
+
 test('Entertainment labels anime movies and plays directly without reading the controls menu', async ({ page }) => {
   let episodeCalls = 0;
   await playbackFixture(page, {

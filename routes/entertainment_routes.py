@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import secrets
@@ -22,6 +23,8 @@ from src.extension_registry import ExtensionRegistry
 from src.external_agent_bridge import _StreamingPinnedTransport
 from src.url_security import validate_public_http_url
 from src.webhook_manager import _validated_public_ips
+
+_LOG = logging.getLogger(__name__)
 
 _ALLOWED_HEADERS = {"referer": "Referer", "user-agent": "User-Agent", "origin": "Origin", "cookie": "Cookie"}
 _PLAYLIST_BYTES = 2 * 1024 * 1024
@@ -305,9 +308,9 @@ async def _anilist_covers(titles: list[str]) -> dict[str, str]:
             if cover:
                 covers[title] = cover
     for title in [value for value in pending if value not in covers]:
-        cover = await _anilist_best_match(client, title)
-        if cover:
-            covers[title] = cover
+        fallback = await _anilist_best_match(client, title)
+        if fallback:
+            covers[title] = fallback
     return covers
 
 
@@ -544,7 +547,7 @@ async def _playlist(owner: str, base_url: str, content: str, headers: dict[str, 
             line = "/api/entertainment/proxy/" + await _token(owner, urljoin(base_url, line), headers)
         else:
             start = 0
-            parts = []
+            parts: list[str] = []
             for match in re.finditer(r'URI="([^"]+)"', line):
                 parts.extend((line[start:match.start()], await replace_uri(match)))
                 start = match.end()
@@ -555,7 +558,7 @@ async def _playlist(owner: str, base_url: str, content: str, headers: dict[str, 
     return "\n".join(lines) + "\n"
 
 
-def _installed(owner: str) -> tuple[dict, dict]:
+def _installed(owner: str) -> tuple[str | None, dict]:
     identity = operator_identity(owner)
     try:
         import json
@@ -615,6 +618,10 @@ def setup_entertainment_routes() -> APIRouter:
             raise HTTPException(404, "Unknown Entertainment operation")
         result = await execute_cli_tool(record, tool, body, identity)
         if result.get("exit_code") != 0:
+            code = str(result.get("error_code") or "")
+            if not re.fullmatch(r"extension_[a-z0-9_]{1,80}", code):
+                code = "extension_cli_unavailable"
+            _LOG.warning("Entertainment provider failed provider=%s operation=%s code=%s", provider_id, operation, code)
             raise HTTPException(503, "Entertainment provider unavailable; check plugin setup or try again")
         payload = result["result"]
         return await _prepare_playback(identity, payload) if operation in {"resolve", "continue"} else payload

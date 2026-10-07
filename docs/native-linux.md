@@ -93,6 +93,16 @@ to install or use these Entertainment providers. Builds use their pinned
 upstream toolchains; installation readiness is distinct from provider network
 availability. Existing desktop mpv is not required for web playback.
 
+The setup guide lets you leave chat and voice unconfigured while using a signed
+Entertainment plugin. This example uses a disposable test account:
+
+![Setup guide with AniCLI enabled and no chat model](images/native-linux-setup.png)
+
+Package verification and private runtime preparation show elapsed progress.
+Keep the preview open and approve the displayed operation once it is ready:
+
+![Signed PandaFlix download progress](images/native-linux-signed-install.png)
+
 Configure and test optional API model and speech providers in Settings.
 Browser speech depends on the browser's actual voices, recognition support and
 microphone permissions; recognition is not guaranteed offline. The installer
@@ -150,13 +160,40 @@ delete them. Runtime mount removal is a separate administrator action: other
 Pandamonium installs may still use it. No uninstall step should remove a shared
 Python runtime, distro package or unrelated user configuration.
 
-## Acceptance still required
+## Validated desktop behavior and remaining limits
 
-The installer must pass a real clean laptop install, restart and repeat install,
-then signed plugin installation and both Entertainment workflows: search,
-movie/series distinctions, episodes, HLS playback, quality, seeking, next episode,
-history/resume and lifecycle. Browser speech requires separate capability and
-permission proof. PandaFlix sandbox-local subtitle tracks are currently omitted
-instead of failing playback; local subtitle delivery remains a separate gap.
-Other Linux distributions and signed release publication are separate proof
-requirements; neither follows from mocked browser tests.
+On the initial EndeavourOS laptop, installation, repeat provisioning, upgrade,
+service restart and SQLite integrity passed. Scoped app and runtime sentinels
+survived a repeat install; the existing ext4 filesystem kept its UUID. Backend
+startup used about 300–340 MiB. Isolated real playback measured Chrome PSS of
+about 586–685 MiB and backend PSS of about 216–480 MiB. These are snapshots of
+the tests, not a maximum for longer viewing sessions.
+
+Signed AniCLI 5.1.2 and PandaFlix 1.2.1 installed without a chat model. Actual
+desktop tests covered search, episodes/seasons, HLS decoding, quality selection,
+seeking, next episode and reopening saved history at the recorded position.
+PandaFlix HLS captions loaded and displayed English cues:
+
+![PandaFlix playback with embedded English captions](images/native-linux-playback.png)
+
+The older signed AniCLI package still labels some movie search results
+**View episodes**; selecting the movie plays it without exposing fake episode
+controls. The corrected typed adapter requires separate signed catalog
+publication. PandaFlix's existing adapter also retains an approximately
+10-second resolve wait. Sandbox-local subtitle files are omitted; embedded HLS
+captions can work, as shown above.
+
+The automated test using installed Chrome exposed speech recognition and
+synthesis APIs, but reported zero available synthesis voices. Microphone access
+without permission returned
+`NotAllowedError`. Choose a working browser voice or configure and test your
+own remote STT/TTS provider; no offline recognition or API-provider success is
+implied by these capability checks.
+
+This profile is validated for the desktop browser. At a 412-pixel mobile
+viewport, some existing Entertainment controls overflow and library navigation
+is hidden. [The mobile capture](images/native-linux-mobile-limit.png) records
+that limitation; it is not a supported mobile acceptance result.
+
+Reboot, uninstall on a disposable installation, a second Linux distribution and
+signed public release publication remain separate acceptance requirements.

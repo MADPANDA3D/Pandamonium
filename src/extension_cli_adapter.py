@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -20,7 +21,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, ValidationError
 
 from core.atomic_io import atomic_write_json
 from src import extension_configuration as configuration
@@ -944,6 +945,13 @@ async def execute_cli_tool(
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - tool boundary returns bounded runtime failures
-        return {"error": str(exc)[:2000], "exit_code": 1}
+        code = "extension_cli_unavailable"
+        if isinstance(exc, ExtensionLifecycleError):
+            candidate = exc.code.partition(":")[0]
+            if re.fullmatch(r"extension_[a-z0-9_]{1,80}", candidate):
+                code = candidate
+        elif isinstance(exc, ValidationError):
+            code = "extension_cli_schema_invalid"
+        return {"error": str(exc)[:2000], "error_code": code, "exit_code": 1}
     finally:
         cancel.set()
