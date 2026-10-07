@@ -28,10 +28,16 @@ PYTHON = "3.12.12"
 UNIT = "pandamonium-desktop.service"
 
 
-def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+def run(
+    args: list[str],
+    *,
+    check: bool = True,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    stdout: int | None = None,
+) -> subprocess.CompletedProcess[bytes]:
     print("+ " + shlex.join(args), flush=True)
-    check = bool(kwargs.pop("check", True))
-    return subprocess.run(args, check=check, **kwargs)
+    return subprocess.run(args, check=check, cwd=cwd, env=env, stdout=stdout)
 
 
 def output(args: list[str]) -> str:
@@ -90,7 +96,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory={systemd_quote(str(root / "current"))}
+WorkingDirectory={str(root / "current").replace("%", "%%")}
 EnvironmentFile={systemd_quote(str(config))}
 ExecStart={systemd_quote(str(root / "current/venv/bin/python"))} -m uvicorn app:app --host 127.0.0.1 --port 7000 --workers 1
 Restart=on-failure
@@ -138,7 +144,7 @@ def install(args: argparse.Namespace) -> None:
         raise RuntimeError(
             "Run as your desktop user. Only runtime provisioning uses sudo."
         )
-    for command in ("uv", "git", "systemctl", "xdg-open"):
+    for command in ("uv", "git", "systemctl", "systemd-analyze", "xdg-open"):
         if not shutil.which(command):
             raise RuntimeError(f"Install {command} first; see docs/native-linux.md.")
     run(["systemctl", "--user", "show-environment"], stdout=subprocess.DEVNULL)
@@ -263,7 +269,11 @@ def install(args: argparse.Namespace) -> None:
             print(
                 "Provision only the existing first-party sandbox foundation (4 GiB bounded runtime)."
             )
-            run(["sudo", "-v"])
+            # NOPASSWD command permission need not include `sudo -v` itself.
+            if subprocess.run(
+                ["sudo", "-n", "true"], capture_output=True, check=False
+            ).returncode:
+                run(["sudo", "-v"])
             code = """import subprocess
 from src.system_requirements import provision, SANDBOX_CAPABILITIES
 def stream(argv, stdin):
@@ -317,6 +327,7 @@ admit()
             next_link.symlink_to(candidate, target_is_directory=True)
             next_link.replace(current)
             unit_path.write_text(service_text(root, config))
+            run(["systemd-analyze", "--user", "verify", str(unit_path)])
             launcher.write_text(launcher_text(root))
             launcher.chmod(0o755)
             # No browser download: use installed Chrome/Chromium app mode, otherwise normal browser.
