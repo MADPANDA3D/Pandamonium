@@ -10,6 +10,8 @@ export const MODEL_SETUP_ENTRY_LABEL = 'Connect a model engine';
 // a message plus next step; any other code-shaped detail falls back to generic
 // recovery copy instead of leaking the code.
 const SETUP_ERROR_MESSAGES = {
+  marketplace_artifact_timeout:
+    'The signed package download exceeded its time limit. Check your connection and retry the install preview.',
   extension_scan_model_unavailable:
     'The configured model could not analyze this source. Connect a working Background Tasks or Default model in Settings, then retry.',
   extension_scan_model_timeout:

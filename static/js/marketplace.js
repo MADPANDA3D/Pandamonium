@@ -824,10 +824,21 @@ function actionLabel(operation) {
   return { install: 'Install', upgrade: 'Update', enable: 'Enable', disable: 'Disable', rollback: 'Rollback', uninstall: 'Remove' }[operation] || operation;
 }
 
+function actionProgress(status, message) {
+  const started = Date.now();
+  status.textContent = message;
+  const timer = setInterval(() => {
+    if (!status.isConnected) { clearInterval(timer); return; }
+    status.textContent = `${message} ${Math.floor((Date.now() - started) / 1000)}s elapsed.`;
+  }, 1000);
+  return () => clearInterval(timer);
+}
+
 async function executeAction(plan, plugin, operation, status, actions, retry) {
   const installedAction = installedSelectedId === plugin.id;
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
   let approvalConsumed = false;
+  let stopProgress = () => {};
   try {
     const decision = plan.authority_decision || {};
     if (decision.decision === 'approval_required') {
@@ -838,9 +849,10 @@ async function executeAction(plan, plugin, operation, status, actions, retry) {
     } else if (decision.decision !== 'allow') {
       throw new Error('extension_action_denied');
     }
-    status.textContent = `Preparing · ${actionLabel(operation)} in progress…`;
+    stopProgress = actionProgress(status, `Preparing · ${actionLabel(operation)} in progress…`);
     status.dataset.readiness = 'preparing';
     const result = await api(`/api/extensions/plans/${encodeURIComponent(plan.plan_id)}/execute`, { method: 'POST' });
+    stopProgress();
     if (result.result?.status !== 'succeeded') throw new Error('extension_action_failed');
     window.dispatchEvent(new Event('pandamonium:extensions-changed'));
     await load();
@@ -851,6 +863,7 @@ async function executeAction(plan, plugin, operation, status, actions, retry) {
     status.textContent = `${actionLabel(operation)} completed.`;
     summary.textContent = `${plugin.name}: ${actionLabel(operation)} completed.`;
   } catch (error) {
+    stopProgress();
     status.textContent = `Failed · ${actionLabel(operation)}: ${humanSetupError(error)}`;
     status.dataset.readiness = 'failed';
     if (approvalConsumed) {
@@ -867,6 +880,8 @@ async function executeAction(plan, plugin, operation, status, actions, retry) {
     } else {
       actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
     }
+  } finally {
+    stopProgress();
   }
 }
 
@@ -874,6 +889,8 @@ async function prepareAction(plugin, operation, section, status, actions) {
   const generation = ++actionGeneration;
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
   status.textContent = `Preparing ${actionLabel(operation).toLowerCase()} preview…`;
+  const stopProgress = actionProgress(status, ['install', 'upgrade'].includes(operation)
+    ? 'Downloading and verifying signed package…' : `Preparing ${actionLabel(operation).toLowerCase()} preview…`);
   try {
     const plan = await api('/api/extensions/marketplace/plans', {
       method: 'POST',
@@ -883,6 +900,7 @@ async function prepareAction(plugin, operation, section, status, actions) {
         ...(operation === 'install' || operation === 'upgrade' ? { version: plugin.version } : {}),
       }),
     });
+    stopProgress();
     if (generation !== actionGeneration || selectedId !== plugin.id) return;
     section.querySelector('.marketplace-action-preview')?.remove();
     const preview = element('div', 'marketplace-action-preview');
@@ -925,8 +943,11 @@ async function prepareAction(plugin, operation, section, status, actions) {
     if (setupBlocked) approve.disabled = true;
     approve.focus();
   } catch (error) {
+    stopProgress();
     status.textContent = `${actionLabel(operation)} unavailable: ${humanSetupError(error)}`;
     actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+  } finally {
+    stopProgress();
   }
 }
 
