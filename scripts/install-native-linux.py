@@ -97,7 +97,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={str(root / "current").replace("%", "%%")}
-EnvironmentFile={systemd_quote(str(config))}
+EnvironmentFile={str(config).replace("%", "%%")}
 ExecStart={systemd_quote(str(root / "current/venv/bin/python"))} -m uvicorn app:app --host 127.0.0.1 --port 7000 --workers 1
 Restart=on-failure
 RestartSec=5
