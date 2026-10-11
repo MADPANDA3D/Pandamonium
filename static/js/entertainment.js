@@ -1,4 +1,5 @@
 import uiModule from './ui.js';
+import { audioOptions, subtitleOptions, preferredTrack, selectAudio, selectSubtitle } from './entertainmentTracks.js';
 
 const el = id => document.getElementById(id);
 const esc = value => uiModule.esc(String(value));
@@ -42,7 +43,7 @@ let initialized = false;
 let playback = null;
 
 const PREFS_KEY = 'entertainment';
-const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
+const DEFAULT_PREFS = { provider: '', language: 'sub', audioLanguage: 'en', audioName: '', subtitleLanguage: 'off', subtitleName: '', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
 const LANGUAGES = ['sub', 'dub'];
 const QUALITIES = ['best', '1080p', '720p', '480p', '360p'];
 let prefs = { ...DEFAULT_PREFS };
@@ -76,6 +77,9 @@ async function resolveStream(path, body, attempts = 3) {
 function normalizePrefs(value) {
   const merged = { ...DEFAULT_PREFS, ...(value && typeof value === 'object' ? value : {}) };
   merged.autoplay = Boolean(merged.autoplay);
+  for (const key of ['audioLanguage', 'audioName', 'subtitleLanguage', 'subtitleName']) {
+    if (typeof merged[key] !== 'string') merged[key] = DEFAULT_PREFS[key];
+  }
   merged.favorites = Array.isArray(merged.favorites) ? merged.favorites.filter(item => item && item.key && item.item).slice(0, 100) : [];
   merged.watchlist = Array.isArray(merged.watchlist) ? merged.watchlist.filter(item => item && item.key && item.item).slice(0, 100) : [];
   merged.history = Array.isArray(merged.history) ? merged.history.filter(entry => entry && entry.title).slice(0, 200) : [];
@@ -231,6 +235,14 @@ function initSlots() {
     b: { video: el('entertainment-video-next'), hls: null },
   };
   for (const key of ['a', 'b']) {
+    const video = slots[key].video;
+    video?.controlsList?.add('nofullscreen');
+    video?.addEventListener('loadedmetadata', () => syncTrackMenus(key, true));
+    for (const tracks of [video?.textTracks, video?.audioTracks]) {
+      tracks?.addEventListener('addtrack', () => queueMicrotask(() => syncTrackMenus(key, true)));
+      tracks?.addEventListener('removetrack', () => queueMicrotask(() => syncTrackMenus(key, true)));
+      tracks?.addEventListener('change', () => syncTrackMenus(key));
+    }
     slots[key].video?.addEventListener('ended', () => { if (key === activeSlotKey) handleEnded(); });
     slots[key].video?.addEventListener('playing', () => { if (key === activeSlotKey) status(''); });
     slots[key].video?.addEventListener('timeupdate', event => {
@@ -271,6 +283,66 @@ function stopPlayer() {
   preloadToken += 1;
   for (const key of ['a', 'b']) teardownSlot(slots[key]);
   activeSlotKey = null;
+  renderTrackMenus(null);
+}
+
+function renderTrackMenus(slot) {
+  const audio = audioOptions(slot);
+  const subtitles = subtitleOptions(slot);
+  const audioMenu = el('entertainment-audio');
+  const subtitleMenu = el('entertainment-subtitles');
+  if (audioMenu) {
+    audioMenu.innerHTML = audio.length ? audio.map(option => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join('') : '<option value="">Source audio</option>';
+    audioMenu.disabled = audio.length < 2;
+    audioMenu.value = audio.find(option => option.selected)?.value || audio[0]?.value || '';
+    audioMenu.title = audio.length ? 'Choose the audio track' : 'This stream does not expose selectable audio tracks';
+  }
+  if (subtitleMenu) {
+    subtitleMenu.innerHTML = '<option value="off">Off</option>' + subtitles.map(option => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join('');
+    subtitleMenu.disabled = subtitles.length === 0;
+    subtitleMenu.value = subtitles.find(option => option.selected)?.value || 'off';
+    subtitleMenu.title = subtitles.length ? 'Choose subtitles or turn them off' : 'No subtitle tracks are available on this stream';
+  }
+  const note = el('entertainment-track-note');
+  if (note) {
+    const messages = [];
+    if (slot && !audio.length) messages.push('Audio language is not reported by this stream.');
+    else if (audio.length && !preferredTrack(audio, prefs.audioLanguage, prefs.audioName)) messages.push('Your preferred audio language is unavailable on this stream.');
+    if (slot && !subtitles.length) messages.push('No subtitles available.');
+    else if (subtitles.length && prefs.subtitleLanguage !== 'off' && !preferredTrack(subtitles, prefs.subtitleLanguage, prefs.subtitleName)) messages.push('Your preferred subtitles are unavailable on this stream.');
+    note.textContent = messages.join(' ');
+  }
+}
+
+function syncTrackMenus(key, applyPreferences = false) {
+  const slot = slots?.[key];
+  if (!slot || slot.syncingTracks) return;
+  if (applyPreferences) {
+    slot.syncingTracks = true;
+    try {
+      selectAudio(slot, preferredTrack(audioOptions(slot), prefs.audioLanguage, prefs.audioName));
+      selectSubtitle(slot, prefs.subtitleLanguage === 'off' ? null : preferredTrack(subtitleOptions(slot), prefs.subtitleLanguage, prefs.subtitleName));
+    } finally { slot.syncingTracks = false; }
+  }
+  if (key === activeSlotKey) renderTrackMenus(slot);
+}
+
+function changeTrack(kind, value) {
+  const slot = slots?.[activeSlotKey];
+  if (!slot) return;
+  const option = (kind === 'audio' ? audioOptions(slot) : subtitleOptions(slot)).find(item => item.value === value);
+  if (!option && !(kind === 'subtitle' && value === 'off')) return;
+  if (kind === 'audio') {
+    prefs.audioLanguage = option.language;
+    prefs.audioName = option.label;
+    selectAudio(slot, option);
+  } else {
+    prefs.subtitleLanguage = option ? option.language : 'off';
+    prefs.subtitleName = option?.label || '';
+    selectSubtitle(slot, option);
+  }
+  savePrefs();
+  renderTrackMenus(slot);
 }
 
 function status(text = '') {
@@ -458,6 +530,7 @@ function loadIntoSlot(key, result) {
       levelLoadingMaxRetry: 6,
       fragLoadingRetryDelay: 500,
     });
+    instance.subtitleDisplay = prefs.subtitleLanguage !== 'off';
     instance.on(window.Hls.Events.MANIFEST_PARSED, () => {
       if (!instance.levels.length) return;
       const lowest = instance.levels.reduce((best, level, index) => (
@@ -484,6 +557,15 @@ function loadIntoSlot(key, result) {
         refreshPlayback().catch(() => {});
       }
     });
+    for (const event of [window.Hls.Events.AUDIO_TRACKS_UPDATED, window.Hls.Events.SUBTITLE_TRACKS_UPDATED]) {
+      if (event) instance.on(event, () => {
+        // Controllers finish selecting manifest defaults after this event.
+        queueMicrotask(() => { if (slot.hls === instance) syncTrackMenus(key, true); });
+      });
+    }
+    for (const event of [window.Hls.Events.AUDIO_TRACK_SWITCHED, window.Hls.Events.SUBTITLE_TRACK_SWITCH]) {
+      if (event) instance.on(event, () => syncTrackMenus(key));
+    }
     slot.hls = instance;
     instance.loadSource(result.url); instance.attachMedia(video);
   } else {
@@ -506,6 +588,7 @@ async function activateSlot(key) {
     video.muted = !isActive;
   }
   const video = slots[key].video;
+  syncTrackMenus(key, true);
   try { await video.play(); } catch (_) { status('Press play to start.'); }
 }
 
@@ -964,7 +1047,9 @@ function init() {
   document.querySelectorAll('[data-ent-dest]').forEach(button => button.addEventListener('click', () => showCollection(button.dataset.entDest)));
   el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
   initSlots();
-  el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
+  el('entertainment-fullscreen')?.addEventListener('click', () => el('entertainment-player')?.requestFullscreen?.());
+  el('entertainment-audio')?.addEventListener('change', event => changeTrack('audio', event.target.value));
+  el('entertainment-subtitles')?.addEventListener('change', event => changeTrack('subtitle', event.target.value));
   el('entertainment-next')?.addEventListener('click', () => nextEpisode().catch(error => status(error.message)));
   el('entertainment-prev')?.addEventListener('click', () => previousEpisode().catch(error => status(error.message)));
   el('entertainment-refresh')?.addEventListener('click', () => refreshPlayback().catch(error => status(error.message)));

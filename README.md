@@ -45,6 +45,13 @@ downloads, see the [native Linux installer guide](docs/native-linux.md). It uses
 an isolated Python environment and an on-demand desktop launcher. This source
 profile is under development; signed public release acceptance is still pending.
 
+Entertainment's player provides **Audio** and **Subtitles** menus for tracks
+offered by the selected stream. English audio is preferred when available;
+your audio and subtitle choices are saved separately from Anime's sub/dub
+setting. Select **Off** to hide subtitles. Use the player's **Fullscreen**
+button to keep these menus accessible. Streams without selectable tracks show
+their availability in the player.
+
 ## Pandamonium Upgrades
 
 Pandamonium keeps Odysseus's self-hosted workspace foundation and adds the

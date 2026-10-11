@@ -443,6 +443,126 @@ async function selectFixtureTitle(page, title = 'Arrival') {
 
 const fixturePlayback = { title: 'Arrival', url: 'https://media.example/arrival.mp4', format: 'file', subtitles: [] };
 
+async function languageTrackFixture(page) {
+  await page.route('**/static/lib/hls.min.js', route => route.fulfill({ contentType: 'application/javascript', body: `
+    window.__hlsInstances = [];
+    window.Hls = class {
+      static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error', AUDIO_TRACKS_UPDATED: 'audio-list', SUBTITLE_TRACKS_UPDATED: 'subtitle-list', AUDIO_TRACK_SWITCHED: 'audio-switch', SUBTITLE_TRACK_SWITCH: 'subtitle-switch' };
+      static isSupported() { return true; }
+      constructor(config) { this.config = config; this.events = {}; this.levels = [{bitrate: 500000}]; this.audioTracks = []; this.subtitleTracks = []; this.audioTrack = -1; this._subtitleTrack = -1; this._subtitleDisplay = config.subtitleDisplay; window.__hlsInstances.push(this); }
+      on(name, handler) { this.events[name] = handler; }
+      loadSource(url) { this.url = url; }
+      attachMedia(video) {
+        this.video = video;
+        const next = this.url.includes('next');
+        this.audioTracks = next ? [{name: 'Italian', lang: 'ita'}, {name: 'English', lang: 'eng'}] : [{name: 'English', lang: 'eng'}, {name: 'Italian', lang: 'ita'}];
+        this.subtitleTracks = next ? [{name: 'English', lang: 'eng'}] : [{name: 'Italian', lang: 'ita'}, {name: 'English', lang: 'eng'}];
+        this.trackNodes = this.subtitleTracks.map(track => { const node = document.createElement('track'); node.kind = 'subtitles'; node.label = track.name; node.srclang = track.lang; video.appendChild(node); return node; });
+        this.nativeTracks = this.trackNodes.map(node => node.track);
+        this.audioTrack = next ? 0 : 1;
+        this.events['audio-list'](); this.events['subtitle-list'](); this.events.manifest();
+      }
+      get subtitleTrack() { return this._subtitleTrack; }
+      set subtitleTrack(value) { this._subtitleTrack = value; this.updateModes(); }
+      get subtitleDisplay() { return this._subtitleDisplay; }
+      set subtitleDisplay(value) { this._subtitleDisplay = value; this.updateModes(); }
+      updateModes() { (this.nativeTracks || []).forEach((track, index) => { track.mode = this._subtitleDisplay && index === this._subtitleTrack ? 'showing' : 'disabled'; }); }
+      destroy() { this.destroyed = true; (this.trackNodes || []).forEach(node => node.remove()); }
+    };
+  ` }));
+}
+
+test('Entertainment prefers English over Italian and exposes subtitles with Off and saved language choices', async ({ page }) => {
+  await languageTrackFixture(page);
+  await playbackFixture(page, { resolve: route => route.fulfill({ json: { ...fixturePlayback, format: 'hls', subtitles: [{ label: 'Subtitles', language: 'en', url: 'https://media.example/en.vtt' }] } }) });
+  await selectFixtureTitle(page);
+  const audio = page.getByLabel('Audio', { exact: true });
+  const subtitles = page.getByLabel('Subtitles', { exact: true });
+  await expect(audio).toHaveValue('hls:0');
+  await expect(audio.locator('option')).toHaveText(['English', 'Italian']);
+  await expect(subtitles.locator('option')).toHaveText(['Off', 'Italian', 'English']);
+  await expect(subtitles).toHaveValue('off');
+  await subtitles.selectOption({ label: 'English' });
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances[0].nativeTracks[1].mode)).toBe('showing');
+  const saved = page.waitForRequest(request => request.url().endsWith('/api/prefs/entertainment') && request.method() === 'PUT' && request.postDataJSON().value.audioLanguage === 'it');
+  await audio.selectOption({ label: 'Italian' });
+  const preferences = (await saved).postDataJSON().value;
+  expect(preferences).toMatchObject({ audioLanguage: 'it', subtitleLanguage: 'en', language: 'sub' });
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances[0].audioTrack)).toBe(1);
+  await subtitles.selectOption('off');
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances[0].nativeTracks.every(track => track.mode === 'disabled'))).toBe(true);
+  await page.locator('.ent-video.is-active').evaluate(video => video.addTextTrack('subtitles', 'French', 'fr'));
+  await subtitles.selectOption({ label: 'French' });
+  await subtitles.selectOption({ label: 'English' });
+  await expect.poll(() => page.locator('.ent-video.is-active').evaluate(video => Array.from(video.textTracks).filter(track => track.mode === 'showing').map(track => track.label))).toEqual(['English']);
+});
+
+test('Entertainment reports unavailable preferred languages and preserves the source audio', async ({ page }) => {
+  await languageTrackFixture(page);
+  await playbackFixture(page, { preferences: { audioLanguage: 'fr', subtitleLanguage: 'fr' }, resolve: route => route.fulfill({ json: { ...fixturePlayback, format: 'hls' } }) });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-audio')).toHaveValue('hls:1');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('off');
+  await expect(page.locator('#entertainment-track-note')).toHaveText('Your preferred audio language is unavailable on this stream. Your preferred subtitles are unavailable on this stream.');
+});
+
+test('Entertainment preserves languages across reordered preloaded episode tracks', async ({ page }) => {
+  await languageTrackFixture(page);
+  await playbackFixture(page, {
+    preferences: { autoplay: true, audioLanguage: 'en', subtitleLanguage: 'en', history: [{ provider: 'pandaflix', title: 'Series Episode 2', item: { selection: '[series] Series', kind: 'series', title: 'Series' }, season: 1, episode: 2 }] },
+    resolve: route => {
+      const episode = route.request().postDataJSON().episode;
+      return route.fulfill({ json: { ...fixturePlayback, format: 'hls', title: `Series Episode ${episode}`, url: `https://media.example/${episode === 3 ? 'next' : 'current'}.m3u8` } });
+    },
+  });
+  await page.locator('[data-ent-dest="recent"]').click();
+  await page.locator('[data-ent-resume-history]').first().click();
+  await expect(page.locator('#entertainment-audio')).toHaveValue('hls:0');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('hls:1');
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances.length)).toBeGreaterThanOrEqual(2);
+  await page.locator('.ent-video.is-active').evaluate(video => video.dispatchEvent(new Event('ended')));
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Series Episode 3');
+  await expect(page.locator('#entertainment-audio')).toHaveValue('hls:1');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('hls:0');
+});
+
+test('Entertainment resets unavailable track menus and fullscreen contains language controls', async ({ page }) => {
+  await languageTrackFixture(page);
+  let resolutions = 0;
+  await playbackFixture(page, { resolve: route => route.fulfill({ json: { ...fixturePlayback, format: resolutions++ === 0 ? 'hls' : 'file' } }) });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-audio')).toBeEnabled();
+  await page.locator('#entertainment-fullscreen').click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('entertainment-player');
+  await expect(page.locator('#entertainment-subtitles')).toBeVisible();
+  await page.evaluate(() => document.exitFullscreen());
+  await page.locator('#entertainment-refresh').click();
+  await expect(page.locator('#entertainment-audio')).toBeDisabled();
+  await expect(page.locator('#entertainment-audio')).toHaveText('Source audio');
+  await expect(page.locator('#entertainment-subtitles')).toBeDisabled();
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('off');
+  await expect(page.locator('#entertainment-track-note')).toContainText('Audio language is not reported');
+});
+
+test('Entertainment switches native audio and external subtitles when available', async ({ page }) => {
+  await playbackFixture(page, { preferences: { subtitleLanguage: 'en' }, resolve: route => route.fulfill({ json: fixturePlayback }) });
+  await selectFixtureTitle(page);
+  await page.locator('.ent-video.is-active').evaluate(video => {
+    const audioTracks = new EventTarget();
+    Object.assign(audioTracks, { 0: { language: 'it', label: 'Italian', enabled: true }, 1: { language: 'en', label: 'English', enabled: false }, length: 2 });
+    Object.defineProperty(video, 'audioTracks', { value: audioTracks });
+    video.addTextTrack('subtitles', 'English', 'en');
+    video.addTextTrack('subtitles', 'French', 'fr');
+    video.dispatchEvent(new Event('loadedmetadata'));
+  });
+  await expect(page.locator('#entertainment-audio')).toHaveValue('native:1');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('native:0');
+  await page.locator('#entertainment-subtitles').selectOption({ label: 'French' });
+  await expect.poll(() => page.locator('.ent-video.is-active').evaluate(video => Array.from(video.textTracks).map(track => track.mode))).toEqual(['disabled', 'showing']);
+  await page.locator('#entertainment-audio').selectOption({ label: 'Italian' });
+  await expect.poll(() => page.locator('.ent-video.is-active').evaluate(video => Array.from(video.audioTracks).map(track => track.enabled))).toEqual([true, false]);
+});
+
 test('Entertainment preloads and autoplays an integer PandaFlix episode after history resume', async ({ page }) => {
   const episodes = [];
   await playbackFixture(page, {
