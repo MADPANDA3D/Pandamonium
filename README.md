@@ -40,6 +40,13 @@ docker compose logs pandamonium
 Native Linux, macOS, Windows, GPU, HTTPS, and configuration instructions are
 in the [setup guide](docs/setup.md).
 
+Entertainment's player provides **Audio** and **Subtitles** menus for tracks
+offered by the selected stream. English audio is preferred when available;
+your audio and subtitle choices are saved separately from Anime's sub/dub
+setting. Select **Off** to hide subtitles. Use the player's **Fullscreen**
+button to keep these menus accessible. Streams without selectable tracks show
+their availability in the player.
+
 ## Pandamonium Upgrades
 
 Pandamonium keeps Odysseus's self-hosted workspace foundation and adds the
