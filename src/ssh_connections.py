@@ -1445,7 +1445,9 @@ def _tailnet_records(status: dict[str, Any]) -> list[dict[str, str]]:
         address = _first_tailnet_ipv4(peer.get("TailscaleIPs"))
         if not address:
             continue
-        name = str(peer.get("HostName") or peer.get("DNSName") or address).strip().rstrip(".")[:128]
+        name = str(peer.get("HostName") or peer.get("DNSName") or "").strip().rstrip(".")[:128]
+        if not name:
+            continue
         os_name = str(peer.get("OS") or "").strip().lower()
         records.append(
             {

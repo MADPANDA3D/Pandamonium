@@ -139,6 +139,22 @@ def test_discovery_never_leaks_addresses_or_peer_keys(fake_tailscale):
         assert peer["os"] in {"android", "darwin", "freebsd", "ios", "linux", "windows", "other"}
 
 
+def test_discovery_skips_unnamed_peers_without_leaking_their_address(fake_tailscale):
+    fake_tailscale["Peer"]["n-unnamed"] = {
+        "ID": "n-unnamed",
+        "HostName": "",
+        "DNSName": "",
+        "TailscaleIPs": ["100.100.100.100"],
+        "OS": "linux",
+        "Online": True,
+    }
+
+    result = ssh_connections.discover_tailnet_peers()
+
+    assert "100.100.100.100" not in json.dumps(result)
+    assert len(result["peers"]) == 4
+
+
 def test_discovery_marks_ios_peer_os(fake_tailscale):
     result = ssh_connections.discover_tailnet_peers()
     ios = [peer for peer in result["peers"] if peer["name"] == "iphone172"]
