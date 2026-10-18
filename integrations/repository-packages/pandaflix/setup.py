@@ -52,7 +52,7 @@ def main():
            "GOCACHE": "/runtime/cache/go-build", "GOMODCACHE": "/runtime/go-modules"}
     subprocess.run([str(compiler), "build", "-trimpath", "-p=2", "-o", str(bin_dir / "pandaflix"), "/package"],
                    env=env, check=True, timeout=300)
-    print(f"PandaFlix v1.2.1 private linux-{arch} runtime ready")
+    print(f"PandaFlix v1.2.2 private linux-{arch} runtime ready")
 
 
 if __name__ == "__main__":

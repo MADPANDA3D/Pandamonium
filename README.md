@@ -101,14 +101,19 @@ following maintained platform capabilities.
   region, and remains keyboard-accessible after reopening a saved conversation.
 
 Native history and Details demo views: [compact card](docs/screenshots/workspace-history-desktop.png)
-and [full sources](docs/screenshots/workspace-sources-desktop.png).
+and full sources on [desktop](docs/screenshots/workspace-sources-desktop.png) or
+[mobile](docs/screenshots/workspace-sources-mobile.png).
 
-Workspace controls: [desktop preview](docs/screenshots/workspace-shared-desktop.png).
-Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png).
+Workspace controls: [desktop](docs/screenshots/workspace-shared-desktop.png) or
+[mobile](docs/screenshots/workspace-shared-mobile.png).
+Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop.png) or
+[mobile](docs/screenshots/workspace-context-mobile.png).
 
 </details>
 
 ![Assistant turn disclosure on desktop](docs/images/chat-turn-disclosure-desktop.png)
+
+[Mobile assistant turn disclosure](docs/images/chat-turn-disclosure-mobile.png)
 
 <details>
 <summary><strong>Governed agents, tools, and extensions</strong></summary>
@@ -171,6 +176,8 @@ Earlier native Codex views: [desktop](docs/screenshots/workspace-context-desktop
 </details>
 
 ![Native MCP approval controls on desktop](docs/images/portal-native-approval-desktop.png)
+
+[Mobile MCP approval controls](docs/images/portal-native-approval-mobile.png)
 
 <details>
 <summary><strong>Knowledge and workspaces</strong></summary>
@@ -263,6 +270,8 @@ variables; the former `ODYSSEUS_*` names remain accepted during migration.
 </details>
 
 ![Updater release control panel on desktop](docs/images/updater-control-panel-desktop.png)
+
+[Mobile updater release control panel](docs/images/updater-control-panel-mobile.png)
 
 <details>
 <summary><strong>Security</strong></summary>
