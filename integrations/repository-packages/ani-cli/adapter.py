@@ -17,6 +17,10 @@ TOOLS = {
     "ani_cli__status", "ani_cli__search", "ani_cli__episodes",
     "ani_cli__resolve", "ani_cli__history", "ani_cli__continue",
 }
+PLAYER_CONTROLS = {
+    "next", "replay", "previous", "prev", "select", "change_quality",
+    "change quality", "quality", "quit", "exit",
+}
 
 
 def _json():
@@ -32,7 +36,7 @@ def _json():
         raise ValueError("Input exceeds limit")
     value = json.loads(raw or b"{}", object_pairs_hook=unique)
     if not isinstance(value, dict):
-        raise ValueError("Expected an object")
+        raise TypeError("Expected an object")
     return value
 
 
@@ -93,11 +97,35 @@ def _environment(work, plan=None, capture_at=None, hold="0"):
     }
 
 
-def _capture(work, detail=""):
+def _menu(work, detail=""):
     path = pathlib.Path(work, "capture.json")
     if not path.exists():
         raise RuntimeError("Upstream did not expose the requested selection: " + detail[-1000:])
-    return json.loads(path.read_text())["items"][:5000]
+    captured = json.loads(path.read_text())
+    return {"prompt": str(captured.get("prompt") or "")[:1000], "items": captured["items"][:5000]}
+
+
+def _capture(work, detail=""):
+    return _menu(work, detail)["items"]
+
+
+def _search_items(lines):
+    items = []
+    for line in lines:
+        match = re.match(r"^(\d+)\s+(.+)$", line)
+        if match:
+            title = match.group(2)[:300]
+            kind = "movie" if re.search(r"\b(movie|film|gekijouban)\b|劇場版", title, re.IGNORECASE) else "series"
+            items.append({"id": int(match.group(1)), "title": title, "kind": kind})
+    return items[:50]
+
+
+def _episode_values(work, detail=""):
+    menu = _menu(work, detail)
+    if "playing episode" in menu["prompt"].lower():
+        return []
+    return [value for value in menu["items"]
+            if re.sub(r"^episode\s+", "", value.strip(), flags=re.IGNORECASE).lower() not in PLAYER_CONTROLS]
 
 
 def _playback(work):
@@ -169,18 +197,13 @@ def main():
                 query = _text(args["query"], "query", 200)
                 argv = ["/bin/sh", "/package/ani-cli", *(["--dub"] if args["dub"] else []), query]
                 _, _, detail = _run(argv, _environment(work, capture_at=0))
-                items = []
-                for line in _capture(work, detail):
-                    match = re.match(r"^(\d+)\s+(.+)$", line)
-                    if match:
-                        items.append({"id": int(match.group(1)), "title": match.group(2)[:300]})
-                result = {"items": items[:50]}
+                result = {"items": _search_items(_capture(work, detail))}
             elif tool == "ani_cli__episodes":
                 offset = args["offset"]
                 if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 5000:
                     raise ValueError("Invalid episode offset")
                 _, _, detail = _run(_base_args(args), _environment(work, capture_at=0))
-                values = _capture(work, detail)
+                values = _episode_values(work, detail)
                 page = values[offset:offset + 100]
                 result = {"items": [{"number": value[:16], "label": f"Episode {value[:16]}"} for value in page],
                           "total": len(values), "next_offset": offset + 100 if offset + 100 < len(values) else -1}
@@ -204,6 +227,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - Process boundary reports provider failures without a traceback.
         print("ani-cli adapter: " + str(exc), file=sys.stderr)
         sys.exit(1)

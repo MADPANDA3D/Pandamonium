@@ -231,6 +231,79 @@ def test_install_preview_pins_revision_and_requires_explicit_approval(
     assert manager.execute_plan(plan["plan_id"], operator_id="operator") == result
 
 
+def test_execute_rechecks_host_requirements_after_approval(
+    tmp_path, git_fixture, monkeypatch
+):
+    repo, v1, _v2 = git_fixture
+    manager, authority, _registry = _manager(tmp_path, repo)
+    reports = iter([{"missing": []}, {"missing": ["media.libmpv"]}])
+    monkeypatch.setattr(
+        installer, "host_requirements_summary", lambda _plan: next(reports)
+    )
+    plan = manager.preview_source("install", SOURCE_URL, v1, operator_id="operator")
+    authority.resolve(
+        plan["authority_decision"]["decision_id"],
+        operator_id="operator",
+        choice="approve",
+        scope="once",
+    )
+
+    with pytest.raises(ExtensionLifecycleError, match="system_requirements_missing"):
+        manager.execute_plan(plan["plan_id"], operator_id="operator")
+    assert manager._read_state()["extensions"] == {}
+
+
+def test_rollback_rechecks_requirements_from_target_revision(
+    tmp_path, git_fixture, monkeypatch
+):
+    repo, v1, v2 = git_fixture
+    manager, authority, _registry = _manager(tmp_path, repo)
+    _approve_and_execute(
+        manager,
+        authority,
+        manager.preview_source("install", SOURCE_URL, v1, operator_id="operator"),
+    )
+    _approve_and_execute(
+        manager,
+        authority,
+        manager.preview_source("upgrade", SOURCE_URL, v2, operator_id="operator"),
+    )
+
+    manager.adapters[0].preview = lambda _path, manifest: {
+        "target_version": manifest["version"],
+        "host_requirements": {"capabilities": ["media.libmpv"]},
+    }
+    observed = []
+    reports = iter([{"missing": []}, {"missing": ["media.libmpv"]}])
+
+    def requirements(plan):
+        observed.append(
+            (
+                plan["manifest"]["version"],
+                plan["execution_recipe"]["target_version"],
+            )
+        )
+        return next(reports)
+
+    monkeypatch.setattr(installer, "host_requirements_summary", requirements)
+    plan = manager.preview_lifecycle(
+        "rollback", "fixture", operator_id="operator", target_revision=v1
+    )
+    assert plan["manifest"]["version"] == "1.0.0"
+    assert plan["execution_recipe"]["target_version"] == "1.0.0"
+    authority.resolve(
+        plan["authority_decision"]["decision_id"],
+        operator_id="operator",
+        choice="approve",
+        scope="once",
+    )
+
+    with pytest.raises(ExtensionLifecycleError, match="system_requirements_missing"):
+        manager.execute_plan(plan["plan_id"], operator_id="operator")
+    assert observed == [("1.0.0", "1.0.0"), ("1.0.0", "1.0.0")]
+    assert manager._read_state()["extensions"]["fixture"]["active_revision"] == v2
+
+
 def test_exact_revision_remains_resolvable_after_branch_advances(git_fixture):
     repo, v1, _v2 = git_fixture
     _run(["git", "tag", "-d", "v1"], cwd=repo)
@@ -626,8 +699,9 @@ def test_extension_routes_expose_preview_execute_and_readback(tmp_path, git_fixt
         "/api/extensions/marketplace/plans",
         "/api/extensions/plans/source",
         "/api/extensions/runtime/{extension_id}/configuration",
-        "/api/extensions/plans/lifecycle",
-        "/api/extensions/plans/{plan_id}/execute",
+            "/api/extensions/plans/lifecycle",
+            "/api/extensions/plans/{plan_id}/execute",
+            "/api/extensions/system-requirements",
         "/api/extensions/scans",
         "/api/extensions/scans/{scan_id}",
         "/api/extensions/scans/{scan_id}/cancel",

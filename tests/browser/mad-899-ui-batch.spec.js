@@ -76,7 +76,7 @@ test('quick visual batch — orb, docks, display size, bucket reorder', async ({
   expect(order.indexOf('plugins-section')).toBeLessThan(order.indexOf('tools-section'));
 
   // 5. Updater modal also opens right-docked (sidebar button path).
-  await page.locator('#sidebar-update-check').click();
+  await page.locator('#sidebar-version-btn').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-modal')).toHaveClass(/modal-right-docked/);
 });

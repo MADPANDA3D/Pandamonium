@@ -29,6 +29,7 @@ import { previewZoneAt, clearPreview, snapModalToZone } from './tileManager.js';
 import { suspendDock, resumeDock, clearRightDock, applyEdgeDock, edgeDockAvailable } from './modalSnap.js';
 import { dismissOrRemove } from './escMenuStack.js';
 import { nextToolWindowZ } from './toolWindowZOrder.js';
+import { rememberOpenTool, forgetOpenTool } from './viewState.js';
 
 const _state = new Map(); // id -> { restoreFn, closeFn, railBtnId, isMinimized, restoreMinHeight }
 const _REPORTABLE_VIEWS = {
@@ -108,6 +109,9 @@ function _bringToFront(modal) {
 }
 
 function _emitModalOpened(id, modal) {
+  try {
+    rememberOpenTool(id);
+  } catch (_) {}
   try {
     window.dispatchEvent(new CustomEvent('odysseus:modal-opened', {
       detail: { id, modal },
@@ -1216,6 +1220,9 @@ export function register(id, {
     _modalEl._mmAutoStackLast = _isVisible();
     const obs = new MutationObserver(() => {
       const vis = _isVisible();
+      if (!vis && _modalEl._mmAutoStackLast && !_modalEl.classList.contains('modal-minimized')) {
+        try { forgetOpenTool(id); } catch (_) {}
+      }
       if (vis && !_modalEl._mmAutoStackLast) {
         _bringToFront(_modalEl);
         _applyPreferredDock(id, _modalEl);
@@ -1261,6 +1268,7 @@ export function unregister(id) {
   if (s) _setBadge(s.btnIds, false);
   _state.delete(id);
   _chipPositions.delete(id);
+  try { forgetOpenTool(id); } catch (_) {}
   // Drop any per-popup _LABELS entry created at register-time.
   if (_customLabelIds.has(id)) {
     delete _LABELS[id];
@@ -1387,6 +1395,15 @@ export function restore(id) {
   return true;
 }
 
+export function restorePersisted(id) {
+  if (_state.has(id)) return restore(id);
+  const wire = _AUTO_WIRE[id];
+  const opener = document.getElementById(wire?.opener || wire?.sidebar || wire?.rail);
+  if (!opener) return false;
+  opener.click();
+  return true;
+}
+
 export function focus(id) {
   const state = _state.get(id);
   if (!state || state.isMinimized) return false;
@@ -1451,9 +1468,10 @@ export function close(id) {
       content.style.opacity = '';
     }
   }
-  _setBadge(s.btnIds, false);
+_setBadge(s.btnIds, false);
   _state.delete(id);
   _chipPositions.delete(id);
+  try { forgetOpenTool(id); } catch (_) {}
   _saveDockState();
   _renderDock();
 }
@@ -1535,10 +1553,11 @@ const _AUTO_WIRE = {
   'notes-panel':          { rail: 'rail-notes',     sidebar: 'tool-notes-btn', elementId: 'notes-pane', defaultDock: DECLARED_DEFAULT_DOCKS['notes-panel'] },
   // Email already has its own #email-unread-dot inline next to the title —
   // don't add a second modalManager badge that lands at the right edge.
-  'email-lib-modal':      { rail: null,             sidebar: null },
+  'email-lib-modal':      { rail: null,             sidebar: null, opener: 'email-section-title' },
   'research-overlay':     { rail: 'rail-research',  sidebar: 'tool-research-btn', defaultDock: DECLARED_DEFAULT_DOCKS['research-overlay'] },
   'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
-  'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn' },
+  'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn', opener: 'user-bar-settings' },
+  'bug-report-modal':     { rail: null,             sidebar: 'tool-report-btn' },
   'compare-model-overlay':{ rail: 'rail-compare',   sidebar: 'tool-compare-btn', defaultDock: DECLARED_DEFAULT_DOCKS['compare-model-overlay'] },
   'marketplace-modal':    { rail: null,             sidebar: 'add-plugins-btn', defaultDock: DECLARED_DEFAULT_DOCKS['marketplace-modal'] },
   'ge-shortcuts-modal':   { rail: null,             sidebar: null },
@@ -1724,4 +1743,4 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-export default { register, unregister, isRegistered, isMinimized, getForegroundState, minimize, restore, focus, toggle, close, injectMinimizeButton };
+export default { register, unregister, isRegistered, isMinimized, getForegroundState, minimize, restore, restorePersisted, focus, toggle, close, injectMinimizeButton };

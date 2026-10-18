@@ -113,6 +113,27 @@ def source_tree(tmp_path):
     return root
 
 
+def test_manifest_host_requirements_survive_intake_normalization(tmp_path):
+    root = source_tree(tmp_path)
+    data = proposal()
+    data["manifest"]["metadata"] = {
+        "summary": "Double integers.",
+        "host_requirements": {"capabilities": ["build.c_toolchain"]},
+    }
+
+    result = validate_proposal(
+        Proposal.model_validate(data),
+        {"README.md": DOC, "odd/place/command.py": CODE},
+        root,
+        SOURCE_URL,
+        REVISION,
+    )
+
+    assert result["manifest"]["metadata"]["host_requirements"] == {
+        "capabilities": ["build.c_toolchain"]
+    }
+
+
 def test_literal_source_search_reads_definition_beyond_first_excerpt(tmp_path):
     root = source_tree(tmp_path)
     (root / "odd/place/command.py").write_text("# padding\n" * 4000 + CODE)

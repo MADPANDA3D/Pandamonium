@@ -154,13 +154,12 @@ def test_issue_body_contains_every_reviewed_field_in_order():
         "### What I was trying to do",
         "### Expected behavior",
         "### Actual behavior / error",
-        "### Steps to reproduce",
         "### Workaround",
         "### Diagnostics (automatic, redacted)",
         "### Screenshots",
     ):
         assert heading in body
-    assert "1. Open a chat" in body
+    assert "### Steps to reproduce" not in body
     assert "Step 2 - error dialog" in body
     assert "1.0.62" in body
     assert "_Reported from the in-app **Report a bug** form._" in body

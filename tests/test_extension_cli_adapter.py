@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import threading
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -75,6 +76,23 @@ def preview_package(manager, path, manifest, operation="install"):
             "tree_digest": package_tree_digest(path),
         },
     )
+
+
+def test_preview_preserves_validated_host_requirements(tmp_path):
+    path, manifest = package(tmp_path)
+    integration_path = path / ".pandamonium/integration.json"
+    integration = json.loads(integration_path.read_text())
+    integration["host_requirements"] = {"capabilities": ["media.libmpv"]}
+    integration_path.write_text(json.dumps(integration))
+
+    recipe = cli.GeneratedCliAdapter(tmp_path / "manager").preview(path, manifest)
+
+    assert recipe["host_requirements"] == {"capabilities": ["media.libmpv"]}
+
+    integration["host_requirements"] = {"capabilities": ["apt.install.anything"]}
+    integration_path.write_text(json.dumps(integration))
+    with pytest.raises(cli.ExtensionLifecycleError, match="extension_cli_execution_recipe_invalid"):
+        cli.GeneratedCliAdapter(tmp_path / "manager").preview(path, manifest)
 
 
 def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monkeypatch):
@@ -279,7 +297,11 @@ def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monke
 
 def test_real_cli_confinement_timeout_output_and_schema_failure(tmp_path, monkeypatch):
     path, manifest = package(tmp_path)
-    runtime = cli.resources.storage_root() / tmp_path.name / "runtime"
+    runtime = (
+        cli.resources.storage_root()
+        / f"{tmp_path.name}-{uuid.uuid4().hex}"
+        / "runtime"
+    )
     runtime.mkdir(parents=True)
     monkeypatch.setenv("MAD959_HOST_SECRET", "must-not-enter-child")
     script = path / ".pandamonium/probe.py"

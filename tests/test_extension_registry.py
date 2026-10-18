@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import validate
 
 from src.extension_registry import (
     ExtensionContractError,
@@ -10,6 +11,7 @@ from src.extension_registry import (
     reconcile_extension_catalog,
     validate_extension_manifest,
 )
+from src.system_requirements import CATALOG
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "extensions"
@@ -98,6 +100,32 @@ def test_security_relevant_unknown_fields_fail_closed(mutation, code):
     manifest = _manifest("atlas")
     mutation(manifest)
     with pytest.raises(ExtensionContractError, match=code):
+        validate_extension_manifest(manifest)
+
+
+def test_host_requirements_are_normalized_and_unknown_capabilities_fail_closed():
+    manifest = _manifest("atlas")
+    manifest["metadata"] = {
+        "summary": "Atlas tools",
+        "host_requirements": {"capabilities": ["media.libmpv"]},
+    }
+    normalized = validate_extension_manifest(manifest)
+    assert normalized["metadata"]["host_requirements"] == {
+        "capabilities": ["media.libmpv"]
+    }
+    schema = json.loads(
+        (Path(__file__).parents[1] / "specs/schemas/jos-extension-v1.schema.json").read_text()
+    )
+    validate(normalized, schema)
+    assert set(
+        schema["properties"]["metadata"]["properties"]["host_requirements"]
+        ["properties"]["capabilities"]["items"]["enum"]
+    ) == set(CATALOG)
+
+    manifest["metadata"]["host_requirements"]["capabilities"] = [
+        "apt.install.anything"
+    ]
+    with pytest.raises(ExtensionContractError, match="system_requirement_unknown_capability"):
         validate_extension_manifest(manifest)
 
 

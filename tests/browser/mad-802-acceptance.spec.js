@@ -51,10 +51,10 @@ test('New Chat preserves configured Friday as the conversation target', async ({
 
   await page.goto('/static/index.html');
 
-  await expect(page.locator('#sidebar-update-version')).toHaveText('Version v1.0.9');
-  await expect(page.locator('#sidebar-update-commit')).toHaveText('Deployed 1.0.9-11111111 · 11111111');
-  await expect(page.locator('#sidebar-update-state')).toHaveText('v1.0.10 available · 22222222');
-  await expect(page.locator('#sidebar-update-check')).toHaveText('Check for updates');
+  await expect(page.locator('#sidebar-update-version')).toHaveText('v1.0.9');
+  await expect(page.locator('#sidebar-update-commit')).toBeHidden();
+  await expect(page.locator('#sidebar-update-state')).toBeHidden();
+  await expect(page.locator('#sidebar-update-check')).toBeHidden();
   await expect(page.locator('#sidebar-update-action')).toBeVisible();
   await expect(page.locator('#sidebar-update-action')).toHaveText('Update to v1.0.10');
 

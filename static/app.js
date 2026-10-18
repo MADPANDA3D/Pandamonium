@@ -7,6 +7,7 @@ import { initComposerLinks } from './js/composerLinks.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import bugReportModule from './js/bugReport.js';
+import viewStateModule from './js/viewState.js';
 import projectsModule from './js/projects.js';
 import accessModeModule from './js/accessMode.js';
 import fileHandlerModule from './js/fileHandler.js';
@@ -1955,6 +1956,9 @@ function initializeEventListeners() {
   try { projectsModule.initProjects(); } catch (_) {}
   try { agentPlanModule.initAgentPlan(); } catch (_) {}
   try { accessModeModule.initAccessMode(); } catch (_) {}
+  // Restore the operator's last view (Entertainment / Settings / open tool
+  // windows) after the modules above have initialized (MAD-986).
+  try { viewStateModule.restoreView(); } catch (_) {}
 
   // Document editor toggle (special: uses module panel, not a checkbox)
   function bringOpenDocumentToFrontOnMobile() {

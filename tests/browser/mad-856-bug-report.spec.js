@@ -16,7 +16,7 @@ const PNG_1PX = Buffer.from(
 );
 
 const PREPARED_TITLE = '[Bug] Send button does nothing';
-const PREPARED_BODY = '### Summary\nSend button does nothing\n\n### Steps to reproduce\n1. Open chat\n2. Click send';
+const PREPARED_BODY = '### Summary\nSend button does nothing';
 
 function sessionFixture() {
   return {
@@ -173,7 +173,6 @@ async function fillSummary(page, summary = 'Send button does nothing') {
   await page.locator('#bug-report-goal').fill('Send a message');
   await page.locator('#bug-report-expected').fill('The message sends');
   await page.locator('#bug-report-actual').fill('Nothing happens');
-  await page.locator('.bug-report-step-input').first().fill('Open a chat');
 }
 
 async function goToEvidence(page) {
@@ -202,7 +201,30 @@ test('opens as a right-docked panel and keeps the draft across navigation', asyn
   await boot(page);
   await openPanel(page);
   await expect(page.locator('#bug-report-summary')).toHaveValue('Draft survives navigation');
-  await expect(page.locator('.bug-report-step-input').first()).toHaveValue('Open a chat');
+});
+
+test('the report is a stepped wizard and no longer asks for reproduction steps', async ({ page }) => {
+  await mockApi(page);
+  await boot(page);
+  await openPanel(page);
+
+  // Only the active step is visible; the others are truly hidden.
+  await expect(page.locator('#bug-report-panel-capture')).toBeVisible();
+  await expect(page.locator('#bug-report-panel-evidence')).toBeHidden();
+  await expect(page.locator('#bug-report-panel-review')).toBeHidden();
+  await expect(page.locator('#bug-report-back')).toBeHidden();
+  await expect(page.locator('#bug-report-steps-list')).toHaveCount(0);
+  await expect(page.locator('.bug-report-step-input')).toHaveCount(0);
+
+  await fillSummary(page);
+  await page.locator('#bug-report-next').click();
+  await expect(page.locator('#bug-report-panel-evidence')).toBeVisible();
+  await expect(page.locator('#bug-report-panel-capture')).toBeHidden();
+  await expect(page.locator('#bug-report-back')).toBeVisible();
+
+  await page.locator('#bug-report-next').click();
+  await expect(page.locator('#bug-report-panel-review')).toBeVisible();
+  await expect(page.locator('#bug-report-panel-evidence')).toBeHidden();
 });
 
 test('captures screenshots with labels, reorder, and removal', async ({ page }) => {
@@ -241,7 +263,7 @@ test('review shows the exact public report, duplicates, and warning before submi
   await addScreenshot(page);
   await goToReview(page);
 
-  await expect(page.locator('#bug-report-review-body')).toContainText('### Steps to reproduce');
+  await expect(page.locator('#bug-report-review-body')).toContainText('### Summary');
   await expect(page.locator('#bug-report-public-warning')).toContainText('public');
   await expect(page.locator('#bug-report-submit')).toBeDisabled();
   await page.locator('#bug-report-confirm').check();

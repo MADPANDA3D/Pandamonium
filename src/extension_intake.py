@@ -68,6 +68,10 @@ class KnowledgeSpec(Record):
     vectorize: bool = False
 
 
+class HostRequirements(Record):
+    capabilities: list[str] = Field(default_factory=list, max_length=32)
+
+
 class CliExecution(Record):
     install: list[list[str]] = Field(default_factory=list, max_length=8)
     checks: list[CliCheck] = Field(min_length=1, max_length=64)
@@ -106,6 +110,7 @@ class Proposal(Record):
     manifest: dict | None
     files: list[GeneratedFile] = Field(max_length=16)
     execution: CliExecution | None = None
+    host_requirements: HostRequirements | None = None
     source_exclusions: list[str] = Field(default_factory=list, max_length=128)
 
 
@@ -471,12 +476,18 @@ def validate_proposal(
                 "CLI execution recipe does not match the evidenced schemas and required checks."
             ) from exc
     if manifest is not None:
+        host_requirements = (
+            proposal.host_requirements.model_dump()
+            if proposal.host_requirements
+            else (manifest.get("metadata") or {}).get("host_requirements")
+        )
         manifest["metadata"] = {
             "summary": " ".join(proposal.purpose.split()),
             "categories": proposal.categories,
             "icon": proposal.icon,
             "examples": [" ".join(item.split()) for item in proposal.examples],
             "requirements": [" ".join(item.split()) for item in proposal.requirements],
+            **({"host_requirements": host_requirements} if host_requirements else {}),
         }
         manifest = validate_extension_manifest(manifest)
     return {
@@ -533,6 +544,8 @@ Declare execution.prerequisites for display/audio/gpu/browser if the LOCAL opera
 these stay Needs setup until an external endpoint supplies them. For a connected speech runtime,
 execution.voice_model selects its evidenced TTS model after a real operation check and automatically
 connects the selected ENDPOINT_ID in editable voice Settings. Show this effect in the install preview.
+Declare host_requirements.capabilities only from sandbox.bubblewrap, sandbox.prlimit, systemd.user,
+runtime.filesystem, build.c_toolchain, build.pkg_config, and media.libmpv.
 Knowledge collections may use execution.knowledge={files:[exact source paths],graph_artifact:null,
 vectorize:false}. Optional graph_artifact is a relative runtime path produced by a package-local
 Graphify setup; vectorize=true then uses the existing embedding client. knowledge.search,

@@ -37,7 +37,9 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
     const KEY = 'odysseus-auth-user';
     const cachedUser = localStorage.getItem(KEY);
     if (cachedUser && cachedUser !== liveUser) {
-      const _keepKeys = new Set(['odysseus-last-user', KEY]);
+      // Preserve per-device appearance prefs across a user change: wiping the
+      // text/icon scale forced the operator to re-set accessibility sizing.
+      const _keepKeys = new Set(['odysseus-last-user', KEY, 'odysseus-ui-scale', 'odysseus-ui-icon-scale']);
       const toRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);

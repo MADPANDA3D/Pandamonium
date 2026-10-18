@@ -246,6 +246,11 @@ class FastEmbedClient:
     """Local embedding client using fastembed (ONNX). No external service needed."""
 
     def __init__(self, model: Optional[str] = None):
+        if os.getenv("PANDAMONIUM_LOCAL_EMBEDDINGS", "true").lower() not in {"1", "true", "yes"}:
+            raise RuntimeError(
+                "Local embeddings are disabled. Configure a remote embedding provider "
+                "or explicitly enable PANDAMONIUM_LOCAL_EMBEDDINGS."
+            )
         try:
             from fastembed import TextEmbedding
         except ImportError as e:

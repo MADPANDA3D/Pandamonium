@@ -266,7 +266,7 @@ function _laneRows(status, isAdmin) {
             ? 'Models found — run the model test'
             : modelState === 'configured'
               ? 'Endpoint saved — add or discover a model'
-              : 'Required — connect a model engine',
+              : 'Needed for chat — connect a model engine',
       optional: false,
       action: isAdmin ? { label: 'Connect', run: () => { _view = { name: 'step', step: 'model' }; render(); } } : null,
     },
@@ -369,6 +369,9 @@ async function renderHome(panel, status) {
   head.append(el('p', null, isAdmin
     ? 'A guided path through the settings that matter. Everything here can be changed later.'
     : 'Your administrator manages this installation. Here is what is ready for you.'));
+  if (isAdmin && !status.model?.usable) {
+    head.append(el('p', 'setup-wizard-note', 'You can install Entertainment plugins and watch before connecting a chat model. Choose model and speech providers whenever you are ready.'));
+  }
   panel.append(head);
 
   if (_notice) {

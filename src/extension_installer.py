@@ -370,6 +370,28 @@ _ACTION_SCHEMAS = [
 _ACTION_CATALOG = compose_capability_catalog(_ACTION_SCHEMAS)
 
 
+def host_requirements_summary(plan: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Read-only host capability report for a generated-package plan."""
+    manifest = plan.get("manifest") or {}
+    runtime = (manifest.get("runtime") or {}).get("type")
+    declared = (manifest.get("metadata") or {}).get("host_requirements")
+    if runtime not in {"service", "cli", "mcp"} and not declared:
+        return None
+    from src.system_requirements import (
+        SystemRequirementError,
+        capabilities_for_package,
+        report,
+    )
+
+    try:
+        capabilities = capabilities_for_package(manifest, plan.get("execution_recipe"))
+    except SystemRequirementError as exc:
+        raise ExtensionLifecycleError(exc.code) from exc
+    if not capabilities:
+        return None
+    return report(capabilities)
+
+
 class ExtensionLifecycleManager:
     def __init__(
         self,
@@ -816,10 +838,25 @@ class ExtensionLifecycleManager:
             if existing and existing.get("owner_scope") not in {None, operator_id}:
                 raise ExtensionLifecycleError("extension_owner_scope_mismatch")
             manifest = None
+            execution_recipe = None
             if existing:
-                manifest = self._load_manifest(
-                    self._revision_path(extension_id, existing["active_revision"])
+                selected_revision = (
+                    target_revision
+                    if operation == "rollback"
+                    else existing["active_revision"]
                 )
+                selected_path = self._revision_path(extension_id, selected_revision)
+                if operation == "rollback":
+                    self._installed_source_revision(
+                        existing, selected_revision, selected_path
+                    )
+                manifest = self._load_manifest(selected_path)
+                if operation in {"enable", "rollback"}:
+                    adapter = self._adapter_for(manifest)
+                    preview = getattr(adapter, "preview", None)
+                    execution_recipe = (
+                        preview(selected_path, manifest) if preview else None
+                    )
             plan = {
                 "plan_id": str(uuid.uuid4()),
                 "call_id": str(uuid.uuid4()),
@@ -829,6 +866,7 @@ class ExtensionLifecycleManager:
                 "operator_id": operator_id,
                 "owner_scope": (existing or {}).get("owner_scope") or operator_id,
                 "manifest": manifest,
+                "execution_recipe": execution_recipe,
                 "available_revisions": list((existing or {}).get("history") or []),
                 "status": "pending_approval",
                 "created_at": utc_now(),
@@ -883,6 +921,9 @@ class ExtensionLifecycleManager:
                 **(manifest.get("rollback") or {}),
                 "available_revisions": list(plan.get("available_revisions") or []),
             }
+            requirements = host_requirements_summary(plan)
+            if requirements is not None:
+                result["system_requirements"] = requirements
         if plan.get("distribution"):
             result["marketplace"] = dict(plan["distribution"])
         if plan.get("execution_recipe") is not None:
@@ -917,6 +958,31 @@ class ExtensionLifecycleManager:
                 raise ExtensionLifecycleError("extension_configuration_changed_preview_again")
             if plan.get("status") == "completed":
                 return self._public_plan(plan)
+            if plan.get("operation") == "rollback":
+                current = state["extensions"].get(plan["extension_id"])
+                target_revision = plan.get("target_revision")
+                if (
+                    not current
+                    or not target_revision
+                    or target_revision not in current.get("history", [])
+                    and target_revision != current.get("active_revision")
+                ):
+                    raise ExtensionLifecycleError(
+                        "extension_rollback_revision_unavailable"
+                    )
+                target_path = self._revision_path(
+                    plan["extension_id"], target_revision
+                )
+                self._installed_source_revision(
+                    current, target_revision, target_path
+                )
+                target_manifest = self._load_manifest(target_path)
+                adapter = self._adapter_for(target_manifest)
+                preview = getattr(adapter, "preview", None)
+                plan["manifest"] = target_manifest
+                plan["execution_recipe"] = (
+                    preview(target_path, target_manifest) if preview else None
+                )
             if "configuration_fingerprint" in plan:
                 from src.extension_configuration import fingerprint, values
 
@@ -935,6 +1001,10 @@ class ExtensionLifecycleManager:
                     )
                 plan["authorized"] = True
                 plan["authority_ref"] = decision["decision_id"]
+            if plan["operation"] in {"install", "upgrade", "enable", "rollback"}:
+                requirements = host_requirements_summary(plan)
+                if requirements and requirements.get("missing"):
+                    raise ExtensionLifecycleError("system_requirements_missing")
             plan["operator_id"] = operator_id
             plan["status"] = "executing"
             state["plans"][plan_id] = plan

@@ -163,7 +163,7 @@ test('first-run admin is guided to name the assistant without opening settings',
   await expect(modal.locator('.setup-lane').filter({ hasText: 'Assistant name' }))
     .toContainText('Ready — Friday');
   await expect(modal.locator('.setup-lane').filter({ hasText: 'Model engine' }))
-    .toContainText('Required');
+    .toContainText('Needed for chat');
 });
 
 
@@ -434,7 +434,7 @@ test('skipping the model step returns to setup with an honest notice', async ({ 
   await expect(modal).toContainText('Set up Pandamonium');
   await expect(modal.locator('.setup-wizard-notice')).toContainText('connect a model');
   const lane = modal.locator('.setup-lane').filter({ hasText: 'Model engine' });
-  await expect(lane).toContainText('Required');
+  await expect(lane).toContainText('Needed for chat');
   await expect(lane).toContainText('connect');
   expect(state.posts).toHaveLength(0);
 });
