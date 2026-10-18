@@ -1541,12 +1541,23 @@ def resolve_tailnet_peer(peer_id: Any) -> str:
 
 
 def connection_payload(connection: Any) -> dict[str, Any]:
-    """Redacted connection payload. Never includes private key material."""
+    """Redacted connection payload. Never includes private key material.
+
+    Tailnet addresses stay server-side even after discovery.  The stored row
+    still carries the routable CGNAT address for OpenSSH, while the browser
+    receives only the operator-facing label.
+    """
     checked_at = getattr(connection, "last_checked_at", None)
+    host = str(connection.host or "")
+    try:
+        host_redacted = ipaddress.ip_address(host) in _TAILSCALE_CGNAT
+    except ValueError:
+        host_redacted = False
     return {
         "id": connection.id,
         "label": connection.label,
-        "host": connection.host,
+        "host": str(connection.label or "Tailnet node") if host_redacted else host,
+        "host_redacted": host_redacted,
         "user": connection.user,
         "port": int(connection.port or DEFAULT_SSH_PORT),
         "keyless": bool(getattr(connection, "keyless", False)),

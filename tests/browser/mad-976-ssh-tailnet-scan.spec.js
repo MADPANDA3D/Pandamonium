@@ -14,7 +14,8 @@ const PEERS = [
 const ADDED = {
   id: 'ssh-newtailnet1',
   label: 'madpanda-workstation',
-  host: '100.64.242.88',
+  host: 'madpanda-workstation',
+  host_redacted: true,
   user: 'leo',
   port: 22,
   keyless: true,
@@ -111,7 +112,8 @@ test('adding a scanned node sends the opaque peer id and resolves the address se
 
   const saved = page.locator('.ssh-row[data-ssh-id="ssh-newtailnet1"]');
   await expect(saved).toContainText('madpanda-workstation');
-  await expect(saved).toContainText('leo@100.64.242.88:22');
+  await expect(saved).toContainText('leo@madpanda-workstation:22');
+  await expect(page.locator('body')).not.toContainText('100.64.242.88');
 });
 
 test('a node with Tailscale SSH is added keyless with no key setup', async ({ page }) => {
@@ -132,7 +134,8 @@ test('a Tailscale SSH connection hides key controls and shows the badge', async 
   const tailscaleConn = {
     ...ADDED,
     label: 'oracle',
-    host: '100.117.131.123',
+    host: 'oracle',
+    host_redacted: true,
     auth_mode: 'tailscale_ssh',
     has_private_key: false,
     public_key: '',
@@ -164,7 +167,8 @@ test('a Tailscale check requirement renders a clickable approval link', async ({
   const checkConn = {
     ...ADDED,
     label: 'madpanda-workstation',
-    host: '100.64.242.88',
+    host: 'madpanda-workstation',
+    host_redacted: true,
     auth_mode: 'tailscale_ssh',
     has_private_key: false,
     public_key: '',

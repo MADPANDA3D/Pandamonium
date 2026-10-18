@@ -349,7 +349,13 @@ def setup_feedback_routes():
             include_diagnostics=draft.get("include_diagnostics", True),
         )
         config = github.resolve_config()
-        url_base = config.attachment_url_base if config else ""
+        relay_config = relay.resolve_config()
+        # Preparation and submission must build the same reviewed body.  A
+        # configured relay is the preferred new-report path and receives the
+        # screenshot bytes directly, so it deliberately uses no GitHub-hosted
+        # attachment base.  Keep that choice for the duplicate-comment path as
+        # well so changing the radio selection cannot alter the confirmed body.
+        url_base = config.attachment_url_base if config and relay_config is None else ""
         title = report.build_issue_title(draft)
         body = report.build_issue_body(
             draft, diagnostics=bundle, attachments=manifest, url_base=url_base
@@ -366,7 +372,7 @@ def setup_feedback_routes():
             "duplicates_error": duplicate_error,
             "security_private_only": draft["type"] == "security",
             "security_url": (config.security_url if config else _github_status()["security_url"]),
-            "public_submission": bool((config is not None or relay.resolve_config() is not None) and _feedback_enabled()),
+            "public_submission": bool((config is not None or relay_config is not None) and _feedback_enabled()),
         }
 
     @router.post("/submit")
@@ -399,7 +405,8 @@ def setup_feedback_routes():
                 ),
             )
 
-        using_relay = relay.resolve_config() is not None and decision != "existing"
+        relay_config = relay.resolve_config()
+        using_relay = relay_config is not None and decision != "existing"
         if using_relay:
             try:
                 client = relay.client_for_submission()
@@ -411,7 +418,9 @@ def setup_feedback_routes():
                 client = github.client_for_submission()
             except github.GitHubIssuesError as exc:
                 raise HTTPException(status_code=503, detail=exc.message)
-            attachment_url_base = client.config.attachment_url_base
+            attachment_url_base = (
+                client.config.attachment_url_base if relay_config is None else ""
+            )
 
         claim = store.claim_submission(
             idempotency_key, draft_id=draft["draft_id"], fingerprint=report.fingerprint_for(draft)

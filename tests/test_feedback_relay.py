@@ -128,6 +128,45 @@ def test_submit_uses_relay_and_returns_issue(env, router, relay_env):
     assert diagnostics["route"]
 
 
+def test_prepare_and_submit_use_the_same_body_when_relay_and_github_are_configured(
+    env, router, relay_env, monkeypatch
+):
+    github_config = SimpleNamespace(
+        attachment_url_base="https://pandamonium.example.test/api/feedback/attachment",
+        security_url="https://github.com/MADPANDA3D/Pandamonium/security/advisories/new",
+    )
+    monkeypatch.setattr(fb.github, "resolve_config", lambda: github_config)
+    attachment = store.save_attachment(
+        draft_id="draft-abc12345",
+        owner="leo",
+        data=b"\x89PNG\r\n\x1a\n" + b"x" * 64,
+        content_type="image/png",
+        suffix=".png",
+        name="player.png",
+        label="wrong audio",
+        route="/static/index.html#chat",
+    )
+    payload = _draft_payload(
+        idempotency_key="sub-0000000000000008",
+        attachment_ids=[attachment["id"]],
+    )
+
+    prepared = asyncio.run(
+        _endpoint(router, "/api/feedback/prepare", "POST")(
+            FakeRequest(payload=payload)
+        )
+    )
+    submitted = asyncio.run(
+        _endpoint(router, "/api/feedback/submit", "POST")(
+            FakeRequest(payload=payload)
+        )
+    )
+
+    assert relay_env.calls[0]["body"]["body_markdown"] == prepared["body"]
+    assert submitted["redacted_report"]["body"] == prepared["body"]
+    assert "pandamonium.example.test" not in prepared["body"]
+
+
 def test_submit_offloads_relay_transport(env, router, relay_env, monkeypatch):
     calls = []
 

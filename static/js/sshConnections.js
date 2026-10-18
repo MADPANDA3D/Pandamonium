@@ -149,6 +149,7 @@ function openEditor(connection, prefill = null) {
   _editingId = connection ? connection.id : null;
   _pendingTailnetPeer = !connection && prefill && prefill.tailnetPeer ? prefill.tailnetPeer : null;
   const peer = _pendingTailnetPeer;
+  const hostRedacted = !!(connection && connection.host_redacted);
   host.classList.remove('hidden');
   host.innerHTML = `
     <div class="admin-model-form ssh-editor-form">
@@ -158,9 +159,10 @@ function openEditor(connection, prefill = null) {
       </div>
       <div class="settings-row">
         <label class="settings-label" for="ssh-edit-host">Host</label>
-        <input id="ssh-edit-host" class="settings-select" type="text" autocapitalize="off" spellcheck="false" placeholder="192.168.1.20 or vps.example.com" value="${esc(connection ? connection.host : '')}"${peer ? ' disabled' : ''}>
+        <input id="ssh-edit-host" class="settings-select" type="text" autocapitalize="off" spellcheck="false" placeholder="192.168.1.20 or vps.example.com" value="${esc(connection ? connection.host : '')}"${peer || hostRedacted ? ' disabled' : ''}>
       </div>
       ${peer ? `<div class="ssh-note">Tailnet node "${esc(peer.name)}" (${esc(peer.os || 'unknown OS')}) selected. Its tailnet address is resolved when you save.</div>` : ''}
+      ${hostRedacted ? '<div class="ssh-note">This tailnet address is retained server-side and is not exposed in the browser. Remove and re-add the connection to select another node.</div>' : ''}
       <div class="settings-row">
         <label class="settings-label" for="ssh-edit-user">User</label>
         <input id="ssh-edit-user" class="settings-select" type="text" autocapitalize="off" spellcheck="false" placeholder="root" value="${esc(connection ? connection.user : '')}">
@@ -201,7 +203,7 @@ async function saveEditor() {
   if (_pendingTailnetPeer && !_editingId) {
     body.append('host', '');
     body.append('tailnet_peer_id', _pendingTailnetPeer.id);
-  } else {
+  } else if (!(_editingId && _connections.find((item) => item.id === _editingId)?.host_redacted)) {
     body.append('host', host.value);
   }
   body.append('user', user.value);

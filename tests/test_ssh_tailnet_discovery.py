@@ -277,12 +277,17 @@ def test_add_connection_from_tailnet_peer_resolves_host(ssh_env, fake_tailscale,
         tailnet_peer_id=peer["id"],
     )
 
-    assert payload["host"] == "100.64.242.88"
+    assert payload["host"] == "Workstation"
+    assert payload["host_redacted"] is True
     assert payload["auth_mode"] == "managed_key"
     assert payload["host_key_pinned"] is True
     encoded = json.dumps(payload)
     assert '"private_key"' not in encoded
     assert "BEGIN OPENSSH PRIVATE KEY" not in encoded
+    assert "100.64.242.88" not in encoded
+    with ssh_env.SessionLocal() as session:
+        row = session.query(database.SshConnection).filter_by(id=payload["id"]).one()
+        assert row.host == "100.64.242.88"
 
 
 def test_add_connection_from_keyless_peer_defaults_to_tailscale_ssh(ssh_env, fake_tailscale, router):
@@ -300,8 +305,10 @@ def test_add_connection_from_keyless_peer_defaults_to_tailscale_ssh(ssh_env, fak
         tailnet_peer_id=peer["id"],
     )
 
-    assert payload["host"] == "100.117.131.123"
+    assert payload["host"] == "Oracle"
+    assert payload["host_redacted"] is True
     assert payload["auth_mode"] == "tailscale_ssh"
+    assert "100.117.131.123" not in json.dumps(payload)
 
 
 def test_add_connection_still_requires_host_without_tailnet_peer(ssh_env, router, monkeypatch):

@@ -127,6 +127,30 @@ test('closing a lazily registered tool clears its saved state', async ({ page })
   await expect(page.locator('#theme-modal')).toBeHidden();
 });
 
+test('dynamic tool windows cannot evict restorable windows', async ({ page }) => {
+  await mockApi(page);
+  await boot(page);
+
+  const saved = await page.evaluate(async () => {
+    const views = await import('/static/js/viewState.js');
+    localStorage.setItem('odysseus-open-tools', JSON.stringify([
+      'theme-modal',
+      'bug-report-modal',
+      'email-reader-42-1',
+      'email-reader-43-2',
+    ]));
+    views.rememberOpenTool('email-reader-44-3');
+    views.rememberOpenTool('calendar-modal');
+    return {
+      stored: JSON.parse(localStorage.getItem('odysseus-open-tools') || '[]'),
+      restored: views.getOpenTools(),
+    };
+  });
+
+  expect(saved.stored).toEqual(['theme-modal', 'bug-report-modal', 'calendar-modal']);
+  expect(saved.restored).toEqual(saved.stored);
+});
+
 test('the evidence step offers a Capture screen action', async ({ page }) => {
   await mockApi(page);
   await boot(page);

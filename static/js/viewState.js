@@ -12,6 +12,26 @@ const VIEW_KEY = 'odysseus-active-view';
 const TOOLS_KEY = 'odysseus-open-tools';
 const MAX_RESTORE_TOOLS = 4;
 
+// Only persist windows that modalManager can reopen from a stable launcher
+// after a full page load. Dynamic windows (for example email-reader-{uid}-{n})
+// have no serialized restore contract and must never evict these entries.
+export const RESTORABLE_TOOL_IDS = new Set([
+  'mad-mcp-modal',
+  'cookbook-modal',
+  'calendar-modal',
+  'gallery-modal',
+  'tasks-modal',
+  'doclib-modal',
+  'memory-modal',
+  'notes-panel',
+  'email-lib-modal',
+  'research-overlay',
+  'theme-modal',
+  'bug-report-modal',
+  'compare-model-overlay',
+  'marketplace-modal',
+]);
+
 function _readJson(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -49,10 +69,13 @@ export function getView() {
 // ── open tool windows ────────────────────────────────────────────────────
 
 export function rememberOpenTool(id) {
-  if (!id || id === 'settings-modal') return;
+  const normalized = String(id || '');
+  if (!RESTORABLE_TOOL_IDS.has(normalized)) return;
   const open = _readJson(TOOLS_KEY, []);
-  const set = new Set(Array.isArray(open) ? open : []);
-  set.add(String(id));
+  const set = new Set(
+    (Array.isArray(open) ? open : []).filter((item) => RESTORABLE_TOOL_IDS.has(String(item)))
+  );
+  set.add(normalized);
   _writeJson(TOOLS_KEY, [...set].slice(-MAX_RESTORE_TOOLS));
 }
 
@@ -66,7 +89,7 @@ export function forgetOpenTool(id) {
 export function getOpenTools() {
   const open = _readJson(TOOLS_KEY, []);
   return Array.isArray(open)
-    ? open.filter((id) => id !== 'settings-modal').slice(0, MAX_RESTORE_TOOLS)
+    ? open.filter((id) => RESTORABLE_TOOL_IDS.has(String(id))).slice(0, MAX_RESTORE_TOOLS)
     : [];
 }
 
