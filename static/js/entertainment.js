@@ -882,8 +882,9 @@ function continueItem(entry, index) {
 function removeContinueEntry(index) {
   const entry = (prefs.history || [])[index];
   if (!entry) return;
-  prefs.history.splice(index, 1);
-  if (prefs.resume && prefs.resume.key === entry.key) prefs.resume = null;
+  const identity = showIdentity(entry);
+  prefs.history = prefs.history.filter(item => showIdentity(item) !== identity);
+  if (prefs.resume && showIdentity(prefs.resume) === identity) prefs.resume = null;
   savePrefs();
   renderCollection('continue').catch(error => { el('ent-collection-status').textContent = error.message; });
 }

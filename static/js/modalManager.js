@@ -1557,6 +1557,7 @@ const _AUTO_WIRE = {
   'research-overlay':     { rail: 'rail-research',  sidebar: 'tool-research-btn', defaultDock: DECLARED_DEFAULT_DOCKS['research-overlay'] },
   'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
   'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn', opener: 'user-bar-settings' },
+  'bug-report-modal':     { rail: null,             sidebar: 'tool-report-btn' },
   'compare-model-overlay':{ rail: 'rail-compare',   sidebar: 'tool-compare-btn', defaultDock: DECLARED_DEFAULT_DOCKS['compare-model-overlay'] },
   'marketplace-modal':    { rail: null,             sidebar: 'add-plugins-btn', defaultDock: DECLARED_DEFAULT_DOCKS['marketplace-modal'] },
   'ge-shortcuts-modal':   { rail: null,             sidebar: null },

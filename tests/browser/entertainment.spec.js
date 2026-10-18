@@ -699,6 +699,12 @@ test('Continue Watching collapses a show to its latest episode and recovers a br
 
   // A cover token that no longer resolves degrades to the initials tile.
   await expect(page.locator('.ent-collection-thumb--empty').first()).toBeVisible();
+
+  // Removing the grouped show removes all of its episodes, without touching
+  // another title that merely shares the same provider.
+  await page.locator('.ent-continue-item', { hasText: 'Episode 12' }).locator('.ent-continue-remove').click();
+  await expect(page.locator('.ent-continue-item')).toHaveCount(1);
+  await expect(page.locator('.ent-continue-item')).toContainText('The Last: Naruto the Movie');
 });
 
 test('Continue Watching uses the furthest episode reached, not recency', async ({ page }) => {

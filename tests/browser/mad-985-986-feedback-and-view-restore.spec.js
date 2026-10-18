@@ -60,6 +60,17 @@ test('the sidebar exposes a Report a bug button that opens the panel', async ({ 
   await expect(page.locator('#bug-report-modal')).toBeVisible();
 });
 
+test('Report a bug is restored after a reload', async ({ page }) => {
+  await mockApi(page);
+  await boot(page);
+
+  await page.locator('#tool-report-btn').click();
+  await expect(page.locator('#bug-report-modal')).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator('#bug-report-modal')).toBeVisible();
+});
+
 test('Settings is restored after a reload', async ({ page }) => {
   await mockApi(page);
   await boot(page);
