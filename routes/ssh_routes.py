@@ -317,9 +317,8 @@ def setup_ssh_routes() -> APIRouter:
     ):
         """One-time password-assisted install of this connection's public key.
 
-        The password is used for this single call and is never stored. The route
-        pins the host key first when needed, installs the key, then confirms the
-        connection so the row can report Connected.
+        The password is used for this single call and is never stored. A host
+        key must already be pinned and verified before this route accepts it.
         """
         require_admin(request)
         secret = _form_text(password)
@@ -333,13 +332,7 @@ def setup_ssh_routes() -> APIRouter:
                     "This connection uses Tailscale SSH, so no key install is needed.",
                 )
             if not row.host_key:
-                try:
-                    entries = ssh.scan_host_key(row.host, int(row.port or ssh.DEFAULT_SSH_PORT))
-                    ssh.store_host_key(row, entries)
-                    session.commit()
-                    session.refresh(row)
-                except ssh.SshScanError as exc:
-                    raise HTTPException(400, str(exc)) from exc
+                raise HTTPException(409, ssh.HOST_KEY_UNKNOWN_MESSAGE)
             install = ssh.install_public_key(row, secret)
             confirm = ssh.run_connection_test(row)
             row.last_status = confirm["state"]

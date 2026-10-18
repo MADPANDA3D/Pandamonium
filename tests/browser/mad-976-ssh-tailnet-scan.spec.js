@@ -212,3 +212,23 @@ test('finishing setup installs the key with the node password and goes green', a
   expect(installBody).toContain('hunter2');
   await expect(row).toContainText('Connected');
 });
+
+test('password setup waits until the host key is pinned and verified', async ({ page }) => {
+  await stubApi(page, {
+    initialConnections: [{
+      ...ADDED,
+      host_key_pinned: false,
+      host_key_fingerprint: '',
+      host_key_type: '',
+      status: { state: 'host_key_unknown', reason: 'host_key_unknown', message: 'Host key not pinned.', checked_at: null },
+    }],
+  });
+  await openSshTab(page);
+
+  const row = page.locator('.ssh-row[data-ssh-id="ssh-newtailnet1"]');
+  await row.locator('[data-ssh-action="detail"]').click();
+
+  await expect(row.locator('[data-ssh-password]')).toHaveCount(0);
+  await expect(row).toContainText('Pin the host key and verify its fingerprint');
+  await expect(row.locator('[data-ssh-action="host-key"]')).toBeVisible();
+});

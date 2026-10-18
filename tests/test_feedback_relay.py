@@ -128,6 +128,24 @@ def test_submit_uses_relay_and_returns_issue(env, router, relay_env):
     assert diagnostics["route"]
 
 
+def test_submit_offloads_relay_transport(env, router, relay_env, monkeypatch):
+    calls = []
+
+    async def inline_to_thread(func, *args, **kwargs):
+        calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(fb.asyncio, "to_thread", inline_to_thread)
+    result = asyncio.run(
+        _endpoint(router, "/api/feedback/submit", "POST")(
+            FakeRequest(payload=_draft_payload(idempotency_key="sub-0000000000000007"))
+        )
+    )
+
+    assert result["ok"] is True
+    assert calls == ["submit"]
+
+
 def test_relay_retryable_failure_keeps_draft(env, router, relay_env):
     relay_env.status = 500
     relay_env.response = {}

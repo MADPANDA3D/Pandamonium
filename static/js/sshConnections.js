@@ -116,12 +116,14 @@ function rowHtml(connection) {
         ${connection.has_private_key
           ? `<div class="ssh-field-label">Public key — install this on the node</div><pre class="ssh-key">${esc(connection.public_key)}</pre>`
           : '<div class="ssh-note">No key on this connection yet. Generate one, or paste an existing private key below.</div>'}
-        ${connection.has_private_key && (!connection.status || connection.status.state !== 'connected')
+        ${connection.has_private_key && connection.host_key_pinned && (!connection.status || connection.status.state !== 'connected')
           ? `<div class="ssh-field-label">Finish setup — install this key with the node password (used once, never stored)</div>
              <div class="ssh-install-row">
                <input type="password" class="settings-select ssh-password-input" data-ssh-password autocomplete="off" placeholder="Password for ${esc(connection.user)}@${esc(connection.host)}">
                <button type="button" class="admin-btn-sm" data-ssh-action="install-key">Install key</button>
              </div>`
+          : connection.has_private_key && !connection.host_key_pinned
+            ? '<div class="ssh-note">Pin the host key and verify its fingerprint before entering the node password.</div>'
           : ''}
         <div class="ssh-field-label">Paste an existing private key</div>
         <textarea class="settings-select ssh-key-input" data-ssh-key-input rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>

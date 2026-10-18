@@ -9,6 +9,7 @@ so the preview and the posted issue cannot diverge.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from collections.abc import Mapping
@@ -447,7 +448,8 @@ def setup_feedback_routes():
         )
         try:
             if using_relay:
-                result = client.submit(
+                result = await asyncio.to_thread(
+                    client.submit,
                     _relay_payload(
                         draft,
                         title=title,
@@ -459,7 +461,7 @@ def setup_feedback_routes():
                     )
                 )
             elif decision == "existing":
-                candidates, _ = _search_duplicates(draft)
+                candidates, _ = await asyncio.to_thread(_search_duplicates, draft)
                 try:
                     issue_number = int(payload.get("existing_issue_number") or 0)
                 except (TypeError, ValueError):
@@ -470,12 +472,13 @@ def setup_feedback_routes():
                         "duplicate_not_found",
                         "That existing issue was not found in the duplicate results. Re-check the list, then retry.",
                     )
-                result = client.add_issue_comment(
+                result = await asyncio.to_thread(
+                    client.add_issue_comment,
                     issue_number=issue_number,
                     body=body,
                 )
             else:
-                result = client.create_issue(title=title, body=body)
+                result = await asyncio.to_thread(client.create_issue, title=title, body=body)
         except report.FeedbackValidationError as exc:
             store.mark_failed(idempotency_key, error=exc.code)
             raise HTTPException(status_code=400, detail=exc.message)

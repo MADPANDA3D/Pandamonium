@@ -211,6 +211,27 @@ def test_install_route_rejects_empty_password(ssh_env, router):
     assert excinfo.value.status_code == 400
 
 
+def test_install_route_requires_separately_pinned_host_key(ssh_env, router, monkeypatch):
+    _insert_connection(ssh_env.SessionLocal, host_key=None)
+    monkeypatch.setattr(
+        ssh_connections,
+        "scan_host_key",
+        lambda *args: pytest.fail("install route must not scan and trust a host key"),
+    )
+    monkeypatch.setattr(
+        ssh_connections,
+        "install_public_key",
+        lambda *args: pytest.fail("password must not be sent before host-key verification"),
+    )
+
+    endpoint = _route(router, "/api/ssh/connections/{connection_id}/install-key", "POST")
+    with pytest.raises(HTTPException) as excinfo:
+        endpoint(_admin_request(), connection_id=NODE_ID, password=PASSWORD)
+
+    assert excinfo.value.status_code == 409
+    assert "host key is not pinned" in str(excinfo.value.detail).lower()
+
+
 def test_install_route_confirms_connection_after_install(ssh_env, router, monkeypatch):
     _insert_connection(ssh_env.SessionLocal, last_status="auth_failed")
     monkeypatch.setattr(
