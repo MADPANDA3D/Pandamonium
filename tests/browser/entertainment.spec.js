@@ -653,6 +653,17 @@ test('Continue Watching holds in-progress titles, queues the next episode, and s
   await page.locator('.ent-continue-remove').click();
   await expect(page.locator('.ent-continue-item')).toHaveCount(0);
   await expect(page.locator('#ent-collection-results .entertainment-empty')).toBeVisible();
+
+  // Finishing the final listed episode must not invent a phantom Episode 4.
+  await page.locator('#entertainment-home').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 3' }).click();
+  await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('ended')));
+  await page.locator('#entertainment-back').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+  await expect(page.locator('.ent-continue-item')).toHaveCount(0);
 });
 
 test('Continue Watching collapses a show to its latest episode and recovers a broken cover', async ({ page }) => {

@@ -140,6 +140,63 @@ def test_relay_retryable_failure_keeps_draft(env, router, relay_env):
     assert excinfo.value.status_code == 502
 
 
+def test_relay_success_requires_confirmed_issue_identity(env, router, relay_env):
+    relay_env.response = {"ok": True}
+    payload = _draft_payload(idempotency_key="sub-0000000000000005")
+    endpoint = _endpoint(router, "/api/feedback/submit", "POST")
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(endpoint(FakeRequest(payload=payload)))
+    assert excinfo.value.status_code == 502
+    assert store.get_submission(payload["idempotency_key"])["status"] == "failed"
+
+    relay_env.response = {
+        "ok": True,
+        "issue_url": "https://github.com/MADPANDA3D/Pandamonium/issues/313",
+        "issue_number": 313,
+    }
+    assert asyncio.run(endpoint(FakeRequest(payload=payload)))["issue_number"] == 313
+
+
+def test_existing_duplicate_uses_github_when_relay_is_configured(
+    env, router, relay_env, monkeypatch
+):
+    class GitHubClient:
+        config = SimpleNamespace(attachment_url_base="")
+
+        def __init__(self):
+            self.comments = []
+
+        def search_open_issues(self, _terms):
+            return [{"number": 7, "title": "Existing", "url": "https://example.test/7"}]
+
+        def add_issue_comment(self, *, issue_number, body):
+            self.comments.append((issue_number, body))
+            return {
+                "issue_number": issue_number,
+                "issue_url": f"https://github.com/MADPANDA3D/Pandamonium/issues/{issue_number}",
+            }
+
+    github_client = GitHubClient()
+    github_config = SimpleNamespace(
+        attachment_url_base="", security_url="https://example.test/security"
+    )
+    monkeypatch.setattr(fb.github, "resolve_config", lambda: github_config)
+    monkeypatch.setattr(fb.github, "client_for_submission", lambda: github_client)
+    payload = _draft_payload(
+        duplicate_decision="existing",
+        existing_issue_number=7,
+        idempotency_key="sub-0000000000000006",
+    )
+
+    result = asyncio.run(
+        _endpoint(router, "/api/feedback/submit", "POST")(FakeRequest(payload=payload))
+    )
+    assert result["attached_to_existing"] is True
+    assert github_client.comments[0][0] == 7
+    assert relay_env.calls == []
+
+
 def test_relay_rejection_is_not_retryable(env, router, relay_env):
     relay_env.status = 400
     relay_env.response = {"ok": False, "message": "Rejected as spam."}

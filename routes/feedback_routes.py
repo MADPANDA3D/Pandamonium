@@ -398,7 +398,7 @@ def setup_feedback_routes():
                 ),
             )
 
-        using_relay = relay.resolve_config() is not None
+        using_relay = relay.resolve_config() is not None and decision != "existing"
         if using_relay:
             try:
                 client = relay.client_for_submission()

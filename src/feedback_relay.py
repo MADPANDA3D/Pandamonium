@@ -121,6 +121,17 @@ class FeedbackRelayClient:
             issue_number = int(data.get("issue_number") or data.get("number") or 0)
         except (TypeError, ValueError):
             issue_number = 0
+        if (
+            data.get("ok") is not True
+            or not issue_url.startswith("https://")
+            or issue_number <= 0
+        ):
+            raise FeedbackRelayError(
+                "relay_invalid_response",
+                "The feedback relay did not confirm an issue. Your draft is saved; retry in a moment.",
+                retryable=True,
+                status=status,
+            )
         return {"issue_url": issue_url, "issue_number": issue_number}
 
 

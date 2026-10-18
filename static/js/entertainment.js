@@ -1176,8 +1176,10 @@ function finishCurrentPlayback(record) {
 function queueNextEpisode(record) {
   const items = record?.items;
   const current = record?.episode;
-  const hasNext = Array.isArray(items) && items.some(item => String(item?.number) === String(current));
-  if (!hasNext) return;
+  const currentIndex = Array.isArray(items)
+    ? items.findIndex(item => String(item?.number) === String(current))
+    : -1;
+  if (currentIndex < 0 || currentIndex + 1 >= items.length) return;
   if (record.provider === 'ani-cli' && isAnimeMovie(record.item)) return;
   const target = nextPlaybackTarget();
   if (!target) return;
