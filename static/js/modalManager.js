@@ -1220,6 +1220,9 @@ export function register(id, {
     _modalEl._mmAutoStackLast = _isVisible();
     const obs = new MutationObserver(() => {
       const vis = _isVisible();
+      if (!vis && _modalEl._mmAutoStackLast && !_modalEl.classList.contains('modal-minimized')) {
+        try { forgetOpenTool(id); } catch (_) {}
+      }
       if (vis && !_modalEl._mmAutoStackLast) {
         _bringToFront(_modalEl);
         _applyPreferredDock(id, _modalEl);
