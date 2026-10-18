@@ -490,6 +490,7 @@ def test_package_names_maps_and_rejects():
         "util-linux",
     ]
     assert sr.package_names(["media.libmpv"], "fedora") == ["mpv-libs-devel"]
+    assert sr.package_names(["media.libmpv"], "alpine") == ["mpv-dev"]
     with pytest.raises(sr.SystemRequirementError):
         sr.package_names(["not.a.capability"], "debian")
 
@@ -628,3 +629,19 @@ def test_declared_media_capabilities_reach_the_report(monkeypatch):
     }
     assert host_requirements_summary(plan) == {"missing": []}
     assert {"media.libmpv", "build.pkg_config"} <= set(captured["capabilities"])
+
+
+def test_host_requirements_summary_rejects_unknown_capability():
+    from src.extension_installer import ExtensionLifecycleError, host_requirements_summary
+
+    plan = {
+        "manifest": {
+            "runtime": {"type": "service"},
+            "metadata": {
+                "host_requirements": {"capabilities": ["apt.install.anything"]}
+            },
+        }
+    }
+    with pytest.raises(ExtensionLifecycleError) as exc:
+        host_requirements_summary(plan)
+    assert exc.value.code == "system_requirement_unknown_capability"

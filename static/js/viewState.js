@@ -49,7 +49,7 @@ export function getView() {
 // ── open tool windows ────────────────────────────────────────────────────
 
 export function rememberOpenTool(id) {
-  if (!id) return;
+  if (!id || id === 'settings-modal') return;
   const open = _readJson(TOOLS_KEY, []);
   const set = new Set(Array.isArray(open) ? open : []);
   set.add(String(id));
@@ -65,7 +65,9 @@ export function forgetOpenTool(id) {
 
 export function getOpenTools() {
   const open = _readJson(TOOLS_KEY, []);
-  return Array.isArray(open) ? open.slice(0, MAX_RESTORE_TOOLS) : [];
+  return Array.isArray(open)
+    ? open.filter((id) => id !== 'settings-modal').slice(0, MAX_RESTORE_TOOLS)
+    : [];
 }
 
 // ── boot restore ─────────────────────────────────────────────────────────
@@ -77,15 +79,15 @@ export async function restoreView() {
   } else if (view.kind === 'settings') {
     try { await (await import('./settings.js')).open(); } catch (_) {}
   }
-  // Tool windows: best-effort. Any tool that has registered by now is
-  // restored; an unknown or failed id is skipped, never an error loop.
+  // Tool windows: best-effort. Tools that register only when opened are
+  // reopened through their normal launcher; unknown ids are skipped.
   const tools = getOpenTools();
   if (!tools.length) return;
   try {
     const modalManager = (await import('./modalManager.js')).default;
     for (const id of tools) {
       try {
-        if (modalManager.isRegistered(id)) modalManager.restore(id);
+        modalManager.restorePersisted(id);
       } catch (_) {}
     }
   } catch (_) {}

@@ -42,6 +42,7 @@ _PACKAGE_ALLOWLIST = frozenset(
         "mpv",
         "mpv-libs-devel",
         "mpv-devel",
+        "mpv-dev",
     }
 )
 

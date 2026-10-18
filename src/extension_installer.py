@@ -385,8 +385,8 @@ def host_requirements_summary(plan: Mapping[str, Any]) -> dict[str, Any] | None:
 
     try:
         capabilities = capabilities_for_package(manifest, plan.get("execution_recipe"))
-    except SystemRequirementError:
-        return None
+    except SystemRequirementError as exc:
+        raise ExtensionLifecycleError(exc.code) from exc
     if not capabilities:
         return None
     return report(capabilities)

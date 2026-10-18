@@ -1392,6 +1392,15 @@ export function restore(id) {
   return true;
 }
 
+export function restorePersisted(id) {
+  if (_state.has(id)) return restore(id);
+  const wire = _AUTO_WIRE[id];
+  const opener = document.getElementById(wire?.opener || wire?.sidebar || wire?.rail);
+  if (!opener) return false;
+  opener.click();
+  return true;
+}
+
 export function focus(id) {
   const state = _state.get(id);
   if (!state || state.isMinimized) return false;
@@ -1541,10 +1550,10 @@ const _AUTO_WIRE = {
   'notes-panel':          { rail: 'rail-notes',     sidebar: 'tool-notes-btn', elementId: 'notes-pane', defaultDock: DECLARED_DEFAULT_DOCKS['notes-panel'] },
   // Email already has its own #email-unread-dot inline next to the title —
   // don't add a second modalManager badge that lands at the right edge.
-  'email-lib-modal':      { rail: null,             sidebar: null },
+  'email-lib-modal':      { rail: null,             sidebar: null, opener: 'email-section-title' },
   'research-overlay':     { rail: 'rail-research',  sidebar: 'tool-research-btn', defaultDock: DECLARED_DEFAULT_DOCKS['research-overlay'] },
   'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
-  'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn' },
+  'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn', opener: 'user-bar-settings' },
   'compare-model-overlay':{ rail: 'rail-compare',   sidebar: 'tool-compare-btn', defaultDock: DECLARED_DEFAULT_DOCKS['compare-model-overlay'] },
   'marketplace-modal':    { rail: null,             sidebar: 'add-plugins-btn', defaultDock: DECLARED_DEFAULT_DOCKS['marketplace-modal'] },
   'ge-shortcuts-modal':   { rail: null,             sidebar: null },
@@ -1730,4 +1739,4 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-export default { register, unregister, isRegistered, isMinimized, getForegroundState, minimize, restore, focus, toggle, close, injectMinimizeButton };
+export default { register, unregister, isRegistered, isMinimized, getForegroundState, minimize, restore, restorePersisted, focus, toggle, close, injectMinimizeButton };

@@ -85,6 +85,20 @@ test('closing Settings clears the saved view so reload returns to chat', async (
   await expect(page.locator('#settings-modal')).toBeHidden();
 });
 
+test('an open tool that registers lazily is restored after a reload', async ({ page }) => {
+  await mockApi(page);
+  await boot(page);
+
+  await page.locator('#tool-theme-btn').click();
+  await expect(page.locator('#theme-modal')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    localStorage.getItem('odysseus-open-tools') || '[]'
+  ).includes('theme-modal'))).toBe(true);
+
+  await page.reload();
+  await expect(page.locator('#theme-modal')).toBeVisible();
+});
+
 test('the evidence step offers a Capture screen action', async ({ page }) => {
   await mockApi(page);
   await boot(page);
