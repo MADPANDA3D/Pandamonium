@@ -179,7 +179,7 @@ for (const [scenario, bridgeReload] of [
   await expect.poll(() => typeof finishInitialStatus).toBe('function');
   await expect.poll(() => page.evaluate(() => caches.keys())).toContain(sourceCache);
   if (viewport) await page.locator('#hamburger-btn').click();
-  await page.locator('#sidebar-update-check').click();
+  await page.locator(bridgeReload ? '#sidebar-update-check' : '#sidebar-version-btn').click();
   await expect(page.locator('#updater-apply')).toBeVisible();
   await page.locator('#updater-apply').click();
   await page.locator('#styled-confirm-ok').click();
@@ -380,18 +380,17 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   });
 
   await page.goto('/static/index.html');
-  await expect(page.locator('#sidebar-update-state')).toHaveText('Up to date');
-  await expect(page.locator('#sidebar-update-check')).toBeVisible();
+  await expect(page.locator('#sidebar-update-state')).toBeHidden();
+  await expect(page.locator('#sidebar-update-check')).toBeHidden();
   await expect(page.locator('#sidebar-update-action')).toBeHidden();
-  const checkMetrics = await page.locator('#sidebar-update-check').evaluate(button => ({
+  await expect(page.locator('#sidebar-update-version')).toHaveText('v1.0.10');
+  const checkMetrics = await page.locator('#sidebar-version-btn').evaluate(button => ({
     width: button.getBoundingClientRect().width,
     rowWidth: button.parentElement.getBoundingClientRect().width,
-    fontSize: parseFloat(getComputedStyle(button).fontSize),
   }));
   expect(Math.abs(checkMetrics.width - checkMetrics.rowWidth)).toBeLessThanOrEqual(1);
-  expect(checkMetrics.fontSize).toBeGreaterThanOrEqual(12);
 
-  await page.locator('#sidebar-update-check').click();
+  await page.locator('#sidebar-version-btn').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'working');
   await expect(page.locator('#updater-progress-title')).toHaveText('Scanning stable releases');
@@ -430,7 +429,7 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   expect(checks).toBe(1);
 
   await page.locator('#close-updater-modal').click();
-  await expect(page.locator('#sidebar-update-action')).toBeFocused();
+  await expect(page.locator('#sidebar-version-btn')).toBeFocused();
   await page.locator('#sidebar-update-action').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
 
@@ -463,9 +462,9 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   expect(await page.evaluate(() => window.__nativeConfirmCalls)).toBe(0);
   await page.keyboard.press('Escape');
   await expect(page.locator('#updater-modal')).toBeHidden();
-  await expect(page.locator('#sidebar-update-check')).toBeEnabled();
-  await expect(page.locator('#sidebar-update-check')).toHaveText('View update progress');
-  await page.locator('#sidebar-update-check').click();
+  await expect(page.locator('#sidebar-update-state')).toBeVisible();
+  await expect(page.locator('#sidebar-update-state')).toContainText('Update in progress');
+  await page.locator('#sidebar-version-btn').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
   expect(checks).toBe(2);
   await expect(page.locator('#updater-progress-card')).toHaveAttribute('data-state', 'reconnecting');
@@ -473,7 +472,7 @@ test('updater dialog survives the restart gap and reconciles the installed versi
   await expect.poll(() => navigations, { timeout: 7000 }).toBeGreaterThanOrEqual(2);
   await expect(page.locator('#updater-modal')).toBeVisible();
   await expect(page.locator('#updater-installed-version')).toHaveText('v1.0.11');
-  await expect(page.locator('#sidebar-update-version')).toHaveText('Version v1.0.11');
+  await expect(page.locator('#sidebar-update-version')).toHaveText('v1.0.11');
   await expect(page.locator('#updater-backup')).toContainText('/var/backups/odysseus/update-1.0.11-proof');
   await expect(page.locator('#updater-rollback')).toBeVisible();
   expect(await page.evaluate(() => performance.getEntriesByType('navigation').length)).toBe(1);
@@ -688,7 +687,7 @@ test('page polling stops after a nonretryable 400 response', async ({ page }) =>
   });
 
   await page.goto('/static/index.html');
-  await page.locator('#sidebar-update-check').click();
+  await page.locator('#sidebar-version-btn').click();
   await page.locator('#updater-apply').click();
   await page.locator('#styled-confirm-ok').click();
   await expect(page.locator('#updater-progress-title')).toHaveText('Update queued');
@@ -753,7 +752,7 @@ test('successful update still reloads when session storage is unavailable', asyn
   });
 
   await page.goto('/static/index.html');
-  await page.locator('#sidebar-update-check').click();
+  await page.locator('#sidebar-version-btn').click();
   await page.locator('#updater-apply').click();
   await page.locator('#styled-confirm-ok').click();
   await expect.poll(() => documentLoads).toBe(2);
@@ -797,9 +796,9 @@ test('host-managed container keeps provenance and separates a GitHub outage from
   });
 
   await page.goto('/static/index.html');
-  await expect(page.locator('#sidebar-update-check')).toBeVisible();
+  await expect(page.locator('#sidebar-version-btn')).toBeVisible();
   await expect(page.locator('#sidebar-update-action')).toBeHidden();
-  await page.locator('#sidebar-update-check').click();
+  await page.locator('#sidebar-version-btn').click();
   await expect(page.locator('#updater-installed-commit')).toHaveText('91cc845d');
   await expect(page.locator('#updater-installation-kind')).toHaveText('Docker container');
   await expect(page.locator('#updater-update-mode')).toHaveText('Host-managed');
@@ -873,8 +872,8 @@ test('updater dialog fits a phone viewport and disables scan motion when request
 
   await page.goto('/static/index.html');
   await page.locator('#hamburger-btn').click();
-  await expect(page.locator('#sidebar-update-check')).toBeVisible();
-  await page.locator('#sidebar-update-check').click();
+  await expect(page.locator('#sidebar-version-btn')).toBeVisible();
+  await page.locator('#sidebar-version-btn').click();
   await expect(page.locator('#updater-modal')).toBeVisible();
   const bounds = await page.locator('.updater-modal-content').evaluate(element => {
     const rect = element.getBoundingClientRect();
@@ -945,7 +944,7 @@ test('installed update reloads even when the replacement worker does not navigat
   });
 
   await page.goto('/static/index.html');
-  await page.locator('#sidebar-update-check').click();
+  await page.locator('#sidebar-version-btn').click();
   await page.locator('#updater-apply').click();
   await page.locator('#styled-confirm-ok').click();
   await expect.poll(() => documentLoads, { timeout: 20000 }).toBe(2);

@@ -416,3 +416,25 @@ def test_browser_surface_has_conditional_launcher_and_no_voice_hook():
     assert "entertainment-anime-play" in index and "anime-play.mp3" in index
     assert "entertainment-anime-play" in source
     assert (ROOT / "static/entertainment/anime-play.mp3").is_file()
+
+
+def test_player_starts_on_the_smallest_level_and_loads_ahead():
+    source = (ROOT / "static/js/entertainment.js").read_text()
+    # Multi-bitrate TV masters list 1080p first; the player must start small and
+    # let ABR ramp, then buffer well ahead like the single-bitrate anime stream.
+    assert "capLevelToPlayerSize: true" in source
+    assert "autoLevelCapping" in source
+    assert "MANIFEST_PARSED" in source
+    assert "maxBufferLength: 3600" in source
+    assert "maxBufferSize: 1500 * 1000 * 1000" in source
+
+
+def test_transient_resolve_failures_are_retried():
+    source = (ROOT / "static/js/entertainment.js").read_text()
+    # A flaky upstream resolution should retry before showing "provider
+    # unavailable", and a non-JSON error body must not surface as a raw parse
+    # error.
+    assert "async function resolveStream(" in source
+    assert "error.status >= 500" in source
+    assert "await response.text()" in source
+    assert "Entertainment request failed (${response.status})" in source

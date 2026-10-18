@@ -1,4 +1,6 @@
 import uiModule from './ui.js';
+import { audioOptions, subtitleOptions, preferredTrack, selectAudio, selectSubtitle } from './entertainmentTracks.js';
+import { setView, clearView } from './viewState.js';
 
 const el = id => document.getElementById(id);
 const esc = value => uiModule.esc(String(value));
@@ -40,9 +42,13 @@ let resumeSaveAt = 0;
 let lastAutoRefresh = 0;
 let initialized = false;
 let playback = null;
+// In-browser drill-down history (results -> seasons -> episodes). Each entry is
+// a view descriptor rendered by renderStep; Back pops one level.
+let navStack = [];
+let currentStep = null;
 
 const PREFS_KEY = 'entertainment';
-const DEFAULT_PREFS = { provider: '', language: 'sub', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
+const DEFAULT_PREFS = { provider: '', language: 'sub', audioLanguage: 'en', audioName: '', subtitleLanguage: 'off', subtitleName: '', quality: 'best', autoplay: false, favorites: [], watchlist: [], history: [], resume: null };
 const LANGUAGES = ['sub', 'dub'];
 const QUALITIES = ['best', '1080p', '720p', '480p', '360p'];
 let prefs = { ...DEFAULT_PREFS };
@@ -57,25 +63,40 @@ async function api(path = '', body) {
   let data;
   try { data = raw ? JSON.parse(raw) : {}; } catch (_) { data = null; }
   if (!response.ok || !data || typeof data !== 'object') {
-    const error = new Error(typeof data?.detail === 'string' ? data.detail : 'Entertainment unavailable');
+    const error = new Error(typeof data?.detail === 'string'
+      ? data.detail
+      : (response.ok ? 'Entertainment unavailable' : `Entertainment request failed (${response.status})`));
     error.status = response.ok ? 502 : response.status;
     throw error;
   }
   return data;
 }
 
+// Provider resolution is the flaky part: the upstream CLI occasionally fails to
+// resolve a source on the first try ("provider unavailable") even though the
+// same episode resolves moments later, so retry a couple of times before
+// surfacing the error (e.g. when resuming from Continue Watching).
 async function resolveStream(path, body, attempts = 3) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try { return await api(path, body); } catch (error) {
-      if (attempt + 1 >= attempts || (error.status && error.status < 500)) throw error;
-      await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await api(path, body);
+    } catch (error) {
+      lastError = error;
+      const retryable = !error.status || error.status >= 500;
+      if (attempt >= attempts || !retryable) throw error;
+      await new Promise(resolve => setTimeout(resolve, 600 * attempt));
     }
   }
+  throw lastError;
 }
 
 function normalizePrefs(value) {
   const merged = { ...DEFAULT_PREFS, ...(value && typeof value === 'object' ? value : {}) };
   merged.autoplay = Boolean(merged.autoplay);
+  for (const key of ['audioLanguage', 'audioName', 'subtitleLanguage', 'subtitleName']) {
+    if (typeof merged[key] !== 'string') merged[key] = DEFAULT_PREFS[key];
+  }
   merged.favorites = Array.isArray(merged.favorites) ? merged.favorites.filter(item => item && item.key && item.item).slice(0, 100) : [];
   merged.watchlist = Array.isArray(merged.watchlist) ? merged.watchlist.filter(item => item && item.key && item.item).slice(0, 100) : [];
   merged.history = Array.isArray(merged.history) ? merged.history.filter(entry => entry && entry.title).slice(0, 200) : [];
@@ -195,10 +216,12 @@ function recordHistory(record) {
 }
 
 function rememberResume(record) {
+  const key = historyKey(record);
+  const previous = (prefs.history || []).find(entry => entry.key === key);
   const same = prefs.resume
     && prefs.resume.provider === record.provider
     && String(prefs.resume.episode) === String(record.episode);
-  prefs.resume = { ...record, key: historyKey(record), position: same ? (prefs.resume.position || 0) : 0, at: Date.now() };
+  prefs.resume = { ...record, key, position: same ? (prefs.resume.position || 0) : 0, at: Date.now(), finished: false, ...(previous?.upNext ? { upNext: true } : {}) };
   recordHistory(prefs.resume);
   savePrefs();
 }
@@ -231,7 +254,17 @@ function initSlots() {
     b: { video: el('entertainment-video-next'), hls: null },
   };
   for (const key of ['a', 'b']) {
+    const video = slots[key].video;
+    video?.controlsList?.add('nofullscreen');
+    video?.addEventListener('loadedmetadata', () => syncTrackMenus(key, true));
+    for (const tracks of [video?.textTracks, video?.audioTracks]) {
+      tracks?.addEventListener('addtrack', () => queueMicrotask(() => syncTrackMenus(key, true)));
+      tracks?.addEventListener('removetrack', () => queueMicrotask(() => syncTrackMenus(key, true)));
+      tracks?.addEventListener('change', () => syncTrackMenus(key));
+    }
     slots[key].video?.addEventListener('ended', () => { if (key === activeSlotKey) handleEnded(); });
+    // Drop the "Resolving stream…" bubble once the active stream actually
+    // starts; nothing else clears it, so it lingered over the video forever.
     slots[key].video?.addEventListener('playing', () => { if (key === activeSlotKey) status(''); });
     slots[key].video?.addEventListener('timeupdate', event => {
       if (!activeSlotKey || slots[activeSlotKey].video !== event.target || !playback) return;
@@ -244,8 +277,9 @@ function initSlots() {
       prefs.resume.position = position;
       prefs.resume.duration = duration;
       prefs.resume.at = now;
+      if (position > 0) { prefs.resume.upNext = false; prefs.resume.finished = false; }
       const entry = (prefs.history || []).find(item => item.key === prefs.resume.key);
-      if (entry) { entry.position = position; entry.duration = duration; entry.at = now; }
+      if (entry) { entry.position = position; entry.duration = duration; entry.at = now; entry.finished = false; if (position > 0) entry.upNext = false; }
       savePrefs();
     });
   }
@@ -271,6 +305,66 @@ function stopPlayer() {
   preloadToken += 1;
   for (const key of ['a', 'b']) teardownSlot(slots[key]);
   activeSlotKey = null;
+  renderTrackMenus(null);
+}
+
+function renderTrackMenus(slot) {
+  const audio = audioOptions(slot);
+  const subtitles = subtitleOptions(slot);
+  const audioMenu = el('entertainment-audio');
+  const subtitleMenu = el('entertainment-subtitles');
+  if (audioMenu) {
+    audioMenu.innerHTML = audio.length ? audio.map(option => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join('') : '<option value="">Source audio</option>';
+    audioMenu.disabled = audio.length < 2;
+    audioMenu.value = audio.find(option => option.selected)?.value || audio[0]?.value || '';
+    audioMenu.title = audio.length ? 'Choose the audio track' : 'This stream does not expose selectable audio tracks';
+  }
+  if (subtitleMenu) {
+    subtitleMenu.innerHTML = '<option value="off">Off</option>' + subtitles.map(option => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join('');
+    subtitleMenu.disabled = subtitles.length === 0;
+    subtitleMenu.value = subtitles.find(option => option.selected)?.value || 'off';
+    subtitleMenu.title = subtitles.length ? 'Choose subtitles or turn them off' : 'No subtitle tracks are available on this stream';
+  }
+  const note = el('entertainment-track-note');
+  if (note) {
+    const messages = [];
+    if (slot && !audio.length) messages.push('Audio language is not reported by this stream.');
+    else if (audio.length && !preferredTrack(audio, prefs.audioLanguage, prefs.audioName)) messages.push('Your preferred audio language is unavailable on this stream.');
+    if (slot && !subtitles.length) messages.push('No subtitles available.');
+    else if (subtitles.length && prefs.subtitleLanguage !== 'off' && !preferredTrack(subtitles, prefs.subtitleLanguage, prefs.subtitleName)) messages.push('Your preferred subtitles are unavailable on this stream.');
+    note.textContent = messages.join(' ');
+  }
+}
+
+function syncTrackMenus(key, applyPreferences = false) {
+  const slot = slots?.[key];
+  if (!slot || slot.syncingTracks) return;
+  if (applyPreferences) {
+    slot.syncingTracks = true;
+    try {
+      selectAudio(slot, preferredTrack(audioOptions(slot), prefs.audioLanguage, prefs.audioName));
+      selectSubtitle(slot, prefs.subtitleLanguage === 'off' ? null : preferredTrack(subtitleOptions(slot), prefs.subtitleLanguage, prefs.subtitleName));
+    } finally { slot.syncingTracks = false; }
+  }
+  if (key === activeSlotKey) renderTrackMenus(slot);
+}
+
+function changeTrack(kind, value) {
+  const slot = slots?.[activeSlotKey];
+  if (!slot) return;
+  const option = (kind === 'audio' ? audioOptions(slot) : subtitleOptions(slot)).find(item => item.value === value);
+  if (!option && !(kind === 'subtitle' && value === 'off')) return;
+  if (kind === 'audio') {
+    prefs.audioLanguage = option.language;
+    prefs.audioName = option.label;
+    selectAudio(slot, option);
+  } else {
+    prefs.subtitleLanguage = option ? option.language : 'off';
+    prefs.subtitleName = option?.label || '';
+    selectSubtitle(slot, option);
+  }
+  savePrefs();
+  renderTrackMenus(slot);
 }
 
 function status(text = '') {
@@ -346,6 +440,47 @@ function episodeButtons(result, action, path, body) {
   }
 }
 
+function updateBackButton() {
+  const button = el('entertainment-results-back');
+  if (button) button.classList.toggle('hidden', navStack.length === 0);
+}
+
+function renderStep(step) {
+  currentStep = step;
+  el('entertainment-results-title').textContent = step.title || 'Results';
+  el('entertainment-jump')?.classList.toggle('hidden', step.kind !== 'anime-episodes');
+  if (step.kind === 'titles') {
+    buttons(step.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
+  } else if (step.kind === 'seasons') {
+    buttons(step.items, 'season', value => value.label);
+  } else if (step.kind === 'panda-episodes') {
+    episodeButtons(step.result, 'panda-episode', '/pandaflix/episodes', step.body);
+  } else if (step.kind === 'anime-episodes') {
+    episodeButtons({ ...step.result, items: step.episodes }, 'anime-episode', '/ani-cli/episodes', step.body);
+  } else if (step.kind === 'history') {
+    buttons(step.items, 'history', item => `${item.title} · Episode ${item.episode}`);
+  }
+  status(step.status || '');
+  updateBackButton();
+}
+
+function navigate(step) {
+  if (currentStep) navStack.push(currentStep);
+  renderStep(step);
+}
+
+function goBack() {
+  const previous = navStack.pop();
+  if (!previous) { updateBackButton(); return; }
+  renderStep(previous);
+}
+
+function resetNavigation() {
+  navStack = [];
+  currentStep = null;
+  updateBackButton();
+}
+
 function showProvider(id) {
   active = id;
   selection = null;
@@ -369,6 +504,7 @@ function showProvider(id) {
   el('entertainment-jump').classList.add('hidden');
   el('entertainment-query').placeholder = anime ? 'Search anime' : 'Search movies and shows';
   el('entertainment-results').replaceChildren();
+  resetNavigation();
   status('');
   renderSaved();
   el('entertainment-tabs')?.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.provider === id));
@@ -448,21 +584,26 @@ function loadIntoSlot(key, result) {
       enableWorker: true,
       lowLatencyMode: false,
       capLevelToPlayerSize: true,
-      // Keep the requested long forward buffer while starting at a small level.
+      // Load well ahead while watching, like the single-bitrate anime stream
+      // does. Starting on the smallest level (below) keeps the first frame fast,
+      // so a large forward buffer no longer strands the player at 1080p.
       maxBufferLength: 3600,
       maxMaxBufferLength: 7200,
-      maxBufferSize: 1.5 * 1024 * 1024 * 1024,
+      maxBufferSize: 1500 * 1000 * 1000,
       backBufferLength: 600,
       fragLoadingMaxRetry: 8,
       manifestLoadingMaxRetry: 6,
       levelLoadingMaxRetry: 6,
       fragLoadingRetryDelay: 500,
     });
+    instance.subtitleDisplay = prefs.subtitleLanguage !== 'off';
+    // Multi-bitrate VOD masters (PandaFlix TV) list 1080p first. Start on the
+    // smallest level so the first frame arrives fast, then let ABR ramp up.
     instance.on(window.Hls.Events.MANIFEST_PARSED, () => {
-      if (!instance.levels.length) return;
-      const lowest = instance.levels.reduce((best, level, index) => (
-        level.bitrate < instance.levels[best].bitrate ? index : best
-      ), 0);
+      const levels = instance.levels || [];
+      if (levels.length < 2) return;
+      let lowest = 0;
+      levels.forEach((level, index) => { if ((level.bitrate || 0) < (levels[lowest].bitrate || 0)) lowest = index; });
       instance.autoLevelCapping = lowest;
       if (slot.startupTimer) clearTimeout(slot.startupTimer);
       slot.startupTimer = setTimeout(() => {
@@ -484,6 +625,15 @@ function loadIntoSlot(key, result) {
         refreshPlayback().catch(() => {});
       }
     });
+    for (const event of [window.Hls.Events.AUDIO_TRACKS_UPDATED, window.Hls.Events.SUBTITLE_TRACKS_UPDATED]) {
+      if (event) instance.on(event, () => {
+        // Controllers finish selecting manifest defaults after this event.
+        queueMicrotask(() => { if (slot.hls === instance) syncTrackMenus(key, true); });
+      });
+    }
+    for (const event of [window.Hls.Events.AUDIO_TRACK_SWITCHED, window.Hls.Events.SUBTITLE_TRACK_SWITCH]) {
+      if (event) instance.on(event, () => syncTrackMenus(key));
+    }
     slot.hls = instance;
     instance.loadSource(result.url); instance.attachMedia(video);
   } else {
@@ -506,6 +656,7 @@ async function activateSlot(key) {
     video.muted = !isActive;
   }
   const video = slots[key].video;
+  syncTrackMenus(key, true);
   try { await video.play(); } catch (_) { status('Press play to start.'); }
 }
 
@@ -524,6 +675,7 @@ const COLLECTIONS = {
   'recently-added': { eyebrow: 'BROWSE', title: 'Recently Added', copy: 'Newest additions to the catalog.' },
   favorites: { eyebrow: 'MY LIBRARY', title: 'My Favorites', copy: 'Titles you saved.' },
   watchlist: { eyebrow: 'MY LIBRARY', title: 'Watchlist', copy: 'Titles you plan to watch.' },
+  continue: { eyebrow: 'MY LIBRARY', title: 'Continue Watching', copy: 'Unfinished titles stay here until you finish or remove them. Finishing an episode lines up the next one.' },
   recent: { eyebrow: 'MY LIBRARY', title: 'Recently Watched', copy: 'Pick up exactly where you left off.' },
   history: { eyebrow: 'MY LIBRARY', title: 'History', copy: 'Pick up exactly where you left off.' },
   downloads: { eyebrow: 'MY LIBRARY', title: 'Downloads', copy: 'Downloaded episodes and movies land here.' },
@@ -552,10 +704,11 @@ async function resumeHistoryEntry(index) {
 }
 
 function collectionThumb(entry) {
+  const initials = esc((entry.title || '?').trim().slice(0, 2).toUpperCase());
   if (entry.item?.cover) {
-    return `<img class="ent-collection-thumb" src="${esc(entry.item.cover)}" alt="" loading="lazy" decoding="async">`;
+    return `<img class="ent-collection-thumb" src="${esc(entry.item.cover)}" alt="" data-ent-initials="${initials}" loading="lazy" decoding="async">`;
   }
-  return `<span class="ent-collection-thumb ent-collection-thumb--empty" aria-hidden="true">${esc((entry.title || '?').trim().slice(0, 2).toUpperCase())}</span>`;
+  return `<span class="ent-collection-thumb ent-collection-thumb--empty" aria-hidden="true">${initials}</span>`;
 }
 
 function collectionItem(entry, glyph, index) {
@@ -570,25 +723,39 @@ function collectionItem(entry, glyph, index) {
 async function enrichLibrary(entries) {
   const host = el('ent-collection-results');
   const groups = new Map();
+  // History/favourite rows are titled "Show Episode N"; the metadata lookup is
+  // by show title, so strip the episode/movie suffix (or prefer the saved item
+  // title) before asking for a cover.
+  const showTitle = (entry) => String((entry.item && entry.item.title) || entry.title || '')
+    .replace(/\s+Episode\s+\d+\s*$/i, '')
+    .replace(/\s+(?:the\s+)?Movie\s*$/i, '')
+    .trim();
   (entries || []).forEach((entry, index) => {
-    if (!entry?.item || entry.item.cover || !entry.title) return;
+    if (!entry?.item || !entry.title) return;
+    // Resolved covers are process-local image tokens that expire on restart, so
+    // only trust a non-proxy URL; refresh anything that looks like a token.
+    const stored = String(entry.item.cover || '');
+    if (stored && !stored.startsWith('/api/entertainment/image/')) return;
+    const title = showTitle(entry);
+    if (!title) return;
     if (!groups.has(entry.provider)) groups.set(entry.provider, []);
-    groups.get(entry.provider).push({ entry, index });
+    groups.get(entry.provider).push({ entry, index, title });
   });
   for (const [provider, rows] of groups) {
     let covers = {};
     try {
-      const result = await api('/metadata', { provider, items: rows.map(({ entry }) => ({ title: entry.title, kind: entry.item.kind || '' })) });
+      const result = await api('/metadata', { provider, items: rows.map(({ entry, title }) => ({ title, kind: entry.item.kind || '' })) });
       covers = result.covers || {};
     } catch (_) { continue; }
     let changed = false;
-    for (const { entry, index } of rows) {
-      const cover = covers[entry.title];
+    for (const { entry, index, title } of rows) {
+      const cover = covers[title];
       if (!cover) continue;
       entry.item.cover = cover;
       changed = true;
+      const initials = (entry.title || '?').trim().slice(0, 2).toUpperCase();
       const thumb = host.querySelector(`[data-ent-lib-index="${index}"] .ent-collection-thumb`);
-      if (thumb) thumb.outerHTML = `<img class="ent-collection-thumb" src="${esc(cover)}" alt="" loading="lazy" decoding="async">`;
+      if (thumb) thumb.outerHTML = `<img class="ent-collection-thumb" src="${esc(cover)}" alt="" data-ent-initials="${esc(initials)}" loading="lazy" decoding="async">`;
     }
     if (changed) savePrefs();
   }
@@ -613,6 +780,114 @@ function recentItem(entry, index) {
   </button>`;
 }
 
+function entryProgress(entry) {
+  const position = Number(entry?.position) || 0;
+  const duration = Number(entry?.duration) || 0;
+  return { position, duration, ratio: duration > 0 ? position / duration : 0 };
+}
+
+// "Finished" is explicit (video `ended`) or effectively complete (>= 98%).
+function isFinished(entry) {
+  if (!entry || entry.finished === true) return Boolean(entry);
+  const { duration, ratio } = entryProgress(entry);
+  return duration > 0 && ratio >= 0.98;
+}
+
+// Anything started but not finished stays in Continue Watching. A queued
+// "up next" episode (position 0, upNext) counts as started so it is clickable.
+function isContinueWatching(entry) {
+  if (!entry || !entry.title || isFinished(entry)) return false;
+  const { position } = entryProgress(entry);
+  return position > 0 || entry.upNext === true;
+}
+
+// One row per show. Group by the show title (AniCLI's item.id is only the
+// search-result index, so it is not stable across searches).
+function showIdentity(entry) {
+  const item = entry?.item || {};
+  const title = String(item.title || entry.title || '').replace(/\s+Episode\s+\d+\s*$/i, '').trim().toLowerCase();
+  const kind = item.kind === 'movie' ? 'movie' : 'series';
+  return `${entry.provider}:${kind}:${title}`;
+}
+
+function episodeRank(entry) {
+  const season = Number(entry?.season);
+  const episode = Number(entry?.episode);
+  return [Number.isFinite(season) ? season : 0, Number.isFinite(episode) ? episode : 0];
+}
+
+// Is `a` a later episode than `b` (season first, then episode, then recency)?
+function isFurtherEpisode(a, b) {
+  const ra = episodeRank(a);
+  const rb = episodeRank(b);
+  if (ra[0] !== rb[0]) return ra[0] > rb[0];
+  if (ra[1] !== rb[1]) return ra[1] > rb[1];
+  return (Number(a.at) || 0) > (Number(b.at) || 0);
+}
+
+function continueGroups() {
+  const byShow = new Map();
+  (prefs.history || []).forEach((entry, index) => {
+    if (!entry?.title) return;
+    // Only entries that were actually engaged count as "viewed": played,
+    // finished, or queued as up next. A resolved-but-unplayed entry does not.
+    if (!isFinished(entry) && !isContinueWatching(entry)) return;
+    const id = showIdentity(entry);
+    if (!byShow.has(id)) byShow.set(id, []);
+    byShow.get(id).push({ entry, index });
+  });
+  const rows = [];
+  for (const group of byShow.values()) {
+    // The furthest episode reached decides the show's state, not the most
+    // recently touched one.
+    const reached = group.reduce((best, cur) => (isFurtherEpisode(cur.entry, best.entry) ? cur : best));
+    let candidate = null;
+    if (!isFinished(reached.entry)) {
+      candidate = reached;
+    } else {
+      // The furthest episode is done: only a later, unfinished queued episode
+      // keeps the show; otherwise the show is finished and leaves the list.
+      candidate = group
+        .filter(({ entry }) => !isFinished(entry) && isFurtherEpisode(entry, reached.entry))
+        .reduce((best, cur) => (!best || isFurtherEpisode(cur.entry, best.entry) ? cur : best), null);
+    }
+    if (candidate) rows.push(candidate);
+  }
+  return rows.sort((a, b) => (Number(b.entry.at) || 0) - (Number(a.entry.at) || 0));
+}
+
+function continueItem(entry, index) {
+  const provider = entry.provider === 'ani-cli' ? 'Anime' : 'Movies & Shows';
+  const episode = entry.episode != null && entry.episode !== '' ? `Episode ${entry.episode}` : (entry.item?.kind === 'movie' ? 'Movie' : '');
+  const bits = [provider, episode].filter(Boolean);
+  const { position, duration } = entryProgress(entry);
+  const percent = duration > 0 ? Math.min(100, Math.round((position / duration) * 100)) : 0;
+  const left = entry.upNext
+    ? 'Up next'
+    : (duration > 0 ? `${formatTime(Math.max(0, duration - position))} left` : (position ? formatTime(position) : ''));
+  return `<div class="ent-continue-item" data-ent-lib-index="${index}">
+    <button type="button" class="ent-collection-item ent-continue-main" data-ent-resume-history="${index}">
+      ${collectionThumb(entry)}
+      <span class="ent-collection-item-body">
+        <strong>${esc(entry.title)}</strong>
+        <small>${esc(bits.join(' · '))}${left ? ` · ${esc(left)}` : ''}</small>
+        ${percent ? `<span class="ent-recent-bar" aria-hidden="true"><i style="width:${percent}%"></i></span>` : ''}
+      </span>
+      <b class="ent-collection-glyph" aria-hidden="true">▶</b>
+    </button>
+    <button type="button" class="ent-continue-remove" data-ent-remove-continue="${index}" aria-label="Remove ${esc(entry.title)} from Continue Watching" title="Remove from Continue Watching">✕</button>
+  </div>`;
+}
+
+function removeContinueEntry(index) {
+  const entry = (prefs.history || [])[index];
+  if (!entry) return;
+  prefs.history.splice(index, 1);
+  if (prefs.resume && prefs.resume.key === entry.key) prefs.resume = null;
+  savePrefs();
+  renderCollection('continue').catch(error => { el('ent-collection-status').textContent = error.message; });
+}
+
 async function renderCollection(key) {
   const host = el('ent-collection-results');
   const statusEl = el('ent-collection-status');
@@ -626,6 +901,14 @@ async function renderCollection(key) {
         ? 'No favorites yet. Use the star on a result card to save titles.'
         : 'Your watchlist is empty. Use ＋ on a result card to add titles.'}</p>`;
     enrichLibrary(entries).catch(() => {});
+    return;
+  }
+  if (key === 'continue') {
+    const groups = continueGroups();
+    host.innerHTML = groups.length
+      ? groups.map(({ entry, index }) => continueItem(entry, index)).join('')
+      : '<p class="entertainment-empty">Nothing in progress. Start an episode or movie and it will wait here until you finish or remove it.</p>';
+    enrichLibrary(groups.map(({ entry }) => entry)).catch(() => {});
     return;
   }
   if (key === 'recent') {
@@ -720,9 +1003,8 @@ async function search() {
   status('Searching upstream…'); el('entertainment-results').replaceChildren();
   const body = active === 'ani-cli' ? { query, dub: el('entertainment-mode').value === 'dub' } : { query };
   const result = await api(`/${active}/search`, body);
-  buttons(result.items, 'title', item => active === 'ani-cli' ? item.title : `${item.title} · ${item.kind === 'series' ? 'Series' : 'Movie'}`);
-  el('entertainment-results-title').textContent = `${result.items.length} Results for “${query}”`;
-  status('');
+  resetNavigation();
+  navigate({ kind: 'titles', items: result.items, title: `${result.items.length} Results for “${query}”`, status: '' });
   enrichCovers(active, result.items).catch(() => {});
 }
 
@@ -745,14 +1027,12 @@ async function chooseTitle(item) {
       status('Playing movie…');
       return playAnimeEpisode('1');
     }
-    episodeButtons({ ...result, items: episodes }, 'anime-episode', '/ani-cli/episodes', body);
-    el('entertainment-jump').classList.remove('hidden');
-    status(`Choose an episode · ${episodes.length} available.`);
+    navigate({ kind: 'anime-episodes', result, episodes, body, title: item.title, status: `Choose an episode · ${episodes.length} available.` });
   } else if (item.kind === 'movie') {
     await resolvePanda(0, 0);
   } else {
     const result = await api('/pandaflix/seasons', { query, selection: item.selection });
-    buttons(result.items, 'season', value => value.label); status('Choose a season.');
+    navigate({ kind: 'seasons', items: result.items, title: item.title, status: 'Choose a season.' });
   }
 }
 
@@ -781,7 +1061,7 @@ async function choose(action, item) {
     selection.season = item.number;
     const body = { query, selection: selection.selection, season: item.number };
     const result = await api('/pandaflix/episodes', { ...body, offset: 0 });
-    episodeButtons(result, 'panda-episode', '/pandaflix/episodes', body); status(`Choose an episode · ${result.total} available.`); return;
+    navigate({ kind: 'panda-episodes', result, body, title: selection.title || 'Episodes', status: `Choose an episode · ${result.total} available.` }); return;
   }
   if (action === 'panda-episode') return resolvePanda(selection.season, item.number);
   if (action === 'history') {
@@ -877,8 +1157,49 @@ async function nextEpisode() {
   await play(result);
 }
 
+function finishCurrentPlayback(record) {
+  if (!record) return;
+  const key = historyKey(record);
+  const entry = (prefs.history || []).find(item => item.key === key);
+  if (entry) {
+    entry.finished = true;
+    entry.upNext = false;
+    entry.position = entry.duration || entry.position || 0;
+    entry.at = Date.now();
+  }
+  if (prefs.resume && prefs.resume.key === key) prefs.resume = null;
+}
+
+// After a finished episode, queue the next one at position 0 so it shows in
+// Continue Watching as "Up next" even when autoplay is off. Guarded so movies
+// and single-entry titles never queue a phantom "next episode".
+function queueNextEpisode(record) {
+  const items = record?.items;
+  const current = record?.episode;
+  const hasNext = Array.isArray(items) && items.some(item => String(item?.number) === String(current));
+  if (!hasNext) return;
+  if (record.provider === 'ani-cli' && isAnimeMovie(record.item)) return;
+  const target = nextPlaybackTarget();
+  if (!target) return;
+  const next = target.resume(String(record.item?.title || record.title || 'Next episode'));
+  const key = historyKey(next);
+  const previous = (prefs.history || []).find(item => item.key === key);
+  const entry = {
+    ...next, key, upNext: true, finished: false,
+    position: previous?.position || 0, duration: previous?.duration || 0, at: Date.now(),
+  };
+  prefs.history = [entry, ...(prefs.history || []).filter(item => item.key !== key)].slice(0, 200);
+}
+
 async function handleEnded() {
-  if (!prefs.autoplay) return;
+  const current = playback;
+  finishCurrentPlayback(current);
+  queueNextEpisode(current);
+  savePrefs();
+  if (!prefs.autoplay) {
+    status('Finished. The next episode is queued in Continue Watching.');
+    return;
+  }
   try { await nextEpisode(); } catch (error) { status(error.message); }
 }
 
@@ -962,9 +1283,29 @@ function init() {
   el('entertainment-fanfare-btn')?.addEventListener('click', () => playSound('entertainment-fanfare'));
   el('ent-global-search')?.addEventListener('click', () => el('entertainment-query')?.focus());
   document.querySelectorAll('[data-ent-dest]').forEach(button => button.addEventListener('click', () => showCollection(button.dataset.entDest)));
-  el('entertainment-back')?.addEventListener('click', () => { stopPlayer(); showProvider(active); });
+  // A stale/expired cover token must degrade to the initials tile, not a
+  // broken-image icon. Capture phase catches <img> error events.
+  el('ent-collection-results')?.addEventListener('error', event => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains('ent-collection-thumb')) return;
+    const span = document.createElement('span');
+    span.className = 'ent-collection-thumb ent-collection-thumb--empty';
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = img.dataset.entInitials || '?';
+    img.replaceWith(span);
+  }, true);
+  el('entertainment-back')?.addEventListener('click', () => {
+    stopPlayer();
+    el('entertainment-player').classList.add('hidden');
+    el('entertainment-collection')?.classList.add('hidden');
+    el('entertainment-browser').classList.remove('hidden');
+    if (currentStep) renderStep(currentStep); else showProvider(active);
+  });
+  el('entertainment-results-back')?.addEventListener('click', () => goBack());
   initSlots();
-  el('entertainment-fullscreen')?.addEventListener('click', () => (slots?.[activeSlotKey]?.video || el('entertainment-video'))?.requestFullscreen?.());
+  el('entertainment-fullscreen')?.addEventListener('click', () => el('entertainment-player')?.requestFullscreen?.());
+  el('entertainment-audio')?.addEventListener('change', event => changeTrack('audio', event.target.value));
+  el('entertainment-subtitles')?.addEventListener('change', event => changeTrack('subtitle', event.target.value));
   el('entertainment-next')?.addEventListener('click', () => nextEpisode().catch(error => status(error.message)));
   el('entertainment-prev')?.addEventListener('click', () => previousEpisode().catch(error => status(error.message)));
   el('entertainment-refresh')?.addEventListener('click', () => refreshPlayback().catch(error => status(error.message)));
@@ -978,7 +1319,7 @@ function init() {
   el('entertainment-search')?.addEventListener('submit', event => { event.preventDefault(); search().catch(error => status(error.message)); });
   el('entertainment-jump')?.addEventListener('submit', event => { event.preventDefault(); jumpEpisode().catch(error => status(error.message)); });
   el('entertainment-history')?.addEventListener('click', async () => {
-    try { status('Loading history…'); const result = await api('/ani-cli/history', {}); buttons(result.items, 'history', item => `${item.title} · Episode ${item.episode}`); status('Continue watching.'); }
+    try { status('Loading history…'); const result = await api('/ani-cli/history', {}); navigate({ kind: 'history', items: result.items, title: 'History', status: 'Continue watching.' }); }
     catch (error) { status(error.message); }
   });
   el('entertainment-section')?.addEventListener('click', () => openEntertainment());
@@ -1021,6 +1362,8 @@ function init() {
     }
     const openFav = event.target.closest?.('[data-ent-open-fav]');
     if (openFav) { openFavorite(openFav.dataset.entOpenFav).catch(error => status(error.message)); return; }
+    const removeContinue = event.target.closest?.('[data-ent-remove-continue]');
+    if (removeContinue) { removeContinueEntry(Number(removeContinue.dataset.entRemoveContinue)); return; }
     const historyItem = event.target.closest?.('[data-ent-resume-history]');
     if (historyItem) {
       resumeHistoryEntry(Number(historyItem.dataset.entResumeHistory)).catch(error => status(error.message));
@@ -1077,6 +1420,7 @@ export async function openEntertainment() {
   const tabs = el('entertainment-tabs');
   if (tabs) tabs.innerHTML = providers.length > 1 ? providers.map(provider => `<button type="button" data-provider="${provider.id}">${esc(provider.label)}</button>`).join('') : '';
   el('entertainment-modal').classList.remove('hidden');
+  setView('entertainment');
   const preferred = providers.find(provider => provider.id === prefs.provider && provider.enabled);
   if (preferred) showProvider(preferred.id); else showLanding();
 }
@@ -1084,6 +1428,7 @@ export async function openEntertainment() {
 export function closeEntertainment() {
   stopPlayer();
   el('entertainment-modal')?.classList.add('hidden');
+  clearView('entertainment');
 }
 
 // Show the sidebar entry as soon as the app loads, not only after Settings has

@@ -1007,6 +1007,13 @@
         <span class="grow">Entertainment</span>
       </div>
 
+      <div class="list-item" id="tool-report-btn" role="button" tabindex="0" aria-haspopup="dialog" aria-controls="bug-report-modal" title="Report a bug or send feedback">
+        <svg class="section-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6M12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M20.97 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4"/>
+        </svg>
+        <span class="grow">Report a bug</span>
+      </div>
+
       <div class="section" id="plugins-section" data-section-reorder="true">
         <div class="section-header-flex">
           <button type="button" class="section-drag-handle" title="Drag to reorder this section" aria-label="Drag to reorder this section"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
@@ -1022,18 +1029,16 @@
       </div>
     </div>
     <section class="sidebar-update-status" id="sidebar-update-status" aria-live="polite" aria-label="Application update status">
-      <div class="sidebar-update-copy">
-        <span class="sidebar-update-version" id="sidebar-update-version">Version —</span>
-        <span class="sidebar-update-commit" id="sidebar-update-commit"></span>
-        <span class="sidebar-update-state is-unknown" id="sidebar-update-state">Not checked</span>
-        <span class="sidebar-update-detail" id="sidebar-update-detail" hidden></span>
-        <span class="sidebar-update-backup" id="sidebar-update-backup" hidden></span>
-      </div>
-      <div class="sidebar-update-actions">
-        <button type="button" class="sidebar-update-action" id="sidebar-update-check">Check for updates</button>
-        <button type="button" class="sidebar-update-action is-primary" id="sidebar-update-action" hidden>Update now</button>
-        <button type="button" class="sidebar-update-action" id="sidebar-update-rollback" hidden>Rollback</button>
-      </div>
+      <button type="button" class="sidebar-version" id="sidebar-version-btn" title="Version — open update settings">
+        <span class="sidebar-update-version" id="sidebar-update-version">v—</span>
+        <span class="sidebar-update-state" id="sidebar-update-state" hidden></span>
+      </button>
+      <button type="button" class="sidebar-update-action is-primary" id="sidebar-update-action" hidden>Update available</button>
+      <span class="sidebar-update-detail" id="sidebar-update-detail" hidden></span>
+      <span class="sidebar-update-commit" id="sidebar-update-commit" hidden></span>
+      <span class="sidebar-update-backup" id="sidebar-update-backup" hidden></span>
+      <button type="button" class="sidebar-update-action" id="sidebar-update-check" hidden>Check for updates</button>
+      <button type="button" class="sidebar-update-action" id="sidebar-update-rollback" hidden>Rollback</button>
     </section>
     <div class="sidebar-user-bar" id="sidebar-user-bar">
       <div class="user-bar-left" id="user-bar-profile">
@@ -3077,9 +3082,11 @@
             <h2 style="display:flex;align-items:center;gap:8px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="m6 8 3 3-3 3"/><path d="M12 14h6"/><path d="M8 21h8"/></svg>SSH Connections
               <span style="flex:1"></span>
+              <button class="admin-btn-sm" id="ssh-scan-btn" type="button" title="List online nodes on your tailnet">Scan tailnet</button>
               <button class="admin-btn-sm" id="ssh-refresh-btn" type="button" title="Reload saved connections">Refresh</button>
             </h2>
             <div class="admin-toggle-sub" style="margin-bottom:12px">Direct node access over SSH. A keyless connection generates its keypair here and pins the node's host key, so saved connections never prompt for authorization. Clicking Test, Enable, or Pin is the approval.</div>
+            <div id="ssh-tailnet-results" class="hidden"></div>
             <div id="ssh-connections-list"><div class="admin-empty">Loading...</div></div>
             <div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 0 2px;">
               <button type="button" class="admin-btn-add" id="ssh-add-btn">Add connection</button>
@@ -3191,6 +3198,7 @@
         </div>
         <div class="ent-side-group">
           <p class="ent-side-title">MY LIBRARY</p>
+          <button type="button" class="ent-side-link" data-ent-dest="continue">Continue Watching</button>
           <button type="button" class="ent-side-link" data-ent-dest="recent">Recently Watched</button>
           <button type="button" class="ent-side-link" data-ent-dest="favorites">My Favorites</button>
           <button type="button" class="ent-side-link" data-ent-dest="watchlist">Watchlist</button>
@@ -3230,7 +3238,10 @@
             </form>
           </div>
           <div class="ent-results-head">
-            <h2 id="entertainment-results-title">Results</h2>
+            <div class="ent-results-title">
+              <button type="button" id="entertainment-results-back" class="ent-results-back hidden" aria-label="Back to previous list">← Back</button>
+              <h2 id="entertainment-results-title">Results</h2>
+            </div>
             <div class="ent-results-tools" aria-hidden="true">
               <span>Sort by:</span><select disabled><option>Relevance</option></select>
               <button type="button" disabled aria-label="Grid view">▦</button>
@@ -3253,6 +3264,11 @@
         </section>
         <section id="entertainment-player" class="entertainment-player hidden">
           <div class="entertainment-player-bar"><button id="entertainment-back" type="button">← Browse</button><strong id="entertainment-now-playing"></strong><button id="entertainment-refresh" type="button" title="Reload the current stream">⟳ Refresh</button><button id="entertainment-prev" type="button">◂ Previous</button><button id="entertainment-next" type="button">Next episode ▸</button><label class="entertainment-autoplay"><input id="entertainment-autoplay" type="checkbox"> Autoplay</label><button id="entertainment-fullscreen" type="button">Fullscreen</button></div>
+          <div class="entertainment-track-controls">
+            <div class="entertainment-track-field"><label for="entertainment-audio">Audio</label><select id="entertainment-audio" disabled><option value="">Source audio</option></select></div>
+            <div class="entertainment-track-field"><label for="entertainment-subtitles">Subtitles</label><select id="entertainment-subtitles" disabled><option value="off">Off</option></select></div>
+            <span id="entertainment-track-note" role="status" aria-live="polite"></span>
+          </div>
           <p id="entertainment-player-status" class="ent-player-status" role="status" aria-live="polite"></p>
           <div class="ent-video-stage">
             <video id="entertainment-video" class="ent-video is-active" controls autoplay playsinline></video>

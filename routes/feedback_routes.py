@@ -9,13 +9,16 @@ so the preview and the posted issue cannot diverge.
 
 from __future__ import annotations
 
+import base64
 import logging
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
 from src import feedback_diagnostics as diagnostics
+from src import feedback_relay as relay
 from src import feedback_report as report
 from src import feedback_store as store
 from src import github_issues as github
@@ -56,6 +59,105 @@ def _github_status() -> dict[str, Any]:
     }
 
 
+def _submission_status() -> dict[str, Any]:
+    """Prefer the operator relay (universal, no GitHub credential) when set."""
+    relay_config = relay.resolve_config()
+    if relay_config is not None:
+        return {
+            "configured": True,
+            "public_submission": True,
+            "mode": "relay",
+            "repo": "",
+            "reason": "",
+            "security_url": github._env("PANDAMONIUM_FEEDBACK_SECURITY_URL")
+            or f"https://github.com/{github.DEFAULT_REPO}/security/advisories/new",
+            **relay_config.public_status(),
+        }
+    status = _github_status()
+    status.setdefault("mode", "github_app" if status.get("configured") else "none")
+    return status
+
+
+def _flat_relay_diagnostics(bundle: Any) -> dict[str, Any]:
+    """Flatten the nested diagnostic bundle to the relay's flat contract.
+
+    The n8n relay validates diagnostics as a flat object whose keys must be a
+    subset of the agreed allowlist, so nested ``app``/``client``/``session``
+    maps are lifted to top-level keys (and nothing else is sent).
+    """
+    if not isinstance(bundle, Mapping) or not bundle.get("included", True):
+        return {}
+    app = bundle.get("app") if isinstance(bundle.get("app"), Mapping) else {}
+    client = bundle.get("client") if isinstance(bundle.get("client"), Mapping) else {}
+    session = bundle.get("session") if isinstance(bundle.get("session"), Mapping) else {}
+    correlation = bundle.get("correlation") if isinstance(bundle.get("correlation"), Mapping) else {}
+    return {
+        "version": app.get("version", ""),
+        "revision": app.get("revision", ""),
+        "installation_method": app.get("installation_method", ""),
+        "runtime": app.get("runtime", ""),
+        "platform_class": app.get("platform_class", ""),
+        "platform_release": app.get("platform_release", ""),
+        "route": bundle.get("route", ""),
+        "browser_class": client.get("user_agent_class", ""),
+        "viewport_class": client.get("viewport_class", ""),
+        "locale": client.get("locale", ""),
+        "session_id": session.get("id", ""),
+        "request_id": correlation.get("request_id", ""),
+        "last_error": bundle.get("latest_error") or {},
+        "health": bundle.get("service_health") or {},
+    }
+
+
+def _relay_payload(
+    draft: dict[str, Any],
+    *,
+    title: str,
+    body: str,
+    bundle: dict[str, Any],
+    manifest: list[dict[str, Any]],
+    idempotency_key: str,
+    owner: str,
+) -> dict[str, Any]:
+    """The reviewed report plus screenshot bytes for the relay webhook."""
+    app = (bundle or {}).get("app") if isinstance(bundle, dict) else {}
+    attachments: list[dict[str, Any]] = []
+    for item in manifest:
+        record = store.get_attachment(draft["draft_id"], item["id"], owner=owner)
+        data_b64 = ""
+        if record is not None:
+            path = store.attachment_path(record)
+            if path is not None and path.is_file():
+                data_b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        attachments.append(
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "label": item.get("label", ""),
+                "route": item.get("route", ""),
+                "content_type": item["content_type"],
+                "bytes": item["bytes"],
+                "sha256": item["sha256"],
+                "data_base64": data_b64,
+            }
+        )
+    return {
+        "schema": relay.SCHEMA,
+        "idempotency_key": idempotency_key,
+        "type": draft["type"],
+        "title": title,
+        "body_markdown": body,
+        "fingerprint": report.fingerprint_for(draft),
+        "install": {
+            "version": str((app or {}).get("version") or ""),
+            "revision": str((app or {}).get("revision") or ""),
+            "installation_method": str((app or {}).get("installation_method") or ""),
+        },
+        "diagnostics": _flat_relay_diagnostics(bundle),
+        "attachments": attachments,
+    }
+
+
 def _bounded_body(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="The report payload must be a JSON object.")
@@ -78,11 +180,12 @@ def setup_feedback_routes():
         """Surface availability, limits, and honest submission state."""
         require_authenticated_request(request)
         enabled = _feedback_enabled()
-        status = _github_status()
+        status = _submission_status()
         return {
             "enabled": enabled,
             "public_submission": bool(enabled and status["public_submission"]),
             "configured": status["configured"],
+            "mode": status.get("mode", ""),
             "repo": status["repo"],
             "reason": "" if enabled else "In-app bug reports are disabled on this installation.",
             "github_reason": status["reason"],
@@ -262,7 +365,7 @@ def setup_feedback_routes():
             "duplicates_error": duplicate_error,
             "security_private_only": draft["type"] == "security",
             "security_url": (config.security_url if config else _github_status()["security_url"]),
-            "public_submission": bool(config is not None and _feedback_enabled()),
+            "public_submission": bool((config is not None or relay.resolve_config() is not None) and _feedback_enabled()),
         }
 
     @router.post("/submit")
@@ -295,10 +398,19 @@ def setup_feedback_routes():
                 ),
             )
 
-        try:
-            client = github.client_for_submission()
-        except github.GitHubIssuesError as exc:
-            raise HTTPException(status_code=503, detail=exc.message)
+        using_relay = relay.resolve_config() is not None
+        if using_relay:
+            try:
+                client = relay.client_for_submission()
+            except relay.FeedbackRelayError as exc:
+                raise HTTPException(status_code=503, detail=exc.message)
+            attachment_url_base = ""
+        else:
+            try:
+                client = github.client_for_submission()
+            except github.GitHubIssuesError as exc:
+                raise HTTPException(status_code=503, detail=exc.message)
+            attachment_url_base = client.config.attachment_url_base
 
         claim = store.claim_submission(
             idempotency_key, draft_id=draft["draft_id"], fingerprint=report.fingerprint_for(draft)
@@ -331,10 +443,22 @@ def setup_feedback_routes():
             draft,
             diagnostics=bundle,
             attachments=manifest,
-            url_base=client.config.attachment_url_base,
+            url_base=attachment_url_base,
         )
         try:
-            if decision == "existing":
+            if using_relay:
+                result = client.submit(
+                    _relay_payload(
+                        draft,
+                        title=title,
+                        body=body,
+                        bundle=bundle,
+                        manifest=manifest,
+                        idempotency_key=idempotency_key,
+                        owner=owner,
+                    )
+                )
+            elif decision == "existing":
                 candidates, _ = _search_duplicates(draft)
                 try:
                     issue_number = int(payload.get("existing_issue_number") or 0)
@@ -358,6 +482,10 @@ def setup_feedback_routes():
         except github.GitHubIssuesError as exc:
             store.mark_failed(idempotency_key, error=exc.code)
             logger.warning("feedback submission failed code=%s retryable=%s", exc.code, exc.retryable)
+            raise HTTPException(status_code=502 if exc.retryable else 400, detail=exc.message)
+        except relay.FeedbackRelayError as exc:
+            store.mark_failed(idempotency_key, error=exc.code)
+            logger.warning("feedback relay submission failed code=%s retryable=%s", exc.code, exc.retryable)
             raise HTTPException(status_code=502 if exc.retryable else 400, detail=exc.message)
 
         issue_url = str(result.get("issue_url") or result.get("url") or "")

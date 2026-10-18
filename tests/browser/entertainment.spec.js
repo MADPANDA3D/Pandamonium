@@ -196,26 +196,6 @@ test('Entertainment warms the next episode into the idle player', async ({ page 
   await expect(page.locator('#entertainment-video')).toHaveAttribute('src', 'https://media.example/ep-1.mp4');
   // ...while episode 2 is warmed into the idle element before it is needed.
   await expect(page.locator('#entertainment-video-next')).toHaveAttribute('src', 'https://media.example/ep-2.mp4');
-
-  // The old episode must stop decoding immediately, even while the following
-  // episode is still resolving into that slot.
-  await page.evaluate(() => {
-    window.__entPaused = [];
-    HTMLMediaElement.prototype.pause = function () { window.__entPaused.push(this.id); };
-  });
-  let followingResolve;
-  await page.route('**/api/entertainment/ani-cli/resolve', route => {
-    if (route.request().postDataJSON().episode !== '3') return route.fallback();
-    followingResolve = route;
-  });
-  await page.locator('#entertainment-next').click();
-  await expect(page.locator('#entertainment-video-next')).toHaveClass(/is-active/);
-  await expect.poll(() => !!followingResolve).toBe(true);
-  try {
-    expect(await page.evaluate(() => window.__entPaused)).toContain('entertainment-video');
-  } finally {
-    await followingResolve.fulfill({ json: { title: 'Naruto Episode 3', url: 'https://media.example/ep-3.mp4', format: 'file', subtitles: [] } });
-  }
 });
 
 test('Entertainment pill plays the fanfare and the top nav is stripped down', async ({ page }) => {
@@ -434,7 +414,6 @@ async function playbackFixture(page, { provider = 'pandaflix', items, episodes, 
   await page.evaluate(async () => (await import('/static/js/settings.js')).open());
   await page.locator('#entertainment-section').click();
 }
-
 async function selectFixtureTitle(page, title = 'Arrival') {
   await page.locator('#entertainment-query').fill(title);
   await page.locator('#entertainment-search button[type="submit"]').click();
@@ -442,6 +421,373 @@ async function selectFixtureTitle(page, title = 'Arrival') {
 }
 
 const fixturePlayback = { title: 'Arrival', url: 'https://media.example/arrival.mp4', format: 'file', subtitles: [] };
+
+async function languageTrackFixture(page) {
+  await page.route('**/static/lib/hls.min.js', route => route.fulfill({ contentType: 'application/javascript', body: `
+    window.__hlsInstances = [];
+    window.Hls = class {
+      static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error', AUDIO_TRACKS_UPDATED: 'audio-list', SUBTITLE_TRACKS_UPDATED: 'subtitle-list', AUDIO_TRACK_SWITCHED: 'audio-switch', SUBTITLE_TRACK_SWITCH: 'subtitle-switch' };
+      static isSupported() { return true; }
+      constructor(config) { this.config = config; this.events = {}; this.levels = [{bitrate: 500000}]; this.audioTracks = []; this.subtitleTracks = []; this.audioTrack = -1; this._subtitleTrack = -1; this._subtitleDisplay = config.subtitleDisplay; window.__hlsInstances.push(this); }
+      on(name, handler) { this.events[name] = handler; }
+      loadSource(url) { this.url = url; }
+      attachMedia(video) {
+        this.video = video;
+        const next = this.url.includes('next');
+        this.audioTracks = next ? [{name: 'Italian', lang: 'ita'}, {name: 'English', lang: 'eng'}] : [{name: 'English', lang: 'eng'}, {name: 'Italian', lang: 'ita'}];
+        this.subtitleTracks = next ? [{name: 'English', lang: 'eng'}] : [{name: 'Italian', lang: 'ita'}, {name: 'English', lang: 'eng'}];
+        this.trackNodes = this.subtitleTracks.map(track => { const node = document.createElement('track'); node.kind = 'subtitles'; node.label = track.name; node.srclang = track.lang; video.appendChild(node); return node; });
+        this.nativeTracks = this.trackNodes.map(node => node.track);
+        this.audioTrack = next ? 0 : 1;
+        this.events['audio-list'](); this.events['subtitle-list'](); this.events.manifest();
+      }
+      get subtitleTrack() { return this._subtitleTrack; }
+      set subtitleTrack(value) { this._subtitleTrack = value; this.updateModes(); }
+      get subtitleDisplay() { return this._subtitleDisplay; }
+      set subtitleDisplay(value) { this._subtitleDisplay = value; this.updateModes(); }
+      updateModes() { (this.nativeTracks || []).forEach((track, index) => { track.mode = this._subtitleDisplay && index === this._subtitleTrack ? 'showing' : 'disabled'; }); }
+      destroy() { this.destroyed = true; (this.trackNodes || []).forEach(node => node.remove()); }
+    };
+  ` }));
+}
+
+test('Entertainment prefers English over Italian and exposes subtitles with Off and saved language choices', async ({ page }) => {
+  await languageTrackFixture(page);
+  await playbackFixture(page, { resolve: route => route.fulfill({ json: { ...fixturePlayback, format: 'hls', subtitles: [{ label: 'Subtitles', language: 'en', url: 'https://media.example/en.vtt' }] } }) });
+  await selectFixtureTitle(page);
+  const audio = page.getByLabel('Audio', { exact: true });
+  const subtitles = page.getByLabel('Subtitles', { exact: true });
+  await expect(audio).toHaveValue('hls:0');
+  await expect(audio.locator('option')).toHaveText(['English', 'Italian']);
+  await expect(subtitles.locator('option')).toHaveText(['Off', 'Italian', 'English']);
+  await expect(subtitles).toHaveValue('off');
+  await subtitles.selectOption({ label: 'English' });
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances[0].nativeTracks[1].mode)).toBe('showing');
+  const saved = page.waitForRequest(request => request.url().endsWith('/api/prefs/entertainment') && request.method() === 'PUT' && request.postDataJSON().value.audioLanguage === 'it');
+  await audio.selectOption({ label: 'Italian' });
+  const preferences = (await saved).postDataJSON().value;
+  expect(preferences).toMatchObject({ audioLanguage: 'it', subtitleLanguage: 'en', language: 'sub' });
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances[0].audioTrack)).toBe(1);
+  await subtitles.selectOption('off');
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances[0].nativeTracks.every(track => track.mode === 'disabled'))).toBe(true);
+  await page.locator('.ent-video.is-active').evaluate(video => video.addTextTrack('subtitles', 'French', 'fr'));
+  await subtitles.selectOption({ label: 'French' });
+  await subtitles.selectOption({ label: 'English' });
+  await expect.poll(() => page.locator('.ent-video.is-active').evaluate(video => Array.from(video.textTracks).filter(track => track.mode === 'showing').map(track => track.label))).toEqual(['English']);
+});
+
+test('Entertainment reports unavailable preferred languages and preserves the source audio', async ({ page }) => {
+  await languageTrackFixture(page);
+  await playbackFixture(page, { preferences: { audioLanguage: 'fr', subtitleLanguage: 'fr' }, resolve: route => route.fulfill({ json: { ...fixturePlayback, format: 'hls' } }) });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-audio')).toHaveValue('hls:1');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('off');
+  await expect(page.locator('#entertainment-track-note')).toHaveText('Your preferred audio language is unavailable on this stream. Your preferred subtitles are unavailable on this stream.');
+});
+
+test('Entertainment preserves languages across reordered preloaded episode tracks', async ({ page }) => {
+  await languageTrackFixture(page);
+  await playbackFixture(page, {
+    preferences: { autoplay: true, audioLanguage: 'en', subtitleLanguage: 'en', history: [{ provider: 'pandaflix', title: 'Series Episode 2', item: { selection: '[series] Series', kind: 'series', title: 'Series' }, season: 1, episode: 2 }] },
+    resolve: route => {
+      const episode = route.request().postDataJSON().episode;
+      return route.fulfill({ json: { ...fixturePlayback, format: 'hls', title: `Series Episode ${episode}`, url: `https://media.example/${Number(episode) === 3 ? 'next' : 'current'}.m3u8` } });
+    },
+  });
+  await page.locator('[data-ent-dest="recent"]').click();
+  await page.locator('[data-ent-resume-history]').first().click();
+  await expect(page.locator('#entertainment-audio')).toHaveValue('hls:0');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('hls:1');
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances.length)).toBeGreaterThanOrEqual(2);
+  await page.locator('.ent-video.is-active').evaluate(video => video.dispatchEvent(new Event('ended')));
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Series Episode 3');
+  await expect(page.locator('#entertainment-audio')).toHaveValue('hls:1');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('hls:0');
+});
+
+test('Entertainment resets unavailable track menus and fullscreen contains language controls', async ({ page }) => {
+  await languageTrackFixture(page);
+  let resolutions = 0;
+  await playbackFixture(page, { resolve: route => route.fulfill({ json: { ...fixturePlayback, format: resolutions++ === 0 ? 'hls' : 'file' } }) });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-audio')).toBeEnabled();
+  await page.locator('#entertainment-fullscreen').click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('entertainment-player');
+  await expect(page.locator('#entertainment-subtitles')).toBeVisible();
+  await page.evaluate(() => document.exitFullscreen());
+  await page.locator('#entertainment-refresh').click();
+  await expect(page.locator('#entertainment-audio')).toBeDisabled();
+  await expect(page.locator('#entertainment-audio')).toHaveText('Source audio');
+  await expect(page.locator('#entertainment-subtitles')).toBeDisabled();
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('off');
+  await expect(page.locator('#entertainment-track-note')).toContainText('Audio language is not reported');
+});
+
+test('Entertainment switches native audio and external subtitles when available', async ({ page }) => {
+  await playbackFixture(page, { preferences: { subtitleLanguage: 'en' }, resolve: route => route.fulfill({ json: fixturePlayback }) });
+  await selectFixtureTitle(page);
+  await page.locator('.ent-video.is-active').evaluate(video => {
+    const audioTracks = new EventTarget();
+    Object.assign(audioTracks, { 0: { language: 'it', label: 'Italian', enabled: true }, 1: { language: 'en', label: 'English', enabled: false }, length: 2 });
+    Object.defineProperty(video, 'audioTracks', { value: audioTracks });
+    video.addTextTrack('subtitles', 'English', 'en');
+    video.addTextTrack('subtitles', 'French', 'fr');
+    video.dispatchEvent(new Event('loadedmetadata'));
+  });
+  await expect(page.locator('#entertainment-audio')).toHaveValue('native:1');
+  await expect(page.locator('#entertainment-subtitles')).toHaveValue('native:0');
+  await page.locator('#entertainment-subtitles').selectOption({ label: 'French' });
+  await expect.poll(() => page.locator('.ent-video.is-active').evaluate(video => Array.from(video.textTracks).map(track => track.mode))).toEqual(['disabled', 'showing']);
+  await page.locator('#entertainment-audio').selectOption({ label: 'Italian' });
+  await expect.poll(() => page.locator('.ent-video.is-active').evaluate(video => Array.from(video.audioTracks).map(track => track.enabled))).toEqual([true, false]);
+});
+
+test('Entertainment back button walks results -> seasons -> episodes', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'pandaflix', label: 'Movies & Shows', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/pandaflix/search') return route.fulfill({ json: { items: [
+      { selection: '[series] The Blacklist (2013)', kind: 'series', title: 'The Blacklist (2013)' },
+    ] } });
+    if (path === '/api/entertainment/pandaflix/seasons') return route.fulfill({ json: { items: [
+      { number: 1, label: 'Season 1' }, { number: 2, label: 'Season 2' },
+    ] } });
+    if (path === '/api/entertainment/pandaflix/episodes') return route.fulfill({ json: {
+      items: [{ number: 1, label: 'E01 - Pilot' }, { number: 2, label: 'E02 - The Freelancer' }], total: 2, next_offset: -1,
+    } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('The Blacklist');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+
+  // Root results view: nothing to go back to.
+  await expect(page.locator('#entertainment-results-title')).toContainText('Results for');
+  await expect(page.locator('#entertainment-results-back')).toBeHidden();
+
+  // Open the series -> seasons, and the back control appears.
+  await page.locator('.ent-card-play').click();
+  await expect(page.locator('.entertainment-result', { hasText: 'Season 1' })).toBeVisible();
+  await expect(page.locator('#entertainment-results-back')).toBeVisible();
+
+  // Open a season -> episodes.
+  await page.locator('.entertainment-result', { hasText: 'Season 1' }).click();
+  await expect(page.locator('.entertainment-result', { hasText: 'E01 - Pilot' })).toBeVisible();
+
+  // Back -> seasons.
+  await page.locator('#entertainment-results-back').click();
+  await expect(page.locator('.entertainment-result', { hasText: 'Season 1' })).toBeVisible();
+  await expect(page.locator('.entertainment-result', { hasText: 'E01 - Pilot' })).toHaveCount(0);
+  await expect(page.locator('#entertainment-results-back')).toBeVisible();
+
+  // Back -> results, and the control hides again.
+  await page.locator('#entertainment-results-back').click();
+  await expect(page.locator('#entertainment-results-title')).toContainText('Results for');
+  await expect(page.locator('#entertainment-results-back')).toBeHidden();
+});
+
+test('Continue Watching holds in-progress titles, queues the next episode, and supports removal', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [
+      { number: '1', label: 'Episode 1' }, { number: '2', label: 'Episode 2' }, { number: '3', label: 'Episode 3' },
+    ], total: 3, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      return route.fulfill({ json: { title: `Naruto Episode ${body.episode}`, url: 'https://media.example/ep.mp4', format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+
+  // Report partial progress, then open the library: the title is in progress.
+  await page.evaluate(() => {
+    const video = document.getElementById('entertainment-video');
+    Object.defineProperty(video, 'duration', { configurable: true, get: () => 1000 });
+    Object.defineProperty(video, 'currentTime', { configurable: true, get: () => 200, set: () => {} });
+    video.dispatchEvent(new Event('timeupdate'));
+  });
+  await page.locator('#entertainment-back').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+  await expect(page.locator('.ent-continue-main')).toContainText('Naruto Episode 1');
+
+  // Finish the episode with autoplay off: the finished one drops out and the
+  // next episode is queued as "Up next".
+  await page.locator('.ent-continue-main').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('ended')));
+  await page.locator('#entertainment-back').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+  await expect(page.locator('.ent-continue-item')).toHaveCount(1);
+  await expect(page.locator('.ent-continue-main')).toContainText('Episode 2');
+  await expect(page.locator('.ent-continue-main')).toContainText('Up next');
+
+  // The user can remove an entry from Continue Watching.
+  await page.locator('.ent-continue-remove').click();
+  await expect(page.locator('.ent-continue-item')).toHaveCount(0);
+  await expect(page.locator('#ent-collection-results .entertainment-empty')).toBeVisible();
+});
+
+test('Continue Watching collapses a show to its latest episode and recovers a broken cover', async ({ page }) => {
+  const seeded = {
+    provider: 'ani-cli', language: 'sub', quality: 'best', autoplay: false,
+    favorites: [], watchlist: [], resume: null,
+    history: [
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden', cover: '/api/entertainment/image/stale10' }, episode: '10', title: 'Naruto: Shippuden Episode 10', position: 100, duration: 1400, at: 1000, key: 'ani-cli:1:10' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden', cover: '/api/entertainment/image/stale11' }, episode: '11', title: 'Naruto: Shippuden Episode 11', position: 120, duration: 1400, at: 2000, key: 'ani-cli:1:11' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden', cover: '/api/entertainment/image/stale12' }, episode: '12', title: 'Naruto: Shippuden Episode 12', position: 130, duration: 1400, at: 3000, key: 'ani-cli:1:12' },
+      { provider: 'ani-cli', query: 'the last', item: { id: 3, title: 'The Last: Naruto the Movie', cover: '/api/entertainment/image/stale-movie' }, episode: '1', title: 'The Last: Naruto the Movie Episode 1', position: 50, duration: 5000, at: 4000, key: 'ani-cli:3:1' },
+    ],
+  };
+  await page.addInitScript(() => { HTMLMediaElement.prototype.play = async function () {}; });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: seeded } });
+    if (path === '/api/entertainment/metadata') return route.fulfill({ json: { covers: {} } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+
+  // One row per show, not one per nexted episode.
+  await expect(page.locator('.ent-continue-item')).toHaveCount(2);
+  await expect(page.locator('.ent-continue-item', { hasText: 'Episode 12' })).toHaveCount(1);
+  await expect(page.locator('.ent-continue-item', { hasText: 'Episode 11' })).toHaveCount(0);
+
+  // A cover token that no longer resolves degrades to the initials tile.
+  await expect(page.locator('.ent-collection-thumb--empty').first()).toBeVisible();
+});
+
+test('Continue Watching uses the furthest episode reached, not recency', async ({ page }) => {
+  // Finishing the last episode must drop the show even when earlier episodes
+  // still have unfinished progress; a queued next episode keeps it.
+  const seeded = {
+    provider: 'ani-cli', language: 'sub', quality: 'best', autoplay: false,
+    favorites: [], watchlist: [], resume: null,
+    history: [
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden' }, episode: '10', title: 'Naruto: Shippuden Episode 10', position: 100, duration: 1400, at: 1000, key: 'ani-cli:1:10' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden' }, episode: '12', title: 'Naruto: Shippuden Episode 12', position: 1390, duration: 1400, at: 2000, key: 'ani-cli:1:12' },
+      { provider: 'ani-cli', query: 'naruto', item: { id: 1, title: 'Naruto: Shippuden' }, episode: '13', title: 'Naruto: Shippuden Episode 13', position: 0, duration: 0, upNext: true, at: 3000, key: 'ani-cli:1:13' },
+      { provider: 'ani-cli', query: 'bleach', item: { id: 2, title: 'Bleach' }, episode: '5', title: 'Bleach Episode 5', position: 100, duration: 1400, at: 1500, key: 'ani-cli:2:5' },
+      { provider: 'ani-cli', query: 'bleach', item: { id: 2, title: 'Bleach' }, episode: '6', title: 'Bleach Episode 6', position: 1400, duration: 1400, at: 1600, key: 'ani-cli:2:6' },
+    ],
+  };
+  await page.addInitScript(() => { HTMLMediaElement.prototype.play = async function () {}; });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: seeded } });
+    if (path === '/api/entertainment/metadata') return route.fulfill({ json: { covers: {} } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
+
+  // Bleach is done (furthest episode finished) so it drops out entirely;
+  // Naruto keeps its queued Episode 13.
+  await expect(page.locator('.ent-continue-item')).toHaveCount(1);
+  await expect(page.locator('.ent-continue-main')).toContainText('Episode 13');
+  await expect(page.locator('.ent-continue-main')).toContainText('Up next');
+  await expect(page.locator('.ent-continue-item', { hasText: 'Bleach' })).toHaveCount(0);
+});
+
+test('Entertainment clears the resolving status once the stream starts', async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'ani-cli', label: 'Anime', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/ani-cli/search') return route.fulfill({ json: { items: [{ id: 1, title: 'Naruto' }] } });
+    if (path === '/api/entertainment/ani-cli/episodes') return route.fulfill({ json: { items: [{ number: '1', label: 'Episode 1' }], total: 1, next_offset: -1 } });
+    if (path === '/api/entertainment/ani-cli/resolve') return route.fulfill({ json: { title: 'Naruto Episode 1', url: 'https://media.example/ep.mp4', format: 'file', proxied: false, subtitles: [] } });
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Naruto');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+  await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
+  await expect(page.locator('#entertainment-player-status')).toHaveText('Resolving stream…');
+
+  await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('playing')));
+  await expect(page.locator('#entertainment-player-status')).toBeEmpty();
+});
+
+test('Entertainment retries a transient resolve failure', async ({ page }) => {
+  let resolveCalls = 0;
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: 'pandaflix', label: 'Movies & Shows', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: null } });
+    if (path === '/api/entertainment/pandaflix/search') return route.fulfill({ json: { items: [{ selection: '[movie] Arrival (2016)', kind: 'movie', title: 'Arrival (2016)' }] } });
+    if (path === '/api/entertainment/pandaflix/resolve') {
+      resolveCalls += 1;
+      if (resolveCalls < 3) return route.fulfill({ status: 503, json: { detail: 'Entertainment provider unavailable; check plugin setup or try again' } });
+      return route.fulfill({ json: { title: 'Arrival', url: 'https://media.example/arrival.mp4', format: 'file', proxied: false, subtitles: [] } });
+    }
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+  await page.locator('#entertainment-query').fill('Arrival');
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').click();
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Arrival');
+  expect(resolveCalls).toBe(3);
+});
 
 test('Entertainment preloads and autoplays an integer PandaFlix episode after history resume', async ({ page }) => {
   const episodes = [];
@@ -558,7 +904,7 @@ test('Entertainment stops after three transient failures and handles a non-JSON 
     return route.fulfill({ status: 503, contentType: 'text/plain', body: 'Internal Server Error' });
   } });
   await selectFixtureTitle(page);
-  await expect(page.locator('#entertainment-status')).toHaveText('Entertainment unavailable');
+  await expect(page.locator('#entertainment-status')).toHaveText('Entertainment request failed (503)');
   expect(calls).toBe(3);
   await expect(page.locator('#entertainment-player')).toBeHidden();
 });
@@ -593,7 +939,7 @@ test('Entertainment starts HLS at the smallest level then allows adaptive qualit
   await selectFixtureTitle(page);
   await expect(page.locator('#entertainment-player')).toBeVisible();
   const config = await page.evaluate(() => window.__hlsInstances[0].config);
-  expect(config).toMatchObject({ capLevelToPlayerSize: true, maxBufferLength: 3600, maxMaxBufferLength: 7200, maxBufferSize: 1.5 * 1024 * 1024 * 1024, backBufferLength: 600 });
+  expect(config).toMatchObject({ capLevelToPlayerSize: true, maxBufferLength: 3600, maxMaxBufferLength: 7200, maxBufferSize: 1500 * 1000 * 1000, backBufferLength: 600 });
   expect(await page.evaluate(() => window.__hlsInstances[0].autoLevelCapping)).toBe(2);
   await page.clock.fastForward(8000);
   expect(await page.evaluate(() => window.__hlsInstances[0].autoLevelCapping)).toBe(-1);

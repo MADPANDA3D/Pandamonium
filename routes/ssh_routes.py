@@ -60,6 +60,12 @@ def setup_ssh_routes() -> APIRouter:
             rows = session.query(SshConnection).order_by(SshConnection.created_at.asc()).all()
             return {"connections": [ssh.connection_payload(row) for row in rows]}
 
+    @router.get("/api/ssh/discover")
+    def discover_ssh_tailnet(request: Request):
+        """List online tailnet peers as opaque ids for the Settings scan (MAD-976)."""
+        require_admin(request)
+        return ssh.discover_tailnet_peers()
+
     @router.post("/api/ssh/connections")
     def add_ssh_connection(
         request: Request,
@@ -68,13 +74,30 @@ def setup_ssh_routes() -> APIRouter:
         user: str = Form(""),
         port: str = Form("22"),
         keyless: str = Form("false"),
+        tailnet_peer_id: str = Form(""),
+        auth_mode: str = Form(""),
     ):
         require_admin(request)
         label_value = ssh.validate_label(_form_text(label))
-        host_value = ssh.validate_host(_form_text(host))
+        # A scanned tailnet node wins over a typed host: the address is resolved
+        # server-side from the opaque id issued by /api/ssh/discover, so the
+        # browser never has to send (or know) the tailnet address. A node that
+        # advertises Tailscale SSH defaults to the keyless tailscale_ssh mode.
+        peer_ref = _form_text(tailnet_peer_id).strip()
+        mode_value = _form_text(auth_mode).strip().lower()
+        if peer_ref:
+            info = ssh.resolve_tailnet_peer_info(peer_ref)
+            host_value = str(info["address"])
+            if not mode_value:
+                mode_value = (
+                    ssh.AUTH_MODE_TAILSCALE if info.get("keyless") else ssh.AUTH_MODE_MANAGED
+                )
+        else:
+            host_value = ssh.validate_host(_form_text(host))
+        mode_value = ssh.validate_auth_mode(mode_value or ssh.AUTH_MODE_MANAGED)
         user_value = ssh.validate_user(_form_text(user))
         port_value = ssh.validate_port(_form_text(port, "22"))
-        enabled = _truthy(_form_text(keyless, "false"))
+        enabled = _truthy(_form_text(keyless, "false")) and mode_value == ssh.AUTH_MODE_MANAGED
         message = "Connection added."
         with SessionLocal() as session:
             row = SshConnection(
@@ -84,11 +107,14 @@ def setup_ssh_routes() -> APIRouter:
                 user=user_value,
                 port=port_value,
                 keyless=enabled,
+                auth_mode=mode_value,
             )
             session.add(row)
             session.commit()
             session.refresh(row)
-            if enabled:
+            if mode_value == ssh.AUTH_MODE_TAILSCALE:
+                message = "Connection added. Test it to connect over Tailscale SSH."
+            elif enabled:
                 try:
                     pair = ssh.generate_keypair(row.id)
                 except HTTPException as exc:
@@ -126,6 +152,7 @@ def setup_ssh_routes() -> APIRouter:
         user: Optional[str] = Form(None),
         port: Optional[str] = Form(None),
         allowed_commands: Optional[str] = Form(None),
+        auth_mode: Optional[str] = Form(None),
     ):
         require_admin(request)
         with SessionLocal() as session:
@@ -136,6 +163,8 @@ def setup_ssh_routes() -> APIRouter:
                 row.user = ssh.validate_user(user)
             if isinstance(port, str):
                 row.port = ssh.validate_port(port)
+            if isinstance(auth_mode, str) and auth_mode.strip():
+                row.auth_mode = ssh.validate_auth_mode(auth_mode)
             if isinstance(allowed_commands, str):
                 # MAD-936: the agent command policy. Empty clears back to the
                 # built-in read-only default; values are validated against a
@@ -280,6 +309,70 @@ def setup_ssh_routes() -> APIRouter:
         ssh.record_ssh_audit(payload["id"], "host-key", "pinned", "", _actor(request))
         return ssh.redact_payload(payload)
 
+    @router.post("/api/ssh/connections/{connection_id}/install-key")
+    def install_ssh_key(
+        request: Request,
+        connection_id: str,
+        password: str = Form(""),
+    ):
+        """One-time password-assisted install of this connection's public key.
+
+        The password is used for this single call and is never stored. The route
+        pins the host key first when needed, installs the key, then confirms the
+        connection so the row can report Connected.
+        """
+        require_admin(request)
+        secret = _form_text(password)
+        if not secret:
+            raise HTTPException(400, ssh.MISSING_PASSWORD_MESSAGE)
+        with SessionLocal() as session:
+            row = _require_row(session, connection_id)
+            if ssh.effective_auth_mode(row) == ssh.AUTH_MODE_TAILSCALE:
+                raise HTTPException(
+                    400,
+                    "This connection uses Tailscale SSH, so no key install is needed.",
+                )
+            if not row.host_key:
+                try:
+                    entries = ssh.scan_host_key(row.host, int(row.port or ssh.DEFAULT_SSH_PORT))
+                    ssh.store_host_key(row, entries)
+                    session.commit()
+                    session.refresh(row)
+                except ssh.SshScanError as exc:
+                    raise HTTPException(400, str(exc)) from exc
+            install = ssh.install_public_key(row, secret)
+            confirm = ssh.run_connection_test(row)
+            row.last_status = confirm["state"]
+            row.last_status_reason = confirm.get("reason") or ""
+            row.last_status_message = confirm.get("message") or ""
+            row.last_checked_at = datetime.utcnow()
+            session.commit()
+            session.refresh(row)
+            payload = ssh.connection_payload(row)
+        ssh.record_ssh_audit(
+            payload["id"],
+            "install-key",
+            install["state"],
+            install.get("reason") or "",
+            _actor(request),
+        )
+        payload.update(
+            {
+                "ok": bool(install.get("ok")) and bool(confirm.get("ok")),
+                "state": confirm["state"],
+                "reason": install.get("reason") or "",
+                # On a failed install the install guidance (password rejected /
+                # password sign-in unavailable) is more useful than the generic
+                # test message.
+                "message": (
+                    confirm.get("message") or install.get("message") or ""
+                    if install.get("ok")
+                    else install.get("message") or confirm.get("message") or ""
+                ),
+            }
+        )
+        return ssh.redact_payload(payload)
+
     @router.post("/api/ssh/connections/{connection_id}/test")
     def test_ssh_connection(request: Request, connection_id: str):
         require_admin(request)
@@ -306,6 +399,7 @@ def setup_ssh_routes() -> APIRouter:
                 "state": result["state"],
                 "reason": result.get("reason") or "",
                 "message": result.get("message") or "",
+                "check_url": result.get("check_url") or "",
             }
         )
         return ssh.redact_payload(payload)

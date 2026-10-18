@@ -281,6 +281,52 @@ async function _decodeImage(blob) {
   });
 }
 
+async function _captureScreen() {
+  const media = navigator.mediaDevices;
+  if (!media || typeof media.getDisplayMedia !== 'function') {
+    _setStatus('Screen capture is not available in this browser. Use Choose files or paste instead.', 'warn');
+    return;
+  }
+  let stream = null;
+  try {
+    stream = await media.getDisplayMedia({ video: true, audio: false });
+  } catch (_) {
+    return; // the operator dismissed the picker
+  }
+  try {
+    const track = stream.getVideoTracks()[0];
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.style.position = 'fixed';
+    video.style.left = '-9999px';
+    video.style.width = '1px';
+    video.style.height = '1px';
+    document.body.appendChild(video);
+    await video.play();
+    // Let the compositor present a couple of frames so the grab is not blank.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const settings = (track && track.getSettings) ? track.getSettings() : {};
+    const width = video.videoWidth || settings.width || 1280;
+    const height = video.videoHeight || settings.height || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(video, 0, 0, width, height);
+    video.remove();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('Screen capture produced an empty image.');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const file = new File([blob], `screen-${stamp}.png`, { type: 'image/png' });
+    await addFiles([file], _currentRoute());
+  } catch (error) {
+    _setStatus(error.message || 'Screen capture failed. Use Choose files or paste instead.', 'error');
+  } finally {
+    try { stream.getTracks().forEach((item) => item.stop()); } catch (_) {}
+  }
+}
+
 function _findAttachment(localId) {
   return _state.attachments.find((item) => item.localId === localId) || null;
 }
@@ -499,28 +545,9 @@ function _renderCapture() {
     rows: 3, placeholder: 'Include the exact error text if you saw one', maxLength: 4000,
   }));
 
-  const stepsField = document.createElement('div');
-  stepsField.className = 'bug-report-field';
-  const stepsLabel = document.createElement('span');
-  stepsLabel.className = 'bug-report-label';
-  stepsLabel.textContent = 'Steps to reproduce (ordered)';
-  stepsField.appendChild(stepsLabel);
-  const list = document.createElement('div');
-  list.id = 'bug-report-steps-list';
-  list.className = 'bug-report-steps';
-  stepsField.appendChild(list);
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.id = 'bug-report-step-add';
-  add.className = 'bug-report-add-step';
-  add.textContent = '+ Add step';
-  add.addEventListener('click', () => {
-    if (_state.draft.steps.length >= 30) return;
-    _state.draft.steps.push('');
-    _renderSteps();
-  });
-  stepsField.appendChild(add);
-  panel.appendChild(stepsField);
+  // Reproduction steps are no longer requested: every report already carries
+  // redacted diagnostics, the exact route, and screenshots automatically.
+  _state.draft.steps = [];
 
   panel.appendChild(_field('Workaround', 'bug-report-workaround', {
     rows: 2, placeholder: 'How did you get past it? (optional)', maxLength: 2000,
@@ -546,51 +573,6 @@ function _renderCapture() {
   bindField('bug-report-actual', 'actual');
   bindField('bug-report-workaround', 'workaround');
   bindField('bug-report-reviewed-text', 'reviewed_text');
-
-  _renderSteps();
-}
-
-function _renderSteps() {
-  const list = _byId('bug-report-steps-list');
-  if (!list) return;
-  if (!_state.draft.steps.length) _state.draft.steps = [''];
-  list.replaceChildren();
-  _state.draft.steps.forEach((value, index) => {
-    const row = document.createElement('div');
-    row.className = 'bug-report-step';
-    const number = document.createElement('span');
-    number.className = 'bug-report-step-number';
-    number.textContent = String(index + 1);
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'styled-prompt-input bug-report-step-input';
-    input.maxLength = 600;
-    input.value = value || '';
-    input.setAttribute('aria-label', `Reproduction step ${index + 1}`);
-    input.addEventListener('input', () => {
-      _state.draft.steps[index] = input.value;
-      _persistDraft();
-    });
-    const up = _iconButton('↑', `Move step ${index + 1} up`, () => _moveStep(index, -1));
-    const down = _iconButton('↓', `Move step ${index + 1} down`, () => _moveStep(index, 1));
-    const remove = _iconButton('✖', `Remove step ${index + 1}`, () => {
-      _state.draft.steps.splice(index, 1);
-      if (!_state.draft.steps.length) _state.draft.steps = [''];
-      _persistDraft();
-      _renderSteps();
-    });
-    row.append(number, input, up, down, remove);
-    list.appendChild(row);
-  });
-}
-
-function _moveStep(index, delta) {
-  const target = index + delta;
-  if (target < 0 || target >= _state.draft.steps.length) return;
-  const [value] = _state.draft.steps.splice(index, 1);
-  _state.draft.steps.splice(target, 0, value);
-  _persistDraft();
-  _renderSteps();
 }
 
 function _iconButton(glyph, label, handler) {
@@ -613,7 +595,7 @@ function _renderEvidence() {
 
   const intro = document.createElement('p');
   intro.className = 'bug-report-hint';
-  intro.textContent = 'Add screenshots with the file picker, drag and drop, or paste (Ctrl/Cmd+V). Label each one with the step it shows.';
+  intro.textContent = 'Capture what you are looking at with Capture screen, or add screenshots with the file picker, drag and drop, or paste (Ctrl/Cmd+V). Label each one with the step it shows.';
   panel.appendChild(intro);
 
   const drop = document.createElement('div');
@@ -622,7 +604,7 @@ function _renderEvidence() {
   drop.tabIndex = 0;
   drop.setAttribute('role', 'button');
   drop.setAttribute('aria-label', 'Add screenshots');
-  drop.innerHTML = '<span>Drop screenshots here or <strong>choose files</strong></span>';
+  drop.innerHTML = '<span>Drop screenshots here, paste (Ctrl/Cmd+V), or</span>';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.id = 'bug-report-file-input';
@@ -633,14 +615,24 @@ function _renderEvidence() {
     addFiles(fileInput.files, _currentRoute());
     fileInput.value = '';
   });
+  const actions = document.createElement('div');
+  actions.className = 'bug-report-capture-actions';
   const choose = document.createElement('button');
   choose.type = 'button';
   choose.className = 'confirm-btn confirm-btn-secondary';
   choose.id = 'bug-report-choose-files';
   choose.textContent = 'Choose files';
-  choose.addEventListener('click', () => fileInput.click());
+  choose.addEventListener('click', (event) => { event.stopPropagation(); fileInput.click(); });
+  const capture = document.createElement('button');
+  capture.type = 'button';
+  capture.className = 'confirm-btn confirm-btn-secondary';
+  capture.id = 'bug-report-capture-screen';
+  capture.textContent = 'Capture screen';
+  capture.title = 'Snap what you are looking at right now';
+  capture.addEventListener('click', (event) => { event.stopPropagation(); _captureScreen(); });
+  actions.append(choose, capture);
   drop.addEventListener('click', (event) => {
-    if (event.target === choose) return;
+    if (event.target === choose || event.target === capture) return;
     fileInput.click();
   });
   drop.addEventListener('keydown', (event) => {
@@ -659,7 +651,7 @@ function _renderEvidence() {
     drop.classList.remove('is-dragover');
     addFiles(event.dataTransfer && event.dataTransfer.files, _currentRoute());
   });
-  drop.appendChild(choose);
+  drop.appendChild(actions);
   panel.appendChild(drop);
   panel.appendChild(fileInput);
 
@@ -1144,7 +1136,7 @@ export async function openBugReport() {
     restoreFn: () => { openBugReport(); },
     closeFn: () => { closeBugReport(); },
     minimizeFn: () => { closeBugReport(); },
-    sidebarBtnId: 'overflow-bug-report-btn',
+    sidebarBtnId: ['overflow-bug-report-btn', 'tool-report-btn'],
     label: 'Bug report',
     icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   });
@@ -1182,6 +1174,8 @@ export function initBugReport() {
   _ensureModal();
   const button = _byId('overflow-bug-report-btn');
   if (button) button.addEventListener('click', () => { openBugReport(); });
+  const sidebarButton = _byId('tool-report-btn');
+  if (sidebarButton) sidebarButton.addEventListener('click', () => { openBugReport(); });
 }
 
 export default {
