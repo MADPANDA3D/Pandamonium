@@ -212,6 +212,16 @@ def test_unknown_or_live_service_state_never_authorizes_data_restore(
         native.require_stopped()
 
 
+def test_first_install_accepts_only_a_confirmed_missing_service(monkeypatch):
+    def missing(_args):
+        raise subprocess.CalledProcessError(4, ["systemctl", "show"])
+
+    monkeypatch.setattr(native, "output", missing)
+    native.require_stopped(missing_ok=True)
+    with pytest.raises(RuntimeError, match="stop was not confirmed"):
+        native.require_stopped()
+
+
 def test_ownership_marker_requires_exact_user_and_path(tmp_path):
     native.atomic_json(
         tmp_path / "owner.json",

@@ -231,6 +231,28 @@ def test_install_preview_pins_revision_and_requires_explicit_approval(
     assert manager.execute_plan(plan["plan_id"], operator_id="operator") == result
 
 
+def test_execute_rechecks_host_requirements_after_approval(
+    tmp_path, git_fixture, monkeypatch
+):
+    repo, v1, _v2 = git_fixture
+    manager, authority, _registry = _manager(tmp_path, repo)
+    reports = iter([{"missing": []}, {"missing": ["media.libmpv"]}])
+    monkeypatch.setattr(
+        installer, "host_requirements_summary", lambda _plan: next(reports)
+    )
+    plan = manager.preview_source("install", SOURCE_URL, v1, operator_id="operator")
+    authority.resolve(
+        plan["authority_decision"]["decision_id"],
+        operator_id="operator",
+        choice="approve",
+        scope="once",
+    )
+
+    with pytest.raises(ExtensionLifecycleError, match="system_requirements_missing"):
+        manager.execute_plan(plan["plan_id"], operator_id="operator")
+    assert manager._read_state()["extensions"] == {}
+
+
 def test_exact_revision_remains_resolvable_after_branch_advances(git_fixture):
     repo, v1, _v2 = git_fixture
     _run(["git", "tag", "-d", "v1"], cwd=repo)

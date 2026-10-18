@@ -960,6 +960,10 @@ class ExtensionLifecycleManager:
                     )
                 plan["authorized"] = True
                 plan["authority_ref"] = decision["decision_id"]
+            if plan["operation"] in {"install", "upgrade", "enable", "rollback"}:
+                requirements = host_requirements_summary(plan)
+                if requirements and requirements.get("missing"):
+                    raise ExtensionLifecycleError("system_requirements_missing")
             plan["operator_id"] = operator_id
             plan["status"] = "executing"
             state["plans"][plan_id] = plan

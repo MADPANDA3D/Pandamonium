@@ -100,6 +100,8 @@ const SETUP_ERROR_MESSAGES = {
     'The host changed after the preview, so the approval was not used. Preview the install again.',
   system_requirement_unknown_capability:
     'This package asks for a system requirement this version does not know. Update Pandamonium and retry.',
+  system_requirements_missing:
+    'Required host software is no longer available. Set up the listed system requirements, then preview and approve the install again.',
   system_requirements_container_unsupported:
     'This package needs a host sandbox that a container cannot provide. Install Pandamonium natively to use it.',
   system_requirements_distro_unsupported:

@@ -112,10 +112,9 @@ def systemd_quote(value: str) -> str:
     )
 
 
-def require_stopped() -> None:
-    values = dict(
-        line.split("=", 1)
-        for line in output(
+def require_stopped(*, missing_ok: bool = False) -> None:
+    try:
+        report = output(
             [
                 "systemctl",
                 "--user",
@@ -123,7 +122,16 @@ def require_stopped() -> None:
                 UNIT,
                 "--property=ActiveState,MainPID",
             ]
-        ).splitlines()
+        )
+    except subprocess.CalledProcessError as error:
+        if missing_ok and error.returncode == 4:
+            return
+        raise RuntimeError(
+            "Backend stop was not confirmed; refusing to copy or restore live data."
+        ) from error
+    values = dict(
+        line.split("=", 1)
+        for line in report.splitlines()
         if "=" in line
     )
     if (
@@ -468,7 +476,7 @@ admit()
         switched = False
         try:
             run(["systemctl", "--user", "stop", UNIT], check=active)
-            require_stopped()
+            require_stopped(missing_ok=not active)
             stopped = True
             shutil.copytree(data, backup / "data")
             for target, content in saved.items():
@@ -532,7 +540,7 @@ admit()
         except BaseException:
             if switched:
                 subprocess.run(["systemctl", "--user", "stop", UNIT], check=False)
-                require_stopped()
+                require_stopped(missing_ok=not active)
                 # Keep failed data intact and restore the verified, stopped-state copy.
                 # A failed restore copy leaves current data intact and the recovery
                 # marker blocks the next install from treating partial data as good.
