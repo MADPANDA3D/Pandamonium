@@ -1,8 +1,8 @@
 {
   "schema_version": "pandamonium.extension-catalog.v1",
   "catalog_id": "pandamonium-community",
-  "generated_at": "2026-09-19T18:26:50.153264+00:00",
-  "expires_at": "2026-12-18T18:26:50.153264+00:00",
+  "generated_at": "2026-10-18T14:50:16.803411+00:00",
+  "expires_at": "2027-01-16T14:50:16.803411+00:00",
   "entries": [
     {
       "package_type": "plugin",
@@ -3175,11 +3175,283 @@
         "reviewer": "developer-action/isolated-validation",
         "security_advisories": []
       }
+    },
+    {
+      "package_type": "plugin",
+      "manifest": {
+        "protocol_version": "jos-extension.v1",
+        "extension_id": "pandaflix",
+        "name": "PandaFlix",
+        "version": "1.2.2",
+        "metadata": {
+          "summary": "Install the complete pinned PandaFlix application and expose its movie/show search, seasons, episodes and playback flows in Pandamonium's native Entertainment UI.",
+          "icon": "\u25b6",
+          "categories": [
+            "entertainment",
+            "media"
+          ],
+          "examples": [
+            "Search and play a title in Pandamonium."
+          ],
+          "requirements": [
+            "Linux x86_64 or aarch64 container; setup downloads the checksum-pinned Go 1.26.0 toolchain into the private plugin runtime.",
+            "Retain the upstream GPL-3.0-or-later license and source notices."
+          ],
+          "skill_descriptions": {}
+        },
+        "source": {
+          "url": "https://github.com/MADPANDA3D/pandaflix.git",
+          "revision": "e69971aa7318df92d089b6870852afb9ab27de0c"
+        },
+        "runtime": {
+          "type": "service",
+          "entrypoint": ".pandamonium/adapter.py"
+        },
+        "capabilities": {
+          "descriptor": {
+            "type": "inline"
+          },
+          "schemas": [
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__status",
+                "description": "Check the installed upstream Movies & Shows CLI version.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__search",
+                "description": "Search Movies & Shows through the real upstream CLI.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "query"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__seasons",
+                "description": "List seasons for the selected upstream PandaFlix series.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    },
+                    "selection": {
+                      "type": "string",
+                      "maxLength": 400,
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "selection"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__episodes",
+                "description": "List episodes for the selected Movies & Shows title.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    },
+                    "selection": {
+                      "type": "string",
+                      "maxLength": 400,
+                      "minLength": 1
+                    },
+                    "season": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5000
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "selection",
+                    "season",
+                    "offset"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "pandaflix__resolve",
+                "description": "Resolve the selected Movies & Shows title for native browser playback.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "minLength": 1
+                    },
+                    "selection": {
+                      "type": "string",
+                      "maxLength": 400,
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "movie",
+                        "series"
+                      ]
+                    },
+                    "season": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "episode": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [
+                    "query",
+                    "selection",
+                    "kind",
+                    "season",
+                    "episode"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        },
+        "permissions": {
+          "default": "read_only",
+          "capabilities": {
+            "pandaflix__resolve": "bounded_write"
+          }
+        },
+        "health": {
+          "type": "catalog",
+          "timeout_seconds": 30
+        },
+        "lifecycle": {
+          "install": [],
+          "start": [],
+          "stop": [],
+          "remove": []
+        },
+        "data_boundaries": {
+          "read": [
+            ".pandamonium"
+          ],
+          "write": [
+            "runtime"
+          ],
+          "network": [
+            "https://go.dev",
+            "https://proxy.golang.org",
+            "https://sum.golang.org",
+            "https://cinejoy.to",
+            "https://api.shegu.st",
+            "https://vixsrc.to",
+            "https://www.lookmovie2.to",
+            "https://api.themoviedb.org"
+          ]
+        },
+        "removal": {
+          "remove_paths": [
+            "runtime"
+          ],
+          "preserve_paths": []
+        },
+        "rollback": {
+          "strategy": "pinned_revision",
+          "retain_revisions": 2
+        }
+      },
+      "summary": "Install the complete pinned PandaFlix application and expose its movie/show search, seasons, episodes and playback flows in Pandamonium's native Entertainment UI.",
+      "categories": [
+        "entertainment",
+        "media"
+      ],
+      "license": "GPL-3.0 AND BSD-3-Clause",
+      "publisher": {
+        "id": "madpanda3d",
+        "name": "MADPANDA3D",
+        "url": "https://github.com/MADPANDA3D",
+        "key_id": "pandamonium-marketplace-2026"
+      },
+      "artifact": {
+        "url": "https://github.com/MADPANDA3D/Pandamonium/releases/download/plugin-pandaflix-1.2.2-cb1e45ebbddd7161d93704797e60f7af31a780734dc174a3e092142278ef6764/pandamonium-plugin-pandaflix-cb1e45ebbddd7161d93704797e60f7af31a780734dc174a3e092142278ef6764.tar.gz",
+        "sha256": "cb1e45ebbddd7161d93704797e60f7af31a780734dc174a3e092142278ef6764",
+        "size_bytes": 59645756,
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "pandamonium-marketplace-2026",
+          "value": "AiXUrwraDL/LhRXyE36UuGpi5Tg02dIxk8nFHLowgH5WFdl9QMJA+wrs2Y2LByfD6UO4eWmpaK7xhon3DgLFCw=="
+        }
+      },
+      "compatibility": {
+        "pandamonium_min": "1.0.68",
+        "pandamonium_max": "1.99.99",
+        "platforms": [
+          "linux"
+        ],
+        "architectures": [
+          "amd64"
+        ]
+      },
+      "dependencies": [],
+      "configuration": [],
+      "restart_required": "none",
+      "review": {
+        "status": "active",
+        "reviewed_at": "2026-10-18T14:49:03.412506+00:00",
+        "reviewer": "developer-action/isolated-validation",
+        "security_advisories": []
+      }
     }
   ],
   "signature": {
     "algorithm": "ed25519",
     "key_id": "pandamonium-marketplace-2026",
-    "value": "2foscz6yEy9kXz9uh/ASxAU7avodf60EtE1IWuTJkhRg64AzVdDmJeV1bKqpxwqHXhtx1lgiD0nNU500NLhaBw=="
+    "value": "+4qr/83WCH3fpMZGNNsFAFcBnlD138VnqRE3TJJEbVVT4/hyJqwd2LLiXZnOTEcrtzasgOhRbkOQPqy6afY5Cw=="
   }
 }
