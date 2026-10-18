@@ -643,6 +643,7 @@ test('Continue Watching holds in-progress titles, queues the next episode, and s
   await page.locator('.ent-continue-main').click();
   await expect(page.locator('#entertainment-player')).toBeVisible();
   await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('ended')));
+  await expect(page.locator('#entertainment-status')).toContainText('next episode is queued');
   await page.locator('#entertainment-back').click();
   await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
   await expect(page.locator('.ent-continue-item')).toHaveCount(1);
@@ -661,6 +662,7 @@ test('Continue Watching holds in-progress titles, queues the next episode, and s
   await page.locator('.ent-card-play').first().click();
   await page.locator('.entertainment-result', { hasText: 'Episode 3' }).click();
   await page.evaluate(() => document.querySelector('.ent-video.is-active').dispatchEvent(new Event('ended')));
+  await expect(page.locator('#entertainment-status')).toHaveText('Finished.');
   await page.locator('#entertainment-back').click();
   await page.locator('.ent-sidebar [data-ent-dest="continue"]').click();
   await expect(page.locator('.ent-continue-item')).toHaveCount(0);

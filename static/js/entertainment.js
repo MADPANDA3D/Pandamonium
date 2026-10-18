@@ -1180,10 +1180,10 @@ function queueNextEpisode(record) {
   const currentIndex = Array.isArray(items)
     ? items.findIndex(item => String(item?.number) === String(current))
     : -1;
-  if (currentIndex < 0 || currentIndex + 1 >= items.length) return;
-  if (record.provider === 'ani-cli' && isAnimeMovie(record.item)) return;
+  if (currentIndex < 0 || currentIndex + 1 >= items.length) return false;
+  if (record.provider === 'ani-cli' && isAnimeMovie(record.item)) return false;
   const target = nextPlaybackTarget();
-  if (!target) return;
+  if (!target) return false;
   const next = target.resume(String(record.item?.title || record.title || 'Next episode'));
   const key = historyKey(next);
   const previous = (prefs.history || []).find(item => item.key === key);
@@ -1192,15 +1192,16 @@ function queueNextEpisode(record) {
     position: previous?.position || 0, duration: previous?.duration || 0, at: Date.now(),
   };
   prefs.history = [entry, ...(prefs.history || []).filter(item => item.key !== key)].slice(0, 200);
+  return true;
 }
 
 async function handleEnded() {
   const current = playback;
   finishCurrentPlayback(current);
-  queueNextEpisode(current);
+  const queued = queueNextEpisode(current);
   savePrefs();
   if (!prefs.autoplay) {
-    status('Finished. The next episode is queued in Continue Watching.');
+    status(queued ? 'Finished. The next episode is queued in Continue Watching.' : 'Finished.');
     return;
   }
   try { await nextEpisode(); } catch (error) { status(error.message); }

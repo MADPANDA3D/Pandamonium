@@ -7,13 +7,12 @@ the local disk. It uses installed Chrome or Chromium in an application window,
 falling back to the default browser. No desktop theme or global Python setting
 is changed.
 
-This is a **host-managed source installation** under development in MAD-1026.
-It is not a signed managed release and does not enable the root in-app updater.
-The signed release verification and root updater remain unchanged. Install only
-an exact reviewed commit; a release containing this installer is still required
-before recommending it as the stable public install.
+This is a **host-managed source installation** developed in MAD-1026. It does
+not enable the root in-app updater; signed release verification and the root
+updater remain unchanged. Install only a reviewed release tag or exact reviewed
+commit.
 
-## Install a reviewed revision
+## Install a reviewed release
 
 The initial validated target is Linux x86_64 with a systemd user session,
 8 GiB free disk and at least 2 GiB available RAM. Other distributions and
@@ -32,15 +31,16 @@ sudo pacman -S --needed git uv python xdg-utils
 Use your installed browser. Chrome or Chromium opens an app window; other
 browsers use a normal tab. Keep the installer checkout on the local SSD. This
 [partial clone](https://git-scm.com/docs/git-clone) defers historical file
-contents; checking out the pinned revision downloads its required files.
-The validated source revision below is included in the
-[v1.0.79 release](https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.79):
+contents; checking out the reviewed release tag downloads its required files.
+The validated release is
+[v1.0.79](https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.79):
 
 ```bash
 mkdir -p ~/.local/state/pandamonium-install
 git clone --filter=blob:none --no-checkout https://github.com/MADPANDA3D/Pandamonium.git ~/.local/state/pandamonium-install/source
 cd ~/.local/state/pandamonium-install/source
-git checkout --detach 7ccd71792cc8623c03b8d558beca6e7e5098954a
+git fetch --depth 1 origin tag v1.0.79
+git checkout --detach v1.0.79
 ```
 
 Inspect `scripts/install-native-linux.py`, then run this single installation
@@ -51,7 +51,7 @@ python3 scripts/install-native-linux.py --revision HEAD --provision-runtime
 ```
 
 If you already have the checkout, reuse it; `git clone` refuses a nonempty
-destination. Review future revisions explicitly before updating the pin.
+destination. Review future releases explicitly before updating the tag.
 
 The command refuses tracked edits and exports only committed files, excluding
 `.env`, local data and Git metadata. Python dependencies come from the committed
