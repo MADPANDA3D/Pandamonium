@@ -179,6 +179,8 @@ from starlette.responses import JSONResponse as _JSONResponse
 REQUEST_HARD_TIMEOUT = float(os.getenv("REQUEST_HARD_TIMEOUT", "45"))
 _EXTENSION_PREVIEW_TIMEOUT = 300.0
 _EXTENSION_EXECUTE_TIMEOUT = 360.0
+# provision() runs at most five sequential child commands, each bounded at 900s.
+_SYSTEM_REQUIREMENTS_TIMEOUT = 4_600.0
 _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/chat",            # streaming
     "/api/shell/stream",    # SSE
@@ -213,9 +215,11 @@ def _is_timeout_exempt(path: str) -> bool:
 
 
 def _request_hard_timeout(path: str, method: str) -> float:
-    # Signed packages can contain a pinned toolchain. Give those two bounded
+    # Signed packages can contain a pinned toolchain. Give these bounded install
     # operations enough time without extending unrelated request deadlines.
     if method == "POST":
+        if path == "/api/extensions/system-requirements":
+            return _SYSTEM_REQUIREMENTS_TIMEOUT
         if path == "/api/extensions/marketplace/plans":
             return _EXTENSION_PREVIEW_TIMEOUT
         parts = path.strip("/").split("/")

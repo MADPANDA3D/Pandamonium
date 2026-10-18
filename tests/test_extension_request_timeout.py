@@ -28,6 +28,7 @@ def timeout_namespace():
         "REQUEST_HARD_TIMEOUT": 0.025,
         "_EXTENSION_PREVIEW_TIMEOUT": 0.15,
         "_EXTENSION_EXECUTE_TIMEOUT": 0.2,
+        "_SYSTEM_REQUIREMENTS_TIMEOUT": 0.25,
         "_BaseHTTPMiddleware": BaseHTTPMiddleware,
         "_JSONResponse": JSONResponse,
         "_asyncio": asyncio,
@@ -38,8 +39,11 @@ def timeout_namespace():
 
 def test_only_exact_post_install_operations_get_their_bounded_deadline():
     timeout = timeout_namespace()["_request_hard_timeout"]
+    assert timeout("/api/extensions/system-requirements", "POST") == 0.25
     assert timeout("/api/extensions/marketplace/plans", "POST") == 0.15
     assert timeout("/api/extensions/plans/plan-123/execute", "POST") == 0.2
+    assert timeout("/api/extensions/system-requirements", "GET") == 0.025
+    assert timeout("/api/extensions/system-requirements/extra", "POST") == 0.025
     assert timeout("/api/extensions/marketplace/plans", "GET") == 0.025
     assert timeout("/api/extensions/marketplace/plans/extra", "POST") == 0.025
     assert timeout("/api/extensions/plans//execute", "POST") == 0.025
@@ -72,9 +76,32 @@ async def test_slow_signed_preview_can_finish_after_normal_request_deadline():
 
 
 @pytest.mark.asyncio
+async def test_system_provisioning_can_finish_after_normal_request_deadline():
+    async def provision(request):
+        await asyncio.sleep(0.06)
+        return JSONResponse({"requirements": "ready"})
+
+    namespace = timeout_namespace()
+    app = Starlette(
+        routes=[Route("/api/extensions/system-requirements", provision, methods=["POST"])]
+    )
+    app.add_middleware(namespace["_RequestTimeoutMiddleware"])
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://test"
+    ) as client:
+        assert (await client.post("/api/extensions/system-requirements")).json() == {
+            "requirements": "ready"
+        }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "path",
-    ["/api/extensions/marketplace/plans", "/api/extensions/plans/plan-123/execute"],
+    [
+        "/api/extensions/marketplace/plans",
+        "/api/extensions/plans/plan-123/execute",
+        "/api/extensions/system-requirements",
+    ],
 )
 async def test_explicit_install_operation_deadline_still_stops_a_stalled_response(path):
     async def stalled(request):
