@@ -33,13 +33,14 @@ Use your installed browser. Chrome or Chromium opens an app window; other
 browsers use a normal tab. Keep the installer checkout on the local SSD. This
 [partial clone](https://git-scm.com/docs/git-clone) defers historical file
 contents; checking out the pinned revision downloads its required files.
-The validated source revision below is available in [PR312](https://github.com/MADPANDA3D/Pandamonium/pull/312):
+The validated source revision below is included in the
+[v1.0.79 release](https://github.com/MADPANDA3D/Pandamonium/releases/tag/v1.0.79):
 
 ```bash
 mkdir -p ~/.local/state/pandamonium-install
 git clone --filter=blob:none --no-checkout https://github.com/MADPANDA3D/Pandamonium.git ~/.local/state/pandamonium-install/source
 cd ~/.local/state/pandamonium-install/source
-git checkout --detach 580c90c3802c7dbab88fae770e8bdd99df3b54cb
+git checkout --detach 7ccd71792cc8623c03b8d558beca6e7e5098954a
 ```
 
 Inspect `scripts/install-native-linux.py`, then run this single installation
