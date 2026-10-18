@@ -310,6 +310,28 @@ _PROBES: Mapping[str, Callable[[], tuple[bool, str]]] = {
 }
 
 
+def normalize_host_requirements(value: Any) -> dict[str, list[str]]:
+    if not isinstance(value, Mapping) or set(value) != {"capabilities"}:
+        raise SystemRequirementError("system_requirement_declaration_invalid")
+    capabilities = value.get("capabilities")
+    if (
+        not isinstance(capabilities, list)
+        or len(capabilities) > 32
+        or any(
+            not isinstance(item, str) or not item or item.strip() != item
+            for item in capabilities
+        )
+        or len(capabilities) != len(set(capabilities))
+    ):
+        raise SystemRequirementError("system_requirement_declaration_invalid")
+    unknown = sorted(set(capabilities) - set(CATALOG))
+    if unknown:
+        raise SystemRequirementError(
+            "system_requirement_unknown_capability", ", ".join(unknown)
+        )
+    return {"capabilities": list(capabilities)}
+
+
 def declared_capabilities(
     manifest: Mapping[str, Any], integration: Mapping[str, Any] | None = None
 ) -> list[str]:
@@ -319,16 +341,10 @@ def declared_capabilities(
     """
     declared: list[str] = []
     for source in (manifest.get("metadata") or {}, integration or {}, manifest):
-        block = source.get("host_requirements") if isinstance(source, Mapping) else None
-        if not isinstance(block, Mapping):
+        if not isinstance(source, Mapping) or "host_requirements" not in source:
             continue
-        raw = block.get("capabilities")
-        if isinstance(raw, list):
-            declared.extend(str(item).strip() for item in raw if str(item).strip())
-    unknown = sorted({item for item in declared if item not in CATALOG})
-    if unknown:
-        raise SystemRequirementError(
-            "system_requirement_unknown_capability", ", ".join(unknown)
+        declared.extend(
+            normalize_host_requirements(source["host_requirements"])["capabilities"]
         )
     return declared
 

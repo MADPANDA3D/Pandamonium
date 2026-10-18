@@ -73,6 +73,13 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
     from src.extension_intake import CliExecution, _check_schema
 
     execution = CliExecution.model_validate(integration.get("execution"))
+    from src.system_requirements import normalize_host_requirements
+
+    host_requirements = (
+        normalize_host_requirements(integration["host_requirements"])
+        if integration.get("host_requirements") is not None
+        else None
+    )
     tools = {
         s["function"]["name"]: s["function"]
         for s in manifest["capabilities"]["schemas"]
@@ -184,6 +191,7 @@ def validate_cli_execution(manifest: dict, integration: dict) -> dict:
         "interfaces": interfaces,
         "tools": tools,
         "source_exclusions": integration.get("source_exclusions", []),
+        **({"host_requirements": host_requirements} if host_requirements else {}),
     }
 
 
@@ -610,6 +618,11 @@ class GeneratedCliAdapter:
         return {
             **contract["execution"],
             "source_exclusions": contract["source_exclusions"],
+            **(
+                {"host_requirements": contract["host_requirements"]}
+                if contract.get("host_requirements")
+                else {}
+            ),
         }
 
     def _runtime(self, manifest: dict, digest: str, owner: str) -> Path:

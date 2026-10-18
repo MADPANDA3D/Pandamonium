@@ -618,14 +618,12 @@ def test_declared_media_capabilities_reach_the_report(monkeypatch):
 
     monkeypatch.setattr(sr, "report", fake_report)
     plan = {
-        "manifest": {
-            "runtime": {"type": "service"},
-            "metadata": {
-                "host_requirements": {
-                    "capabilities": ["media.libmpv", "build.pkg_config"]
-                }
-            },
-        }
+        "manifest": {"runtime": {"type": "service"}},
+        "execution_recipe": {
+            "host_requirements": {
+                "capabilities": ["media.libmpv", "build.pkg_config"]
+            }
+        },
     }
     assert host_requirements_summary(plan) == {"missing": []}
     assert {"media.libmpv", "build.pkg_config"} <= set(captured["capabilities"])

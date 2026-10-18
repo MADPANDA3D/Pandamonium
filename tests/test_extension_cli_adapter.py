@@ -78,6 +78,23 @@ def preview_package(manager, path, manifest, operation="install"):
     )
 
 
+def test_preview_preserves_validated_host_requirements(tmp_path):
+    path, manifest = package(tmp_path)
+    integration_path = path / ".pandamonium/integration.json"
+    integration = json.loads(integration_path.read_text())
+    integration["host_requirements"] = {"capabilities": ["media.libmpv"]}
+    integration_path.write_text(json.dumps(integration))
+
+    recipe = cli.GeneratedCliAdapter(tmp_path / "manager").preview(path, manifest)
+
+    assert recipe["host_requirements"] == {"capabilities": ["media.libmpv"]}
+
+    integration["host_requirements"] = {"capabilities": ["apt.install.anything"]}
+    integration_path.write_text(json.dumps(integration))
+    with pytest.raises(cli.ExtensionLifecycleError, match="extension_cli_execution_recipe_invalid"):
+        cli.GeneratedCliAdapter(tmp_path / "manager").preview(path, manifest)
+
+
 def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monkeypatch):
     path, manifest = package(tmp_path)
     root = tmp_path / "manager"

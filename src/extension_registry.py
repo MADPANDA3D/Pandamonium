@@ -304,7 +304,11 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
     normalized = dict(value)
     if "metadata" in value:
         metadata = _object(value["metadata"], "extension_metadata_invalid")
-        _strict_fields(metadata, {"summary", "categories", "icon", "examples", "requirements", "skill_descriptions"}, "extension_metadata_unknown_field")
+        _strict_fields(
+            metadata,
+            {"summary", "categories", "icon", "examples", "requirements", "skill_descriptions", "host_requirements"},
+            "extension_metadata_unknown_field",
+        )
         if not isinstance(metadata.get("summary"), str) or not isinstance(metadata.get("icon", "◈"), str):
             raise ExtensionContractError("extension_metadata_invalid")
         display: dict[str, Any] = {
@@ -322,6 +326,16 @@ def validate_extension_manifest(manifest: Any) -> dict[str, Any]:
         if set(descriptions) - set(descriptor.get("include", [])) or any(not isinstance(text, str) for text in descriptions.values()):
             raise ExtensionContractError("extension_metadata_skill_invalid")
         display["skill_descriptions"] = {name: _bounded_text(text, "extension_metadata_invalid", maximum=1000) for name, text in descriptions.items()}
+        if "host_requirements" in metadata:
+            from src.system_requirements import (
+                SystemRequirementError,
+                normalize_host_requirements,
+            )
+
+            try:
+                display["host_requirements"] = normalize_host_requirements(metadata["host_requirements"])
+            except SystemRequirementError as exc:
+                raise ExtensionContractError(exc.code) from exc
         normalized["metadata"] = display
     normalized.update({
         "extension_id": extension_id,
