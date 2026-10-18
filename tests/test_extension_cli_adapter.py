@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import threading
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -279,7 +280,11 @@ def test_real_cli_install_mount_owner_restart_disable_and_remove(tmp_path, monke
 
 def test_real_cli_confinement_timeout_output_and_schema_failure(tmp_path, monkeypatch):
     path, manifest = package(tmp_path)
-    runtime = cli.resources.storage_root() / tmp_path.name / "runtime"
+    runtime = (
+        cli.resources.storage_root()
+        / f"{tmp_path.name}-{uuid.uuid4().hex}"
+        / "runtime"
+    )
     runtime.mkdir(parents=True)
     monkeypatch.setenv("MAD959_HOST_SECRET", "must-not-enter-child")
     script = path / ".pandamonium/probe.py"

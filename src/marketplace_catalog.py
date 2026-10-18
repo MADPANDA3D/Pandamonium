@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import re
+import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -47,6 +48,7 @@ CATEGORY_PATTERN = r"^[a-z][a-z0-9-]{0,39}$"
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 MAX_ARTIFACT_REDIRECTS = 3
+ARTIFACT_DOWNLOAD_TIMEOUT = 240.0
 
 
 class MarketplaceCatalogError(ValueError):
@@ -613,11 +615,14 @@ def download_catalog_artifact(
     ):
         raise MarketplaceCatalogError("marketplace_artifact_size_invalid")
     url = str(artifact.get("url") or "")
+    deadline = time.monotonic() + ARTIFACT_DOWNLOAD_TIMEOUT
     try:
         with client_factory(
             follow_redirects=False, trust_env=False, timeout=30
         ) as client:
             for redirect_count in range(MAX_ARTIFACT_REDIRECTS + 1):
+                if time.monotonic() >= deadline:
+                    raise MarketplaceCatalogError("marketplace_artifact_timeout")
                 url = validate_public_http_url(url)
                 if urlparse(url).scheme != "https":
                     raise MarketplaceCatalogError(
@@ -647,6 +652,8 @@ def download_catalog_artifact(
                         )
                     content = bytearray()
                     for chunk in response.iter_bytes():
+                        if time.monotonic() >= deadline:
+                            raise MarketplaceCatalogError("marketplace_artifact_timeout")
                         content.extend(chunk)
                         if len(content) > expected:
                             raise MarketplaceCatalogError(

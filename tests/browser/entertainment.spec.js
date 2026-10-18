@@ -196,6 +196,26 @@ test('Entertainment warms the next episode into the idle player', async ({ page 
   await expect(page.locator('#entertainment-video')).toHaveAttribute('src', 'https://media.example/ep-1.mp4');
   // ...while episode 2 is warmed into the idle element before it is needed.
   await expect(page.locator('#entertainment-video-next')).toHaveAttribute('src', 'https://media.example/ep-2.mp4');
+
+  // The old episode must stop decoding immediately, even while the following
+  // episode is still resolving into that slot.
+  await page.evaluate(() => {
+    window.__entPaused = [];
+    HTMLMediaElement.prototype.pause = function () { window.__entPaused.push(this.id); };
+  });
+  let followingResolve;
+  await page.route('**/api/entertainment/ani-cli/resolve', route => {
+    if (route.request().postDataJSON().episode !== '3') return route.fallback();
+    followingResolve = route;
+  });
+  await page.locator('#entertainment-next').click();
+  await expect(page.locator('#entertainment-video-next')).toHaveClass(/is-active/);
+  await expect.poll(() => !!followingResolve).toBe(true);
+  try {
+    expect(await page.evaluate(() => window.__entPaused)).toContain('entertainment-video');
+  } finally {
+    await followingResolve.fulfill({ json: { title: 'Naruto Episode 3', url: 'https://media.example/ep-3.mp4', format: 'file', subtitles: [] } });
+  }
 });
 
 test('Entertainment pill plays the fanfare and the top nav is stripped down', async ({ page }) => {
@@ -392,3 +412,215 @@ test('Entertainment plays the anime sting when an episode starts', async ({ page
   await page.locator('.entertainment-result', { hasText: 'Episode 1' }).click();
   await expect.poll(() => page.evaluate(() => window.__entPlayed.includes('entertainment-anime-play'))).toBe(true);
 });
+
+async function playbackFixture(page, { provider = 'pandaflix', items, episodes, resolve, preferences } = {}) {
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () {};
+    HTMLMediaElement.prototype.load = function () {};
+  });
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/entertainment') return route.fulfill({ json: { providers: [{ id: provider, label: 'Media', enabled: true }] } });
+    if (path === '/api/prefs/entertainment') return route.fulfill({ json: { key: 'entertainment', value: preferences || null } });
+    if (path === `/api/entertainment/${provider}/search`) return route.fulfill({ json: { items: items || [{ selection: '[movie] Arrival', kind: 'movie', title: 'Arrival' }] } });
+    if (path === `/api/entertainment/${provider}/episodes`) return episodes(route);
+    if (path === `/api/entertainment/${provider}/resolve`) return resolve(route);
+    if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
+    if (['/api/models', '/api/model-endpoints', '/api/sessions'].includes(path)) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/static/index.html');
+  await page.evaluate(async () => (await import('/static/js/settings.js')).open());
+  await page.locator('#entertainment-section').click();
+}
+
+async function selectFixtureTitle(page, title = 'Arrival') {
+  await page.locator('#entertainment-query').fill(title);
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await page.locator('.ent-card-play').first().click();
+}
+
+const fixturePlayback = { title: 'Arrival', url: 'https://media.example/arrival.mp4', format: 'file', subtitles: [] };
+
+test('Entertainment preloads and autoplays an integer PandaFlix episode after history resume', async ({ page }) => {
+  const episodes = [];
+  await playbackFixture(page, {
+    preferences: {
+      autoplay: true,
+      history: [{ provider: 'pandaflix', title: 'Breaking Bad Episode 2', query: 'Breaking Bad', item: { selection: '[series] Breaking Bad', kind: 'series', title: 'Breaking Bad' }, season: 1, episode: 2 }],
+    },
+    resolve: route => {
+      const episode = route.request().postDataJSON().episode;
+      episodes.push(episode);
+      if (!Number.isInteger(episode)) return route.fulfill({ status: 503, json: { detail: 'Episode must be an integer' } });
+      return route.fulfill({ json: { ...fixturePlayback, title: `Breaking Bad Episode ${episode}` } });
+    },
+  });
+  await page.locator('[data-ent-dest="recent"]').click();
+  await page.locator('[data-ent-resume-history]').first().click();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Breaking Bad Episode 2');
+  await expect.poll(() => episodes.includes(3)).toBe(true);
+  await page.locator('.ent-video.is-active').evaluate(video => video.dispatchEvent(new Event('ended')));
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Breaking Bad Episode 3');
+  expect(episodes.every(Number.isInteger)).toBe(true);
+});
+
+test('Entertainment labels anime movies and plays directly without reading the controls menu', async ({ page }) => {
+  let episodeCalls = 0;
+  await playbackFixture(page, {
+    provider: 'ani-cli', items: [{ id: 1, title: 'Naruto the Movie' }],
+    episodes: route => { episodeCalls += 1; return route.fulfill({ json: { items: [], total: 0, next_offset: -1 } }); },
+    resolve: route => route.fulfill({ json: { ...fixturePlayback, title: 'Naruto the Movie' } }),
+  });
+  await selectFixtureTitle(page, 'Naruto');
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await expect(page.locator('#entertainment-now-playing')).toHaveText('Naruto the Movie');
+  expect(episodeCalls).toBe(0);
+  await page.locator('#entertainment-back').click();
+  await page.locator('#entertainment-search button[type="submit"]').click();
+  await expect(page.locator('.ent-card-play').first()).toContainText('Play movie');
+});
+
+test('Entertainment removes anime control labels from every episode page and shows the selected title', async ({ page }) => {
+  await playbackFixture(page, {
+    provider: 'ani-cli', items: [{ id: 1, title: 'Naruto' }],
+    episodes: route => {
+      const offset = JSON.parse(route.request().postData()).offset;
+      return route.fulfill({ json: {
+        items: [{ number: offset ? '2' : '1', label: offset ? 'Episode 2' : 'Episode 1' }, { number: 'next', label: 'Episode next' }, { number: 'quit', label: 'Episode quit' }],
+        total: 2, next_offset: offset ? -1 : 100,
+      } });
+    },
+    resolve: route => route.fulfill({ json: fixturePlayback }),
+  });
+  await selectFixtureTitle(page, 'Naruto');
+  await expect(page.locator('#entertainment-results-title')).toHaveText('Naruto');
+  await expect(page.locator('#entertainment-results .entertainment-result')).toHaveCount(2);
+  await expect(page.locator('#entertainment-results')).not.toContainText('Episode next');
+  await page.locator('[data-ent-more]').click();
+  await expect(page.locator('#entertainment-results .entertainment-result')).toHaveCount(2);
+  await expect(page.locator('#entertainment-results')).toContainText('Episode 2');
+  await expect(page.locator('#entertainment-results')).not.toContainText('Episode quit');
+});
+
+test('Entertainment treats a control-only anime episode list as a single movie', async ({ page }) => {
+  await playbackFixture(page, {
+    provider: 'ani-cli', items: [{ id: 1, title: 'Single entry' }],
+    episodes: route => route.fulfill({ json: { items: [{ number: 'change_quality', label: 'Episode change_quality' }], total: 1, next_offset: -1 } }),
+    resolve: route => {
+      expect(JSON.parse(route.request().postData()).episode).toBe('1');
+      return route.fulfill({ json: fixturePlayback });
+    },
+  });
+  await selectFixtureTitle(page, 'Single entry');
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  await expect(page.locator('#entertainment-results')).not.toContainText('Episode change_quality');
+});
+
+test('Entertainment clears resolving only when the active stream plays', async ({ page }) => {
+  await playbackFixture(page, { resolve: route => route.fulfill({ json: fixturePlayback }) });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-player-status')).toHaveText('Resolving stream…');
+  await page.locator('#entertainment-video-next').evaluate(video => video.dispatchEvent(new Event('playing')));
+  await expect(page.locator('#entertainment-player-status')).toHaveText('Resolving stream…');
+  await page.locator('#entertainment-video').evaluate(video => video.dispatchEvent(new Event('playing')));
+  await expect(page.locator('#entertainment-player-status')).toBeEmpty();
+});
+
+for (const failure of ['json-503', 'text-503', 'network']) {
+  test(`Entertainment resumes a watched title after transient ${failure} resolve failures`, async ({ page }) => {
+    let calls = 0;
+    await playbackFixture(page, {
+      preferences: { history: [{ provider: 'pandaflix', query: 'Arrival', item: { selection: '[movie] Arrival', kind: 'movie', title: 'Arrival' }, title: 'Arrival', season: 0, episode: 0, position: 35 }] },
+      resolve: route => {
+        calls += 1;
+        if (calls <= 2) {
+          if (failure === 'network') return route.abort('failed');
+          if (failure === 'text-503') return route.fulfill({ status: 503, contentType: 'text/plain', body: 'Internal Server Error' });
+          return route.fulfill({ status: 503, json: { detail: 'Entertainment provider unavailable' } });
+        }
+        return route.fulfill({ json: fixturePlayback });
+      },
+    });
+    await page.locator('.ent-sidebar [data-ent-dest="recent"]').click();
+    await page.locator('#ent-collection-results .ent-collection-item').click();
+    await expect(page.locator('#entertainment-player')).toBeVisible();
+    await expect(page.locator('#entertainment-now-playing')).toHaveText('Arrival');
+    expect(calls).toBe(3);
+  });
+}
+
+test('Entertainment stops after three transient failures and handles a non-JSON error', async ({ page }) => {
+  let calls = 0;
+  await playbackFixture(page, { resolve: route => {
+    calls += 1;
+    return route.fulfill({ status: 503, contentType: 'text/plain', body: 'Internal Server Error' });
+  } });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-status')).toHaveText('Entertainment unavailable');
+  expect(calls).toBe(3);
+  await expect(page.locator('#entertainment-player')).toBeHidden();
+});
+
+test('Entertainment does not retry a client-side resolve rejection', async ({ page }) => {
+  let calls = 0;
+  await playbackFixture(page, { resolve: route => {
+    calls += 1;
+    return route.fulfill({ status: 403, json: { detail: 'Provider disabled' } });
+  } });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-status')).toHaveText('Provider disabled');
+  expect(calls).toBe(1);
+});
+
+test('Entertainment starts HLS at the smallest level then allows adaptive quality with the requested buffer', async ({ page }) => {
+  await page.clock.install();
+  await page.route('**/static/lib/hls.min.js', route => route.fulfill({ contentType: 'application/javascript', body: `
+    window.__hlsInstances = [];
+    window.Hls = class {
+      static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error' };
+      static ErrorTypes = { MEDIA_ERROR: 'media', NETWORK_ERROR: 'network' };
+      static isSupported() { return true; }
+      constructor(config) { this.config = config; this.events = {}; this.levels = [{bitrate: 4500000}, {bitrate: 2000000}, {bitrate: 476000}]; window.__hlsInstances.push(this); }
+      on(name, handler) { this.events[name] = handler; }
+      loadSource(url) { this.url = url; }
+      attachMedia(video) { this.video = video; this.events.manifest(); }
+      destroy() { this.destroyed = true; }
+      recoverMediaError() {}
+    };` }));
+  await playbackFixture(page, { resolve: route => route.fulfill({ json: { ...fixturePlayback, format: 'hls' } }) });
+  await selectFixtureTitle(page);
+  await expect(page.locator('#entertainment-player')).toBeVisible();
+  const config = await page.evaluate(() => window.__hlsInstances[0].config);
+  expect(config).toMatchObject({ capLevelToPlayerSize: true, maxBufferLength: 3600, maxMaxBufferLength: 7200, maxBufferSize: 1.5 * 1024 * 1024 * 1024, backBufferLength: 600 });
+  expect(await page.evaluate(() => window.__hlsInstances[0].autoLevelCapping)).toBe(2);
+  await page.clock.fastForward(8000);
+  expect(await page.evaluate(() => window.__hlsInstances[0].autoLevelCapping)).toBe(-1);
+
+  // Replacing or closing a stream must cancel its startup timer.
+  await page.locator('#entertainment-refresh').click();
+  await expect.poll(() => page.evaluate(() => window.__hlsInstances.length)).toBe(2);
+  await page.locator('#entertainment-close').click();
+  await page.clock.fastForward(8000);
+  expect(await page.evaluate(() => ({ destroyed: window.__hlsInstances[1].destroyed, cap: window.__hlsInstances[1].autoLevelCapping }))).toEqual({ destroyed: true, cap: 2 });
+});
+
+for (const replace of [false, true]) {
+  test(`Entertainment ${replace ? 'drops a pending seek when refreshing before metadata' : 'resumes the saved position after delayed metadata'}`, async ({ page }) => {
+    await playbackFixture(page, {
+      preferences: { history: [{ provider: 'pandaflix', query: 'Arrival', item: { selection: '[movie] Arrival', kind: 'movie', title: 'Arrival' }, title: 'Arrival', season: 0, episode: 0, position: 75 }] },
+      resolve: route => route.fulfill({ json: fixturePlayback }),
+    });
+    await page.locator('.ent-sidebar [data-ent-dest="recent"]').click();
+    await page.locator('#ent-collection-results .ent-collection-item').click();
+    await expect(page.locator('#entertainment-player')).toBeVisible();
+    expect(await page.locator('#entertainment-video').evaluate(video => video.currentTime)).toBe(0);
+    if (replace) {
+      await page.locator('#entertainment-refresh').click();
+      await expect(page.locator('#entertainment-refresh')).toBeEnabled();
+    }
+    await page.locator('#entertainment-video').evaluate(video => video.dispatchEvent(new Event('loadedmetadata')));
+    expect(await page.locator('#entertainment-video').evaluate(video => video.currentTime)).toBe(replace ? 0 : 75);
+  });
+}

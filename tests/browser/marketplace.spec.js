@@ -38,11 +38,12 @@ const marketplace = {
   ],
 };
 
-async function mockApp(page, response = marketplace) {
-  await page.route('**/api/**', route => {
+async function mockApp(page, response = marketplace, { previewDelay = 0, executeDelay = 0 } = {}) {
+  await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/extensions/marketplace') return route.fulfill({ json: response });
     if (path === '/api/extensions/marketplace/plans') {
+      if (previewDelay) await new Promise(resolve => setTimeout(resolve, previewDelay));
       const request = route.request().postDataJSON();
       return route.fulfill({ json: {
         plan_id: `plan-${request.operation}`, operation: request.operation, extension_id: request.extension_id,
@@ -52,7 +53,10 @@ async function mockApp(page, response = marketplace) {
       } });
     }
     if (path.startsWith('/api/authority/decisions/')) return route.fulfill({ json: { decision: 'allow' } });
-    if (/\/api\/extensions\/plans\/[^/]+\/execute$/.test(path)) return route.fulfill({ json: { result: { status: 'succeeded' } } });
+    if (/\/api\/extensions\/plans\/[^/]+\/execute$/.test(path)) {
+      if (executeDelay) await new Promise(resolve => setTimeout(resolve, executeDelay));
+      return route.fulfill({ json: { result: { status: 'succeeded' } } });
+    }
     if (path === '/api/extensions/catalog') return route.fulfill({ json: { plugins: [] } });
     if (path === '/api/auth/status') return route.fulfill({ json: { username: 'tester', is_admin: true, privileges: {} } });
     if (path === '/api/models' || path === '/api/model-endpoints' || path === '/api/sessions') return route.fulfill({ json: [] });
@@ -216,4 +220,22 @@ test('marketplace renders loading, offline, empty, and mobile detail navigation'
   await mockApp(page, { schema_version: 'pandamonium.marketplace-view.v1', status: 'empty', failure: null, plugins: [] });
   await page.locator('#marketplace-retry').click();
   await expect(page.locator('#marketplace-results')).toContainText('No plugins published');
+});
+
+
+test('Signed plugin download and installation show elapsed progress and stop after completion', async ({ page }) => {
+  await mockApp(page, marketplace, { previewDelay: 1800, executeDelay: 1800 });
+  await page.goto('/static/index.html');
+  await page.getByRole('button', { name: 'Browse plugins' }).click();
+  await page.getByRole('tab', { name: 'Marketplace', exact: true }).click();
+  await page.getByRole('button', { name: /Atlas/ }).click();
+  const detail = page.locator('#marketplace-detail');
+  await detail.getByRole('button', { name: 'Update', exact: true }).click();
+  await expect(detail).toContainText(/Downloading and verifying signed package… \d+s elapsed\./);
+  await expect(detail).toContainText('Approval required: Update Atlas');
+  await detail.getByRole('button', { name: 'Approve once' }).click();
+  await expect(detail).toContainText(/Preparing · Update in progress… \d+s elapsed\./);
+  await expect(page.locator('#marketplace-summary')).toContainText('Atlas: Update completed.');
+  await page.waitForTimeout(1200);
+  await expect(detail).not.toContainText(/in progress… \d+s elapsed\./);
 });
