@@ -644,6 +644,89 @@ async function startSourceScan() {
   }
 }
 
+function sudoPrompt() {
+  return new Promise(resolve => {
+    const overlay = element('div', 'marketplace-sudo-overlay');
+    const panel = element('div', 'marketplace-sudo');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.append(
+      element('strong', '', 'Administrator permission required'),
+      element('p', '', 'Pandamonium needs to install the system requirements this plugin needs. Your password is used once and is never stored.'),
+    );
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'sudo password');
+    input.placeholder = 'sudo password';
+    const actions = element('div', 'marketplace-action-buttons');
+    const confirm = element('button', 'marketplace-action-primary', 'Install requirements');
+    confirm.type = 'button';
+    const cancel = element('button', '', 'Cancel');
+    cancel.type = 'button';
+    actions.append(confirm, cancel);
+    panel.append(input, actions);
+    overlay.append(panel);
+    document.body.append(overlay);
+    const close = value => { overlay.remove(); resolve(value); };
+    confirm.addEventListener('click', () => close(input.value));
+    cancel.addEventListener('click', () => close(null));
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') close(input.value);
+      if (event.key === 'Escape') close(null);
+    });
+    input.focus();
+  });
+}
+
+async function provisionSystemRequirements(requirements, block, button, retry) {
+  const status = block.querySelector('.marketplace-action-status');
+  const password = await sudoPrompt();
+  if (password === null) return;
+  button.disabled = true;
+  status.textContent = 'Installing system requirements…';
+  try {
+    await api('/api/extensions/system-requirements', {
+      method: 'POST',
+      body: JSON.stringify({ capabilities: requirements.missing, password }),
+    });
+    status.textContent = 'System requirements installed. Re-checking…';
+    block.remove();
+    if (typeof retry === 'function') retry();
+  } catch (error) {
+    button.disabled = false;
+    status.textContent = `Setup failed: ${humanSetupError(error)}`;
+  }
+}
+
+function renderSystemRequirements(preview, requirements, approve, retry) {
+  if (!requirements || !(requirements.missing || []).length) return;
+  const block = element('div', 'marketplace-system-requirements');
+  block.dataset.readiness = requirements.blocked_reason ? 'unsupported' : 'setup_required';
+  block.append(element('strong', '', 'System requirements'));
+  const list = element('ul', '');
+  (requirements.capabilities || [])
+    .filter(row => !row.present)
+    .forEach(row => list.append(element('li', '', row.detail ? `${row.summary} — ${row.detail}` : row.summary)));
+  block.append(list);
+  if (requirements.blocked_reason === 'system_requirements_container_unsupported') {
+    block.append(element('p', '', 'This package needs a host sandbox that a container cannot provide. Install Pandamonium natively to use it.'));
+    if (approve) approve.disabled = true;
+  } else if (requirements.blocked_reason) {
+    block.append(element('p', '', `Automatic setup is not available on this host (${requirements.host?.distro_family || 'unknown'}). Install bubblewrap and util-linux, then retry.`));
+    if (approve) approve.disabled = true;
+  } else {
+    const packages = requirements.packages || [];
+    block.append(element('p', '', `Will install: ${packages.join(', ') || 'nothing'}. Administrator approval is required.`));
+    const setup = element('button', 'marketplace-action-primary', 'Set up automatically');
+    setup.type = 'button';
+    setup.addEventListener('click', () => provisionSystemRequirements(requirements, block, setup, retry));
+    block.append(setup, element('p', 'marketplace-action-status', 'Nothing is installed until you confirm.'));
+    if (approve) approve.disabled = true;
+  }
+  preview.prepend(block);
+}
+
 async function prepareSourceAction(artifact, section, actions) {
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
   scanStatus.textContent = 'Preparing install preview…';
@@ -691,6 +774,7 @@ async function prepareSourceAction(artifact, section, actions) {
       'install',
       scanStatus,
       approvalActions,
+      () => prepareSourceAction(artifact, section, actions),
     ));
     const cancel = element('button', '', '← Back to scan');
     cancel.type = 'button';
@@ -701,12 +785,16 @@ async function prepareSourceAction(artifact, section, actions) {
       element('p', 'marketplace-action-status', 'Nothing has been installed yet. Approve once to install this exact revision, or go back to the scan result.'),
     );
     section.append(preview);
+    let setupBlocked = false;
     if (manifest.configuration?.length) {
       const setup = detailSection('Required setup');
       preview.prepend(setup);
-      approve.disabled = await renderRuntimeSetup(setup, plan.extension_id, plan.plan_id,
+      setupBlocked = await renderRuntimeSetup(setup, plan.extension_id, plan.plan_id,
         () => prepareSourceAction(artifact, section, actions));
     }
+    renderSystemRequirements(preview, plan.system_requirements, approve,
+      () => prepareSourceAction(artifact, section, actions));
+    if (setupBlocked) approve.disabled = true;
     scanStatus.textContent = 'Review the exact pinned revision, then approve once or go back.';
     preview.scrollIntoView({ block: 'center' });
     approve.focus({ preventScroll: true });
@@ -736,15 +824,17 @@ function actionLabel(operation) {
   return { install: 'Install', upgrade: 'Update', enable: 'Enable', disable: 'Disable', rollback: 'Rollback', uninstall: 'Remove' }[operation] || operation;
 }
 
-async function executeAction(plan, plugin, operation, status, actions) {
+async function executeAction(plan, plugin, operation, status, actions, retry) {
   const installedAction = installedSelectedId === plugin.id;
   actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  let approvalConsumed = false;
   try {
     const decision = plan.authority_decision || {};
     if (decision.decision === 'approval_required') {
       await api(`/api/authority/decisions/${encodeURIComponent(decision.decision_id)}`, {
         method: 'POST', body: JSON.stringify({ choice: 'approve', scope: 'once' }),
       });
+      approvalConsumed = true;
     } else if (decision.decision !== 'allow') {
       throw new Error('extension_action_denied');
     }
@@ -763,7 +853,20 @@ async function executeAction(plan, plugin, operation, status, actions) {
   } catch (error) {
     status.textContent = `Failed · ${actionLabel(operation)}: ${humanSetupError(error)}`;
     status.dataset.readiness = 'failed';
-    actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+    if (approvalConsumed) {
+      // The approval was already used; re-clicking "Approve once" can only fail
+      // with authority_decision_not_pending, so offer a fresh preview instead.
+      actions.replaceChildren();
+      if (typeof retry === 'function') {
+        const again = element('button', 'marketplace-action-primary', `Preview ${actionLabel(operation).toLowerCase()} again`);
+        again.type = 'button';
+        again.addEventListener('click', () => retry());
+        actions.append(again);
+        status.textContent += ' The approval was already used — preview again to retry.';
+      }
+    } else {
+      actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+    }
   }
 }
 
@@ -801,7 +904,7 @@ async function prepareAction(plugin, operation, section, status, actions) {
     const approvalActions = element('div', 'marketplace-action-buttons');
     const approve = element('button', 'marketplace-action-primary', 'Approve once');
     approve.type = 'button';
-    approve.addEventListener('click', () => executeAction(plan, plugin, operation, status, approvalActions));
+    approve.addEventListener('click', () => executeAction(plan, plugin, operation, status, approvalActions, () => prepareAction(plugin, operation, section, status, actions)));
     const cancel = element('button', '', 'Cancel');
     cancel.type = 'button';
     cancel.addEventListener('click', () => renderDetail(plugin));
@@ -810,12 +913,16 @@ async function prepareAction(plugin, operation, section, status, actions) {
     actions.replaceChildren();
     section.append(preview);
     status.textContent = 'Review the exact signed package, data, and restart scope before approval.';
+    let setupBlocked = false;
     if (plan.manifest?.configuration?.length && ['install', 'upgrade', 'enable'].includes(operation)) {
       const setup = detailSection('Runtime setup');
       preview.prepend(setup);
-      approve.disabled = await renderRuntimeSetup(setup, plan.extension_id, plan.plan_id,
+      setupBlocked = await renderRuntimeSetup(setup, plan.extension_id, plan.plan_id,
         () => prepareAction(plugin, operation, section, status, actions));
     }
+    renderSystemRequirements(preview, plan.system_requirements, approve,
+      () => prepareAction(plugin, operation, section, status, actions));
+    if (setupBlocked) approve.disabled = true;
     approve.focus();
   } catch (error) {
     status.textContent = `${actionLabel(operation)} unavailable: ${humanSetupError(error)}`;
